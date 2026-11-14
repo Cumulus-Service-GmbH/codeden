@@ -1,8 +1,10 @@
-import type {
-  ArchiveSessionResponse,
-  HandoffSessionRequest,
-  ProviderInfo,
-  Session,
+import {
+  type ArchiveSessionResponse,
+  describeUnpushedWork,
+  type HandoffSessionRequest,
+  type ProviderInfo,
+  type Session,
+  type UnpushedWork,
 } from "@codeden/contracts";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
@@ -115,23 +117,56 @@ const brief = (text: string | null) =>
   text && text.length > 160 ? `${text.slice(0, 159).trimEnd()}…` : (text ?? undefined);
 
 /**
+ * Whether pushing the session's branch would save work a container was kept for: its checked-out
+ * branch has commits no remote has (#337).
+ */
+export const canPushFirst = (unpushed: UnpushedWork | undefined) =>
+  unpushed?.current != null && unpushed.branches.some((b) => b.name === unpushed.current);
+
+/**
+ * A toast whose text takes the full width, with its buttons on a row of their own below (two
+ * long labels beside the text squeeze it into a narrow column). Important: sonner's own rule for
+ * the content outranks a utility.
+ */
+const WIDE_ACTIONS = {
+  toast: "flex-wrap",
+  content: "basis-[calc(100%-2rem)]!",
+  actionButton: "ml-1.5!",
+};
+
+/**
  * Toast for an archive: what happened to the worktree, with Undo. A worktree kept because of
  * uncommitted changes offers Remove anyway; a removal that failed (a file still in use) offers
- * Try again.
+ * Try again. A container kept because its clone holds work that exists nowhere else (#337) says
+ * what, offers Push the branch first when that would save it, and Delete anyway, saying the work
+ * is deleted for good.
  */
 export function announceArchive(
   result: ArchiveSessionResponse,
-  actions: { undo: () => void; retry: () => void; force: () => void },
+  actions: { undo: () => void; retry: () => void; force: () => void; push: () => void },
 ): void {
   const undo = { label: "Undo", onClick: actions.undo };
-  const { status, message: detail } = result.worktree;
+  const { status, message: detail, unpushed } = result.worktree;
   if (status === "removed") {
-    toast.success("Session archived and its worktree removed", {
-      action: undo,
-      description: brief(detail),
-    });
+    toast.success(
+      unpushed
+        ? "Session archived and its container deleted"
+        : "Session archived and its worktree removed",
+      { action: undo, description: brief(detail) },
+    );
   } else if (status === "none") {
     toast.success("Session archived", { action: undo });
+  } else if (status === "kept_changes" && unpushed) {
+    const work = describeUnpushedWork(unpushed);
+    const remove = { label: "Delete anyway", onClick: actions.force };
+    const push = { label: "Push the branch first", onClick: actions.push };
+    toast.warning("Session archived. Its container was kept: it holds work that isn't pushed.", {
+      description: `${work.charAt(0).toUpperCase()}${work.slice(1)}. Delete anyway deletes this work for good.`,
+      action: canPushFirst(unpushed) ? push : remove,
+      cancel: canPushFirst(unpushed) ? remove : undo,
+      duration: 20_000,
+      classNames: WIDE_ACTIONS,
+    });
   } else if (status === "kept_changes") {
     toast("Session archived. The worktree has uncommitted changes, so it was kept.", {
       action: { label: "Remove anyway", onClick: actions.force },
@@ -208,15 +243,27 @@ export function useSessionActions(session: Session) {
     onSuccess: () => toast.success("Session restored to the sidebar"),
     onError,
   });
+  const announce = (result: ArchiveSessionResponse, force: boolean) =>
+    announceArchive(result, {
+      undo: () => unarchive.mutate(),
+      retry: () => archive.mutate(force),
+      force: () => archive.mutate(true),
+      push: () => pushThenArchive.mutate(),
+    });
   const archive = useMutation({
     mutationFn: (force: boolean) => client.archiveSession(session.id, { force }),
-    onSuccess: (result, force) =>
-      announceArchive(result, {
-        undo: () => unarchive.mutate(),
-        retry: () => archive.mutate(force),
-        force: () => archive.mutate(true),
-      }),
+    onSuccess: announce,
     onError,
+  });
+  // A container kept for unpushed commits (#337): push its branch (with the brokered GitHub
+  // credential), then archive again, which removes the container when nothing else is left.
+  const pushThenArchive = useMutation({
+    mutationFn: async () => {
+      await client.gitPush(session.id, {});
+      return client.archiveSession(session.id, { force: false });
+    },
+    onSuccess: (result) => announce(result, false),
+    onError: (error) => toast.error("Couldn't push the branch", { description: message(error) }),
   });
   const rename = useMutation({
     mutationFn: (title: string) => client.updateSession(session.id, { title }),
