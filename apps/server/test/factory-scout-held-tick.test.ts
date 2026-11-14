@@ -92,6 +92,18 @@ describe("the scout's tools while a loop pass is held (#311)", () => {
     expect(env.messages.slice(messages).map((m) => m.sessionId)).not.toContain(scout.id);
   });
 
+  it("plans a round without area reviewers in under a second while a pass is held", async () => {
+    const scout = await darkFactory();
+    const pass = await heldTick();
+    const plan = env.factory.planRound(scout, { lenses: [] });
+    expect(await settlesWithin(plan, 1_000)).toBe(true);
+    expect((await plan).next).toMatch(/Review by yourself now/);
+    pass.release();
+    await pass.done;
+    // The pass, which read the loop before the plan, kept it.
+    expect(loop().scout.round).toMatchObject({ phase: "filing", plan: { lenses: [] } });
+  });
+
   it("records findings in under a second, keeps them through the held pass, and once only", async () => {
     const scout = await darkFactory();
     await env.factory.planRound(scout, { lenses: [{ area: "ux", focus: "forms" }] });
