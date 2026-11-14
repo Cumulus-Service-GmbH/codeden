@@ -1,12 +1,14 @@
 import {
   AutonomyMode,
   type FactoryItem,
+  type FactoryLesson,
   FactoryLimits,
   FactoryLoop,
   FactoryStatus,
   FactoryTuning,
   type FactoryWorkItem,
   isFactoryMode,
+  lessonKey,
   parseVision,
 } from "@codeden/contracts";
 import type { FactoryApi } from "../factory-api";
@@ -138,6 +140,7 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
         reviewerNote: null,
         verdict: null,
       })),
+      lessons: isFactoryMode(f.mode) ? demoLessons(projectId) : [],
       lastDigest: null,
       lastTickAt: now(),
     });
@@ -328,5 +331,45 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       stage: "rejected",
       reason: req?.reason ? `Dismissed by you: ${req.reason}` : "Dismissed by you",
     }),
+    forgetLesson: async (id, lessonId) => {
+      const s = status(id);
+      const lesson = s.lessons.find((l) => l.id === lessonId);
+      if (!lesson) throw new Error(`No lesson ${lessonId}`);
+      world.factory.set(id, { ...s, lessons: s.lessons.filter((l) => l.id !== lessonId) });
+      return delay({ ...lesson, removedAt: now() });
+    },
   };
+}
+
+/** Lessons the demo factory's reviewers recorded. */
+function demoLessons(projectId: string): FactoryLesson[] {
+  const lesson = (n: number, text: string, prNumber: number, times: number, ago: number) => ({
+    id: `lesson-${n}`,
+    projectId,
+    text,
+    key: lessonKey(text),
+    itemId: `fw-l${n}`,
+    prNumber,
+    reviewerProvider: "codex",
+    times,
+    createdAt: minutesAgo(ago * 3),
+    lastSeenAt: minutesAgo(ago),
+    removedAt: null,
+  });
+  return [
+    lesson(
+      1,
+      "Every user-facing change adds a changelog fragment in changes/<issue>-<slug>.md; never edit CHANGELOG.md.",
+      214,
+      3,
+      40,
+    ),
+    lesson(
+      2,
+      "Put unit tests next to their package in test/, not beside the source file.",
+      209,
+      1,
+      180,
+    ),
+  ];
 }

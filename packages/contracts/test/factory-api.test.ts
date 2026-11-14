@@ -164,6 +164,7 @@ describe("factory API contracts (§10.1)", () => {
       lensSessions: {},
       round: null,
       lastRoundAt: null,
+      lastRoundNote: null,
       rounds: 0,
     });
     // Items stored before `largeChange`, the pipelines and session cleanup existed still parse,

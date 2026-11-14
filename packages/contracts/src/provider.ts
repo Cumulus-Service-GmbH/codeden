@@ -191,6 +191,16 @@ export const CODEDEN_CREDENTIAL_FILES = [
  */
 export const INVALID_COPY_SUFFIX = ".invalid-";
 
+/**
+ * Where the runner keeps each session's private MCP config, relative to CodeDen's data directory
+ * (§15): one owner-only folder per session (`<dir>/session-<id>-<random>/`) with its MCP servers,
+ * bearer token included, for providers that read them from a file instead of a command line
+ * (Claude Code's `--mcp-config <file>`). Removed when the session ends. Another session's token
+ * would let an agent call CodeDen as that session's role, so everything in this folder is guarded
+ * like `CODEDEN_CREDENTIAL_FILES` (§11.2).
+ */
+export const CODEDEN_MCP_CONFIG_DIR = "runner/mcp";
+
 /** Options for `ProviderAdapter.openSession`. */
 export const SessionOptions = z.object({
   /** CodeDen session id. */

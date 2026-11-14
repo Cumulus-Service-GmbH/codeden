@@ -1,7 +1,9 @@
+import { PRIVATE_MCP_CONFIG_NAME, PRIVATE_MCP_FOLDER_PREFIX } from "../util/private-mcp-config";
 import {
   agentPattern,
   codedenCredentialCopies,
   codedenCredentialFiles,
+  codedenSecretFolders,
   resolvePattern,
   slashes,
   touchesCodedenCredentials,
@@ -173,6 +175,21 @@ function keeps(names: string[], file: string, root: string, ctx: PathContext, co
     });
 }
 
+/**
+ * True when walking `dir` reaches a file in a secret folder (`codedenSecretFolders`): from inside
+ * it, or from above it when the walk goes into subfolders, and a name filter keeps the files
+ * CodeDen writes there (`<folder>/session-<id>-<random>/mcp.json`).
+ */
+function reachesSecretFolder(dir: string, walk: Walk, ctx: PathContext): boolean {
+  const p = pathApi(ctx);
+  const sample = `${PRIVATE_MCP_FOLDER_PREFIX}s1-AbC123`;
+  return codedenSecretFolders(ctx).some(
+    (folder) =>
+      (isInside(dir, folder, ctx) || holds(dir, folder, walk.recursive, ctx)) &&
+      keeps(walk.names, p.join(folder, sample, PRIVATE_MCP_CONFIG_NAME), dir, ctx),
+  );
+}
+
 /** The root of `walk` from which it reaches a credential file or a copy of one, if any. */
 function walkReaches(walk: Walk, ctx: PathContext): string | undefined {
   const files = codedenCredentialFiles(ctx);
@@ -183,7 +200,11 @@ function walkReaches(walk: Walk, ctx: PathContext): string | undefined {
   for (const root of walk.roots.length ? walk.roots : ["."]) {
     for (const alt of braceAlternatives(root)) {
       const dir = resolvePattern(alt, ctx);
-      if (files.some((f) => reaches(dir, f, false)) || copies.some((c) => reaches(dir, c, true))) {
+      if (
+        files.some((f) => reaches(dir, f, false)) ||
+        copies.some((c) => reaches(dir, c, true)) ||
+        reachesSecretFolder(dir, walk, ctx)
+      ) {
         return root;
       }
     }

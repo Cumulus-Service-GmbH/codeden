@@ -36,6 +36,7 @@ const approve: ReviewVerdict = {
   vision: { aligned: true },
   tests: { adequate: true },
   security: { concerns: [] },
+  lessons: [],
 };
 
 function pr(patch: Partial<FactoryPr> = {}): FactoryPr {

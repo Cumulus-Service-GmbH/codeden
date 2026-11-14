@@ -2,6 +2,12 @@ import { z } from "zod";
 import { GitHubIssueRef, GitHubPrRef, Id, ProviderId, Timestamp } from "./common";
 import { AutonomyMode, FactoryLimits, FactoryLoopState, MergePath } from "./factory";
 import {
+  FactoryLesson,
+  LESSON_MAX,
+  LESSONS_DESCRIPTION,
+  LESSONS_PER_VERDICT,
+} from "./factory-lessons";
+import {
   Classification,
   DiscoveryArea,
   Investigation,
@@ -131,14 +137,25 @@ export const ReviewVerdict = z.object({
     .describe(
       "With `request_changes`: `pr` (default) when something is wrong with the pull request; `environment` when only your local environment couldn't verify it (broken dependencies, timeouts). CI on the PR's head is the authority for the full suite, so an `environment` verdict isn't sent to the author: you get the CI result instead.",
     ),
+  /**
+   * General, reusable rules for the repository the reviewer found worth remembering, not findings
+   * about this change alone (see `factory-lessons.ts`). The factory keeps them as the project's
+   * lessons, and later builders and reviewers get them in their briefs. Verdicts stored before
+   * lessons existed have none.
+   */
+  lessons: z
+    .array(z.string().min(1).max(LESSON_MAX))
+    .max(LESSONS_PER_VERDICT)
+    .default([])
+    .describe(LESSONS_DESCRIPTION),
 });
 export type ReviewVerdict = z.infer<typeof ReviewVerdict>;
 export type ReviewVerdictInit = z.input<typeof ReviewVerdict>;
 
 /**
  * What a reviewer sends to `factory_submit_review`: a `ReviewVerdict` whose summary has no
- * upper bound, so a long review is never rejected; the tool stores it with
- * `truncateReviewSummary`.
+ * upper bound and whose lessons have no limits, so a review is never rejected over them; the tool
+ * stores them with `truncateReviewSummary` and `cleanLessons`.
  */
 export const ReviewVerdictSubmission = ReviewVerdict.extend({
   summary: z
@@ -147,6 +164,7 @@ export const ReviewVerdictSubmission = ReviewVerdict.extend({
     .describe(
       `What you found, specifically. Up to ${REVIEW_SUMMARY_MAX.toLocaleString("en-US")} characters are stored; anything longer is cut and marked "${REVIEW_SUMMARY_TRUNCATED}".`,
     ),
+  lessons: z.array(z.string()).default([]).describe(LESSONS_DESCRIPTION),
 });
 export type ReviewVerdictSubmission = z.infer<typeof ReviewVerdictSubmission>;
 
@@ -321,6 +339,12 @@ export const FactoryTuning = z.object({
    * end alone doesn't mean it stopped working.
    */
   idleGraceMin: z.int().positive().default(10),
+  /**
+   * "Learn from reviews": reviewers are asked for general lessons with their verdicts, the factory
+   * keeps them (`FactoryLesson`), and builders and reviewers get them in their briefs. Off: no
+   * lesson is asked for, recorded or briefed; the ones kept stay for when it is on again.
+   */
+  learnFromReviews: z.boolean().default(true),
 });
 export type FactoryTuning = z.infer<typeof FactoryTuning>;
 
@@ -788,6 +812,11 @@ export const FactoryStatus = z.object({
   /** The dark factory's scout; null in the software factory. */
   scout: ScoutStatus.nullable().default(null),
   visionExists: z.boolean(),
+  /**
+   * The lessons in force (not forgotten), the ones builders and reviewers get in their briefs:
+   * the newest `LESSONS_IN_BRIEF`, last recorded first.
+   */
+  lessons: z.array(FactoryLesson).default([]),
   lastDigest: FactoryDigest.nullable(),
   /**
    * When the loop last ticked (the panel's "last check"), changed or not. After a server
@@ -818,4 +847,6 @@ export const FACTORY_EVENT_PAYLOADS = {
   "factory.loop.updated": z.object({ loop: FactoryLoop }),
   "factory.item.updated": z.object({ item: FactoryItem }),
   "factory.digest.created": z.object({ digest: FactoryDigest }),
+  /** A lesson recorded, recorded again (`times`) or forgotten (`removedAt`); an upsert. */
+  "factory.lesson.updated": z.object({ lesson: FactoryLesson }),
 } as const;

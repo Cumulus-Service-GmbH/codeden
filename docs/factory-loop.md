@@ -88,6 +88,7 @@ Every pull request carries its test results, and screenshots when UI files chang
 - **The independent reviewer** is a separate agent session, on a different provider from the builder when one is available (see [Reviewers and providers](#reviewers-and-providers)). It checks the pull request against the issue, the spec and the vision. A docs change that touches only documentation skips it.
 - **The merge checks** run beside it: protected areas, size, CI, review, tests, test results, security and screenshots. CI on the pull request is the authority for the full test suite.
 - **Revise rounds.** A review that asks for changes, or a failed check, sends the work back to the same builder to fix in the same branch: up to **2 revise rounds**. After that the item stops (see [When things go wrong](#when-things-go-wrong)).
+- **Lessons.** With its verdict, a reviewer can record up to three general rules for the repository (a convention, a recurring mistake, a test to run or avoid). New builders and reviewers get the 20 most recent in their briefs, so a finding that keeps coming back stops costing a revise round. The panel lists them under **Lessons**, where **Forget** removes one for good. Only reviews of trusted work teach the factory, and **Learn from reviews** in the settings turns it off (see [Lessons](software-factory.md#lessons-the-factory-learns-from-its-reviews)).
 
 ### Merge
 

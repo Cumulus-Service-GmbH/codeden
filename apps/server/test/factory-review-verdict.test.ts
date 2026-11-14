@@ -87,6 +87,45 @@ describe("factory_submit_review summary length", () => {
   });
 });
 
+describe("factory_submit_review lessons (#326)", () => {
+  it("stores at most three cleaned lessons and never rejects a verdict over them", async () => {
+    const { call, submitted } = reviewTool();
+    const res = await call("factory_submit_review", {
+      ...verdict("Fine"),
+      lessons: [
+        "  Add a changelog fragment.  ",
+        "",
+        "add a changelog fragment",
+        "x".repeat(400),
+        "Pass token=abc123secretvalue to the CLI",
+        "A fourth lesson",
+      ],
+    });
+    expect(res.isError, res.text).toBe(false);
+    expect(submitted[0]?.lessons).toEqual([
+      "Add a changelog fragment.",
+      `${"x".repeat(299)}…`,
+      "Pass token=*** to the CLI",
+    ]);
+    expect(ReviewVerdict.safeParse(submitted[0]).success).toBe(true);
+  });
+
+  it("records a verdict without lessons as having none", async () => {
+    const { call, submitted } = reviewTool();
+    await call("factory_submit_review", verdict("Fine"));
+    expect(submitted[0]?.lessons).toEqual([]);
+  });
+
+  it("documents lessons in the tool description and its input schema", () => {
+    expect(factorySubmitReview.description).toMatch(/up to 3 `lessons`/);
+    const listed = describeTool(factorySubmitReview);
+    const lessons = (listed.inputSchema.properties as Record<string, Record<string, unknown>>)
+      .lessons;
+    expect(lessons).not.toHaveProperty("maxItems");
+    expect(lessons?.description).toMatch(/general, reusable rules/);
+  });
+});
+
 describe("rejected tool calls", () => {
   it("say what to fix and to call the tool again", async () => {
     const { call, submitted } = reviewTool();

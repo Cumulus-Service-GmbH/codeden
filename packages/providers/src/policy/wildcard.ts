@@ -97,12 +97,14 @@ interface Automaton {
   accepts: (states: Set<number>) => boolean;
 }
 
+/** The characters of the folder names CodeDen gives sessions (`session-<id>-<random>`). */
+const FOLDER_CHARS = [..."abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-"];
+
 /**
  * True when `pattern` matches `prefix` followed by some run of digits: whether a wildcard reaches
  * any of a numbered family of files, such as the copies CodeDen keeps of a damaged file
- * (`remote-access.json.invalid-<timestamp>`). The pattern runs as a small automaton: over
- * `prefix`, then over digits until no new state turns up. The pattern's first `literal`
- * characters match as themselves. Undefined when it is malformed.
+ * (`remote-access.json.invalid-<timestamp>`). The pattern's first `literal` characters match as
+ * themselves. Undefined when it is malformed.
  */
 export function wildcardMatchesNumbered(
   pattern: string,
@@ -117,12 +119,47 @@ export function wildcardMatchesNumbered(
     states = run.step(states, ch);
     if (states.size === 0) return false;
   }
-  // Every state some run of one or more digits leads to.
+  return run.accepts(afterRun(run, states, DIGITS));
+}
+
+/**
+ * True when `pattern` matches one of the session folders CodeDen makes, or the file `name` in
+ * one: whether a wildcard reaches the sessions' private files. `start` is where the folders'
+ * paths begin (`/`-separated, `<folder>/session-`), and the rest of a folder's name is letters,
+ * digits, `_` and `-`. The pattern's first `literal` characters match as themselves. Undefined
+ * when it is malformed.
+ */
+export function wildcardMatchesSessionFile(
+  pattern: string,
+  start: string,
+  name: string,
+  ignoreCase: boolean,
+  literal = 0,
+): boolean | undefined {
+  const run = automaton(pattern, ignoreCase, literal);
+  if (!run) return undefined;
+  let states = run.start;
+  for (const ch of start) {
+    states = run.step(states, ch);
+    if (states.size === 0) return false;
+  }
+  const folders = afterRun(run, states, FOLDER_CHARS);
+  if (run.accepts(folders)) return true;
+  let file: Set<number> = folders;
+  for (const ch of `/${name}`) {
+    file = run.step(file, ch);
+    if (file.size === 0) return false;
+  }
+  return run.accepts(file);
+}
+
+/** Every state a run of one or more of `alphabet`'s characters leads to from `states`. */
+function afterRun(run: Automaton, states: Set<number>, alphabet: readonly string[]): Set<number> {
   const seen = new Set<number>();
   let frontier: Set<number> = states;
   while (frontier.size > 0) {
     const found = new Set<number>();
-    for (const d of DIGITS) {
+    for (const d of alphabet) {
       for (const s of run.step(frontier, d)) {
         if (!seen.has(s)) found.add(s);
       }
@@ -130,7 +167,7 @@ export function wildcardMatchesNumbered(
     for (const s of found) seen.add(s);
     frontier = found;
   }
-  return run.accepts(seen);
+  return seen;
 }
 
 /**

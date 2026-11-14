@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   AutonomyLevel,
   CODEDEN_CREDENTIAL_FILES,
+  CODEDEN_MCP_CONFIG_DIR,
   INVALID_COPY_SUFFIX,
   ProviderCapabilities,
   SessionOptions,
@@ -49,6 +50,8 @@ describe("permission levels (§11.2)", () => {
     ]);
     // Copies of a damaged file are named with it; the policy guards credential copies by it.
     expect(INVALID_COPY_SUFFIX).toBe(".invalid-");
+    // Sessions' MCP configs (bearer tokens) sit in the runner's own folder, guarded as a whole.
+    expect(CODEDEN_MCP_CONFIG_DIR).toBe("runner/mcp");
   });
 
   it("treats the readOnly capability as optional", () => {

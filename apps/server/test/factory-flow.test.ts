@@ -123,9 +123,13 @@ describe("factory pipelines with the Fake provider (§10.1)", () => {
       },
       scout,
     );
-    const lenses = plan.lenses as Array<{ area: string; sessionId: string }>;
+    const lenses = plan.lenses as Array<{ area: string }>;
     expect(lenses.map((l) => l.area)).toEqual(["bugs"]);
-    const lens = lenses[0]?.sessionId as string;
+    // The plan is recorded at once; the next tick starts the area reviewer.
+    const reviewing = await tick();
+    expect(reviewing.scout?.phase).toBe("reviewing");
+    const lens = reviewing.scout?.lenses[0]?.sessionId as string;
+    expect(lens).toBeTruthy();
     await idle(lens);
     await call(
       "agent",
