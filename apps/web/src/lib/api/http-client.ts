@@ -18,9 +18,11 @@ import {
   ProviderHistoryResponse,
   RefreshModelsResponse,
   RefreshProjectResponse,
+  RemoteImageGrant,
   ReorderProjectsResponse,
   RestoreFilesResponse,
   RetryInboxResponse,
+  remoteImagePath,
   type SendMessageRequestInit,
   SessionDetail,
   SessionFileContent,
@@ -223,6 +225,10 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
       ),
     openTerminal: (o) => openTerminalSocket(wsBase, o),
     artifactUrl: (id) => `${origin}/api/artifacts/${enc(id)}`,
+    remoteImageUrl: async (url) => {
+      const grant = await post("/remote-image", { url }, (v) => RemoteImageGrant.parse(v));
+      return `${origin}${remoteImagePath(grant.id)}`;
+    },
     speechSummary: (text) =>
       post("/utility/speech-summary", { text }, (v) => SpeechSummaryResponse.parse(v)),
 
