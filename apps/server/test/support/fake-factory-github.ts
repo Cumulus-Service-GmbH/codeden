@@ -211,6 +211,8 @@ export class FakeFactoryGithub implements FactoryGithub {
       title: opts.title,
       body: opts.body ?? "Fixes the issue\n\n## Test results\n- `pnpm test`: passed",
       headSha: `head${number}`,
+      // What the PR itself changes: kept by update-branch and rebases, changed by a push.
+      diffKey: `diff${number}`,
       headBranch: `codeden/pr-${number}`,
       checks: opts.checks ?? "success",
       failedChecks: opts.checks === "failure" ? ["test"] : [],
@@ -228,9 +230,22 @@ export class FakeFactoryGithub implements FactoryGithub {
     return pr;
   }
 
-  /** What a rebase by an agent does: a new head on the current main, without conflicts. */
+  /**
+   * What a rebase by an agent does: a new head on the current main, without conflicts. The PR's
+   * own change stays the same (its `diffKey`) unless the test changes it.
+   */
   rebase(pr: FakePr, headSha: string, checks: ChecksState = "success"): void {
     Object.assign(pr, { headSha, baseSha: this.main.sha, mergeable: "mergeable", checks });
+  }
+
+  /** A push to the PR's branch that changes its code (`files` added): a new head and diff. */
+  push(pr: FakePr, headSha: string, files: string[] = [], checks: ChecksState = "success"): void {
+    Object.assign(pr, {
+      headSha,
+      diffKey: `${pr.diffKey ?? "diff"}+${headSha}`,
+      files: [...new Set([...pr.files, ...files])],
+      checks,
+    });
   }
 
   async behindBy(_projectId: string, number: number): Promise<number> {

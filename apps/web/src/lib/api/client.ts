@@ -273,6 +273,11 @@ export interface CodeDenClient {
   readonly browser: BrowserApi;
   /** URL for an artifact's bytes (screenshots, generated images, attachments). */
   artifactUrl(artifactId: string): string;
+  /**
+   * "Load image" on a remote image in Markdown (#341): an address on the server that fetches
+   * exactly `url`, once. Ask again for each click; never build it from a URL in the page.
+   */
+  remoteImageUrl(url: string): Promise<string>;
   /** Compress a final message for read-aloud with the utility model (§11.3). */
   speechSummary(text: string): Promise<SpeechSummaryResponse>;
 

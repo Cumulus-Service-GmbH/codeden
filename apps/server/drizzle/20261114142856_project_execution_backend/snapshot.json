@@ -924,6 +924,16 @@
     },
     {
       "table": "inbox_items",
+      "name": "attempts",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "1",
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "inbox_items",
       "name": "created_at",
       "type": "text",
       "notNull": true,

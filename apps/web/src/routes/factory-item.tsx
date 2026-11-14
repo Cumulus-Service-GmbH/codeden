@@ -13,6 +13,7 @@ import {
 import type { ReactNode } from "react";
 import { SectionLabel } from "@/components/common/bits";
 import { StatusDot } from "@/components/common/status-dot";
+import { FollowUps } from "@/components/factory/follow-ups";
 import {
   CheckRow,
   InvestigationCard,
@@ -229,6 +230,7 @@ export function FactoryItemPage({ projectId, itemId }: { projectId: string; item
                 <Verdict review={item.review} item={item} />
               </section>
             )}
+            <FollowUps item={item} projectId={projectId} mode={project.autonomyMode} />
           </div>
           <aside className="space-y-3 rounded-xl border border-border bg-card p-4 self-start">
             <ItemActions item={item} projectId={projectId} />

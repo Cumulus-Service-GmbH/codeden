@@ -48,6 +48,7 @@ import { assertCanEnter, haltProject } from "./controls";
 import * as decisions from "./decisions";
 import { writeDigest } from "./digest";
 import { advanceDrain, drainInboxId, drainStatus, startDrain } from "./drain";
+import { fileFollowUp } from "./follow-ups";
 import type { FactoryGithub } from "./github-port";
 import { allowLargeChange } from "./large-change";
 import { forgetLesson } from "./lessons";
@@ -55,6 +56,7 @@ import { runTick } from "./loop";
 import { PrFiles } from "./overlap";
 import { reportReproduction, submitAnalysis } from "./pipeline";
 import { localDay } from "./policy";
+import { ProviderBackoffStore } from "./provider-backoffs";
 import { runScoutNow } from "./scout";
 import { fileIssue, planRound, reportFindings } from "./scout-reports";
 import {
@@ -139,6 +141,7 @@ export class FactoryService {
           runner: deps.runner,
           rateLimits: () => deps.usage.rateLimitWindows?.() ?? [],
           now: deps.options?.now ?? (() => new Date()),
+          backoffs: new ProviderBackoffStore(deps.db),
           log: deps.log,
         }),
         log: deps.log,
@@ -200,6 +203,16 @@ export class FactoryService {
     });
     this.queuedTicks.set(projectId, next);
     return next;
+  }
+
+  /**
+   * A person's **Check now**: providers backed off after a sign-in failure are tried again (the
+   * person may have just signed in; providers are detected again in the background), then one
+   * loop step runs.
+   */
+  checkNow(projectId: string): Promise<FactoryLoop> {
+    this.ctx.sessions.recheckProviders();
+    return this.tick(projectId);
   }
 
   /**
@@ -488,6 +501,21 @@ export class FactoryService {
     const item = decisions.retry(this.ctx, projectId, itemId, mode, by);
     this.soon(projectId);
     return item;
+  }
+
+  /**
+   * "File issue": file one review follow-up of a merged item as an issue, labelled and linked to
+   * its PR (or link it to the open issue with the same title). Filing it again changes nothing.
+   */
+  fileFollowUp(projectId: string, itemId: string, index: number): Promise<FactoryItem> {
+    return this.serialize(projectId, "file follow-up", () =>
+      fileFollowUp(
+        this.ctx,
+        this.deps.projects.get(projectId),
+        this.item(projectId, itemId),
+        index,
+      ),
+    );
   }
 
   /** Dismiss a failed item without an open PR: it is rejected with the reason. */

@@ -89,6 +89,12 @@ Every pull request carries its test results, and screenshots when UI files chang
 - **The merge checks** run beside it: protected areas, size, CI, review, tests, test results, security and screenshots. CI on the pull request is the authority for the full test suite.
 - **Revise rounds.** A review that asks for changes, or a failed check, sends the work back to the same builder to fix in the same branch: up to **2 revise rounds**. After that the item stops (see [When things go wrong](#when-things-go-wrong)).
 - **Lessons.** With its verdict, a reviewer can record up to three general rules for the repository (a convention, a recurring mistake, a test to run or avoid). New builders and reviewers get the 20 most recent in their briefs, so a finding that keeps coming back stops costing a revise round. The panel lists them under **Lessons**, where **Forget** removes one for good. Only reviews of trusted work teach the factory, and **Learn from reviews** in the settings turns it off (see [Lessons](software-factory.md#lessons-the-factory-learns-from-its-reviews)).
+- **An approval covers one head commit.** The reviewer approves the commit it was asked to review, and only that commit merges on the approval. If new commits land on the pull request after it (from the builder, a conflict resolution or anyone else), the review check goes back to waiting and the reviewer reviews only what changed since the approved commit. The item says why: "New commits since the approval (abc1234 → def5678): re-review running". Merging the default branch in, or a rebase that brings only its commits in, leaves the pull request's own changes as they were, so the approval stands.
+- **Blocking findings and follow-ups.** A security concern the reviewer lists **blocks** the merge, so an approval can't list one: the reviewer asks for changes, or, when it can wait, makes it a **follow-up**. Follow-ups (up to 5 per review, each a title with an optional severity and area) never hold up the merge and never send the work back to the builder. Once the pull request merges:
+  - **Dark factory:** each follow-up is filed as an issue, labelled `codeden-factory` and `codeden-follow-up` and linked to the pull request, and the factory takes it on like any other issue.
+  - **Software factory:** they're listed on the item page under **Follow-ups**, each with a **File issue** button.
+
+  A follow-up whose title matches an open issue is linked to that issue instead of filed again, and none is filed twice.
 
 ### Merge
 
@@ -110,8 +116,8 @@ With auto-merge on, a pull request whose checks all pass doesn't merge on the sp
 
 - **Order:** a revert goes first, then the pull request whose checks passed first.
 - **Only the head of the queue acts.** The others say "queued to merge (number 2 in line)".
-- **Behind the default branch?** The factory asks GitHub to update the head pull request (**Update branch**, pinned to its current head commit). No agent and no new review is needed. CI then runs on the new head.
-- **Merged on a later pass** once CI on that head is green: a squash merge, again pinned to the head commit, at most one per pass.
+- **Behind the default branch?** The factory asks GitHub to update the head pull request (**Update branch**, pinned to its current head commit). No agent is needed, and no new review while the pull request's own changes stay the same; only when the default branch changed lines right next to them does the reviewer look at the new head first. CI then runs on the new head.
+- **Merged on a later pass** once CI on that head is green: a squash merge, again pinned to the head commit, at most one per pass. Right before the merge the factory checks again that the review's approval covers that exact commit. If the head moved, nothing merges until the new commits are reviewed.
 - **Held** while the loop is paused (reverts excepted), when today's merges reached **Auto-merges per day** (5), and while a kill switch is on.
 
 **Why one at a time?** Every merge changes the default branch. A pull request that passed CI against the old default branch hasn't been tested against the new one, so each pull request is updated and tested on top of the one before it. Merging several at once could merge two changes that each pass alone but break together.
@@ -149,9 +155,13 @@ Within each, what waited longest goes first. **Reviews, fixes and rebases come b
 - its CLI is older than CodeDen needs;
 - it's signed out;
 - it's at its usage limit (until the reset, or an hour when the reset time isn't known);
-- a factory session just failed on it because of the provider (it couldn't start or sign in): it's skipped for 30 minutes, then tried again.
+- a factory session failed on it because of the provider:
+  - **it couldn't sign in** (an expired or revoked login, such as OpenCode's `Request failed: 401`): it's skipped until its login changes. That's when a later check sees a different login (it was signed out and in again, another account, a new expiry), when you press **Check now** on the factory panel or **Retry** a failed run on that provider, or after 6 hours, in case the change can't be seen (an expired token can look the same as a fresh one);
+  - its CLI is too old, or the session couldn't start: it's skipped for 30 minutes, then tried again.
 
-Providers are checked again every few minutes.
+Providers are checked again every few minutes. These skips are kept across a restart.
+
+**A provider that isn't signed in** gets one inbox item, such as "OpenCode isn't signed in (openai/gpt-5.5): run `opencode auth login`", instead of a "Run failed" item for each failed session. Later failures update that item (counting the attempts), and it closes by itself once a factory session on that provider completes a turn. After signing in, press **Check now** to use the provider again at once.
 
 **When the reviewer's provider isn't available,** the **When the reviewer's provider is unavailable** setting decides:
 
@@ -240,7 +250,7 @@ A round that runs over 3 hours is closed. No round starts at the open pull reque
 | **Kill switch** (factory panel or Factory view) | Stops the project's loop and every factory session: builders, reviewers, the scout and its area reviewers. Builds without a pull request go back to the queue; work with one keeps its place. Nothing moves or merges until you turn it off. |
 | **Global factory kill switch** (Settings → General) | The same for every project. |
 | **Resume** | Shown while the loop is paused. Clears the pause and the failure count. There is no manual pause: use the kill switch. |
-| **Check now** | Runs a pass right away instead of waiting up to 30 seconds. |
+| **Check now** | Runs a pass right away instead of waiting up to 30 seconds. Providers skipped because they [weren't signed in](#reviewers-and-providers) are tried again, and checked again in the background. |
 | **Run scout now** | Dark factory: starts a scout round now, skipping the interval and the backlog threshold. Not while a round runs, the loop is paused or over budget, at the open pull request limit, without a free agent, or with a kill switch on. |
 | **Digest** | Today's digest, now, in your inbox. |
 | **Settings** | The limits below, the merge checks, the agents and the scout. |

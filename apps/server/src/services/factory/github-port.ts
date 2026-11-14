@@ -46,6 +46,12 @@ export interface FactoryPr {
   renamedFrom?: string[];
   /** Added + deleted lines per file, when GitHub reports them. */
   fileLines?: Array<{ path: string; lines: number }>;
+  /**
+   * Fingerprint of what the PR at `headSha` itself changes (`prDiffKey`, read pinned to that
+   * commit): the same on a head that only brought the default branch in, so the approval
+   * carries over (`approval.ts`). Null when it can't be told; absent when not read.
+   */
+  diffKey?: string | null;
 }
 
 /** What the default branch has that a PR's head doesn't (`FactoryGithub.mainSince`). */
@@ -160,6 +166,8 @@ const LOGIN_TTL_MS = 10 * 60_000;
 /** `FactoryGithub` over the real `GithubService` (Octokit, the PR/issue projections). */
 export class GithubFactoryPort implements FactoryGithub {
   private login: { value: string | null; at: number } | null = null;
+  /** `diffKeyAt`'s fingerprints per head commit. */
+  private readonly diffKeys = new Map<string, string | null>();
 
   constructor(private readonly github: GithubService) {}
 
@@ -238,7 +246,12 @@ export class GithubFactoryPort implements FactoryGithub {
 
   async prDetails(projectId: string, number: number): Promise<FactoryPr> {
     const pr = await this.github.getPrDetails(githubPrId(projectId, number));
+    // Read pinned to this read's head commit, so it is that head's (`diffKeyAt`).
+    const diffKey = pr.headSha
+      ? await prOps.diffKeyAt(this.github, projectId, pr.baseBranch, pr.headSha, this.diffKeys)
+      : null;
     return {
+      diffKey,
       ref: { number: pr.number, url: pr.url, state: pr.state, title: pr.title },
       title: pr.title,
       body: pr.body,

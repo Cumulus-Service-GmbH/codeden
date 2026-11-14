@@ -11,7 +11,12 @@ import { errorMessage } from "../errors";
 import type { RunnerPort } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import type { SessionService } from "../sessions/session-service";
-import type { ProviderAvailability, ProviderRunnable, Unavailable } from "./availability";
+import type {
+  ProviderAvailability,
+  ProviderCause,
+  ProviderRunnable,
+  Unavailable,
+} from "./availability";
 import {
   type BriefLessons,
   builderPrompt,
@@ -117,9 +122,12 @@ export class FactorySessions {
   /**
    * Whether a person's action (Retry) can run on `provider` now. The factory's back-off after its
    * own sessions failed there doesn't apply, and before refusing, providers are detected again
-   * and waited for, so a CLI just signed in or updated isn't refused from an old detection.
+   * and waited for, so a CLI just signed in or updated isn't refused from an old detection. A
+   * person retrying on the provider also ends the factory's sign-in back-off there: they may
+   * have just signed in (the next failure backs it off again).
    */
   async runnableNow(provider: string): Promise<ProviderRunnable> {
+    this.deps.availability.recheck(provider);
     const cached = this.runnable(provider, { ignoreFailures: true });
     if (cached.runnable) return cached;
     await this.deps.availability.detectNow();
@@ -136,9 +144,21 @@ export class FactorySessions {
     this.deps.availability.refresh();
   }
 
-  /** A factory session failed because of its provider: new work skips it for a while. */
-  providerFailed(provider: string, reason: string, until: string | null): void {
-    this.deps.availability.markFailed(provider, reason, until);
+  /**
+   * A factory session failed because of its provider: new work skips it for a while, or until
+   * its login changes after a sign-in failure.
+   */
+  providerFailed(provider: string, cause: ProviderCause): void {
+    this.deps.availability.markFailed(provider, cause.reason, cause.until, cause.signin);
+  }
+
+  /**
+   * A person asks the factory to check now: providers backed off after a sign-in failure are
+   * tried again (they may have just signed in), and providers are detected again in the
+   * background.
+   */
+  recheckProviders(): void {
+    this.deps.availability.recheck();
   }
 
   /** Stop one session; failures are only logged. */

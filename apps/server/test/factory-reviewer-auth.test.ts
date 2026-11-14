@@ -14,6 +14,9 @@ const { item, tick, later, enable, backlogItem, openPr } = factorySteps(() => en
 
 const HOUR = 60 * 60_000;
 
+/** Let the background provider detection a tick started finish. */
+const settle = () => new Promise((r) => setImmediate(r));
+
 /** A feature under review: Claude built it, Codex is at its weekly limit. */
 async function underReview(): Promise<string> {
   env = createFactoryEnv({ providers: ["claude", "codex", "opencode"] });
@@ -82,7 +85,7 @@ describe("factory reviewer on a provider whose sign-in expired", () => {
     });
   });
 
-  it("keeps reviews off OpenCode until its backoff ends", async () => {
+  it("keeps reviews off OpenCode until its login changes (#342)", async () => {
     const id = await underReview();
     openCodeTurnFails(item(id).reviewerSessionId as string, "Request failed: 401");
     await tick();
@@ -96,12 +99,25 @@ describe("factory reviewer on a provider whose sign-in expired", () => {
     expect(item(id).nudges.reviewer_failed_1).toBeDefined();
     expect(item(id).reviewerProvider).toBe("claude");
 
-    // Once the backoff is over, OpenCode is tried again.
+    // An expired login doesn't fix itself on a timer: well past the half hour, still Claude.
     later(31 * 60_000);
+    await tick();
+    await settle();
     await env.setStatus(item(id).reviewerSessionId as string, "failed");
     await tick();
     await tick();
     expect(item(id).nudges.reviewer_failed_2).toBeDefined();
+    expect(item(id).reviewerProvider).toBe("claude");
+
+    // Detection reports a different login (the user signed in again): OpenCode is tried again.
+    env.detected.opencode = { account: "openai" };
+    later(6 * 60_000);
+    await tick();
+    await settle();
+    await env.setStatus(item(id).reviewerSessionId as string, "failed");
+    await tick();
+    await tick();
+    expect(item(id).nudges.reviewer_failed_3).toBeDefined();
     expect(item(id).reviewerProvider).toBe("opencode");
   });
 });

@@ -1,7 +1,7 @@
 import type { FactoryItem, Session } from "@codeden/contracts";
 import type { InboxService } from "../inbox-service";
 import type { SessionRepo } from "../sessions/repo";
-import { PROVIDER_FAILURE_BACKOFF_MS, type Unavailable } from "./availability";
+import { PROVIDER_FAILURE_BACKOFF_MS, type ProviderCause, type Unavailable } from "./availability";
 
 /**
  * A factory session that failed because of its provider rather than its work (§10.1, Provider
@@ -23,6 +23,8 @@ export const MAX_PROVIDER_RESTARTS = 5;
 const FAILING_TO_START = "failing to start";
 /** A refused open the provider classified as `setup`: its CLI is older than CodeDen runs. */
 const TOO_OLD = "too old to run (update it)";
+/** Its login needs the user (`auth`): backed off until the login changes, not for a while. */
+const NOT_SIGNED_IN: ProviderCause = { reason: "not signed in", until: null, signin: true };
 
 /** Whether the failure keeps all new factory work off the provider, not just the item's reviews. */
 export function providerWide(cause: Unavailable): boolean {
@@ -39,13 +41,13 @@ export function providerFailure(
   repo: SessionRepo,
   inbox: Pick<InboxService, "find">,
   s: Session,
-): Unavailable | null {
+): ProviderCause | null {
   if (s.status !== "failed" && s.status !== "idle") return null;
   const last = repo.rootTurnIds(s).at(-1);
   if (!last) {
     if (s.status !== "failed") return null;
     if (s.startError?.kind === "setup") return { reason: TOO_OLD, until: null };
-    if (s.startError?.kind === "auth") return { reason: "not signed in", until: null };
+    if (s.startError?.kind === "auth") return NOT_SIGNED_IN;
     const notStarted = s.startError || inbox.find(`inbox:${s.id}:start`);
     return notStarted ? { reason: FAILING_TO_START, until: null } : null;
   }
@@ -54,7 +56,7 @@ export function providerFailure(
   if (turn.error.kind === "usage_limit") {
     return { reason: "at its usage limit", until: turn.error.retryAt ?? null };
   }
-  if (turn.error.kind === "auth") return { reason: "not signed in", until: null };
+  if (turn.error.kind === "auth") return NOT_SIGNED_IN;
   return null;
 }
 

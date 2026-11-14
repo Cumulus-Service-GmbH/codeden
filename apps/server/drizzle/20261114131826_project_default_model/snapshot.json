@@ -3,8 +3,7 @@
   "dialect": "sqlite",
   "id": "38044392-7ffd-4604-8b90-7d26919c59f1",
   "prevIds": [
-    "13c0b7ab-5796-4dd7-9d62-6aace8ff605a",
-    "8b5e0c61-a857-4662-a86c-e1c0fb7e4f9a"
+    "2e6311b9-006c-4ab2-b72b-2278ceb54b0a"
   ],
   "ddl": [
     {
@@ -920,6 +919,16 @@
       "notNull": false,
       "autoincrement": false,
       "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "inbox_items",
+      "name": "attempts",
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "1",
       "generated": null,
       "entityType": "columns"
     },

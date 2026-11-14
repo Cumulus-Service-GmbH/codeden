@@ -25,6 +25,16 @@ export interface ItemContext {
   root: string | null;
   /** Whose replies the thread holds: "Agent", "Project manager", "Subagent"... */
   speaker: string;
+  /** Hides secrets (and counts them); text is passed through it before it's cut short. */
+  redact: (text: string) => string;
+}
+
+/**
+ * `text` cut to `max` characters, its secrets hidden first: a cut through a token would leave
+ * a piece too short for the redactor to recognise.
+ */
+function cut(text: string, max: number, ctx: ItemContext): string {
+  return clip(ctx.redact(text), max);
 }
 
 /** A single-line command longer than this is cut. */
@@ -100,18 +110,19 @@ function fileChange(change: FileChange, root: string | null): string {
 }
 
 /** What a tool call did, as the start of its line, plus a code block for a multi-line command. */
-function toolAction(item: ToolCallItem, root: string | null): { text: string; block?: string } {
+function toolAction(item: ToolCallItem, ctx: ItemContext): { text: string; block?: string } {
+  const { root } = ctx;
   const titled = (fallback: string) => {
     const title = item.title ? oneLine(item.title) : "";
-    return title && title !== fallback ? `: ${clip(title, 200)}` : "";
+    return title && title !== fallback ? `: ${cut(title, 200, ctx)}` : "";
   };
   switch (item.toolKind) {
     case "command": {
       const command = item.command.trim();
       if (command.includes("\n")) {
-        return { text: "Ran", block: fenced(clip(command, COMMAND_BLOCK_MAX), "sh") };
+        return { text: "Ran", block: fenced(cut(command, COMMAND_BLOCK_MAX, ctx), "sh") };
       }
-      return { text: `Ran ${inlineCode(clip(command, COMMAND_MAX))}` };
+      return { text: `Ran ${inlineCode(cut(command, COMMAND_MAX, ctx))}` };
     }
     case "file_edit": {
       if (item.changes.length === 0) return { text: `Edited files${titled("")}` };
@@ -151,19 +162,21 @@ const TOOL_STATUS: Readonly<Partial<Record<ItemStatus, string>>> = {
 };
 
 /** How a tool call ended, when not plainly: a non-zero exit code, failed, declined, running. */
-function toolOutcome(item: ToolCallItem): string {
+function toolOutcome(item: ToolCallItem, ctx: ItemContext): string {
   const code = item.toolKind === "command" ? item.exitCode : null;
   const exit = code !== null && code !== undefined && code !== 0 ? ` (exit ${code})` : "";
   const why =
-    item.status === "failed" && item.error ? `: ${clip(oneLine(item.error.message), 300)}` : "";
+    item.status === "failed" && item.error ? `: ${cut(oneLine(item.error.message), 300, ctx)}` : "";
   return `${exit}${TOOL_STATUS[item.status] ?? ""}${why}`;
 }
 
 /** Images the call created, by caption (never the file or its path). */
-function toolImages(item: ToolCallItem): string {
+function toolImages(item: ToolCallItem, ctx: ItemContext): string {
   const images = item.generatedImages ?? [];
   if (images.length === 0) return "";
-  const captions = images.flatMap((i) => (i.caption ? [`"${clip(oneLine(i.caption), 120)}"`] : []));
+  const captions = images.flatMap((i) =>
+    i.caption ? [`"${cut(oneLine(i.caption), 120, ctx)}"`] : [],
+  );
   const what = images.length === 1 ? "an image" : `${images.length} images`;
   return ` · created ${what}${captions.length ? `: ${captions.join(", ")}` : ""}`;
 }
@@ -173,9 +186,9 @@ function toolImages(item: ToolCallItem): string {
  * lists use `*` because every other list in the export uses `-`: a list right after a todo
  * list or an approval's facts would otherwise merge into it.
  */
-export function toolLine(item: ToolCallItem, root: string | null): string {
-  const { text, block } = toolAction(item, root);
-  const line = `${text}${toolOutcome(item)}${toolImages(item)}`;
+export function toolLine(item: ToolCallItem, ctx: ItemContext): string {
+  const { text, block } = toolAction(item, ctx);
+  const line = `${text}${toolOutcome(item, ctx)}${toolImages(item, ctx)}`;
   return listItem(block ? `${line}:\n${block}` : line, "*");
 }
 
@@ -217,12 +230,12 @@ function decisionText(item: ItemOf<"approval_request">): string {
   return "Answered";
 }
 
-function approvalBlock(item: ItemOf<"approval_request">, root: string | null): string {
+function approvalBlock(item: ItemOf<"approval_request">, ctx: ItemContext): string {
   const facts: string[] = [];
   if (item.reason) facts.push(`Why: ${oneLine(item.reason)}`);
-  if (item.command) facts.push(`Command: ${inlineCode(clip(item.command, COMMAND_MAX))}`);
+  if (item.command) facts.push(`Command: ${inlineCode(cut(item.command, COMMAND_MAX, ctx))}`);
   if (item.paths?.length) {
-    facts.push(`Paths: ${item.paths.map((p) => inlineCode(relativeTo(p, root))).join(", ")}`);
+    facts.push(`Paths: ${item.paths.map((p) => inlineCode(relativeTo(p, ctx.root))).join(", ")}`);
   }
   if (item.url) facts.push(`Link: ${link(item.url)}`);
   facts.push(`Decision: ${decisionText(item)}`);
@@ -258,7 +271,7 @@ export function itemBlock(item: Item, ctx: ItemContext): string | null {
     case "user_question":
       return questionBlock(item, ctx.speaker);
     case "approval_request":
-      return approvalBlock(item, ctx.root);
+      return approvalBlock(item, ctx);
     case "notice":
       return quote(
         `**${item.level === "warning" ? "Warning" : "Notice"}:** ${item.message.trim()}`,
