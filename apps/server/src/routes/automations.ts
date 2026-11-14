@@ -1,6 +1,8 @@
 import {
   type Automation,
   type AutomationExport,
+  AutomationImportLinkRequest,
+  type AutomationImportLinkResponse,
   AutomationImportSource,
   AutomationProjectRequest,
   type AutomationProjectSettings,
@@ -45,7 +47,8 @@ const importLimit = bodyLimit({
 
 /**
  * `/api/automations` (§10): definitions, enable/disable, run now, pause/resume/skip, runs
- * history, upcoming runs (the Now / Next strip), templates and triage decisions.
+ * history, upcoming runs (the Now / Next strip), templates, sharing (export, and import from
+ * files or a link) and triage decisions.
  */
 export function automationRoutes(s: AppServices) {
   const a = s.automations;
@@ -69,6 +72,11 @@ export function automationRoutes(s: AppServices) {
     })
     .post("/import/preview", importLimit, jsonBody(AutomationImportSource), (c) =>
       c.json({ items: a.definitions.previewImport(c.req.valid("json")) }),
+    )
+    .post("/import/link", jsonBody(AutomationImportLinkRequest), async (c) =>
+      c.json<AutomationImportLinkResponse>(
+        await a.definitions.previewLink(c.req.valid("json").url),
+      ),
     )
     .post("/import", importLimit, jsonBody(ImportAutomationsRequest), (c) => {
       const req = c.req.valid("json");

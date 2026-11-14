@@ -60,9 +60,21 @@ Automations travel as Markdown files with YAML frontmatter, the same format as a
 
 - **Export** on an automation's page: **Download .md** (`<name>.md`) or **Copy as Markdown**.
 - **Export all** on the Automations page downloads every automation of the project as a `.zip` of `.md` files.
-- **Import** takes one or more `.md` files, a `.zip` of them, or pasted Markdown. CodeDen parses each file exactly like an automation file and shows a preview: name, schedule, agent, permissions, the first lines of the prompt, and any error (bad YAML, an unknown field, an invalid cron expression or timezone, a missing prompt). Pick which ones to import and whether they go into this project or all projects.
+- **Import** takes one or more `.md` files, a `.zip` of them, pasted Markdown, or a **link**. CodeDen parses each file exactly like an automation file and shows a preview: name, schedule, agent, permissions, the first lines of the prompt, and any error (bad YAML, an unknown field, an invalid cron expression or timezone, a missing prompt). Pick which ones to import and whether they go into this project or all projects.
 
 Imported automations always start **off**, and an import never runs anything. A file with **Full** permissions is flagged in the preview, so you can read its prompt before switching it on. Unknown frontmatter fields are refused on import (a typo such as `maxPerDya` would otherwise be silently ignored). An import takes at most 50 files of up to 128 KB each (1 MB in total), and a zip of up to 1 MB.
+
+### Importing from a link
+
+To share automations, publish the `.md` file (or a `.zip` of several) and hand out the link. In **Import › Link**, paste one of:
+
+| Link | What CodeDen downloads |
+|---|---|
+| `https://github.com/<owner>/<repo>/blob/<branch>/<path>.md` (a GitHub file page) | The file from `raw.githubusercontent.com` |
+| `https://gist.github.com/<user>/<id>` | Every `.md` file in the gist (other files are skipped), through GitHub's API. Add a revision (`/<user>/<id>/<sha>`) to pin a version |
+| Any other `https://` link to a `.md` or `.zip` file, including GitHub's **Download ZIP** and release asset links | The file. A zip is recognised by its contents, so download links without `.zip` in them work too |
+
+The CodeDen server downloads the link **once**, when you press **Preview**, and the import creates exactly the files you previewed. If the file changes after your preview, the import doesn't pick up the change. The download sends no cookies, tokens or GitHub credentials, so only public files and gists work. Only `https` links are accepted, including every redirect (at most 5). Links reach only the public internet: a link or redirect to this computer (`localhost`, `127.0.0.1`), your local network (`192.168.x.x`, `10.x.x.x`, …), link-local addresses (such as a cloud server's metadata address) or other special-purpose ranges is refused, also when a public-looking name resolves there. Downloads stop after 15 seconds or 1 MB (4 MB for a gist's API answer), and the usual import limits apply to what comes back. A link that opens a web page instead of a file (a GitHub folder or repository page, a blog post) is refused with a hint to use the raw file's link. The link itself is not stored with the imported automations.
 
 ## Built-in templates
 

@@ -5,9 +5,9 @@ import { AutomationAction, AutomationGuards, AutomationTrigger } from "./entitie
 
 /**
  * Sharing automations (§10): duplicate, export as the Markdown + YAML frontmatter file format
- * (one `.md`, or all of a project's as a `.zip`), and import those files back. Imports are
- * parsed with the same parser and validation as automation files, never run anything and
- * always start off.
+ * (one `.md`, or all of a project's as a `.zip`), and import those files back, from files or
+ * a link. Imports are parsed with the same parser and validation as automation files, never
+ * run anything and always start off.
  */
 
 /** Size limits for an import, checked by the server before anything is parsed. */
@@ -22,6 +22,12 @@ export const AUTOMATION_IMPORT_LIMITS = {
   maxZipBytes: 1024 * 1024,
   /** Entries a zip may list, `.md` or not (more is refused before inflating anything). */
   maxZipEntries: 200,
+  /** A link to import from, in characters. */
+  maxLinkChars: 2048,
+  /** How long the server waits for a link's download, redirects included. */
+  linkTimeoutMs: 15_000,
+  /** Redirects a link may take; each one must stay on https. */
+  maxLinkRedirects: 5,
 } as const;
 
 /** One Markdown automation file to import. */
@@ -78,6 +84,26 @@ export const AutomationImportPreviewResponse = z.object({
   items: z.array(AutomationImportPreviewItem),
 });
 export type AutomationImportPreviewResponse = z.infer<typeof AutomationImportPreviewResponse>;
+
+/**
+ * `POST /api/automations/import/link`: download a link once and preview it. Takes an https
+ * link to a `.md` or `.zip` file, a GitHub file page (`github.com/<owner>/<repo>/blob/...`)
+ * or a gist (`gist.github.com/...`). No credentials are sent with the download.
+ */
+export const AutomationImportLinkRequest = z.object({
+  url: z.string().trim().min(1).max(AUTOMATION_IMPORT_LIMITS.maxLinkChars),
+});
+export type AutomationImportLinkRequest = z.infer<typeof AutomationImportLinkRequest>;
+
+/**
+ * The downloaded files and their preview. Import with `source` as it is: an import never
+ * downloads anything, so what it creates is exactly what was previewed.
+ */
+export const AutomationImportLinkResponse = z.object({
+  source: AutomationImportSource,
+  items: z.array(AutomationImportPreviewItem),
+});
+export type AutomationImportLinkResponse = z.infer<typeof AutomationImportLinkResponse>;
 
 /**
  * `POST /api/automations/import`: re-parse the same source and create the selected files as

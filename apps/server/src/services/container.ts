@@ -107,7 +107,10 @@ export interface ServicesOptions {
   /** GitHub API transport and poll intervals (tests point them at a fake GitHub). */
   github?: Pick<GithubServiceDeps, "fetch" | "baseUrl" | "idleIntervalMs" | "activeIntervalMs">;
   /** Automation clock, scheduler timings and file rescans (tests). */
-  automations?: Pick<AutomationServiceDeps, "now" | "scheduler" | "templatesDir" | "rescanMs">;
+  automations?: Pick<
+    AutomationServiceDeps,
+    "now" | "scheduler" | "templatesDir" | "rescanMs" | "fetch"
+  >;
   /** Factory loop timings and its GitHub port (§10.1; tests pass a scripted GitHub). */
   factory?: FactoryOptions & { github?: FactoryGithub };
   /** How the hosting process was started and how it restarts into another version (§16). */

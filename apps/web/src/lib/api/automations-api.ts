@@ -1,5 +1,6 @@
 import {
   AutomationExport,
+  AutomationImportLinkResponse,
   AutomationImportPreviewResponse,
   type AutomationImportSource,
   AutomationListItem,
@@ -84,6 +85,8 @@ export interface AutomationsApi {
   exportAll(projectId?: string): Promise<ExportAutomationsResponse>;
   /** Parse an import without saving anything. */
   previewImport(source: AutomationImportSource): Promise<AutomationImportPreviewResponse>;
+  /** Download a link's automation files once and preview them; import the returned `source`. */
+  previewLink(url: string): Promise<AutomationImportLinkResponse>;
   /** Create the selected files of an import, all off. */
   importAutomations(req: ImportAutomationsRequest): Promise<ImportAutomationsResponse>;
 }
@@ -147,6 +150,8 @@ export function httpAutomationsApi(http: Fetcher): AutomationsApi {
       get(`/automations/export${qs({ projectId })}`, (v) => ExportAutomationsResponse.parse(v)),
     previewImport: (source) =>
       post("/automations/import/preview", source, (v) => AutomationImportPreviewResponse.parse(v)),
+    previewLink: (url) =>
+      post("/automations/import/link", { url }, (v) => AutomationImportLinkResponse.parse(v)),
     importAutomations: (req) =>
       post("/automations/import", req, (v) => ImportAutomationsResponse.parse(v)),
   };

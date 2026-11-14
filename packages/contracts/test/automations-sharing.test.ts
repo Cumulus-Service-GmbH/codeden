@@ -3,6 +3,8 @@ import {
   AUTOMATION_IMPORT_LIMITS,
   Automation,
   AutomationExport,
+  AutomationImportLinkRequest,
+  AutomationImportLinkResponse,
   AutomationImportPreviewResponse,
   AutomationImportSource,
   DuplicateAutomationRequest,
@@ -56,6 +58,19 @@ describe("sharing automations (§10)", () => {
       projectId: "p1",
       select: ["a.md"],
     });
+  });
+
+  it("round-trips link imports: the request, and the downloaded files with their preview", () => {
+    const req = roundTrip(AutomationImportLinkRequest, { url: "  https://gist.github.com/a/b  " });
+    expect(req.url).toBe("https://gist.github.com/a/b");
+    expect(AutomationImportLinkRequest.safeParse({ url: " " }).success).toBe(false);
+    const long = `https://example.com/${"a".repeat(AUTOMATION_IMPORT_LIMITS.maxLinkChars)}`;
+    expect(AutomationImportLinkRequest.safeParse({ url: long }).success).toBe(false);
+    const res = roundTrip(AutomationImportLinkResponse, {
+      source: { files: [{ name: "a.md", content: "---\nname: a\n---\nhi" }] },
+      items: [{ fileName: "a.md", automation: draft, error: null, fullPermissions: true }],
+    });
+    expect(res.source.files?.[0]?.name).toBe("a.md");
   });
 
   it("caps the number and size of imported files", () => {

@@ -4,7 +4,7 @@ import {
   type AutomationImportSource,
 } from "@codeden/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, FileUp, FolderGit2, Globe, Import } from "lucide-react";
+import { AlertTriangle, FileUp, FolderGit2, Globe, Import, Link2 } from "lucide-react";
 import { useId, useState } from "react";
 import { toast } from "sonner";
 import { AUTONOMY } from "@/components/thread/autonomy";
@@ -18,6 +18,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useClient } from "@/lib/api";
 import { automationKeys } from "@/lib/automations";
@@ -144,8 +145,15 @@ function PreviewRow({
   );
 }
 
+/** A typed link as an https URL: `gist.github.com/…` without a scheme gets `https://`. */
+function linkUrl(input: string): string {
+  const link = input.trim();
+  return /^[a-z][a-z0-9+.-]*:/i.test(link) ? link : `https://${link}`;
+}
+
 /**
- * Import automations (§10): `.md` files, a `.zip` of them, or pasted Markdown. The server
+ * Import automations (§10): `.md` files, a `.zip` of them, pasted Markdown, or a link (a
+ * `.md` or `.zip` URL, a GitHub file or a gist, downloaded once by the server). The server
  * parses them like automation files and previews each one; nothing runs, and imported
  * automations always start off.
  */
@@ -153,9 +161,11 @@ export function ImportDialog({ projectId }: { projectId: string }) {
   const client = useClient();
   const queryClient = useQueryClient();
   const id = useId();
+  const linkForm = `${id}-link`;
   const [open, setOpen] = useState(false);
-  const [mode, setMode] = useState<"files" | "paste">("files");
+  const [mode, setMode] = useState<"files" | "paste" | "link">("files");
   const [text, setText] = useState("");
+  const [link, setLink] = useState("");
   const [source, setSource] = useState<AutomationImportSource | null>(null);
   const [items, setItems] = useState<AutomationImportPreviewItem[] | null>(null);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -165,6 +175,13 @@ export function ImportDialog({ projectId }: { projectId: string }) {
     setItems(null);
     setSelected(new Set());
     setText("");
+    setLink("");
+  };
+  /** Show a preview; the import later sends exactly this source back. */
+  const show = (src: AutomationImportSource, previewed: AutomationImportPreviewItem[]) => {
+    setSource(src);
+    setItems(previewed);
+    setSelected(new Set(previewed.filter((i) => i.automation).map((i) => i.fileName)));
   };
 
   const preview = useMutation({
@@ -172,12 +189,13 @@ export function ImportDialog({ projectId }: { projectId: string }) {
       src,
       res: await client.automations.previewImport(src),
     }),
-    onSuccess: ({ src, res }) => {
-      setSource(src);
-      setItems(res.items);
-      setSelected(new Set(res.items.filter((i) => i.automation).map((i) => i.fileName)));
-    },
+    onSuccess: ({ src, res }) => show(src, res.items),
     onError: (e) => toast.error("Couldn't read the import", { description: e.message }),
+  });
+  const linkPreview = useMutation({
+    mutationFn: (url: string) => client.automations.previewLink(url),
+    onSuccess: (res) => show(res.source, res.items),
+    onError: (e) => toast.error("Couldn't import from the link", { description: e.message }),
   });
   const commit = useMutation({
     mutationFn: () => {
@@ -228,8 +246,8 @@ export function ImportDialog({ projectId }: { projectId: string }) {
         <DialogHeader>
           <DialogTitle>Import automations</DialogTitle>
           <DialogDescription>
-            Markdown automation files (<code>.md</code>), a <code>.zip</code> of them, or pasted
-            text. Nothing runs, and everything you import starts off.
+            Markdown automation files (<code>.md</code>), a <code>.zip</code> of them, pasted text
+            or a link. Nothing runs, and everything you import starts off.
           </DialogDescription>
         </DialogHeader>
         {!items ? (
@@ -241,9 +259,40 @@ export function ImportDialog({ projectId }: { projectId: string }) {
               options={[
                 { id: "files", label: "Files" },
                 { id: "paste", label: "Paste" },
+                { id: "link", label: "Link" },
               ]}
             />
-            {mode === "files" ? (
+            {mode === "link" ? (
+              <form
+                id={linkForm}
+                className="space-y-2"
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (link.trim() && !linkPreview.isPending) linkPreview.mutate(linkUrl(link));
+                }}
+              >
+                <Input
+                  value={link}
+                  onChange={(e) => setLink(e.target.value)}
+                  inputMode="url"
+                  autoComplete="off"
+                  spellCheck={false}
+                  autoFocus
+                  placeholder="https://gist.github.com/…"
+                  className="font-mono text-[12px]"
+                  aria-label="Link to import"
+                  data-testid="import-link-input"
+                />
+                <p className="flex items-start gap-1.5 text-2xs text-muted-foreground">
+                  <Link2 className="mt-px size-3.5 shrink-0" />
+                  <span>
+                    A link to a <code>.md</code> or <code>.zip</code> file, a GitHub file or a
+                    public gist. CodeDen downloads it once, sends no credentials, and imports
+                    exactly what the preview shows.
+                  </span>
+                </p>
+              </form>
+            ) : mode === "files" ? (
               <label
                 htmlFor={`${id}-files`}
                 className="flex cursor-pointer flex-col items-center gap-2 rounded-xl border border-dashed border-border px-6 py-10 text-center hover:border-primary/40"
@@ -338,13 +387,21 @@ export function ImportDialog({ projectId }: { projectId: string }) {
                 Import {selected.size} of {valid.length}, off
               </Button>
             </>
+          ) : mode === "paste" ? (
+            <Button
+              onClick={() => preview.mutate({ text })}
+              disabled={!text.trim() || preview.isPending}
+            >
+              Preview
+            </Button>
           ) : (
-            mode === "paste" && (
+            mode === "link" && (
               <Button
-                onClick={() => preview.mutate({ text })}
-                disabled={!text.trim() || preview.isPending}
+                type="submit"
+                form={linkForm}
+                disabled={!link.trim() || linkPreview.isPending}
               >
-                Preview
+                {linkPreview.isPending ? "Downloading…" : "Preview"}
               </Button>
             )
           )}

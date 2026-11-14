@@ -55,6 +55,8 @@ export interface AutomationServiceDeps {
   now?: () => Date;
   scheduler?: { graceMs?: number; maxWaitMs?: number };
   rescanMs?: number;
+  /** Downloads for imports from a link (tests script it); public addresses only otherwise. */
+  fetch?: typeof fetch;
   log?: (message: string) => void;
 }
 
@@ -107,6 +109,7 @@ export class AutomationService implements AutomationPort {
       projects: deps.projects,
       sources: this.sources,
       schedules: this.schedules,
+      fetch: deps.fetch,
     });
     this.triage = new TriageService({
       db: deps.db,
