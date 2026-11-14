@@ -300,6 +300,58 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
       runTurn(id, brief, "codeden");
       return delay({ sessionId: id }, 400);
     },
+    async reviewSession(sessionId, req) {
+      const source = world.snapshot.sessions.find((s) => s.id === sessionId);
+      if (!source) throw new Error("Session not found");
+      if (running.has(sessionId)) throw new Error("Wait for the running turn to finish");
+      const target = world.snapshot.runner.providers.find((p) => p.id === req.provider);
+      if (!target) throw new Error(`Provider ${req.provider} is not available`);
+      if (!target.capabilities.readOnly) {
+        throw new Error(`${target.displayName} cannot run sessions with read-only permissions`);
+      }
+      const id = uid("s");
+      const project = world.snapshot.projects.find((p) => p.id === source.projectId);
+      const same = target.id === source.provider;
+      const now = new Date().toISOString();
+      const session = makeSession({
+        ...source,
+        id,
+        provider: target.id,
+        model: req.model ?? (same ? source.model : null),
+        effort: req.effort ?? (same ? source.effort : null),
+        autonomy: "read_only",
+        planMode: false,
+        title: req.title ?? `Review: ${source.title ?? source.purpose}`,
+        workKey: `review:${source.id}`,
+        status: "starting",
+        startedBy: { kind: "user" },
+        parentSessionId: null,
+        pr: null,
+        progress: null,
+        result: null,
+        resumeToken: null,
+        archivedAt: null,
+        worktreeRemovedAt: null,
+        branch: `codeden/${id.slice(2, 10)}`,
+        worktreePath: `~/.codeden/wt/${project?.slug ?? "project"}/${id.slice(2, 10)}`,
+        forkedFrom: { sessionId, checkpoint: null, kind: "review" },
+        rootThreadId: `t-${id.slice(2)}`,
+        createdAt: now,
+        updatedAt: now,
+        endedAt: null,
+      });
+      world.emitDomain({ type: "session.created", sessionId: null, payload: { session } });
+      const brief = [
+        `You are an independent reviewer. Review the changes another CodeDen session made, "${source.title ?? source.purpose}". This session is read-only.`,
+        `## The task\n\n${source.purpose}`,
+        req.focus ? `## What to focus on (from the user)\n\n${req.focus}` : "",
+        "## Your review\n\nThe verdict (**Approve** or **Request changes**), then the findings, most severe first.",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+      runTurn(id, brief, "codeden");
+      return delay({ sessionId: id }, 400);
+    },
     queue: queue.api({
       running: (sessionId) => running.has(sessionId),
       steer: (sessionId, input) => client.sendMessage(sessionId, input, "steer"),

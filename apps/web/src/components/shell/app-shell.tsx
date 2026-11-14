@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { useRoleSession } from "@/components/orchestration/role-chat";
 import { AddProjectDialog } from "@/components/setup/add-project-dialog";
 import { HandoffDialog } from "@/components/thread/handoff-dialog";
+import { ReviewDialog } from "@/components/thread/review-dialog";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { RightPanel } from "@/components/workbench/right-panel";
 import { TerminalDrawer } from "@/components/workbench/terminal-drawer";
@@ -134,6 +135,7 @@ export function AppShell() {
       <CommandPalette />
       <AddProjectDialog />
       <HandoffDialog />
+      <ReviewDialog />
       <ShortcutsDialog />
       <LiveEffects />
     </div>

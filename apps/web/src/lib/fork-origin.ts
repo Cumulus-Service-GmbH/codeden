@@ -34,14 +34,31 @@ export function forkOriginText(origin: ForkOrigin): {
         : origin.checkpoint === 0
           ? "Code: its files when it started"
           : `Code: its files after turn ${origin.checkpoint}`,
-    // A handoff starts a new conversation, possibly on another provider (§9).
+    // A handoff or a review starts a new conversation, possibly on another provider (§9).
     conversation:
-      origin.kind === "handoff" ? "Conversation: a new one, opened with a brief of its work" : null,
+      origin.kind === "handoff"
+        ? "Conversation: a new one, opened with a brief of its work"
+        : origin.kind === "review"
+          ? "Conversation: a new, read-only one, opened with a review brief"
+          : null,
   };
 }
 
 /** Whether a session was handed off from another (a new conversation), not forked. */
 export const isHandoff = (origin: ForkOrigin) => origin.kind === "handoff";
+
+/** Whether a session is a read-only review of another one's changes (§9). */
+export const isReview = (origin: ForkOrigin | null | undefined) => origin?.kind === "review";
+
+/**
+ * How a session made from another one names it: `from` in Details and tooltips, `chip` in the
+ * thread header ("Fork of …", "Handed off from …", "Review of …").
+ */
+export function forkOriginLabel(origin: ForkOrigin): { from: string; chip: string } {
+  if (origin.kind === "handoff") return { from: "Handed off from", chip: "Handed off from" };
+  if (origin.kind === "review") return { from: "Review of", chip: "Review of" };
+  return { from: "Forked from", chip: "Fork of" };
+}
 
 /** How a session is related to the one whose diff is open. */
 export type ForkRelation = "source" | "fork" | "handoff" | "sibling";
@@ -57,11 +74,14 @@ const newestFirst = (a: Session, b: Session) => b.createdAt.localeCompare(a.crea
 /**
  * The sessions `session`'s code can be compared with (§12.3), in this order: the one it was
  * forked or handed off from, the ones forked or handed off from it, and its siblings (other
- * forks and handoffs of its source), each group newest first. Only the same project's.
+ * forks and handoffs of its source), each group newest first. Only the same project's. Reviews
+ * are left out: a read-only reviewer has no code of its own, only its source's.
  */
 export function relatedSessions(session: Session, all: readonly Session[]): RelatedSession[] {
   if (!session.projectId) return [];
-  const candidates = all.filter((s) => s.id !== session.id && s.projectId === session.projectId);
+  const candidates = all.filter(
+    (s) => s.id !== session.id && s.projectId === session.projectId && !isReview(s.forkedFrom),
+  );
   const sourceId = session.forkedFrom?.sessionId;
   const source = candidates.find((s) => s.id === sourceId);
   const children = candidates

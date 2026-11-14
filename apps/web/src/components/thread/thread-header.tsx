@@ -14,6 +14,7 @@ import {
   GitFork,
   MoreHorizontal,
   PanelRight,
+  ScanSearch,
   Square,
   SquareTerminal,
   Workflow,
@@ -35,7 +36,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { SessionCostChip } from "@/components/usage/session-cost";
 import { useClient } from "@/lib/api";
 import { copyWithFeedback } from "@/lib/copy";
-import { isHandoff } from "@/lib/fork-origin";
+import { forkOriginLabel, isHandoff, isReview } from "@/lib/fork-origin";
 import { statusLabel } from "@/lib/format";
 import { useProject, useSession } from "@/lib/queries";
 import { MARKDOWN_HINT, useSessionActions } from "@/lib/session-actions";
@@ -69,24 +70,24 @@ function Chip({
   );
 }
 
-/** Where a forked or handed-off session came from, linking to the source session. */
+/** Where a forked, handed-off or reviewing session came from, linking to the source session. */
 function ForkedFromChip({ origin, className }: { origin: ForkOrigin; className?: string }) {
   const source = useSession(origin.sessionId);
   const title = source ? (source.title ?? source.purpose) : "another session";
-  const handoff = isHandoff(origin);
+  const label = forkOriginLabel(origin);
   return (
     <Link
       to="/sessions/$sessionId"
       params={{ sessionId: origin.sessionId }}
-      title={`${handoff ? "Handed off from" : "Forked from"} ${title}`}
+      title={`${label.from} ${title}`}
       className={cn(
         "inline-flex h-6 max-w-44 items-center gap-1.5 rounded-md border border-border/80 px-2 text-2xs text-muted-foreground hover:border-primary/40 hover:text-foreground [&_svg]:size-3",
         className,
       )}
     >
-      {handoff ? <ArrowRightLeft /> : <GitFork />}
+      {isReview(origin) ? <ScanSearch /> : isHandoff(origin) ? <ArrowRightLeft /> : <GitFork />}
       <span className="truncate">
-        {handoff ? "Handed off from" : "Fork of"} {title}
+        {label.chip} {title}
       </span>
     </Link>
   );
@@ -292,6 +293,21 @@ export function ThreadHeader({ session, running }: { session: Session; running: 
                   Hand off…
                   <span className="text-2xs text-muted-foreground">
                     {actions.handoffBlocked ?? "Continue in a new session, on any provider"}
+                  </span>
+                </span>
+              </DropdownMenuItem>
+            )}
+            {actions.canReview && (
+              <DropdownMenuItem
+                disabled={actions.reviewBlocked !== null}
+                title={actions.reviewBlocked ?? undefined}
+                onSelect={() => actions.review()}
+              >
+                <ScanSearch />
+                <span className="flex min-w-0 flex-col">
+                  Review with another agent…
+                  <span className="text-2xs text-muted-foreground">
+                    {actions.reviewBlocked ?? "A read-only second opinion on its changes"}
                   </span>
                 </span>
               </DropdownMenuItem>

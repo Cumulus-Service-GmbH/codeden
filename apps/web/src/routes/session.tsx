@@ -1,10 +1,10 @@
 import type { ForkOrigin } from "@codeden/contracts";
 import { Link } from "@tanstack/react-router";
-import { ArrowRightLeft, GitFork, MessageSquareDashed } from "lucide-react";
+import { ArrowRightLeft, GitFork, MessageSquareDashed, ScanSearch } from "lucide-react";
 import { useEffect } from "react";
 import { EmptyState } from "@/components/common/bits";
 import { ThreadView } from "@/components/thread/thread-view";
-import { forkOriginText, isHandoff } from "@/lib/fork-origin";
+import { forkOriginText, isHandoff, isReview } from "@/lib/fork-origin";
 import { useSession } from "@/lib/queries";
 import { useLayoutStore } from "@/stores/layout";
 
@@ -17,6 +17,23 @@ function ForkedEmpty({ origin }: { origin: ForkOrigin }) {
   const source = useSession(sourceId);
   // Forked from a turn ("Fork from here"): the conversation and code end with that turn.
   const { upTo } = forkOriginText(origin);
+  if (isReview(origin)) {
+    return (
+      <EmptyState icon={<ScanSearch />} title="Review session" className="flex-1">
+        Reviews the changes of{" "}
+        <Link
+          to="/sessions/$sessionId"
+          params={{ sessionId: sourceId }}
+          className="font-medium text-foreground underline-offset-2 hover:underline"
+        >
+          {source ? (source.title ?? source.purpose) : "another session"}
+        </Link>
+        , read-only, in its own worktree with that session's code. Once the worktree is ready,
+        CodeDen sends the agent a review brief as its first message. The original session is
+        unchanged.
+      </EmptyState>
+    );
+  }
   if (isHandoff(origin)) {
     return (
       <EmptyState icon={<ArrowRightLeft />} title="Handed-off session" className="flex-1">

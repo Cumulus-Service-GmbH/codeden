@@ -7,10 +7,21 @@ export interface HandoffTarget {
   provider: string | null;
 }
 
+/**
+ * The review dialog (§9): the session whose changes another agent reviews and, when chosen
+ * already, the reviewer's provider.
+ */
+export interface ReviewTarget {
+  sessionId: string;
+  provider: string | null;
+}
+
 interface UiState {
   paletteOpen: boolean;
   /** The open handoff dialog, or null. */
   handoff: HandoffTarget | null;
+  /** The open review dialog, or null. */
+  review: ReviewTarget | null;
   addProjectOpen: boolean;
   shortcutsOpen: boolean;
   /** The sidebar drawer on phones and tablets. */
@@ -22,6 +33,8 @@ interface UiState {
   setPaletteOpen: (open: boolean) => void;
   /** Open the handoff dialog for a session, optionally with a provider chosen; null closes it. */
   setHandoff: (target: HandoffTarget | null) => void;
+  /** Open the review dialog for a session, optionally with a provider chosen; null closes it. */
+  setReview: (target: ReviewTarget | null) => void;
   setAddProjectOpen: (open: boolean) => void;
   setShortcutsOpen: (open: boolean) => void;
   setNavOpen: (open: boolean) => void;
@@ -43,6 +56,7 @@ const sameBounds = (a: ComposerBounds | null, b: ComposerBounds | null) =>
 export const useUiStore = create<UiState>()((set, get) => ({
   paletteOpen: false,
   handoff: null,
+  review: null,
   addProjectOpen: false,
   shortcutsOpen: false,
   navOpen: false,
@@ -50,6 +64,7 @@ export const useUiStore = create<UiState>()((set, get) => ({
   composerBounds: null,
   setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
   setHandoff: (handoff) => set({ handoff }),
+  setReview: (review) => set({ review }),
   setAddProjectOpen: (addProjectOpen) => set({ addProjectOpen }),
   setShortcutsOpen: (shortcutsOpen) => set({ shortcutsOpen }),
   setNavOpen: (navOpen) => set({ navOpen }),
