@@ -15,10 +15,15 @@ const tooLarge = (message: string) => new ServiceError(413, "import_too_large", 
 /** The last path segment of a zip entry or uploaded file name. */
 const baseName = (name: string) => name.split(/[\\/]/).pop()?.trim() || "automation.md";
 
-/** Read the `.md` entries of a zip, refusing oversized or overfull archives before inflating. */
+/** Read the `.md` entries of a base64 zip. */
 function unzipMarkdown(zipBase64: string): AutomationImportFile[] {
   const data = Buffer.from(zipBase64, "base64");
   if (data.length === 0) throw badRequest("The zip is empty or not base64", "invalid_zip");
+  return unzipMarkdownBytes(data);
+}
+
+/** Read the `.md` entries of a zip, refusing oversized or overfull archives before inflating. */
+export function unzipMarkdownBytes(data: Uint8Array): AutomationImportFile[] {
   if (data.length > LIMITS.maxZipBytes) {
     throw tooLarge(`The zip is larger than ${LIMITS.maxZipBytes / 1024} KB`);
   }
@@ -42,6 +47,7 @@ function unzipMarkdown(zipBase64: string): AutomationImportFile[] {
   };
   let files: Record<string, Uint8Array>;
   try {
+    // A plain copy: fflate expects Uint8Array semantics, not a Buffer's.
     files = unzipSync(new Uint8Array(data), { filter: wanted });
   } catch (error) {
     if (error instanceof ServiceError) throw error;

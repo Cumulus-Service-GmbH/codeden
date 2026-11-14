@@ -4,6 +4,7 @@ import {
   Automation,
   type AutomationCreator,
   AutomationGuards,
+  type AutomationImportLinkResponse,
   type AutomationImportPreviewItem,
   type AutomationTemplate,
   type CreateAutomationRequest,
@@ -18,7 +19,8 @@ import { automations } from "../../db/schema";
 import type { EventStore } from "../../events/store";
 import { badRequest, conflict, notFound } from "../errors";
 import type { ProjectService } from "../projects/project-service";
-import { previewImport } from "./import";
+import { collectImportFiles, previewFile, previewImport } from "./import";
+import { resolveImportLink } from "./import-link";
 import type { ScheduleStore } from "./schedule-store";
 import { type AutomationSources, templateFits } from "./sources";
 import { validateAutomation } from "./validate";
@@ -29,6 +31,8 @@ export interface DefinitionsDeps {
   projects: ProjectService;
   sources: AutomationSources;
   schedules: ScheduleStore;
+  /** Downloads for imports from a link (tests script it); the global `fetch` otherwise. */
+  fetch?: typeof fetch;
 }
 
 /** Id of a project's starter automation created from a template. */
@@ -262,6 +266,18 @@ export class AutomationDefinitions {
   /** Parse an import without saving anything. */
   previewImport(req: ImportAutomationsRequest["source"]): AutomationImportPreviewItem[] {
     return previewImport(req);
+  }
+
+  /**
+   * Download a link's automation files once and preview them, without saving anything. The
+   * import then sends back `source`, so it creates exactly what was previewed and never
+   * downloads again.
+   */
+  async previewLink(url: string): Promise<AutomationImportLinkResponse> {
+    const files = collectImportFiles({
+      files: await resolveImportLink(url, { fetch: this.deps.fetch }),
+    });
+    return { source: { files }, items: files.map(previewFile) };
   }
 
   private template(id: string): AutomationTemplate {

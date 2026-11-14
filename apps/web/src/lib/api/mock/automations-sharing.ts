@@ -13,7 +13,7 @@ import { uid } from "./live";
 
 type SharingApi = Pick<
   AutomationsApi,
-  "duplicate" | "exportOne" | "exportAll" | "previewImport" | "importAutomations"
+  "duplicate" | "exportOne" | "exportAll" | "previewImport" | "previewLink" | "importAutomations"
 >;
 
 const slug = (name: string) =>
@@ -84,7 +84,7 @@ function mockPreview(file: AutomationImportFile): AutomationImportPreviewItem {
   return { fileName: file.name, automation, error: null, fullPermissions: autonomy === "full" };
 }
 
-/** Duplicate, export and import in the mock (no real zip: the mock never downloads one). */
+/** Duplicate, export and import in the mock (no real zip or link: the mock downloads nothing). */
 export function mockSharingApi(deps: {
   find: (id: string) => Automation;
   all: (projectId?: string) => Automation[];
@@ -133,6 +133,21 @@ export function mockSharingApi(deps: {
     },
     async previewImport(source) {
       return { items: files(source).map(mockPreview) };
+    },
+    /** The mock downloads nothing: any https link gives one sample automation named after it. */
+    async previewLink(url) {
+      if (!/^https:\/\//i.test(url.trim())) {
+        throw new Error(
+          "Only https links can be imported. Use an https link to a .md or .zip file, a GitHub file or a gist.",
+        );
+      }
+      const last = url.split(/[?#]/)[0]?.split("/").filter(Boolean).pop() ?? "shared";
+      const name = `${slug(last.replace(/\.md$/i, ""))}.md`;
+      const file = {
+        name,
+        content: `---\nname: Shared review\ntrigger:\n  type: manual\n---\nReview {{project.name}} and report what needs attention.\n`,
+      };
+      return { source: { files: [file] }, items: [mockPreview(file)] };
     },
     async importAutomations(req) {
       const items = files(req.source)
