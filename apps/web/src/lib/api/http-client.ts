@@ -26,6 +26,7 @@ import {
   ReviewSessionResponse,
   remoteImagePath,
   type SendMessageRequestInit,
+  Session,
   SessionDetail,
   SessionFileContent,
   SessionFileList,
@@ -112,6 +113,10 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
     onConnectionChange: (listener) => socket.onState(listener),
 
     getSessionDetail: (id) => get(`/sessions/${enc(id)}`, (v) => SessionDetail.parse(v)),
+    getSessions: (ids) =>
+      get(`/sessions?${new URLSearchParams({ ids: ids.join(",") })}`, (v) =>
+        Session.array().parse(v),
+      ),
     listArchivedSessions: (projectId, { cursor, limit } = {}) => {
       const params = new URLSearchParams();
       if (cursor) params.set("cursor", cursor);

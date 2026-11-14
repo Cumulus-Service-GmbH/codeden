@@ -1,9 +1,10 @@
 import type { EventEnvelope, Session } from "@codeden/contracts";
-import { act, screen } from "@testing-library/react";
+import { act, fireEvent, screen, waitFor } from "@testing-library/react";
+import { useState } from "react";
 import { describe, expect, it, vi } from "vitest";
 import { createMockClient } from "@/lib/api/mock";
 import { syncSessionQueries } from "@/lib/archived-sessions";
-import { useSessionLookup } from "@/lib/queries";
+import { useSessionLookup, useSessionLookups } from "@/lib/queries";
 import { renderWithClient } from "./utils";
 
 /**
@@ -27,23 +28,17 @@ async function clientWithout(id: string) {
     sessions: snap.sessions.filter((s) => s.id !== id),
   });
   const archived = { ...target, title: "Old work", archivedAt: ARCHIVED_AT };
-  const detail = vi.spyOn(client, "getSessionDetail").mockResolvedValue({
-    session: archived,
-    usage: null,
-    followups: null,
-    startMeta: null,
-    queuedMessages: 0,
-  });
-  return { client, archived, detail };
+  const lookup = vi.spyOn(client, "getSessions").mockResolvedValue([archived]);
+  return { client, archived, lookup };
 }
 
 describe("looking up a session (#323)", () => {
   it("fetches an archived session the snapshot doesn't carry, and follows live updates", async () => {
-    const { client, archived, detail } = await clientWithout("s-deps");
+    const { client, archived, lookup } = await clientWithout("s-deps");
     const { queryClient } = renderWithClient(<Probe id="s-deps" />, client);
 
     expect(await screen.findByText("Old work")).toBeTruthy();
-    expect(detail).toHaveBeenCalledWith("s-deps");
+    expect(lookup).toHaveBeenCalledWith(["s-deps"]);
 
     const env = {
       seq: 99_999,
@@ -58,12 +53,69 @@ describe("looking up a session (#323)", () => {
 
   it("reads a session the snapshot carries without fetching it", async () => {
     const client = createMockClient();
-    const detail = vi.spyOn(client, "getSessionDetail");
+    const lookup = vi.spyOn(client, "getSessions");
     const snap = await client.getSnapshot();
     const session = snap.sessions.find((s) => s.id === "s-deps") as Session;
     renderWithClient(<Probe id="s-deps" />, client);
 
     expect(await screen.findByText(session.title ?? session.purpose)).toBeTruthy();
-    expect(detail).not.toHaveBeenCalled();
+    expect(lookup).not.toHaveBeenCalled();
+  });
+
+  it("says a session the server doesn't have is missing", async () => {
+    const { client } = await clientWithout("s-deps");
+    vi.spyOn(client, "getSessions").mockResolvedValue([]);
+    renderWithClient(<Probe id="s-deps" />, client);
+
+    expect(await screen.findByText("missing")).toBeTruthy();
+  });
+});
+
+/** What each render's `useSessionLookups` returned, to check it stays the same map. */
+const seen: ReadonlyMap<string, Session>[] = [];
+
+function Several({ ids }: { ids: string[] }) {
+  const [renders, setRenders] = useState(0);
+  // A new array every render, with the same ids.
+  const found = useSessionLookups([...ids]);
+  seen.push(found);
+  return (
+    <>
+      {ids.map((id) => (
+        <Probe key={id} id={id} />
+      ))}
+      <p data-testid="several">{[...found.keys()].sort().join(",")}</p>
+      <button type="button" onClick={() => setRenders(renders + 1)}>
+        Render again
+      </button>
+    </>
+  );
+}
+
+describe("looking up several sessions (#372)", () => {
+  it("fetches the sessions a render needs in one request, and only once", async () => {
+    const client = createMockClient();
+    const snap = await client.getSnapshot();
+    const gone = ["s-deps", "s-a11y", "s-checkout"];
+    vi.spyOn(client, "getSnapshot").mockResolvedValue({
+      ...snap,
+      sessions: snap.sessions.filter((s) => !gone.includes(s.id)),
+    });
+    const lookup = vi.spyOn(client, "getSessions");
+    renderWithClient(<Several ids={[...gone, "s-search"]} />, client);
+
+    await waitFor(() =>
+      expect(screen.getByTestId("several").textContent).toBe("s-a11y,s-checkout,s-deps,s-search"),
+    );
+    // One request for the three the snapshot lacks, whichever hook asked; none for s-search.
+    expect(lookup).toHaveBeenCalledTimes(1);
+    expect([...(lookup.mock.calls[0]?.[0] ?? [])].sort()).toEqual(gone.slice().sort());
+
+    // Rendering again asks for nothing, and gives the same map.
+    const before = seen.length;
+    fireEvent.click(screen.getByRole("button", { name: "Render again" }));
+    await waitFor(() => expect(seen.length).toBeGreaterThan(before));
+    expect(seen.at(-1)).toBe(seen[before - 1]);
+    expect(lookup).toHaveBeenCalledTimes(1);
   });
 });

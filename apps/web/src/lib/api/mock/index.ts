@@ -106,6 +106,11 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
         },
         60,
       ),
+    getSessions: (ids) =>
+      delay(
+        world.snapshot.sessions.filter((s) => ids.includes(s.id)),
+        60,
+      ),
     listArchivedSessions: (projectId, query) =>
       delay(mockArchivedPage(world.snapshot.sessions, projectId, query), 80),
     getToolOutput(sessionId, itemId) {

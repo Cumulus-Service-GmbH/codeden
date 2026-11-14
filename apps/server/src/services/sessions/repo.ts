@@ -143,6 +143,7 @@ export class SessionRepo {
     if (query.status?.length) conditions.push(inArray(sessions.status, query.status));
     if (query.workKey) conditions.push(eq(sessions.workKey, query.workKey));
     if (query.role) conditions.push(eq(sessions.role, query.role));
+    if (query.ids?.length) conditions.push(inArray(sessions.id, query.ids));
     return this.db
       .select()
       .from(sessions)

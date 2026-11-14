@@ -93,10 +93,14 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
   const theme = useResolvedTheme();
   const session = useSession(sessionId);
   const sessions = useSnapshotData((s) => s.sessions, noSessions);
-  const related = useMemo(
-    () => (session ? relatedSessions(session, sessions) : []),
-    [session, sessions],
-  );
+  // The session it was forked, handed off or reviewed from, by id: it may be archived and out
+  // of the snapshot (§6).
+  const source = useSession(session?.forkedFrom?.sessionId);
+  const related = useMemo(() => {
+    if (!session) return [];
+    const all = source && !sessions.includes(source) ? [...sessions, source] : sessions;
+    return relatedSessions(session, all);
+  }, [session, sessions, source]);
   // The view picked for this session; another session's panel starts at all changes.
   const [picked, setPicked] = useState<{ sessionId: string; scope: DiffScope } | null>(null);
   const scope = picked?.sessionId === sessionId ? picked.scope : allChanges;

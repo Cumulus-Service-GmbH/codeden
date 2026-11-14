@@ -138,6 +138,11 @@ export interface CodeDenClient {
   // Sessions and turns.
   getSessionDetail(sessionId: string): Promise<SessionDetail>;
   /**
+   * These sessions, archived or not (at most `SESSION_LOOKUP_MAX` ids); ids that don't exist
+   * are left out. For the sessions views need that the snapshot no longer carries (§6).
+   */
+  getSessions(sessionIds: readonly string[]): Promise<Session[]>;
+  /**
    * A page of a project's archived agent sessions, most recently archived first. The snapshot
    * carries only the recent ones (§6).
    */
