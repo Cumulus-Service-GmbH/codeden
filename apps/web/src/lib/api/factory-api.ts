@@ -2,6 +2,7 @@ import {
   type FactoryAdmitRequest,
   FactoryDigest,
   type FactoryDismissRequest,
+  type FactoryFileFollowUpRequest,
   type FactoryItem,
   FactoryItemResponse,
   type FactoryLesson,
@@ -78,6 +79,12 @@ export interface FactoryApi {
    * learned again. 404 `lesson_not_found`.
    */
   forgetLesson(projectId: string, lessonId: string): Promise<FactoryLesson>;
+  /**
+   * "File issue": file one review follow-up of a merged item (by its position in `followUps`),
+   * or link it to the open issue with the same title. Filing it again changes nothing; 400
+   * `no_follow_up` when there is no such follow-up.
+   */
+  fileFollowUp(projectId: string, itemId: string, index: number): Promise<FactoryItem>;
 }
 
 const enc = encodeURIComponent;
@@ -116,6 +123,12 @@ export function httpFactoryApi(http: Fetcher): FactoryApi {
         `${p(id)}/factory/lessons/${enc(lessonId)}`,
         undefined,
         (v) => FactoryLessonResponse.parse(v).lesson,
+      ),
+    fileFollowUp: (id, itemId, index) =>
+      post(
+        `${p(id)}/factory/items/${enc(itemId)}/follow-ups/file`,
+        { index } satisfies FactoryFileFollowUpRequest,
+        item,
       ),
   };
 }

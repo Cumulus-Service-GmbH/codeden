@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { GitHubIssueRef, GitHubPrRef, Id, ProviderId, Timestamp } from "./common";
 import { AutonomyMode, FactoryLimits, FactoryLoopState, MergePath } from "./factory";
+import { FactoryFollowUp, ReviewFollowUps } from "./factory-follow-ups";
 import {
   FactoryLesson,
   LESSON_MAX,
@@ -123,7 +124,24 @@ export const ReviewVerdict = z.object({
     notNeeded: z.boolean().optional(),
     note: z.string().optional(),
   }),
-  security: z.object({ concerns: z.array(z.string()).default([]) }),
+  security: z.object({
+    /**
+     * Blocking: each must be fixed in this pull request before it merges (the `security` merge
+     * check fails while any is listed), so an `approve` never lists one. What can wait goes in
+     * `followUps`.
+     */
+    concerns: z
+      .array(z.string())
+      .default([])
+      .describe(
+        "Blocking: security problems this pull request must fix before it merges (the merge waits on them), so never with `approve`. Anything that can wait goes in `followUps`.",
+      ),
+  }),
+  /**
+   * Non-blocking findings that can wait for their own issue (`factory-follow-ups.ts`). Absent on
+   * verdicts stored before they existed.
+   */
+  followUps: ReviewFollowUps.optional(),
   /**
    * What stops an approval, with `request_changes`. `pr` (the default, when absent): something
    * wrong with the pull request (a defect, a missing criterion, red CI). `environment`: only the
@@ -203,6 +221,11 @@ export const FactoryItem = z.object({
   /** Set when the reviewer had to run on the author's provider. */
   reviewerNote: z.string().nullable(),
   review: ReviewVerdict.nullable(),
+  /**
+   * The review's follow-ups, taken from the verdict on record when the pull request merged, each
+   * with the issue that tracks it once filed (by the dark factory, or with "File issue").
+   */
+  followUps: z.array(FactoryFollowUp).default([]),
   checks: z.array(MergeCheck),
   /** Fix rounds after failed merge checks. */
   attempts: z.int().nonnegative(),

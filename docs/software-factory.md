@@ -275,10 +275,12 @@ Every check must pass before a pull request is ready to merge. Results are recor
 | **Review** | The independent reviewer approves against the issue, the spec and the vision. Skipped for docs-only changes in the docs pipeline |
 | **Tests** | Test files changed (or the change is only docs or config), and the reviewer agrees the tests the change needs exist |
 | **Test results** | The PR description has a `## Test results` section, or test output was attached with `attach_evidence`. Skipped when no code changed |
-| **Security** | Your `auditCommand`, run in the builder's worktree, passes, and the reviewer raised no security concerns |
+| **Security** | Your `auditCommand`, run in the builder's worktree, passes, and the reviewer raised no security concerns. A concern always blocks, so an approval can't list one; the reviewer's non-blocking **follow-ups** never fail this or any other check (see below) |
 | **Screenshots** | If UI files changed, screenshots were attached with `attach_evidence` |
 
 A failed check (other than size) starts a **revise round**: the builder gets the failures and fixes them in the same branch, up to `maxFixAttempts` rounds; after that the item fails and counts towards the pause limit. A builder session that died is resumed by the revise message. CI that never started is no code problem, so it never starts a revise round (see [Failures outside the work](#failures-outside-the-work)). A review verdict that arrives after a revise round started goes to the builder as part of that round; one that arrives after the item failed is kept on the item.
+
+**Follow-ups never block.** Besides its verdict, the reviewer can list up to 5 **follow-ups**: things worth doing that can wait for their own issue, each a title with an optional severity (`low`, `medium`, `high`) and area. They never fail a check or start a revise round. When the PR merges, the item keeps them. The dark factory files each as an issue, labelled `codeden-factory` and `codeden-follow-up` and linked to the PR, and then takes it on like any other issue. In the software factory they're listed on the item page under **Follow-ups**, each with **File issue**. A follow-up whose title matches an open issue is linked to that issue instead, and none is filed twice.
 
 **Too large is different.** A revise round can't make work smaller without cutting scope, so a size failure skips it and doesn't count towards the pause limit. Instead the PM is woken to split the work into smaller issues, or, when it can't be split (an initial scaffold, a stack migration), allow it with `factory_allow_large_change`.
 
@@ -451,6 +453,7 @@ Everything in the UI is also available over the local API (with the install toke
 | `POST /api/projects/:id/factory/set-type` | `{ itemId, type, reason? }`: move an item that hasn't started to another pipeline |
 | `POST /api/projects/:id/factory/items/:itemId/retry` | `{ mode? }`: run a stopped item again. `rereview` (the default while its pull request is open) sends that pull request back to a fresh review; `rebuild` (the default without one) starts over from the first step. `409 no_open_pr` for a re-review without an open pull request |
 | `POST /api/projects/:id/factory/items/:itemId/dismiss` | `{ reason? }`: mark a failed item without an open pull request rejected, with the reason (409 `pr_open` while its pull request is open) |
+| `POST /api/projects/:id/factory/items/:itemId/follow-ups/file` | `{ index }`: **File issue** for one review follow-up of a merged item (its position in `followUps`), or link it to the open issue with the same title. Filing it again changes nothing; 400 `no_follow_up` when there is no such follow-up |
 | `DELETE /api/projects/:id/factory/lessons/:lessonId` | Forget a lesson: it leaves the briefs and is never learned again (404 `lesson_not_found`). The panel status lists the lessons in force in `lessons` |
 | `POST /api/projects/:id/kill-switch`, `POST /api/factory/kill-switch` | `{ on: true }` |
 | `POST /api/projects/:id/factory/resume` | Clear a pause |

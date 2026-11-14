@@ -11,6 +11,7 @@ import { archiveFinished } from "./cleanup";
 import { settleClosedIssues } from "./closed-issues";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { advanceDrain } from "./drain";
+import { fileDueFollowUps } from "./follow-ups";
 import { classifyPending, intakeFailedChecks, intakeIssues } from "./intake";
 import { briefLessons } from "./lessons";
 import { openPrFiles, scheduleOrder } from "./overlap";
@@ -108,6 +109,10 @@ export async function runTick(
   // PRs a rebuild or an integrator replaced are closed, whatever their item's stage by now.
   await closeReplacedPrs(ctx, project).catch((error: unknown) =>
     ctx.log?.(`factory: closing replaced PRs: ${errorMessage(error)}`),
+  );
+  // Merged work's review follow-ups become issues (dark factory), also while paused.
+  await fileDueFollowUps(ctx, project).catch((error: unknown) =>
+    ctx.log?.(`factory: filing follow-ups: ${errorMessage(error)}`),
   );
   // Finished work gives back its sessions and worktrees, also while paused.
   archiveFinished(ctx, projectId);

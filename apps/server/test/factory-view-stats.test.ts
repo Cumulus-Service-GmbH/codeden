@@ -33,6 +33,7 @@ const base: FactoryItem = {
   reviewerProvider: null,
   reviewerNote: null,
   review: null,
+  followUps: [],
   checks: [],
   attempts: 0,
   reason: null,
