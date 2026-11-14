@@ -1,15 +1,29 @@
-import { CODEDEN_CREDENTIAL_FILES, INVALID_COPY_SUFFIX } from "@codeden/contracts";
+import {
+  CODEDEN_CREDENTIAL_FILES,
+  CODEDEN_MCP_CONFIG_DIR,
+  INVALID_COPY_SUFFIX,
+} from "@codeden/contracts";
+import { PRIVATE_MCP_CONFIG_NAME, PRIVATE_MCP_FOLDER_PREFIX } from "../util/private-mcp-config";
 import type { RiskAssessment } from "./assessment";
 import { isInside, isWin, type PathContext, pathApi, resolveAgainst, samePath } from "./paths";
-import { WILDCARD, wildcardMatchesNumbered, wildcardPattern, wildcardReaches } from "./wildcard";
+import {
+  WILDCARD,
+  wildcardMatchesNumbered,
+  wildcardMatchesSessionFile,
+  wildcardPattern,
+  wildcardReaches,
+} from "./wildcard";
 
 export { wildcardPattern } from "./wildcard";
 
 /**
  * CodeDen's own home (§15, #320). Its credential files are the install token, the runner lock
- * and the remote access store, and the copies CodeDen keeps of one it found damaged
- * (`<file>.invalid-<timestamp>`, with the same secrets in it): an agent holding the install
- * token or the runner's token could drive CodeDen itself and approve its own requests. The rest
+ * and the remote access store, the copies CodeDen keeps of one it found damaged
+ * (`<file>.invalid-<timestamp>`, with the same secrets in it), and every file in the sessions'
+ * private MCP config folder (`CODEDEN_MCP_CONFIG_DIR`, each session's MCP bearer token): an
+ * agent holding the install token or the runner's token could drive CodeDen itself and approve
+ * its own requests, and one holding another session's MCP token could call CodeDen as that
+ * session's role. The rest
  * of the home holds the database (other sessions' transcripts, inbox items, MCP token hashes),
  * settings, logs, backups and other sessions' worktrees. Touching anything there asks at every
  * level, Full included, and is refused for read-only sessions (§11.2); agents get CodeDen state
@@ -40,11 +54,24 @@ export function codedenCredentialCopies(ctx: PathContext): string[] {
   return codedenCredentialFiles(ctx).map((file) => `${file}${INVALID_COPY_SUFFIX}`);
 }
 
+/**
+ * Folders whose every file is a credential, as absolute paths (none without a home): the
+ * sessions' private MCP configs, one folder per session inside.
+ */
+export function codedenSecretFolders(ctx: PathContext): string[] {
+  const home = ctx.codedenHome;
+  if (!home) return [];
+  return [pathApi(ctx).join(home, CODEDEN_MCP_CONFIG_DIR)];
+}
+
 /** The credential files, then the folders that hold them. */
 function guardedPaths(ctx: PathContext): string[] {
   const files = codedenCredentialFiles(ctx);
   const p = pathApi(ctx);
-  return [...files, ...new Set(files.map((file) => p.dirname(file)))];
+  return [
+    ...files,
+    ...new Set([...files.map((file) => p.dirname(file)), ...codedenSecretFolders(ctx)]),
+  ];
 }
 
 /** True when `abs` (an absolute path, no wildcards) is a copy of a credential file. */
@@ -111,24 +138,33 @@ export function agentPattern(abs: string, ctx: PathContext): RegExp | undefined 
 
 /**
  * True when `target` reaches one of CodeDen's credential files: the file itself or a copy of
- * it, a folder that holds one (`<home>`, `<home>/runner`: copying or searching it reads them),
- * or a wildcard that matches any of them. `~`, `$HOME`, `$CODEDEN_HOME` (and its PowerShell
- * and cmd forms) and relative paths resolve as in the shell. The home itself is always compared
- * literally.
+ * it, a folder that holds one (`<home>`, `<home>/runner`, `<home>/runner/mcp`: copying or
+ * searching it reads them), anything in a secret folder (`codedenSecretFolders`), or a wildcard
+ * that matches any of them. `~`, `$HOME`, `$CODEDEN_HOME` (and its PowerShell and cmd forms) and
+ * relative paths resolve as in the shell. The home itself is always compared literally.
  */
 export function touchesCodedenCredentials(target: string, ctx: PathContext): boolean {
   if (!ctx.codedenHome || !target.trim()) return false;
   const abs = resolvePattern(target, ctx);
   const guarded = guardedPaths(ctx);
   if (guarded.some((p) => samePath(p, abs, ctx))) return true;
+  const folders = codedenSecretFolders(ctx);
+  if (folders.some((folder) => isInside(abs, folder, ctx))) return true;
   const pattern = agentPattern(abs, ctx);
   if (pattern === undefined) return isCredentialCopy(abs, ctx);
   if (guarded.some((p) => pattern.test(slashes(p, ctx)))) return true;
-  // Copies are numbered: a wildcard reaches them when it matches the start and some number.
   const glob = slashes(abs, ctx);
   const literal = literalPrefix(abs, ctx);
+  const win = isWin(ctx);
+  // A wildcard reaches a secret folder's files when it matches a session folder or file in it.
+  const inFolder = (f: string) => {
+    const start = `${slashes(f, ctx)}/${PRIVATE_MCP_FOLDER_PREFIX}`;
+    return wildcardMatchesSessionFile(glob, start, PRIVATE_MCP_CONFIG_NAME, win, literal);
+  };
+  if (folders.some((f) => inFolder(f) === true)) return true;
+  // Copies are numbered: a wildcard reaches them when it matches the start and some number.
   return codedenCredentialCopies(ctx).some(
-    (copy) => wildcardMatchesNumbered(glob, slashes(copy, ctx), isWin(ctx), literal) === true,
+    (copy) => wildcardMatchesNumbered(glob, slashes(copy, ctx), win, literal) === true,
   );
 }
 
