@@ -1,9 +1,11 @@
 import type { FactoryItem, FactoryLoop, Project, Session } from "@codeden/contracts";
+import { withAskedHead } from "./approval";
 import { type Unavailable, unavailableText } from "./availability";
 import type { FactoryContext } from "./context";
 import { failReview } from "./failures";
 import type { FactoryPr } from "./github-port";
 import { stoppedSinceNudge } from "./idle";
+import { briefLessons } from "./lessons";
 import { failItem } from "./outcomes";
 import { REVIEWER_NUDGE, reReviewPrompt } from "./prompts";
 import { recheckPrompt } from "./prompts-integration";
@@ -16,7 +18,14 @@ import {
   skippedProviders,
 } from "./provider-failure";
 import { baseBranchOf } from "./rebase";
-import { recheckOf, recheckSent, recheckSentFor, withoutRecheckRequest } from "./recheck";
+import {
+  recheckCause,
+  recheckOf,
+  recheckSent,
+  recheckSentFor,
+  recheckWhy,
+  withoutRecheckRequest,
+} from "./recheck";
 import { CLEAN_REVIEW, environmentStrikes, replaceBlockedReviewer } from "./review-environment";
 import { pickReviewer, type ReviewerChoice, type ReviewerWait } from "./reviewer-choice";
 import { isBusy } from "./sessions";
@@ -100,6 +109,7 @@ async function startReviewer(
     reviewHead(ctx, project, item, pr),
     mayAutoMerge(item, project.factoryLimits),
     text,
+    text ? undefined : briefLessons(ctx, project.id),
   );
   if (res.status !== "started") return { status: res.status };
   return { sessionId: res.sessionId, provider: choice.provider, note: choice.note };
@@ -167,7 +177,8 @@ export async function ensureReviewer(
     await ctx.sessions.message(item.reviewerSessionId, reReviewPrompt(item));
     return ctx.store.updateItem(item.id, (i) => {
       const { rereview_pending: _p, ...rest } = i.nudges;
-      return { ...i, nudges: { ...rest, rereview_sent: ctx.now().toISOString() } };
+      const at = ctx.now().toISOString();
+      return { ...i, nudges: withAskedHead({ ...rest, rereview_sent: at }, pr.headSha, at) };
     });
   }
   if (!reviewSlot(ctx, project, item)) {
@@ -184,15 +195,20 @@ export async function ensureReviewer(
       note: `Review not started (${res.status})`,
     }));
   }
-  return ctx.store.updateItem(item.id, (i) => ({ ...withReviewer(i, res), note: null }));
+  return ctx.store.updateItem(item.id, (i) => {
+    const next = withReviewer(i, res);
+    const nudges = withAskedHead(next.nudges, pr.headSha, ctx.now().toISOString());
+    return { ...next, note: null, nudges };
+  });
 }
 
 /**
- * An agent rebased the PR to resolve conflicts after the reviewer approved: the reviewer
- * re-checks only the resolution (`git range-diff`). When the reviewer session can't take the
- * message any more, a fresh reviewer does that same re-check, told what was approved; the
- * earlier verdict stands if it approves. One request at a time, recorded with the head it is
- * about: its verdict answers for that head, and a newer one is asked about once it is in.
+ * The PR's head moved after the reviewer approved (an agent resolved conflicts, or new commits
+ * came): the reviewer re-checks only what changed since the approved head (`git range-diff`).
+ * When the reviewer session can't take the message any more, a fresh reviewer does that same
+ * re-check, told what was approved; the earlier verdict stands if it approves. One request at a
+ * time, recorded with the head it is about: its verdict answers for that head, and a newer one
+ * is asked about once it is in.
  */
 async function requestRecheck(
   ctx: FactoryContext,
@@ -205,28 +221,28 @@ async function requestRecheck(
 ): Promise<FactoryItem> {
   if (recheckSentFor(item) !== null) return item;
   const newHead = pr.headSha ?? "HEAD";
-  const sent = recheckSent(pr.headSha, ctx.now().toISOString());
+  const at = ctx.now().toISOString();
+  const sent = withAskedHead(recheckSent(pr.headSha, at), pr.headSha, at);
   const base = baseBranchOf(project);
+  const cause = recheckCause(item) ?? "conflicts";
+  const why = recheckWhy(cause, oldHead, pr.headSha);
+  const commits = cause === "commits";
+  const job = commits ? "re-review them" : "re-check the resolution";
+  const prompt = (fresh: boolean) => recheckPrompt(item, oldHead, newHead, base, fresh, cause);
   const reviewer = item.reviewerSessionId
     ? ctx.repo.find(item.reviewerSessionId)?.session
     : undefined;
   if (reviewer && reviewer.status !== "failed" && !reviewer.archivedAt) {
     if (!reviewSlot(ctx, project, item, reviewer)) {
-      return ctx.store.updateItem(
-        item.id,
-        (i) => ({
-          ...i,
-          note: "Rebased after the review: waiting for a free agent to re-check the resolution",
-        }),
-        { touch: false },
-      );
+      const note = `${why}: waiting for a free agent to ${job}`;
+      return ctx.store.updateItem(item.id, (i) => ({ ...i, note }), { touch: false });
     }
-    await ctx.sessions.message(reviewer.id, recheckPrompt(item, oldHead, newHead, base));
+    await ctx.sessions.message(reviewer.id, prompt(false));
     return ctx.store.updateItem(item.id, (i) => {
       const { reviewer: _nudged, ...nudges } = i.nudges;
       return {
         ...i,
-        note: "Rebased after the review: the reviewer re-checks the conflict resolution",
+        note: `${why}: ${commits ? "re-review running" : "the reviewer re-checks the conflict resolution"}`,
         nudges: { ...nudges, ...sent },
       };
     });
@@ -234,28 +250,27 @@ async function requestRecheck(
   if (!reviewSlot(ctx, project, item)) {
     return ctx.store.updateItem(item.id, (i) => ({
       ...i,
-      note: "Rebased after the review: waiting for a free agent to re-check the resolution",
+      note: `${why}: waiting for a free agent to ${job}`,
     }));
   }
-  const text = recheckPrompt(item, oldHead, newHead, base, true);
-  const res = await startReviewer(ctx, project, loop, item, vision, pr, text);
+  const res = await startReviewer(ctx, project, loop, item, vision, pr, prompt(true));
   if ("waiting" in res) {
     return ctx.store.updateItem(item.id, (i) => ({
       ...i,
-      note: `Rebased after the review: ${res.waiting.replace(/^Waiting/, "waiting")}`,
+      note: `${why}: ${res.waiting.replace(/^Waiting/, "waiting")}`,
     }));
   }
   if ("status" in res) {
     return ctx.store.updateItem(item.id, (i) => ({
       ...i,
-      note: `Re-check of the conflict resolution not started (${res.status})`,
+      note: `${commits ? "Re-review of the new commits" : "Re-check of the conflict resolution"} not started (${res.status})`,
     }));
   }
   return ctx.store.updateItem(item.id, (i) => {
     const next = withReviewer(i, res);
     return {
       ...next,
-      note: "Rebased after the review: a fresh reviewer re-checks the conflict resolution",
+      note: `${why}: a fresh reviewer ${commits ? "re-reviews them" : "re-checks the conflict resolution"}`,
       nudges: { ...next.nudges, ...sent },
     };
   });

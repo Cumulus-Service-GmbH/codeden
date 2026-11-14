@@ -6,6 +6,7 @@ import {
   type Project,
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
+import { approvalCovers } from "./approval";
 import { CONFLICTS_DETAIL } from "./checks";
 import type { FactoryContext } from "./context";
 import { fastMergeVerdict, noteProtectionForcesStrict, withMainCi } from "./fast-merge";
@@ -143,9 +144,11 @@ export async function advanceQueue(
     prDecidedOutside(ctx, head, pr.ref);
     return loop;
   }
-  // A new head since the checks ran (or conflicts): the verify step looks at it first.
+  // A new head since the checks ran (or conflicts): the verify step looks at it first. The
+  // review is checked again here: only the head an approval covers merges (`approval.ts`).
   const sha = pr.headSha;
   if (!sha || sha !== trackedHead(head) || pr.mergeable !== "mergeable") return loop;
+  if (!approvalCovers(head, sha)) return loop;
   return mergeOrUpdate(ctx, project, loop, head, pr, sha);
 }
 

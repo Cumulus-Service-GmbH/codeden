@@ -12,6 +12,7 @@ import { settleClosedIssues } from "./closed-issues";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { advanceDrain } from "./drain";
 import { classifyPending, intakeFailedChecks, intakeIssues } from "./intake";
+import { briefLessons } from "./lessons";
 import { openPrFiles, scheduleOrder } from "./overlap";
 import { advanceOwned } from "./owned";
 import { budgetExceeded, localDay, mayBuild, queueOrder } from "./policy";
@@ -301,7 +302,8 @@ async function startBuilder(
   }
   const { provider, model } = choice;
   try {
-    const res = await ctx.sessions.startBuilder(item, vision, provider, model);
+    const lessons = briefLessons(ctx, project.id);
+    const res = await ctx.sessions.startBuilder(item, vision, provider, model, lessons);
     if (res.status === "conflict") {
       const other = res.existing.map((w) => w.workKey).join(", ");
       ctx.store.updateItem(item.id, (i) => ({

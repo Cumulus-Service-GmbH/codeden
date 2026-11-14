@@ -12,7 +12,13 @@ import type { RunnerPort } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import type { SessionService } from "../sessions/session-service";
 import type { ProviderAvailability, ProviderRunnable, Unavailable } from "./availability";
-import { builderPrompt, revertPrompt, reviewerPrompt } from "./prompts";
+import {
+  type BriefLessons,
+  builderPrompt,
+  NO_LESSONS,
+  revertPrompt,
+  reviewerPrompt,
+} from "./prompts";
 import { FACTORY_STARTER, isFactorySession } from "./starter";
 
 export { FACTORY_STARTER, isFactorySession };
@@ -185,6 +191,8 @@ export class FactorySessions {
     vision: string,
     provider: string,
     model: string | null = null,
+    /** The project's lessons for its brief (`lessons.ts`). */
+    lessons: BriefLessons = NO_LESSONS,
   ): Promise<StartSessionResponse> {
     const step = item.type ? ` (${item.type})` : "";
     return this.start({
@@ -195,7 +203,7 @@ export class FactorySessions {
       workKey: item.workKey,
       title: item.title.slice(0, 200),
       issue: item.issue ?? undefined,
-      input: brief(builderPrompt(item, vision)),
+      input: brief(builderPrompt(item, vision, lessons)),
     });
   }
 
@@ -215,6 +223,8 @@ export class FactorySessions {
     autoMerge: boolean,
     /** A brief of its own instead of the whole review (a conflict resolution's re-check). */
     text?: string,
+    /** The project's lessons for the whole review's brief (`lessons.ts`). */
+    lessons: BriefLessons = NO_LESSONS,
   ): Promise<StartSessionResponse> {
     const builder = item.builderSessionId
       ? this.deps.repo.find(item.builderSessionId)?.session
@@ -244,7 +254,7 @@ export class FactorySessions {
       title: `Review: ${item.title}`.slice(0, 200),
       issue: item.issue ?? undefined,
       workspace,
-      input: brief(text ?? reviewerPrompt(item, vision, note, localBase, autoMerge)),
+      input: brief(text ?? reviewerPrompt(item, vision, note, localBase, autoMerge, lessons)),
     });
   }
 

@@ -97,4 +97,24 @@ describe("factory pipelines (§10.1)", () => {
     expect(ScoutRound.parse(JSON.parse(JSON.stringify(held)))).toEqual(held);
     expect(ScoutRound.safeParse({ ...round, heldMs: -1 }).success).toBe(false);
   });
+
+  it("keeps the scout's plan and why a round closed early", () => {
+    const round = { id: "r1", phase: "planning", startedAt: ts, sentAt: ts } as const;
+    // Rounds and scouts saved before plans were recorded read as unplanned, with no note.
+    expect(ScoutRound.parse(round).plan).toBeNull();
+    expect(ScoutState.parse({}).lastRoundNote).toBeNull();
+    const plan = {
+      at: ts,
+      lenses: [{ area: "ux", focus: "the task editor" }],
+      pending: ["ux"],
+      next: "End your turn now.",
+    };
+    const planned = ScoutRound.parse({ ...round, plan });
+    expect(ScoutRound.parse(JSON.parse(JSON.stringify(planned)))).toEqual(planned);
+    expect(ScoutRound.safeParse({ ...round, plan: { ...plan, pending: ["nope"] } }).success).toBe(
+      false,
+    );
+    const closed = ScoutState.parse({ lastRoundNote: "Couldn't start area reviewers (ux)." });
+    expect(ScoutState.parse(JSON.parse(JSON.stringify(closed)))).toEqual(closed);
+  });
 });

@@ -129,6 +129,7 @@ export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
     case "factory.loop.updated":
     case "factory.item.updated":
     case "factory.digest.created":
+    case "factory.lesson.updated":
       applyFactoryProjection(tx, e);
       return [];
     case "runner.registered":
