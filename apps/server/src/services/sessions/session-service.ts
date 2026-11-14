@@ -19,6 +19,7 @@ import type {
   UpdateSessionRequest,
   UserInput,
 } from "@codeden/contracts";
+import type { SandboxService } from "../../execution/sandboxes";
 import type { McpTokenStore } from "../../mcp/tokens";
 import type { SettingsStore } from "../../settings-store";
 import type { ArtifactService } from "../artifacts";
@@ -61,6 +62,8 @@ export interface SessionServiceDeps extends RunnerDeps {
   utility?: Pick<UtilityService, "handoffSummary">;
   /** Wait before retrying a queued message the runner could not take (default 30 s). */
   outboxRetryMs?: number;
+  /** Refuses starts a project's sandboxes can't host (`docs/remote-runners.md` §8). */
+  sandboxes?: Pick<SandboxService, "assertStartable" | "wants">;
 }
 
 /** Preferred providers when the choice is `auto` (first ready one wins). */
@@ -483,8 +486,9 @@ export class SessionService {
       archivedAt: null,
     }));
     try {
-      if (session.worktreeRemovedAt) {
-        // Cleanup removed the worktree (§9): recreate it, then resume through the provider.
+      // Cleanup removed the worktree (§9), or a container session's start failed and took its
+      // container with it: make it again, then resume through the provider.
+      if (session.worktreeRemovedAt || this.needsSandbox(session)) {
         await this.deps.launcher.resume(this.deps.repo.get(session.id), input);
         return;
       }
@@ -546,6 +550,17 @@ export class SessionService {
     this.launching.set(id, promise);
   }
 
+  /** A session of a `docker` project that has no container (its start failed). */
+  private needsSandbox(session: Session): boolean {
+    const sandboxes = this.deps.sandboxes;
+    if (!sandboxes || !session.projectId || session.runnerId) return false;
+    try {
+      return sandboxes.wants(session, this.deps.projects.get(session.projectId));
+    } catch {
+      return false;
+    }
+  }
+
   /** The runner that hosts this session (`sessions.runnerId`, else the home runner). */
   private runnerOf(sessionId: string): RunnerPort {
     return runnerForSession(this.deps, sessionId);
@@ -588,6 +603,8 @@ export class SessionService {
       this.provider(provider),
     );
     const autonomy = req.autonomy ?? project?.autonomy ?? settings.autonomy.default;
+    // A `docker` project's sessions run in containers, which no provider credentials reach yet.
+    this.deps.sandboxes?.assertStartable(req.role, project, this.provider(provider));
     this.assertReadOnlySupported(req.role, provider, autonomy);
     // Either value is refused where plan mode doesn't exist, as for PATCH.
     if (req.planMode !== undefined) this.assertPlanModeSupported(req.role, provider);

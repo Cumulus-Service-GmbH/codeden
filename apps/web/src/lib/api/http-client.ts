@@ -4,6 +4,7 @@ import {
   DiffResult,
   DisconnectGithubResponse,
   DismissInboxResponse,
+  ExecutionBackendsResponse,
   ForkSessionResponse,
   FsListResponse,
   GitCommitResponse,
@@ -146,6 +147,12 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
     createProject: (input) => post("/projects", input, (v) => CreateProjectResponse.parse(v)),
     updateProject: (id, patch) =>
       call("PATCH", `/projects/${enc(id)}`, patch, (v) => Project.parse(v)),
+    executionBackends: ({ projectId, refresh } = {}) => {
+      const params = new URLSearchParams();
+      if (projectId) params.set("projectId", projectId);
+      if (refresh) params.set("refresh", "true");
+      return get(`/execution/backends?${params}`, (v) => ExecutionBackendsResponse.parse(v));
+    },
     reorderProjects: (projectIds) =>
       call("PUT", "/projects/order", { projectIds }, (v) => ReorderProjectsResponse.parse(v)).then(
         (r) => r.projects,

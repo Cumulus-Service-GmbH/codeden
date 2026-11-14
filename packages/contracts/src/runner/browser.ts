@@ -495,7 +495,8 @@ const TabResult = z.object({ tab: BrowserTab });
 /** Result schemas for `browser.*` commands, spread into `RunnerCommandResults`. */
 export const BrowserCommandResults = {
   /**
-   * `cdpUrl` is the runner Chromium's CDP endpoint on 127.0.0.1 (null for native views).
+   * `cdpUrl` is always null: the runner's Chromium is driven over a pipe and opens no debugging
+   * port (§12.2). Older runners sent its loopback CDP endpoint; the server never passes it on.
    * `engine` is absent from older runners (`runner`).
    */
   "browser.open": z.object({

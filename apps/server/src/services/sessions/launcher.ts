@@ -8,6 +8,7 @@ import {
   type UserInput,
   type WorkspaceRequest,
 } from "@codeden/contracts";
+import type { SandboxService } from "../../execution/sandboxes";
 import { codedenSystemPrompt, MCP_SERVER_NAME } from "../../mcp/prompt";
 import type { McpTokenStore } from "../../mcp/tokens";
 import { errorMessage, ServiceError } from "../errors";
@@ -50,6 +51,8 @@ export interface LauncherDeps extends RunnerDeps {
   connectTimeoutMs?: number;
   /** Clone URLs and brokered credentials for runners that don't share this disk (§9). */
   git?: GitBroker;
+  /** Sandboxes for projects whose sessions run in containers (`docs/remote-runners.md` §8). */
+  sandboxes?: Pick<SandboxService, "wants" | "place" | "release">;
 }
 
 /**
@@ -98,15 +101,39 @@ export class SessionLauncher {
   }
 
   /**
-   * Prepare the session's workspace, record it on the session, then open the provider session.
-   * Throws on failure; nothing reaches the provider when the workspace could not be prepared.
+   * Start a session: in a project whose sessions run in containers, it gets its own first
+   * (`docs/remote-runners.md` §8). A start that fails after that removes the container again
+   * and forgets it, so the next message starts over in a new one rather than anywhere else.
    */
   private async start(sessionId: string, opts: LaunchOptions): Promise<void> {
+    const session = this.deps.repo.get(sessionId);
+    const project = session.projectId ? this.deps.projects.get(session.projectId) : null;
+    const sandboxes = this.deps.sandboxes;
+    if (!project || !sandboxes?.wants(session, project, { fork: opts.fork !== undefined })) {
+      return this.startOn(session, project, opts);
+    }
+    const home = this.deps.runner.providers().find((p) => p.id === session.provider);
+    const runnerId = await sandboxes.place(session, project, home);
+    const placed = this.deps.repo.update(sessionId, (s) => ({ ...s, runnerId }));
+    try {
+      await this.startOn(placed, project, opts);
+    } catch (error) {
+      await sandboxes.release(this.deps.repo.get(sessionId), { force: true }).catch(() => null);
+      this.deps.repo.update(sessionId, (s) => ({ ...s, runnerId: null }));
+      throw error;
+    }
+  }
+
+  /**
+   * Prepare the session's workspace on its runner, record it on the session, then open the
+   * provider session. Throws on failure; nothing reaches the provider when the workspace could
+   * not be prepared.
+   */
+  private async startOn(session: Session, project: Project | null, opts: LaunchOptions) {
     const { repo } = this.deps;
-    const session = repo.get(sessionId);
+    const sessionId = session.id;
     const runner = runnerForSession(this.deps, sessionId);
     await this.requireRunner(runner);
-    const project = session.projectId ? this.deps.projects.get(session.projectId) : null;
     const ws = await this.prepareWorkspace(runner, session, project, opts.workspace, opts.fork);
     repo.update(sessionId, (s) => ({
       ...s,
@@ -156,6 +183,15 @@ export class SessionLauncher {
     const forkStart = this.pendingForkStart(session);
     if (forkStart) {
       await this.start(session.id, { ...forkStart, ...(input ? { input } : {}) });
+      return;
+    }
+    // A container session whose start failed has none: it gets one now, never runs elsewhere.
+    const project = session.projectId ? this.deps.projects.get(session.projectId) : null;
+    if (project && this.deps.sandboxes?.wants(session, project)) {
+      await this.start(session.id, {
+        workspace: { mode: "worktree" },
+        ...(input ? { input } : {}),
+      });
       return;
     }
     const runner = runnerForSession(this.deps, session.id);

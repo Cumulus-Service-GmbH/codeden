@@ -76,7 +76,8 @@ export function Segmented<T extends string>({
   onChange,
 }: {
   value: T;
-  options: { value: T; label: string }[];
+  /** `disabled` options can't be picked; `title` says why on hover. */
+  options: { value: T; label: string; disabled?: boolean; title?: string }[];
   onChange: (v: T) => void;
 }) {
   return (
@@ -86,9 +87,11 @@ export function Segmented<T extends string>({
           key={o.value}
           type="button"
           aria-pressed={value === o.value}
+          disabled={o.disabled}
+          title={o.title}
           onClick={() => onChange(o.value)}
           className={cn(
-            "h-full rounded-md px-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground",
+            "h-full rounded-md px-2.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:text-muted-foreground",
             value === o.value && "bg-accent text-foreground shadow-xs",
           )}
         >

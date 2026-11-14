@@ -1,4 +1,4 @@
-import type { Project } from "@codeden/contracts";
+import type { BackendStatus, Project } from "@codeden/contracts";
 import type { CodeDenClient } from "../client";
 import { ApiRequestError } from "../http";
 import { defaultFactoryLimits } from "./fixtures/ops";
@@ -7,8 +7,34 @@ import type { MockWorld } from "./world";
 
 type MockProjectApi = Pick<
   CodeDenClient,
-  "createProject" | "updateProject" | "reorderProjects" | "refreshProject" | "disconnectGithub"
+  | "createProject"
+  | "updateProject"
+  | "executionBackends"
+  | "reorderProjects"
+  | "refreshProject"
+  | "disconnectGithub"
 >;
+
+const NOT_GITHUB =
+  "Docker sandboxes need a GitHub project: each container clones the repository from GitHub";
+
+/** The mock machine has Docker; a local project still can't use it. */
+function mockBackends(project?: Project): BackendStatus[] {
+  const docker: BackendStatus = {
+    backend: "docker",
+    available: true,
+    code: "ok",
+    version: "29.6.1",
+    reason: null,
+    fix: null,
+  };
+  return [
+    { backend: "local", available: true, code: "ok", version: null, reason: null, fix: null },
+    project && project.kind !== "github"
+      ? { ...docker, available: false, code: "unsupported_project", reason: NOT_GITHUB }
+      : docker,
+  ];
+}
 
 const later = <T>(value: T, ms: number): Promise<T> =>
   new Promise((resolve) => setTimeout(() => resolve(structuredClone(value)), ms));
@@ -56,6 +82,7 @@ export function mockProjectApi(world: MockWorld): MockProjectApi {
         killSwitch: false,
         timezone: null,
         agentCiEnv: true,
+        execution: { backend: "local" },
         pinned: false,
         sortOrder: last + 1,
         createdAt: now,
@@ -81,7 +108,14 @@ export function mockProjectApi(world: MockWorld): MockProjectApi {
       );
     },
 
+    async executionBackends({ projectId } = {}) {
+      return later({ backends: mockBackends(projectId ? find(projectId) : undefined) }, 120);
+    },
+
     async updateProject(id, patch) {
+      if (patch.execution?.backend === "docker" && find(id).kind !== "github") {
+        throw new ApiRequestError(400, "backend_unavailable", NOT_GITHUB);
+      }
       const project = {
         ...find(id),
         ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)),

@@ -42,12 +42,8 @@ export function createBrowserCommandHandlers(deps: BrowserCommandDeps): BrowserC
   const handlers: Handlers = {
     "browser.open": async (c) => {
       const session = await manager.open(c.sessionId, c.url, c.relay);
-      const native = session.engine === "native";
-      return {
-        cdpUrl: native ? null : manager.cdpUrl,
-        tabs: session.listTabs(),
-        engine: session.engine,
-      };
+      // No browser exposes a CDP endpoint (§12.2): the runner's Chromium has no debugging port.
+      return { cdpUrl: null, tabs: session.listTabs(), engine: session.engine };
     },
     "browser.handoff": async (c) => {
       const session = await manager.handoff(c.sessionId, c.tabs, c.cookies);

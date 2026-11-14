@@ -7,6 +7,7 @@ import type {
   WorktreeCleanupOutcome,
 } from "@codeden/contracts";
 import type { EventStore } from "../../events/store";
+import type { SandboxService } from "../../execution/sandboxes";
 import { badRequest, errorMessage } from "../errors";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
@@ -20,6 +21,8 @@ export interface WorktreeCleanupDeps extends RunnerDeps {
   settings: () => Settings;
   /** Stops a session (provider turn, queued messages, open approvals) before it is archived. */
   stopSession: (id: string) => Promise<unknown>;
+  /** Removes the container of a session that ran in one (`docs/remote-runners.md` §16). */
+  sandboxes?: Pick<SandboxService, "release">;
   /** Where a removal that keeps failing is reported (`cleanup_failed`). */
   inbox?: Pick<InboxService, "find" | "put" | "close">;
   /**
@@ -152,7 +155,9 @@ export class WorktreeCleanup {
     );
     const force = opts.force === true;
     if (force) this.forced.add(id);
-    const worktree = await this.removeWorktree(id, { force });
+    // A session in a container has a clone there instead of a worktree: the container goes.
+    const sandbox = await this.deps.sandboxes?.release(this.deps.repo.get(id), { force });
+    const worktree = sandbox ?? (await this.removeWorktree(id, { force }));
     return { session: this.deps.repo.get(id), worktree };
   }
 
@@ -286,13 +291,17 @@ export class WorktreeCleanup {
     return removed;
   }
 
-  /** Clean up the worktrees of an archived project's sessions that are not in use. */
+  /**
+   * Clean up the worktrees, and the containers, of an archived project's sessions that are not
+   * in use.
+   */
   async cleanProject(projectId: string): Promise<string[]> {
     const removed: string[] = [];
     for (const session of this.deps.repo.list({ projectId, role: "agent" })) {
-      if (!session.worktreePath || session.worktreeRemovedAt || IN_USE.has(session.status)) {
-        continue;
-      }
+      if (IN_USE.has(session.status)) continue;
+      const sandbox = await this.deps.sandboxes?.release(session, { force: false });
+      if (sandbox?.status === "removed") removed.push(session.id);
+      if (sandbox || !session.worktreePath || session.worktreeRemovedAt) continue;
       const result = await this.removeWorktree(session.id, { force: false });
       if (result.status === "removed") removed.push(session.id);
     }

@@ -21,6 +21,7 @@ export * from "./entities/inbox";
 export * from "./entities/project";
 export * from "./entities/session";
 export * from "./events";
+export * from "./execution";
 export * from "./factory";
 export * from "./factory-api";
 export * from "./factory-needs-you";
