@@ -106,6 +106,20 @@ In the dialog, pick the provider, model and effort, and optionally say what the 
 
 The new session's header shows **Handed off from …** with a link back, and **Details** shows where it came from. **Compare with** in the Diff panel shows how its code differs from the original's. Hand off works on every provider and needs no fork support. It's available once the session has done some work, and while no turn is running and nothing waits on you: a session that failed or was stopped (after a usage limit, say) can be handed off. CodeDen won't hand off to a provider that can't keep the session's permissions: read-only needs a provider that enforces it, and a session that's still planning needs one with plan mode.
 
+## Review with another agent
+
+Want a second opinion before you merge? Have another agent review a session's changes, read-only and usually on another provider, the way the software factory reviews its own work. Open the session's **⋯** menu and choose **Review with another agent…**, use **Review this session with another agent…** in the command palette (**Ctrl/Cmd+K**), or click **Review with another agent** under the pull request in the **GitHub** panel.
+
+In the dialog, pick the reviewer's provider, model and effort (it starts on another provider that is signed in, when there is one), and optionally say what it should focus on ("The migration and its rollback"). Then choose **Start review on …**. CodeDen starts a new session in the same project:
+
+- **A copy of the code.** Its own worktree on a new branch from the session's branch, with the session's files at the end of its last turn copied in, uncommitted changes included, so the session can keep working while it's reviewed. The project's setup commands run first, so the reviewer can run the tests.
+- **Read-only.** The reviewer can read files and run checks (tests, lint, type-check), but can't edit, commit, push or open a pull request. Only providers that enforce read-only can review.
+- **A review brief.** Its first message, from CodeDen, names the session, its branch and base branch, the linked issue and pull request, the task and your requests along the way, what the agent says it did (as claims to check), the files it edited and your focus. It tells the reviewer how to read the whole change and what to report.
+- **A verdict.** The reviewer ends with **Approve** or **Request changes**, then its findings, most severe first, each with the file and line, a case where it fails and whether it blocks the merge, and what it checked.
+- **Original unchanged.** Nothing about the reviewed session changes. To act on the findings, send them to it as a message.
+
+The review's header shows **Review of …** with a link back, and **Details** shows where it came from. Reviews aren't listed under **Compare with** in the Diff panel, since they have no code of their own. Review is available once the session has done some work, and while no turn is running and nothing waits on you. A review session can't itself be reviewed. Archive the review when you're done, and its worktree is removed.
+
 ## Share a session
 
 Want to show how an agent solved something in an issue, a pull request or a write-up, or keep a record outside CodeDen? Open the session's **⋯** menu (in the thread header, or on its row in the sidebar) and choose **Copy as Markdown** to put the whole transcript on the clipboard, or **Download as Markdown** to save it as `<title>-<date>.md`. It works for every session, including the project manager, the orchestrator, archived sessions and one that's still working (you get what it has done so far).

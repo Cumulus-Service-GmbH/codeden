@@ -32,6 +32,8 @@ import type {
   ResolveConflictResponse,
   RestoreFilesRequest,
   RestoreFilesResponse,
+  ReviewSessionRequest,
+  ReviewSessionResponse,
   Role,
   RuntimeResponse,
   Session,
@@ -163,6 +165,11 @@ export interface CodeDenClient {
    * work as its first message instead of the conversation (§9). The source is left as it is.
    */
   handoffSession(sessionId: string, req: HandoffSessionRequest): Promise<HandoffSessionResponse>;
+  /**
+   * Review a session's changes (§9): a new read-only session, on the chosen provider, with its
+   * code and a review brief. The source is unchanged.
+   */
+  reviewSession(sessionId: string, req: ReviewSessionRequest): Promise<ReviewSessionResponse>;
   /**
    * The session's transcript as Markdown, with a file name, to copy or download and share
    * outside CodeDen (§13). Every thread is included; reasoning, tool output and diffs aren't.

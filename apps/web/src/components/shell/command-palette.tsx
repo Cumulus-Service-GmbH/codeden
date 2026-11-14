@@ -13,6 +13,7 @@ import {
   PanelLeft,
   PanelRight,
   Rocket,
+  ScanSearch,
   Settings,
   SlidersHorizontal,
   SquareTerminal,
@@ -135,6 +136,29 @@ function HandoffCurrentSession({ session, close }: { session: Session; close: ()
   );
 }
 
+/**
+ * Review the session on screen with another agent (§9): open the review dialog for a read-only
+ * second opinion on its changes. Disabled, with the reason, while a turn runs or before it has
+ * done anything; not offered for a review itself.
+ */
+function ReviewCurrentSession({ session, close }: { session: Session; close: () => void }) {
+  const actions = useSessionActions(session);
+  if (!actions.canReview) return null;
+  return (
+    <Row
+      icon={<ScanSearch />}
+      label="Review this session with another agent…"
+      hint={actions.reviewBlocked ?? "A read-only second opinion on its changes"}
+      value="review this session another agent second opinion code review read-only"
+      disabled={actions.reviewBlocked !== null}
+      onSelect={() => {
+        close();
+        actions.review();
+      }}
+    />
+  );
+}
+
 /** Ctrl K: jump to any session or project, find what was said in a transcript, or run an action. */
 export function CommandPalette() {
   const open = useUiStore((s) => s.paletteOpen);
@@ -246,6 +270,7 @@ export function CommandPalette() {
           <CommandGroup heading="Actions">
             {current && <ForkCurrentSession session={current} close={() => setOpen(false)} />}
             {current && <HandoffCurrentSession session={current} close={() => setOpen(false)} />}
+            {current && <ReviewCurrentSession session={current} close={() => setOpen(false)} />}
             {automationSource?.projectId && (
               <Row
                 icon={<Workflow />}

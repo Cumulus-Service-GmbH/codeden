@@ -1,4 +1,5 @@
 import {
+  type ForkKind,
   type ItemOf,
   type ItemRecord,
   type Role,
@@ -29,7 +30,7 @@ export interface TranscriptSource {
   projectName: string | null;
   /** Display name of the session's provider. */
   providerName: string;
-  /** Title of the session it was forked or handed off from, when that session still exists. */
+  /** Title of the session it was forked, handed off or reviewed from, when it still exists. */
   forkedFromTitle: string | null;
   threads: Thread[];
   /** Oldest first. */
@@ -55,6 +56,13 @@ const STATUS: Readonly<Record<SessionStatus, string>> = {
   completed: "Done",
   failed: "Failed",
   stopped: "Stopped",
+};
+
+/** How a session made from another one names its source (§9). */
+const FORK_HOW: Readonly<Record<ForkKind, string>> = {
+  fork: "Forked from",
+  handoff: "Handed off from",
+  review: "Review of",
 };
 
 /** Who writes the replies in a session's own threads. */
@@ -159,7 +167,7 @@ function header(src: TranscriptSource): string {
     facts.push(`**Pull request:** [#${s.pr.number}${title}](${s.pr.url}) (${s.pr.state})`);
   }
   if (s.forkedFrom) {
-    const how = s.forkedFrom.kind === "handoff" ? "Handed off from" : "Forked from";
+    const how = FORK_HOW[s.forkedFrom.kind ?? "fork"];
     facts.push(`**${how}:** ${oneLine(src.forkedFromTitle ?? "another session")}`);
   }
   facts.push(`**Started:** ${utcTime(s.createdAt)} · **Last activity:** ${utcTime(s.updatedAt)}`);

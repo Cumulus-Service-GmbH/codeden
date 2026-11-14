@@ -1,6 +1,6 @@
-import { githubPrId } from "@codeden/contracts";
+import { githubPrId, type Session } from "@codeden/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { CircleDot, ExternalLink, GitPullRequest } from "lucide-react";
+import { CircleDot, ExternalLink, GitPullRequest, ScanSearch } from "lucide-react";
 import type { ReactNode } from "react";
 import { EmptyState } from "@/components/common/bits";
 import { GithubUnavailable, LabelChip } from "@/components/github/github-bits";
@@ -12,6 +12,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useClient } from "@/lib/api";
 import { platform } from "@/lib/platform";
 import { useProject, useSession } from "@/lib/queries";
+import { useSessionActions } from "@/lib/session-actions";
 import { useAskForPullRequest, usePullRequestOffer } from "./open-pr";
 import { PrRequestedButton } from "./open-pr-controls";
 
@@ -60,6 +61,30 @@ function IssueSection({ projectId, number }: { projectId: string; number: number
       </div>
       {issue.body && <Markdown className="text-[13px]">{issue.body}</Markdown>}
     </Section>
+  );
+}
+
+/**
+ * "Review with another agent" beside the session's pull request (§9): a read-only second opinion
+ * on its changes before it merges. Not offered for a review session itself.
+ */
+function ReviewPrButton({ session }: { session: Session }) {
+  const actions = useSessionActions(session);
+  if (!actions.canReview) return null;
+  return (
+    <div className="mt-3 flex flex-col items-start gap-1">
+      <Button
+        size="sm"
+        variant="outline"
+        disabled={actions.reviewBlocked !== null}
+        onClick={() => actions.review()}
+      >
+        <ScanSearch /> Review with another agent
+      </Button>
+      <span className="text-2xs text-muted-foreground">
+        {actions.reviewBlocked ?? "A read-only second opinion on its changes, before you merge"}
+      </span>
+    </div>
   );
 }
 
@@ -128,6 +153,7 @@ export function GitHubPanel({ sessionId }: { sessionId: string }) {
       {data.pr && (
         <Section title="Pull request">
           <PrDetailsView prId={githubPrId(data.pr.projectId, data.pr.number)} showSession={false} />
+          {session && <ReviewPrButton session={session} />}
         </Section>
       )}
       {data.issue && session?.projectId && (

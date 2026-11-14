@@ -154,6 +154,16 @@ describe("transcript export: header", () => {
     expect(md).toContain("- **Result:** success. Fixed it. Tests pass.");
   });
 
+  it("names the session a review reviewed (#356)", () => {
+    const md = sessionTranscriptMarkdown(
+      source({
+        session: { ...session, forkedFrom: { sessionId: "s0", checkpoint: 2, kind: "review" } },
+        forkedFromTitle: "Fix login",
+      }),
+    );
+    expect(md).toContain("- **Review of:** Fix login");
+  });
+
   it("labels the cost as the ledger does (§12.6)", () => {
     expect(costFact(usage())).toBe("$1.23 · 48k tokens · 2 turns");
     expect(costFact(usage({ estimatedCostUsd: 0.5 }, "subscription"))).toBe(

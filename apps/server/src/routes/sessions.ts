@@ -8,6 +8,8 @@ import {
   ListSessionsQuery,
   type QueuedMessageList,
   RespondRequest,
+  ReviewSessionRequest,
+  type ReviewSessionResponse,
   SendMessageRequest,
   type SessionTranscriptExport,
   StartSessionRequest,
@@ -25,7 +27,7 @@ import { jsonBody, queryOf } from "./validate";
 
 /**
  * `/api/sessions`: start (with conflict handling), message, steer, interrupt, respond, stop,
- * fork, handoff, export as Markdown, archive (removes the worktree, §9), unarchive and the
+ * fork, handoff, review, export as Markdown, archive (removes the worktree, §9), unarchive and the
  * queued-message tray. `installToken` is hidden from exports wherever it appears.
  */
 export function sessionRoutes(s: AppServices, installToken: string) {
@@ -76,6 +78,14 @@ export function sessionRoutes(s: AppServices, installToken: string) {
       // A new session, on any provider, with this one's code and a brief of its work (§9).
       .post("/:id/handoff", jsonBody(HandoffSessionRequest), async (c) => {
         const body: HandoffSessionResponse = await s.sessions.handoff(
+          c.req.param("id"),
+          c.req.valid("json"),
+        );
+        return c.json(body);
+      })
+      // A read-only session, on any provider, that reviews this one's changes (§9).
+      .post("/:id/review", jsonBody(ReviewSessionRequest), async (c) => {
+        const body: ReviewSessionResponse = await s.sessions.review(
           c.req.param("id"),
           c.req.valid("json"),
         );

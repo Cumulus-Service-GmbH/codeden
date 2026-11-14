@@ -9,6 +9,7 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
+import { isReview } from "@/lib/fork-origin";
 import { useTranscriptsStore } from "@/stores/transcripts";
 import { useUiStore } from "@/stores/ui";
 import { useClient } from "./api";
@@ -72,6 +73,32 @@ export function useTurnCount(sessionId: string): number | undefined {
 /** `handoffBlocked` for a session, with its turn count from the loaded transcript. */
 export function useHandoffBlocked(session: Session): string | null {
   return handoffBlocked(session, useTurnCount(session.id));
+}
+
+/**
+ * Whether "Review with another agent" applies to a session at all (§9): agent sessions, except
+ * reviews themselves (a read-only review has no changes of its own).
+ */
+export const canReview = (session: Pick<Session, "role" | "forkedFrom">) =>
+  session.role === "agent" && !isReview(session.forkedFrom);
+
+/**
+ * Why a session's changes can't be reviewed right now, or null when they can (the server checks
+ * the same, §9): as for a handoff, it needs a branch and some work, and no turn running or
+ * waiting. `turns` is undefined when not known here, and then the server decides.
+ */
+export function reviewBlocked(session: Session, turns: number | undefined): string | null {
+  if (session.status === "waiting") return "Answer what it's waiting on first";
+  if (canStop(session)) return "Wait for the running turn to finish";
+  if (NOT_STARTED.has(session.status)) return "The session hasn't started yet";
+  if (!session.branch) return "Only sessions on a git branch can be reviewed";
+  if (turns === 0) return "No changes to review yet";
+  return null;
+}
+
+/** `reviewBlocked` for a session, with its turn count from the loaded transcript. */
+export function useReviewBlocked(session: Session): string | null {
+  return reviewBlocked(session, useTurnCount(session.id));
 }
 
 /**
@@ -227,8 +254,8 @@ export const MARKDOWN_HINT = "Secrets redacted";
 /**
  * What you can do to a session from its row menu, the thread header's ⋯ menu or the command
  * palette: open, rename, copy its link, copy or download it as Markdown, make an automation from
- * it, stop, fork, archive (with Undo) and unarchive. They all use this, so they show the same
- * toasts.
+ * it, stop, fork, hand off, review with another agent, archive (with Undo) and unarchive. They
+ * all use this, so they show the same toasts.
  */
 export function useSessionActions(session: Session) {
   const client = useClient();
@@ -293,6 +320,9 @@ export function useSessionActions(session: Session) {
   const fork = useForkSession(session);
   const setHandoff = useUiStore((s) => s.setHandoff);
   const blocked = useHandoffBlocked(session);
+  const setReview = useUiStore((s) => s.setReview);
+  const reviewable = canReview(session);
+  const notReviewable = useReviewBlocked(session);
 
   return {
     open: () => void navigate({ to: "/sessions/$sessionId", params: { sessionId: session.id } }),
@@ -335,6 +365,12 @@ export function useSessionActions(session: Session) {
     /** Open the handoff dialog, with `provider` chosen when given. */
     handoff: (provider?: string) =>
       setHandoff({ sessionId: session.id, provider: provider ?? null }),
+    /** Agent sessions other than reviews can be reviewed: show "Review with another agent". */
+    canReview: reviewable,
+    /** Why the review can't start right now (null when it can). */
+    reviewBlocked: reviewable ? notReviewable : null,
+    /** Open the review dialog, with `provider` chosen when given. */
+    review: (provider?: string) => setReview({ sessionId: session.id, provider: provider ?? null }),
   };
 }
 

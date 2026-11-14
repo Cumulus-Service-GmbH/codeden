@@ -23,6 +23,7 @@ import {
   ReorderProjectsResponse,
   RestoreFilesResponse,
   RetryInboxResponse,
+  ReviewSessionResponse,
   remoteImagePath,
   type SendMessageRequestInit,
   SessionDetail,
@@ -141,6 +142,8 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
       post(`/sessions/${enc(id)}/fork`, req ?? {}, (v) => ForkSessionResponse.parse(v)),
     handoffSession: (id, req) =>
       post(`/sessions/${enc(id)}/handoff`, req, (v) => HandoffSessionResponse.parse(v)),
+    reviewSession: (id, req) =>
+      post(`/sessions/${enc(id)}/review`, req, (v) => ReviewSessionResponse.parse(v)),
     exportSession: (id) =>
       get(`/sessions/${enc(id)}/export`, (v) => SessionTranscriptExport.parse(v)),
     queue: httpQueueApi(http),

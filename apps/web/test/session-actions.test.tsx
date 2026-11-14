@@ -358,6 +358,9 @@ describe("session row menu", () => {
     canHandoff: false,
     handoffBlocked: null,
     handoff: vi.fn(),
+    canReview: false,
+    reviewBlocked: null,
+    review: vi.fn(),
     ...patch,
   });
 

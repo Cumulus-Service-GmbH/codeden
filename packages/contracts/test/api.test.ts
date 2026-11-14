@@ -15,9 +15,12 @@ import {
   ListSessionsQuery,
   LoginCommandResponse,
   LoginToolId,
+  REVIEW_FOCUS_MAX,
   RefreshModelsResponse,
   ReorderProjectsRequest,
   RetryInboxResponse,
+  ReviewSessionRequest,
+  ReviewSessionResponse,
   SendMessageRequest,
   SessionSnapshot,
   SessionSnapshotQuery,
@@ -275,6 +278,38 @@ describe("api schemas", () => {
     );
     roundTrip(HandoffSessionResponse, { sessionId: "s3" });
     expect(HandoffSessionResponse.safeParse({}).success).toBe(false);
+  });
+
+  it("round-trips review requests and responses (#356)", () => {
+    expect(roundTrip(ReviewSessionRequest, { provider: "codex" })).toEqual({ provider: "codex" });
+    expect(
+      roundTrip(ReviewSessionRequest, {
+        provider: "claude",
+        model: " opus ",
+        effort: "high",
+        title: " Second look ",
+        focus: "  The migration and its rollback. ",
+      }),
+    ).toEqual({
+      provider: "claude",
+      model: "opus",
+      effort: "high",
+      title: "Second look",
+      focus: "The migration and its rollback.",
+    });
+    expect(
+      roundTrip(ReviewSessionRequest, { provider: "codex", model: null, effort: null }),
+    ).toEqual({ provider: "codex", model: null, effort: null });
+    expect(ReviewSessionRequest.safeParse({}).success).toBe(false);
+    expect(ReviewSessionRequest.safeParse({ provider: "" }).success).toBe(false);
+    expect(ReviewSessionRequest.safeParse({ provider: "codex", focus: " " }).success).toBe(false);
+    expect(
+      ReviewSessionRequest.safeParse({ provider: "codex", focus: "x".repeat(REVIEW_FOCUS_MAX + 1) })
+        .success,
+    ).toBe(false);
+    expect(ReviewSessionRequest.safeParse({ provider: "codex", title: "" }).success).toBe(false);
+    roundTrip(ReviewSessionResponse, { sessionId: "s4" });
+    expect(ReviewSessionResponse.safeParse({}).success).toBe(false);
   });
 
   it("defaults the handoff summary job on", () => {
