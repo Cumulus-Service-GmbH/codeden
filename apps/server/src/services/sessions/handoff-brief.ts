@@ -119,7 +119,7 @@ function intro(src: HandoffSource): string {
  * or an automation wrote to it. Their briefs quote issue text, and on a public repository
  * anyone writes issues.
  */
-function quotesUntrustedInput(src: HandoffSource): boolean {
+export function quotesUntrustedInput(src: Pick<HandoffSource, "session" | "requests">): boolean {
   return (
     src.session.issue !== null ||
     workStarter(src.session).kind !== "user" ||
@@ -127,14 +127,14 @@ function quotesUntrustedInput(src: HandoffSource): boolean {
   );
 }
 
-function task(src: HandoffSource): string {
+export function task(src: Pick<HandoffSource, "session" | "requests">): string {
   const first = src.requests[0];
   const text = first ? message(first.input, TASK_MAX) : clip(src.session.purpose, TASK_MAX);
   return `## The task\n\n${text}`;
 }
 
 /** Later messages to the source, CodeDen's own (retries, wake-ups, PR feedback) left out. */
-function laterRequests(src: HandoffSource): string | null {
+export function laterRequests(src: Pick<HandoffSource, "requests">): string | null {
   const later = src.requests.slice(1).filter((m) => m.input.from !== "codeden");
   if (later.length === 0) return null;
   const shown = later.slice(-REQUESTS_SHOWN);
@@ -174,7 +174,7 @@ function progress(src: HandoffSource): string {
   return `## Where it got to\n\n${parts.join("\n\n")}`;
 }
 
-function files(src: HandoffSource): string | null {
+export function files(src: Pick<HandoffSource, "session" | "edits">): string | null {
   const paths = editedPaths(src.edits, src.session.worktreePath ?? src.session.cwd);
   if (paths.length === 0) return null;
   const shown = paths.slice(0, FILES_SHOWN).map((p) => `- ${p}`);
@@ -283,11 +283,11 @@ function message(input: UserInput, max: number): string {
   return from === "user" ? `${body}${note}` : `From ${SENDERS[from]}:\n${quote(body)}${note}`;
 }
 
-function clip(text: string, max: number): string {
+export function clip(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
 }
 
-function oneLine(text: string): string {
+export function oneLine(text: string): string {
   return text.replace(/\s+/g, " ").trim();
 }
 
@@ -295,7 +295,7 @@ function indent(text: string): string {
   return text.replace(/\n/g, "\n  ");
 }
 
-function quote(text: string): string {
+export function quote(text: string): string {
   return text
     .split("\n")
     .map((l) => (l ? `> ${l}` : ">"))

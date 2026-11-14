@@ -288,6 +288,20 @@ describe("entities", () => {
         forkedFrom: { sessionId: "s0", checkpoint: null, kind: "handoff" },
       }).forkedFrom?.kind,
     ).toBe("handoff");
+    // A read-only review of the source's changes (#356).
+    expect(
+      roundTrip(Session, {
+        ...sampleSession,
+        autonomy: "read_only",
+        forkedFrom: { sessionId: "s0", checkpoint: 2, kind: "review" },
+      }).forkedFrom?.kind,
+    ).toBe("review");
+    expect(
+      Session.safeParse({
+        ...sampleSession,
+        forkedFrom: { sessionId: "s0", checkpoint: 2, kind: "audit" },
+      }).success,
+    ).toBe(false);
     // A handoff of the factory's work records who started it (#248).
     expect(
       roundTrip(Session, {

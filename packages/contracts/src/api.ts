@@ -266,6 +266,37 @@ export type HandoffSessionRequest = z.infer<typeof HandoffSessionRequest>;
 export const HandoffSessionResponse = z.object({ sessionId: Id });
 export type HandoffSessionResponse = z.infer<typeof HandoffSessionResponse>;
 
+/** Longest focus a review request passes on ("What should it focus on?"). */
+export const REVIEW_FOCUS_MAX = 4_000;
+
+/**
+ * `POST /api/sessions/:id/review`: an independent, read-only review of an agent session's
+ * changes by a new session, usually on another provider (§9). The reviewer gets the source's
+ * code as a handoff does (a new branch from the source's branch, its latest checkpoint
+ * restored as uncommitted changes), runs with read-only permissions, and opens with a review
+ * brief from CodeDen. The source is only read.
+ */
+export const ReviewSessionRequest = z.object({
+  /** The provider that reviews; it must enforce read-only (`capabilities.readOnly`). */
+  provider: ProviderId,
+  /**
+   * The model; omitted or null: the source's model when the provider is the same, else the
+   * provider's default.
+   */
+  model: z.string().trim().min(1).nullable().optional(),
+  /** The reasoning effort, chosen the same way as `model`. */
+  effort: ReasoningEffort.nullable().optional(),
+  /** Defaults to "Review: " followed by the source's title. */
+  title: z.string().trim().min(1).max(200).optional(),
+  /** What the reviewer should look at most closely, added to the brief. */
+  focus: z.string().trim().min(1).max(REVIEW_FOCUS_MAX).optional(),
+});
+export type ReviewSessionRequest = z.infer<typeof ReviewSessionRequest>;
+
+/** `POST /api/sessions/:id/review` response: the review session (it starts in the background). */
+export const ReviewSessionResponse = z.object({ sessionId: Id });
+export type ReviewSessionResponse = z.infer<typeof ReviewSessionResponse>;
+
 /** Recorded with a session about how it was started (forced starts keep their reason). */
 export const SessionStartMeta = z.object({
   workspaceMode: WorkspaceRequest.shape.mode,

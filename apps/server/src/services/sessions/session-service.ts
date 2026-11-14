@@ -9,6 +9,8 @@ import type {
   ProviderInfo,
   QueueSender,
   RespondRequest,
+  ReviewSessionRequest,
+  ReviewSessionResponse,
   RoleDefaults,
   SendMessageRequest,
   SendMessageResponse,
@@ -46,6 +48,7 @@ import { planModeUnsupported, readOnlyUnsupported } from "./permissions";
 import type { Answerer, QuestionBroker } from "./questions";
 import { applyPendingConfig, updateSession } from "./reconfigure";
 import type { SessionRepo, StoredStartMeta } from "./repo";
+import { planReview } from "./review";
 
 export interface SessionServiceDeps extends RunnerDeps {
   repo: SessionRepo;
@@ -239,6 +242,20 @@ export class SessionService {
   async handoff(id: string, req: HandoffSessionRequest): Promise<HandoffSessionResponse> {
     const { repo, projects, utility } = this.deps;
     const plan = await planHandoff({ repo, projects, runner: this.runnerOf(id), utility }, id, req);
+    repo.create(plan.session, plan.meta);
+    this.launchInBackground(plan.session.id, undefined, plan.start.workspace, plan.start.fork);
+    return { sessionId: plan.session.id };
+  }
+
+  /**
+   * Review an agent session's changes (§9): a new read-only session, on any provider that
+   * enforces read-only, with its code as a handoff has it and a review brief as the first
+   * message, which starts a turn (`review.ts`). The worktree is made in the background, and the
+   * launcher delivers the brief as it does a handoff's.
+   */
+  async review(id: string, req: ReviewSessionRequest): Promise<ReviewSessionResponse> {
+    const { repo, projects } = this.deps;
+    const plan = await planReview({ repo, projects, runner: this.runnerOf(id) }, id, req);
     repo.create(plan.session, plan.meta);
     this.launchInBackground(plan.session.id, undefined, plan.start.workspace, plan.start.fork);
     return { sessionId: plan.session.id };
