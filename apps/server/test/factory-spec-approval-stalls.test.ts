@@ -195,11 +195,14 @@ describe("spec approval under the PRs-open limit and the kill switch (#373)", ()
     }
     expect(item(id).specApproval).toMatchObject({ state: "pending", requestedAt: current });
 
-    // A decision on the version on record goes through.
+    // The inbox card decides on the version it shows (its item's `updatedAt`), which goes through.
+    const card = inboxOf(id);
+    expect(card).toMatchObject({ status: "open", updatedAt: current });
+    expect(card?.body).toContain("Export as CSV or JSON");
     const approved = await env.factory.decideSpec(
       env.project.id,
       id,
-      FactorySpecDecisionRequest.parse({ decision: "approve", version: current }),
+      FactorySpecDecisionRequest.parse({ decision: "approve", version: card?.updatedAt }),
     );
     expect(approved.specApproval?.state).toBe("approved");
   });
