@@ -53,9 +53,11 @@ describe("factory settings in the autonomy dialog", () => {
     expect(screen.getByText("issues wait for an agent.")).toBeTruthy();
     fireEvent.change(backlog, { target: { value: "0" } });
     expect(screen.getByText("Off: only Run scout now starts a round.")).toBeTruthy();
-    // A negative number isn't a threshold: the box falls back to 0.
+    // A negative number isn't a threshold: on blur the box is clamped to 0, with a note.
     fireEvent.change(backlog, { target: { value: "-3" } });
+    fireEvent.blur(backlog);
     expect(backlog.value).toBe("0");
+    expect(screen.getByText("The least is 0.")).toBeTruthy();
     fireEvent.change(screen.getByLabelText("Revise rounds"), { target: { value: "4" } });
     fireEvent.change(screen.getByLabelText("Watch main CI (minutes)"), { target: { value: "45" } });
     fireEvent.change(screen.getByLabelText("When the reviewer's provider is unavailable"), {

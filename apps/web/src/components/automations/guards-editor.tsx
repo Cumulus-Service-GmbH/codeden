@@ -1,16 +1,12 @@
 import type { AutomationGuards, OverlapPolicy } from "@codeden/contracts";
 import { useId } from "react";
+import { NumberField } from "@/components/common/number-field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Field, Segmented } from "./form-bits";
 import { OVERLAP_HELP, OVERLAP_LABEL } from "./meta";
 
 const POLICIES: OverlapPolicy[] = ["skip-if-running", "queue", "run-anyway"];
-
-const positive = (s: string): number | null => {
-  const n = Number.parseInt(s, 10);
-  return Number.isFinite(n) && n > 0 ? n : null;
-};
 
 /**
  * Guards (§10, §8.4): overlap policy for the work-key check, concurrency cap, quiet hours,
@@ -46,13 +42,12 @@ export function GuardsEditor({
           htmlFor={`${id}-conc`}
           help="Runs of this automation at once in a project."
         >
-          <Input
+          <NumberField
             id={`${id}-conc`}
-            type="number"
             min={1}
             value={guards.maxConcurrent}
             disabled={disabled}
-            onChange={(e) => onChange({ ...guards, maxConcurrent: positive(e.target.value) ?? 1 })}
+            onChange={(maxConcurrent) => onChange({ ...guards, maxConcurrent })}
             className="w-28 text-[13px]"
           />
         </Field>
@@ -61,14 +56,14 @@ export function GuardsEditor({
           htmlFor={`${id}-day`}
           help="Leave empty for no limit. Skipped runs don't count."
         >
-          <Input
+          <NumberField
             id={`${id}-day`}
-            type="number"
+            optional
             min={1}
-            value={guards.maxPerDay ?? ""}
+            value={guards.maxPerDay}
             placeholder="No limit"
             disabled={disabled}
-            onChange={(e) => onChange({ ...guards, maxPerDay: positive(e.target.value) })}
+            onChange={(maxPerDay) => onChange({ ...guards, maxPerDay })}
             className="w-28 text-[13px]"
           />
         </Field>

@@ -1,10 +1,10 @@
 import type { Role } from "@codeden/contracts";
 import { ProviderMark } from "@/components/common/bits";
+import { NumberField } from "@/components/common/number-field";
 import { PickerFooterChoice } from "@/components/composer/model-picker/footer";
 import { ModelPicker } from "@/components/composer/model-picker/model-picker";
 import { KillSwitchButton } from "@/components/factory/kill-switch";
 import { AUTONOMY } from "@/components/thread/autonomy";
-import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { useSnapshotData } from "@/lib/queries";
 import { cn } from "@/lib/utils";
@@ -118,19 +118,16 @@ export function GeneralSettings() {
           />
         </SettingRow>
         <SettingRow label="Inactive for" help="Days without activity before cleanup.">
-          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <Input
-              type="number"
+          <div className="flex items-baseline gap-2 text-xs text-muted-foreground">
+            <NumberField
               min={1}
               max={365}
               aria-label="Days before cleanup"
               disabled={!settings.worktrees.cleanup}
               value={settings.worktrees.afterDays}
-              onChange={(e) => {
-                const days = Math.round(Number(e.target.value));
-                if (days >= 1 && days <= 365) update({ worktrees: { afterDays: days } });
-              }}
-              className="h-8 w-20 text-xs"
+              onChange={(afterDays) => update({ worktrees: { afterDays } })}
+              wrapperClassName="w-20"
+              className="h-8 text-xs"
             />
             days
           </div>

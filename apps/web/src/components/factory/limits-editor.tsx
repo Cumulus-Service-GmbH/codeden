@@ -1,6 +1,7 @@
 import type { FactoryLimits, FactoryTuning, MergePolicy } from "@codeden/contracts";
 import { useId, useState } from "react";
 import { Field } from "@/components/automations/form-bits";
+import { NumberField } from "@/components/common/number-field";
 import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -71,11 +72,6 @@ const MERGE_POLICY_HELP: Record<MergePolicy, string> = {
 
 const MERGE_POLICY_HINT =
   "Re-testing every pull request after each merge costs a full CI run per merge. Fast skips it when nothing the pull request changed moved; CI on the default branch is still watched after every merge, and a merge that breaks it is reverted.";
-
-const int = (s: string, min = 0): number | undefined => {
-  const n = Number.parseInt(s, 10);
-  return Number.isFinite(n) && n >= min ? n : undefined;
-};
 
 /** True when the limits carry the daily budget factory modes require. */
 export function hasBudget(limits: FactoryLimits): boolean {
@@ -170,29 +166,25 @@ export function LimitsEditor({
           htmlFor={`${id}-usd`}
           help="The loop pauses until tomorrow when today's spend reaches it."
         >
-          <Input
+          <NumberField
             id={`${id}-usd`}
-            type="number"
+            decimal
+            optional
             min={0}
-            step="0.5"
-            value={budget.usd ?? ""}
+            value={budget.usd}
             placeholder="e.g. 10"
-            onChange={(e) => {
-              const n = Number.parseFloat(e.target.value);
-              setBudget({ usd: Number.isFinite(n) && n > 0 ? n : undefined });
-            }}
+            onChange={(usd) => setBudget({ usd: usd || undefined })}
             className="text-[13px]"
           />
         </Field>
         <Field label="Daily budget (tokens)" htmlFor={`${id}-tok`} help="Optional, alongside USD.">
-          <Input
+          <NumberField
             id={`${id}-tok`}
-            type="number"
+            optional
             min={0}
-            step={100000}
-            value={budget.tokens ?? ""}
+            value={budget.tokens}
             placeholder="e.g. 5000000"
-            onChange={(e) => setBudget({ tokens: int(e.target.value, 1) })}
+            onChange={(tokens) => setBudget({ tokens: tokens || undefined })}
             className="text-[13px]"
           />
         </Field>
@@ -219,14 +211,11 @@ export function LimitsEditor({
           htmlFor={`${id}-conc`}
           help="The swarm: builders, reviewers and the scout share it."
         >
-          <Input
+          <NumberField
             id={`${id}-conc`}
-            type="number"
             min={1}
             value={limits.maxConcurrentSessions}
-            onChange={(e) =>
-              onChange({ ...limits, maxConcurrentSessions: int(e.target.value, 1) ?? 1 })
-            }
+            onChange={(maxConcurrentSessions) => onChange({ ...limits, maxConcurrentSessions })}
             className="text-[13px]"
           />
         </Field>
@@ -235,12 +224,11 @@ export function LimitsEditor({
           htmlFor={`${id}-merges`}
           hint="With auto-merge on, the most pull requests CodeDen merges by itself in a day. Once it's reached, more work waits for tomorrow."
         >
-          <Input
+          <NumberField
             id={`${id}-merges`}
-            type="number"
             min={0}
             value={limits.maxMergesPerDay}
-            onChange={(e) => onChange({ ...limits, maxMergesPerDay: int(e.target.value) ?? 0 })}
+            onChange={(maxMergesPerDay) => onChange({ ...limits, maxMergesPerDay })}
             className="text-[13px]"
           />
         </Field>
@@ -249,13 +237,12 @@ export function LimitsEditor({
           htmlFor={`${id}-fails`}
           hint="The factory pauses after this many failed merge checks or reverts in a row, so a broken setup doesn't keep spending. Resume it from the factory panel."
         >
-          <Input
+          <NumberField
             id={`${id}-fails`}
-            type="number"
             min={1}
             value={limits.pauseAfterConsecutiveFailures}
-            onChange={(e) =>
-              onChange({ ...limits, pauseAfterConsecutiveFailures: int(e.target.value, 1) ?? 1 })
+            onChange={(pauseAfterConsecutiveFailures) =>
+              onChange({ ...limits, pauseAfterConsecutiveFailures })
             }
             className="text-[13px]"
           />
@@ -269,15 +256,13 @@ export function LimitsEditor({
             hint={WIP_HELP}
             help="Empty: the same as Agents at once."
           >
-            <Input
+            <NumberField
               id={`${id}-open-prs`}
-              type="number"
+              optional
               min={1}
-              value={tuning.maxOpenPrs ?? ""}
+              value={tuning.maxOpenPrs}
               placeholder={`${limits.maxConcurrentSessions} (Agents at once)`}
-              onChange={(e) =>
-                onTuningChange({ ...tuning, maxOpenPrs: int(e.target.value, 1) ?? null })
-              }
+              onChange={(maxOpenPrs) => onTuningChange({ ...tuning, maxOpenPrs })}
               className="text-[13px]"
             />
           </Field>
@@ -335,15 +320,13 @@ export function LimitsEditor({
               htmlFor={`${id}-lines`}
               help="Lockfiles and generated files don't count. Leave empty for no limit."
             >
-              <Input
+              <NumberField
                 id={`${id}-lines`}
-                type="number"
+                optional
                 min={1}
-                value={tuning.maxChangedLines ?? ""}
+                value={tuning.maxChangedLines}
                 placeholder="No limit"
-                onChange={(e) =>
-                  onTuningChange({ ...tuning, maxChangedLines: int(e.target.value, 1) ?? null })
-                }
+                onChange={(maxChangedLines) => onTuningChange({ ...tuning, maxChangedLines })}
                 className="text-[13px]"
               />
             </Field>
@@ -352,15 +335,13 @@ export function LimitsEditor({
               htmlFor={`${id}-files`}
               help="Leave empty for no limit."
             >
-              <Input
+              <NumberField
                 id={`${id}-files`}
-                type="number"
+                optional
                 min={1}
-                value={tuning.maxChangedFiles ?? ""}
+                value={tuning.maxChangedFiles}
                 placeholder="No limit"
-                onChange={(e) =>
-                  onTuningChange({ ...tuning, maxChangedFiles: int(e.target.value, 1) ?? null })
-                }
+                onChange={(maxChangedFiles) => onTuningChange({ ...tuning, maxChangedFiles })}
                 className="text-[13px]"
               />
             </Field>
@@ -375,15 +356,11 @@ export function LimitsEditor({
               htmlFor={`${id}-fixes`}
               hint="How many times the builder may revise a pull request after the reviewer asks for changes or a merge check fails. After that the item fails, and you can run it again from its page."
             >
-              <Input
+              <NumberField
                 id={`${id}-fixes`}
-                type="number"
                 min={0}
-                step={1}
                 value={tuning.maxFixAttempts}
-                onChange={(e) =>
-                  onTuningChange({ ...tuning, maxFixAttempts: int(e.target.value) ?? 0 })
-                }
+                onChange={(maxFixAttempts) => onTuningChange({ ...tuning, maxFixAttempts })}
                 className="text-[13px]"
               />
             </Field>
@@ -392,15 +369,11 @@ export function LimitsEditor({
               htmlFor={`${id}-watch`}
               hint="After an automatic merge, how long the factory watches CI on the default branch. A failure while it watches reverts the merge; CI still running after this long counts as done."
             >
-              <Input
+              <NumberField
                 id={`${id}-watch`}
-                type="number"
                 min={1}
-                step={1}
                 value={tuning.watchTimeoutMin}
-                onChange={(e) =>
-                  onTuningChange({ ...tuning, watchTimeoutMin: int(e.target.value, 1) ?? 1 })
-                }
+                onChange={(watchTimeoutMin) => onTuningChange({ ...tuning, watchTimeoutMin })}
                 className="text-[13px]"
               />
             </Field>

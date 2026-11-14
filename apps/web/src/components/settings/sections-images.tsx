@@ -1,9 +1,9 @@
 import type { ImageGenerationOverride, ImageTestResponse, SettingsPatch } from "@codeden/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { NumberField } from "@/components/common/number-field";
 import { StatusDot } from "@/components/common/status-dot";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -141,15 +141,13 @@ export function ImageSettings() {
               : "Maximum images per day across all agents. 0 turns generation off."
           }
         >
-          <Input
-            type="number"
+          <NumberField
             min={0}
             aria-label="Daily image cap"
             value={ig.dailyCap}
-            onChange={(e) =>
-              update({ imageGeneration: { dailyCap: Math.max(0, Number(e.target.value) || 0) } })
-            }
-            className="h-8 w-24 text-xs"
+            onChange={(dailyCap) => update({ imageGeneration: { dailyCap } })}
+            wrapperClassName="w-24"
+            className="h-8 text-xs"
           />
         </SettingRow>
         <SettingRow
@@ -213,19 +211,15 @@ export function ImageSettings() {
                   : undefined
               }
             >
-              <Input
-                type="number"
+              <NumberField
+                optional
                 min={0}
                 aria-label="Project daily cap"
                 placeholder="global"
-                value={override?.dailyCap ?? ""}
-                onChange={(e) =>
-                  void setOverride({
-                    dailyCap:
-                      e.target.value === "" ? undefined : Math.max(0, Number(e.target.value) || 0),
-                  })
-                }
-                className="h-8 w-24 text-xs"
+                value={override?.dailyCap}
+                onChange={(dailyCap) => void setOverride({ dailyCap: dailyCap ?? undefined })}
+                wrapperClassName="w-24"
+                className="h-8 text-xs"
               />
             </SettingRow>
             <SettingRow label="Remove the override">
