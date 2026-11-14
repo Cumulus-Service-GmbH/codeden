@@ -1,18 +1,22 @@
 import {
   type FactoryItem,
+  type FactoryLoop,
   type FactoryMergeChecks,
   type FactoryStatus,
   type FactoryWorkItem,
   type GitHubPrRef,
   isFactoryMode,
+  type Project,
   pipelineStep,
+  type ScoutStatus,
 } from "@codeden/contracts";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { drainStatus } from "./drain";
 import { localDay, queueOrder } from "./policy";
 import { ownedPr, pullRequests } from "./pr-status";
 import { recoverable } from "./recover";
-import { scoutStatus } from "./scout";
+import { scoutNowBlocker, scoutNowFacts } from "./scout";
+import { isBusy } from "./sessions";
 import { factoryStats, viewRecentItems, viewWindow } from "./stats";
 import { ACTIVE_STAGES, DONE_STAGES, WAITING_STAGES } from "./store";
 import { wipOf } from "./wip";
@@ -127,5 +131,43 @@ export async function buildStatus(ctx: FactoryContext, projectId: string): Promi
     lastDigest: ctx.store.digests(projectId, 1)[0] ?? null,
     // Kept in memory: an idle tick saves nothing (`FactoryStore.saveTick`).
     lastTickAt: ctx.store.lastTick(projectId) ?? loop.lastTickAt,
+  };
+}
+
+/** The scout as the dashboard shows it (`spend`: today's, against the budget). */
+function scoutStatus(
+  ctx: FactoryContext,
+  project: Project,
+  loop: FactoryLoop,
+  spend: { usd: number; tokens: number },
+): ScoutStatus {
+  const { scout, tuning } = loop;
+  const round = scout.round;
+  const active = (id: string) => {
+    const s = ctx.repo.find(id)?.session;
+    return s !== undefined && isBusy(s);
+  };
+  return {
+    phase: round?.phase ?? "idle",
+    sessionId: scout.sessionId,
+    lenses: (round?.lenses ?? []).map((l) => ({
+      area: l.area,
+      sessionId: l.sessionId,
+      reported: l.reported,
+      active: active(l.sessionId),
+    })),
+    waiting: round?.plan?.pending ?? [],
+    findings: round?.findings.length ?? 0,
+    filed: round?.filed ?? 0,
+    lastRoundAt: scout.lastRoundAt,
+    lastRoundNote: scout.lastRoundNote,
+    nextRoundAt:
+      round || !scout.lastRoundAt || tuning.minBacklog === 0
+        ? null
+        : new Date(
+            Date.parse(scout.lastRoundAt) + tuning.discoveryIntervalMin * 60_000,
+          ).toISOString(),
+    rounds: scout.rounds,
+    runNowBlockedBy: scoutNowBlocker(project, loop, scoutNowFacts(ctx, project, loop, spend)),
   };
 }

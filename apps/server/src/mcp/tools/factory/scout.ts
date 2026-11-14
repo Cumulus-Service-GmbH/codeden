@@ -13,7 +13,7 @@ import { asTool, forSession } from "./shared";
 export const factoryPlanRound = defineTool({
   name: "factory_plan_round",
   description:
-    "Plan this review round: the review areas you want, each with a focus specific to this app. Each gets an area reviewer (a long-lived reviewer agent for that one area); CodeDen starts or wakes them within the factory's limits and tells you which ran. An empty list means you review by yourself this round. Call once per round.",
+    "Plan this review round: the review areas you want, each with a focus specific to this app. Each gets an area reviewer (a long-lived reviewer agent for that one area). CodeDen records the plan and answers at once, saying which areas get a reviewer within the factory's limits; it starts or wakes them as agents free up and sends you their findings. An empty list means you review by yourself this round. Call once per round; calling again returns the same plan.",
   roles: ["agent"],
   scope: "session",
   alwaysLoad: true,

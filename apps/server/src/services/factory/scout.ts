@@ -6,7 +6,6 @@ import {
   SCOUT_UNAVAILABLE,
   type ScoutRound,
   type ScoutState,
-  type ScoutStatus,
   type Session,
 } from "@codeden/contracts";
 import { conflict, errorMessage } from "../errors";
@@ -14,13 +13,15 @@ import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { budgetExceeded, freeSlots, localDay } from "./policy";
 import {
   LENS_NUDGE,
+  lensPrompt,
   SCOUT_PLAN_NUDGE,
   scoutFilePrompt,
   scoutPlanPrompt,
   scoutSelfReviewPrompt,
 } from "./prompts-scout";
+import { LENS_START_TIMEOUT_MS, type LensBrief, startPlannedLenses } from "./scout-lenses";
 import { isBusy } from "./sessions";
-import { busySlots, claimSlot } from "./slots";
+import { busySlots, claimSlot, SCOUT_SLOT } from "./slots";
 import { ACTIVE_STAGES, WAITING_STAGES } from "./store";
 import { wipOf, wipText } from "./wip";
 
@@ -29,7 +30,8 @@ import { wipOf, wipText } from "./wip";
  * waiting) and `discoveryIntervalMin` has passed, one round runs:
  *
  * 1. planning: the scout (one long-lived session per project) looks at the app and asks for at
- *    most `discoveryPerRound` review areas with `factory_plan_round`;
+ *    most `discoveryPerRound` review areas with `factory_plan_round`, which records the plan and
+ *    answers at once; the loop then starts their area reviewers as agents free up;
  * 2. reviewing: each area reviewer (a "lens" in the code: one long-lived session per area,
  *    reused round after round) reviews its area and reports findings with
  *    `factory_report_findings`;
@@ -44,9 +46,6 @@ import { wipOf, wipText } from "./wip";
  * `minBacklog` 0 turns scheduled rounds off. "Run scout now" (`runScoutNow`) starts a round on
  * demand, skipping the interval and the backlog threshold but nothing else.
  */
-
-/** The scout's claim on an agent slot (`slots.ts`): its rounds and their area reviewers. */
-export const SCOUT_SLOT = "scout";
 
 /** Why the scout does nothing while the factory drains (`drain.ts`). */
 export const DRAINING_TEXT =
@@ -216,6 +215,7 @@ async function startRound(
       startedAt: at,
       sentAt: at,
       nudgedAt: null,
+      plan: null,
       lenses: [],
       findings: [],
       filed: 0,
@@ -225,8 +225,9 @@ async function startRound(
   };
 }
 
-function endRound(scout: ScoutState, now: Date): ScoutState {
-  return { ...scout, round: null, lastRoundAt: now.toISOString() };
+/** The round is over; `note` says why when it closed before running its course. */
+function endRound(scout: ScoutState, now: Date, note: string | null = null): ScoutState {
+  return { ...scout, round: null, lastRoundAt: now.toISOString(), lastRoundNote: note };
 }
 
 async function advanceRound(
@@ -235,26 +236,52 @@ async function advanceRound(
   loop: FactoryLoop,
   now: Date,
 ): Promise<ScoutState> {
-  const scout = loop.scout;
-  const round = scout.round;
+  let scout = loop.scout;
+  let round = scout.round;
   if (!round) return scout;
+  const pending = () => (round?.plan?.pending.length ?? 0) > 0;
   // Every area reviewer reported (or the scout reviews by itself), but the work-in-progress
   // limit holds: filing waits, with the findings kept, until a PR merges. Nothing runs
   // meanwhile, so the held time doesn't count against the round's timeout.
   const holding = () => wipOf(ctx, project, loop).holding;
-  if (round.phase === "reviewing" && round.lenses.every((l) => l.reported) && holding()) {
+  if (
+    round.phase === "reviewing" &&
+    !pending() &&
+    round.lenses.every((l) => l.reported) &&
+    holding()
+  ) {
     return { ...scout, round: holdRound(round, now) };
   }
-  if (roundRunMs(round, now) > ROUND_TIMEOUT_MS) return endRound(scout, now);
+  if (roundRunMs(round, now) > ROUND_TIMEOUT_MS) {
+    return endRound(scout, now, "Closed after 3 hours without finishing.");
+  }
   const s = scout.sessionId ? ctx.repo.find(scout.sessionId)?.session : undefined;
-  if (!s || s.status === "failed") return endRound(scout, now);
+  if (!s || s.status === "failed") {
+    return endRound(scout, now, "Closed: the scout's session failed.");
+  }
   const at = now.toISOString();
+
+  // Planned area reviewers start as agents free up; the round reviews once one has started.
+  if (pending()) {
+    const started = await startPlannedLenses(ctx, project, scout, now, lensBrief(ctx, project));
+    if (started.closed) return endRound(started.scout, now, started.closed);
+    scout = started.scout;
+    round = scout.round;
+    if (!round || round.phase === "planning") return scout;
+  }
 
   if (round.phase === "planning" || round.phase === "filing") {
     if (!turnEnded(s, round.sentAt)) return scout;
     // Filing done, or the scout filed by itself without planning lenses.
     if (round.phase === "filing" || round.filed > 0) return endRound(scout, now);
-    if (round.nudgedAt) return endRound(scout, now);
+    if (round.nudgedAt) {
+      return endRound(scout, now, "Closed: the scout didn't plan the round, even when reminded.");
+    }
+    // Its turn ended long ago and the round still has no plan: the loop couldn't act on it (a
+    // plan call that never answered, then a restart). It closes rather than wake the scout.
+    if (now.getTime() - Date.parse(s.updatedAt) > LENS_START_TIMEOUT_MS) {
+      return endRound(scout, now, "Closed: the scout ended its turn without planning the round.");
+    }
     await ctx.sessions.message(s.id, SCOUT_PLAN_NUDGE);
     return { ...scout, round: { ...round, nudgedAt: at, sentAt: at } };
   }
@@ -270,7 +297,9 @@ async function advanceRound(
     if (!ls || ls.status === "failed" || ls.status === "stopped") {
       lenses.push({ ...lens, reported: true });
     } else if (!turnEnded(ls, lens.sentAt)) {
-      lenses.push(lens);
+      // Idle long after it was woken without a turn since: the wake never reached it.
+      const lost = !isBusy(ls) && now.getTime() - Date.parse(lens.sentAt) > LENS_START_TIMEOUT_MS;
+      lenses.push(lost ? { ...lens, reported: true } : lens);
     } else if (!lens.nudgedAt) {
       await ctx.sessions.message(ls.id, LENS_NUDGE);
       lenses.push({ ...lens, nudgedAt: at, sentAt: at });
@@ -278,7 +307,9 @@ async function advanceRound(
       lenses.push({ ...lens, reported: true });
     }
   }
-  if (lenses.some((l) => !l.reported)) return { ...scout, round: { ...round, lenses } };
+  if (pending() || lenses.some((l) => !l.reported)) {
+    return { ...scout, round: { ...round, lenses } };
+  }
   // Filing is the scout's next turn: it waits at the work-in-progress limit, and for a free
   // agent after everything else waiting for one (`slots.ts`), held either way.
   if (holding() || !claimSlot(ctx, project, "scout", SCOUT_SLOT, { wake: s.id })) {
@@ -321,38 +352,15 @@ export function defaultBranch(project: Project): string {
     : (project.defaultBranch ?? "main");
 }
 
-/** The scout as the dashboard shows it (`spend`: today's, against the budget). */
-export function scoutStatus(
-  ctx: FactoryContext,
-  project: Project,
-  loop: FactoryLoop,
-  spend: { usd: number; tokens: number },
-): ScoutStatus {
-  const { scout, tuning } = loop;
-  const round = scout.round;
-  const active = (id: string) => {
-    const s = ctx.repo.find(id)?.session;
-    return s !== undefined && isBusy(s);
-  };
-  return {
-    phase: round?.phase ?? "idle",
-    sessionId: scout.sessionId,
-    lenses: (round?.lenses ?? []).map((l) => ({
-      area: l.area,
-      sessionId: l.sessionId,
-      reported: l.reported,
-      active: active(l.sessionId),
-    })),
-    findings: round?.findings.length ?? 0,
-    filed: round?.filed ?? 0,
-    lastRoundAt: scout.lastRoundAt,
-    nextRoundAt:
-      round || !scout.lastRoundAt || tuning.minBacklog === 0
-        ? null
-        : new Date(
-            Date.parse(scout.lastRoundAt) + tuning.discoveryIntervalMin * 60_000,
-          ).toISOString(),
-    rounds: scout.rounds,
-    runNowBlockedBy: scoutNowBlocker(project, loop, scoutNowFacts(ctx, project, loop, spend)),
-  };
+/** An area reviewer's brief for this round, in this project. */
+function lensBrief(ctx: FactoryContext, project: Project): LensBrief {
+  return (lens, firstRun) =>
+    lensPrompt({
+      area: lens.area,
+      focus: lens.focus,
+      vision: visionOf(project).text,
+      defaultBranch: defaultBranch(project),
+      known: knownTitles(ctx, project.id),
+      firstRun,
+    });
 }

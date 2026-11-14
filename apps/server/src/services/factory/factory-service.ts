@@ -108,6 +108,8 @@ export class FactoryService {
   readonly data: FactoryStore;
   readonly ctx: FactoryContext;
   private readonly chains = new Map<string, Promise<unknown>>();
+  /** Per project, the tick waiting for its turn on the chain (`tick`). */
+  private readonly queuedTicks = new Map<string, Promise<FactoryLoop>>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
   /** Archives finished work's sessions, one at a time, outside the tick chains. */
   readonly archiver: SessionArchiver;
@@ -180,11 +182,20 @@ export class FactoryService {
     this.timers.clear();
   }
 
-  /** Run one loop step for a project (serialized per project). */
+  /**
+   * Run one loop step for a project (serialized per project). Calls made while a tick waits for
+   * its turn share that tick, which reads the state when it starts: however often a busy factory
+   * asks, at most one tick waits, so the agents' reports never queue behind a backlog of ticks.
+   */
   tick(projectId: string): Promise<FactoryLoop> {
-    return this.serialize(projectId, "tick", () =>
-      runTick(this.ctx, projectId, { digest: (p, l, day) => this.writeDigest(p, l, day) }),
-    );
+    const queued = this.queuedTicks.get(projectId);
+    if (queued) return queued;
+    const next = this.serialize(projectId, "tick", () => {
+      this.queuedTicks.delete(projectId);
+      return runTick(this.ctx, projectId, { digest: (p, l, day) => this.writeDigest(p, l, day) });
+    });
+    this.queuedTicks.set(projectId, next);
+    return next;
   }
 
   /**
@@ -485,10 +496,14 @@ export class FactoryService {
     return res;
   }
 
-  /** `factory_plan_round`: the scout's review areas for this round. */
-  planRound(session: Session, req: FactoryPlanRoundRequest) {
+  /** `factory_plan_round`: the scout's review areas for this round; the next tick starts them. */
+  async planRound(session: Session, req: FactoryPlanRoundRequest) {
     const projectId = session.projectId ?? "";
-    return this.serialize(projectId, "plan round", () => planRound(this.ctx, session, req));
+    const res = await this.serialize(projectId, "plan round", () =>
+      planRound(this.ctx, session, req),
+    );
+    this.soon(projectId);
+    return res;
   }
 
   /** `factory_report_findings`: an area reviewer's findings. */
