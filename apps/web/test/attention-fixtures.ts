@@ -52,7 +52,6 @@ export function snapshot(
     settings: { ...settings, notifications: { ...settings.notifications, ...notifications } },
     projects: [],
     sessions: [],
-    archivedSessionCounts: {},
     inbox,
     automations: [],
     scheduled: [],

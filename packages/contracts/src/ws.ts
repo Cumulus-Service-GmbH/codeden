@@ -32,11 +32,6 @@ export const RunnerConnectionStatus = z.object({
 });
 export type RunnerConnectionStatus = z.infer<typeof RunnerConnectionStatus>;
 
-/** The snapshot carries sessions archived in the last this many days... */
-export const SNAPSHOT_ARCHIVED_SESSIONS_DAYS = 7;
-/** ...and at most this many of them, the most recently archived. */
-export const SNAPSHOT_ARCHIVED_SESSIONS_MAX = 100;
-
 /** Everything the app shell needs on load. Transcripts are loaded per session. */
 export const Snapshot = z.object({
   seq: z.int().nonnegative(),
@@ -44,19 +39,7 @@ export const Snapshot = z.object({
   generatedAt: Timestamp,
   settings: Settings,
   projects: z.array(Project),
-  /**
-   * Every session that isn't archived, plus the recently archived ones
-   * (`SNAPSHOT_ARCHIVED_SESSIONS_DAYS`, at most `SNAPSHOT_ARCHIVED_SESSIONS_MAX`), oldest first.
-   * Older archived sessions are fetched when needed: one by id (`GET /api/sessions/:id`), or a
-   * project's a page at a time (`GET /api/projects/:id/sessions/archived`). So a live
-   * `session.updated` for a session the client doesn't have is one archived before that window.
-   */
   sessions: z.array(Session),
-  /**
-   * How many archived agent sessions each project has, by project id: all of them, not only
-   * those in `sessions`. Projects without any are left out.
-   */
-  archivedSessionCounts: z.record(Id, z.int().nonnegative()).default({}),
   inbox: z.array(InboxItem),
   automations: z.array(Automation),
   /** Upcoming scheduled runs across projects (§8.4 Now / Next). */

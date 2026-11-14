@@ -16,7 +16,6 @@ import { automations, inboxItems, items, sessions, threads, turns } from "../db/
 import { turnsOldestFirst } from "../db/turn-order";
 import type { AppServices } from "../services/container";
 import { badRequest, notFound } from "../services/errors";
-import { archivedSessionCounts, snapshotSessions } from "../services/sessions/archived";
 import { clientItemRecord } from "../services/sessions/client-items";
 import { agentConfigRoutes, sessionAgentConfigRoutes } from "./agent-config";
 import { automationRoutes, projectAutomationRoutes } from "./automations";
@@ -143,8 +142,7 @@ function buildSnapshot(ctx: ApiContext): Snapshot {
     generatedAt: new Date().toISOString(),
     settings: s.settings.get(),
     projects: s.projects.list(),
-    sessions: snapshotSessions(s.db),
-    archivedSessionCounts: archivedSessionCounts(s.db),
+    sessions: s.db.select().from(sessions).orderBy(asc(sessions.createdAt)).all().map(rowToSession),
     inbox: s.inbox.list({ status: "open" }),
     automations: s.db.select().from(automations).all().map(rowToAutomation),
     scheduled: s.orchestration.automation.listScheduledRuns(null, 20),

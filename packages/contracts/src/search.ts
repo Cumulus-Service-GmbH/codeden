@@ -59,10 +59,7 @@ export const SnippetPart = z.object({
 });
 export type SnippetPart = z.infer<typeof SnippetPart>;
 
-/**
- * One transcript item that matched. Session details come from the app snapshot, or for an older
- * archived session from `GET /api/sessions/:id`.
- */
+/** One transcript item that matched. Session details come from the app snapshot. */
 export const TranscriptSearchHit = z.object({
   sessionId: Id,
   /** The thread holding the item: the session's root thread or a subagent's. */

@@ -15,7 +15,7 @@ import { AutonomyModeButton } from "@/components/factory/autonomy-dialog";
 import { OpenFactoryViewButton } from "@/components/factory/factory-actions";
 import { FactoryPanel } from "@/components/factory/factory-panel";
 import { ProjectGithub } from "@/components/github/project-github";
-import { ArchivedSessionsList, SessionsList } from "@/components/project/lists";
+import { SessionsList } from "@/components/project/lists";
 import { NowNext } from "@/components/project/now-next";
 import { ProjectExecution } from "@/components/project/project-execution";
 import { ProjectSettings } from "@/components/project/project-settings";
@@ -24,7 +24,7 @@ import { Button } from "@/components/ui/button";
 import { ProjectSpendCard } from "@/components/usage/project-spend-card";
 import { useProjectStatus } from "@/lib/orchestration";
 import { useSnapshot } from "@/lib/queries";
-import { activeSessions, type SessionView, sessionCounts } from "@/lib/session-filter";
+import { type SessionView, sessionCounts, sessionsInView } from "@/lib/session-filter";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "./page-header";
 
@@ -59,8 +59,8 @@ export function ProjectPage({
   }, [showArchived]);
   const project = data?.projects.find((p) => p.id === projectId);
   if (!data || !project) return null;
-  const counts = sessionCounts(data, projectId);
-  const active = activeSessions(data.sessions, projectId);
+  const counts = sessionCounts(data.sessions, projectId);
+  const listed = sessionsInView(data.sessions, projectId, sessionView);
   const factory = isFactoryMode(project.autonomyMode);
   const titleOf = (id: string | null) => data.sessions.find((s) => s.id === id)?.title ?? null;
   const go = (search: ProjectSearch) =>
@@ -179,10 +179,12 @@ export function ProjectPage({
                     ))}
                   </div>
                 </div>
-                {showArchived ? (
-                  <ArchivedSessionsList projectId={projectId} />
-                ) : active.length > 0 ? (
-                  <SessionsList sessions={active} />
+                {listed.length > 0 ? (
+                  <SessionsList sessions={listed} />
+                ) : showArchived ? (
+                  <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-xs text-muted-foreground">
+                    No archived sessions. Archive one from its menu to tidy the sidebar.
+                  </p>
                 ) : (
                   <div
                     className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border px-4 py-6 text-center text-xs text-muted-foreground"

@@ -8,7 +8,6 @@ import { providerAvailability } from "@/components/composer/model-picker/logic";
 import type { CodeDenClient } from "../client";
 import { ApiRequestError } from "../http";
 import { startAmbient } from "./ambient";
-import { mockArchivedPage } from "./archived";
 import { mockAutomationsApi } from "./automations";
 import { mockExportSession } from "./export-session";
 import { mockFactoryApi } from "./factory";
@@ -105,8 +104,6 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
         },
         60,
       ),
-    listArchivedSessions: (projectId, query) =>
-      delay(mockArchivedPage(world.snapshot.sessions, projectId, query), 80),
     getToolOutput(sessionId, itemId) {
       const item = world.item(sessionId, itemId);
       if (item?.kind !== "tool_call") return Promise.reject(new Error("No such tool call"));

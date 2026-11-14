@@ -1,4 +1,4 @@
-import type { TranscriptSearchHit } from "@codeden/contracts";
+import type { Project, Session, TranscriptSearchHit } from "@codeden/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { defaultFilter } from "cmdk";
 import { TextSearch } from "lucide-react";
@@ -6,7 +6,6 @@ import { StatusDot } from "@/components/common/status-dot";
 import { SnippetText } from "@/components/search/snippet-text";
 import { CommandGroup, CommandItem } from "@/components/ui/command";
 import { ageShort } from "@/lib/format";
-import { useProject, useSession } from "@/lib/queries";
 import {
   canSearchTranscripts,
   hitKindLabel,
@@ -36,10 +35,17 @@ function Badge({ children }: { children: string }) {
   );
 }
 
-function HitRow({ hit, onSelect }: { hit: TranscriptSearchHit; onSelect: () => void }) {
-  // An older archived session isn't in the snapshot: it is fetched by id.
-  const session = useSession(hit.sessionId);
-  const project = useProject(session?.projectId);
+function HitRow({
+  hit,
+  session,
+  project,
+  onSelect,
+}: {
+  hit: TranscriptSearchHit;
+  session: Session | undefined;
+  project: Project | undefined;
+  onSelect: () => void;
+}) {
   const role = session ? roleBadge(session.role) : null;
   return (
     <CommandItem
@@ -76,7 +82,17 @@ function HitRow({ hit, onSelect }: { hit: TranscriptSearchHit; onSelect: () => v
  * "Transcripts" in the command palette: the newest transcript matches for what's typed (3+
  * characters), and a row that opens the full results with their filters and more pages.
  */
-export function PaletteTranscripts({ search, close }: { search: string; close: () => void }) {
+export function PaletteTranscripts({
+  search,
+  sessions,
+  projects,
+  close,
+}: {
+  search: string;
+  sessions: Session[];
+  projects: Project[];
+  close: () => void;
+}) {
   const navigate = useNavigate();
   const { data, searching, error } = useTranscriptSearch(search, { limit: 5 });
   if (!canSearchTranscripts(search)) return null;
@@ -101,9 +117,18 @@ export function PaletteTranscripts({ search, close }: { search: string; close: (
 
   return (
     <CommandGroup heading="Transcripts">
-      {data?.hits.map((hit) => (
-        <HitRow key={`${hit.sessionId}:${hit.itemId}`} hit={hit} onSelect={() => open(hit)} />
-      ))}
+      {data?.hits.map((hit) => {
+        const session = sessions.find((s) => s.id === hit.sessionId);
+        return (
+          <HitRow
+            key={`${hit.sessionId}:${hit.itemId}`}
+            hit={hit}
+            session={session}
+            project={projects.find((p) => p.id === session?.projectId)}
+            onSelect={() => open(hit)}
+          />
+        );
+      })}
       {note && <div className="px-2 py-1.5 pl-9 text-xs text-muted-foreground">{note}</div>}
       <CommandItem
         value={`${ALL}${q}`}

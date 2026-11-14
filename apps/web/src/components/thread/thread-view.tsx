@@ -6,7 +6,7 @@ import { EmptyState } from "@/components/common/bits";
 import { SessionComposer } from "@/components/composer/composer";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useClient } from "@/lib/api";
-import { useSessionLookup, useSnapshotData, useTranscript } from "@/lib/queries";
+import { useSession, useSnapshotData, useTranscript } from "@/lib/queries";
 import { activeTurn } from "@/lib/transcript/reducer";
 import { latestFollowups } from "@/lib/transcript/timeline";
 import { useComposerStore } from "@/stores/composer";
@@ -79,8 +79,7 @@ export function ThreadView({
   empty?: React.ReactNode;
   focusItemId?: string;
 }) {
-  // An older archived session isn't in the snapshot: it is fetched by id.
-  const { session, loading } = useSessionLookup(sessionId);
+  const session = useSession(sessionId);
   const { transcript, isLoading, error } = useTranscript(sessionId);
   const threadId = transcript?.rootThreadId ?? session?.rootThreadId ?? null;
   const running = Boolean(transcript && threadId && activeTurn(transcript, threadId));
@@ -101,14 +100,6 @@ export function ThreadView({
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="h-12 shrink-0 border-b border-border" />
           <FirstMessage input={firstMessage} status="starting" />
-        </div>
-      );
-    }
-    if (loading) {
-      return (
-        <div className="flex min-h-0 flex-1 flex-col">
-          <div className="h-12 shrink-0 border-b border-border" />
-          <TranscriptSkeleton />
         </div>
       );
     }

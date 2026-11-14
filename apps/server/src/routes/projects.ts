@@ -1,5 +1,4 @@
 import {
-  ArchivedSessionsQuery,
   CreateProjectRequest,
   ProjectCommandsQuery,
   ReorderProjectsRequest,
@@ -11,14 +10,11 @@ import { Hono } from "hono";
 import { z } from "zod";
 import type { AppServices } from "../services/container";
 import { listFolderFiles } from "../services/files/session-files";
-import { archivedSessionsPage } from "../services/sessions/archived";
 import { jsonBody, queryOf } from "./validate";
 
 /**
  * `/api/projects`: add from a folder or clone, list, reorder, update (and pin), archive, and
  * re-detect the folder's git checkout and GitHub remote (`refresh`, `disconnect-github`).
- * `sessions/archived` pages through the project's archived sessions (the snapshot carries only
- * the recent ones).
  * `commands` and `files` feed the composer's `/` and `@` menus in the New session draft, before
  * the session and its worktree exist: they read the project folder.
  */
@@ -47,10 +43,6 @@ export function projectRoutes(s: AppServices) {
         s.agentConfig.projectSlashCommands(c.req.param("id"), c.req.valid("query").provider),
       ),
     )
-    .get("/:id/sessions/archived", queryOf(ArchivedSessionsQuery), (c) => {
-      const project = s.projects.get(c.req.param("id"));
-      return c.json(archivedSessionsPage(s.db, project.id, c.req.valid("query")));
-    })
     .get("/:id/files", (c) =>
       c.json<SessionFileList>(
         listFolderFiles(s.projects.get(c.req.param("id")).path, s.paths.home),

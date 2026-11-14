@@ -49,37 +49,8 @@ export function useRecheckSetup() {
   });
 }
 
-/** The query holding a session the snapshot doesn't carry, fetched by id. */
-export const sessionRecordKey = (sessionId: string) => ["session-record", sessionId] as const;
-
-/**
- * A session by id, from the snapshot, or fetched when the snapshot doesn't carry it: one
- * archived before its recent window, opened from a link, a search hit or a factory item (§6).
- * Realtime keeps the fetched copy current (`syncSessionQueries`). `loading` while fetching.
- */
-export function useSessionLookup(sessionId: string | undefined): {
-  session: Session | undefined;
-  loading: boolean;
-} {
-  const client = useClient();
-  const { data: snapshot } = useSnapshot();
-  const listed = sessionId ? snapshot?.sessions.find((x) => x.id === sessionId) : undefined;
-  const fetch = Boolean(sessionId && snapshot && !listed);
-  const record = useQuery({
-    queryKey: sessionRecordKey(sessionId ?? ""),
-    queryFn: async () => (await client.getSessionDetail(sessionId ?? "")).session,
-    enabled: fetch,
-    staleTime: Infinity,
-    retry: false,
-  });
-  return {
-    session: listed ?? (fetch ? record.data : undefined),
-    loading: Boolean(sessionId) && (!snapshot || (fetch && record.isLoading)),
-  };
-}
-
 export function useSession(sessionId: string | undefined): Session | undefined {
-  return useSessionLookup(sessionId).session;
+  return useSnapshotData((s) => s.sessions.find((x) => x.id === sessionId), undefined);
 }
 
 export function useProject(projectId: string | null | undefined): Project | undefined {

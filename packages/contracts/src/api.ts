@@ -291,27 +291,6 @@ export const ListSessionsQuery = z.object({
 });
 export type ListSessionsQuery = z.infer<typeof ListSessionsQuery>;
 
-/** Archived sessions per page when `limit` is omitted. */
-export const ARCHIVED_SESSIONS_DEFAULT_LIMIT = 50;
-
-/** `GET /api/projects/:id/sessions/archived` query: a page of a project's archived agent sessions. */
-export const ArchivedSessionsQuery = z.object({
-  /** Continue after the previous page: its `nextCursor`. Opaque to clients. */
-  cursor: z.string().min(1).max(200).optional(),
-  /** Most sessions to return. */
-  limit: z.coerce.number().int().min(1).max(100).default(ARCHIVED_SESSIONS_DEFAULT_LIMIT),
-});
-export type ArchivedSessionsQuery = z.infer<typeof ArchivedSessionsQuery>;
-export type ArchivedSessionsQueryInit = z.input<typeof ArchivedSessionsQuery>;
-
-/** `GET /api/projects/:id/sessions/archived` response: the most recently archived first. */
-export const ArchivedSessionsPage = z.object({
-  sessions: z.array(Session),
-  /** Pass as `cursor` for the next page; null when this was the last one. */
-  nextCursor: z.string().nullable(),
-});
-export type ArchivedSessionsPage = z.infer<typeof ArchivedSessionsPage>;
-
 /** `GET /api/sessions/:id`. */
 export const SessionDetail = z.object({
   session: Session,
