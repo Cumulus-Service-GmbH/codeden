@@ -309,6 +309,9 @@ export const SessionStartMeta = z.object({
 });
 export type SessionStartMeta = z.infer<typeof SessionStartMeta>;
 
+/** Most session ids one `GET /api/sessions?ids=` asks for. */
+export const SESSION_LOOKUP_MAX = 100;
+
 /** `GET /api/sessions` query. */
 export const ListSessionsQuery = z.object({
   projectId: Id.optional(),
@@ -319,6 +322,16 @@ export const ListSessionsQuery = z.object({
     .optional(),
   workKey: z.string().optional(),
   role: Role.optional(),
+  /**
+   * Only these sessions, comma-separated (at most `SESSION_LOOKUP_MAX`), archived or not: the
+   * sessions a view needs that the snapshot no longer carries (§6), looked up in one request.
+   * Ids that don't exist are left out of the answer.
+   */
+  ids: z
+    .string()
+    .transform((s) => s.split(","))
+    .pipe(z.array(Id).min(1).max(SESSION_LOOKUP_MAX))
+    .optional(),
 });
 export type ListSessionsQuery = z.infer<typeof ListSessionsQuery>;
 

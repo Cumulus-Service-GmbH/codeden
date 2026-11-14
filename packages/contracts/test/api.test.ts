@@ -21,6 +21,7 @@ import {
   RetryInboxResponse,
   ReviewSessionRequest,
   ReviewSessionResponse,
+  SESSION_LOOKUP_MAX,
   SendMessageRequest,
   SessionSnapshot,
   SessionSnapshotQuery,
@@ -379,6 +380,10 @@ describe("api schemas", () => {
     expect(ThreadItemsQuery.parse({ before: "10" })).toEqual({ before: 10, limit: 100 });
     expect(ListSessionsQuery.parse({ status: "running,idle" }).status).toEqual(["running", "idle"]);
     expect(() => ListSessionsQuery.parse({ status: "nope" })).toThrow();
+    expect(ListSessionsQuery.parse({ ids: "s-1,s-2" }).ids).toEqual(["s-1", "s-2"]);
+    expect(() => ListSessionsQuery.parse({ ids: "s-1,,s-2" })).toThrow();
+    const tooMany = Array.from({ length: SESSION_LOOKUP_MAX + 1 }, (_, i) => `s-${i}`).join(",");
+    expect(() => ListSessionsQuery.parse({ ids: tooMany })).toThrow();
     expect(SendMessageRequest.parse({ input: { text: "x" } }).whenBusy).toBe("queue");
   });
 
