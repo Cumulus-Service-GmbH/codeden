@@ -161,6 +161,10 @@ describe("secret redaction (#264)", () => {
         "xoxb-1234567890-abcdefghij and AKIAABCDEFGHIJKLMNOP",
         "PGPASSWORD=hunter2-correct psql -h db",
         "NGROK_AUTHTOKEN=2abcDEF34ghi ngrok http 80",
+        // Options with a prefix before the secret word, which the bubble has always masked.
+        "psql --db-password=hunter2 -h db",
+        "wp core install --admin_password=hunter22",
+        "sync --api-token=abc123def",
       ].map(redactSecrets),
     ).toEqual([
       "https://***@github.com/acme/shop.git",
@@ -172,6 +176,9 @@ describe("secret redaction (#264)", () => {
       "*** and ***",
       "PGPASSWORD=*** psql -h db",
       "NGROK_AUTHTOKEN=*** ngrok http 80",
+      "psql --db-password=*** -h db",
+      "wp core install --admin_password=***",
+      "sync --api-token=***",
     ]);
   });
 

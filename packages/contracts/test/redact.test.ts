@@ -101,6 +101,23 @@ describe("redactAndCount: KEY=value", () => {
     for (const [input, output] of lines) expect(hide(input as string), input).toBe(output);
   });
 
+  it("hides options with a prefix before the secret word (--db-password=, --api-token=)", () => {
+    const lines = [
+      ["psql --db-password=hunter2 -h db", `psql --db-password=${REDACTED} -h db`],
+      [
+        "wp core install --admin_password=hunter22 --url=x.dev",
+        `wp core install --admin_password=${REDACTED} --url=x.dev`,
+      ],
+      ["--api-token=abc123def", `--api-token=${REDACTED}`],
+      ["gh-sync --github-token=abc123def", `gh-sync --github-token=${REDACTED}`],
+      ["npm-cli --registry-token=abc123def", `npm-cli --registry-token=${REDACTED}`],
+      ["tool -db-password=hunter22", `tool -db-password=${REDACTED}`],
+      ["my-db-password=hunter22", `my-db-password=${REDACTED}`],
+      ["Use the token abcdefgh1234 for the API", `Use the token ${REDACTED} for the API`],
+    ];
+    for (const [input, output] of lines) expect(hide(input as string), input).toBe(output);
+  });
+
   it("counts each hidden value once, and a second pass changes nothing", () => {
     const text = `GITHUB_TOKEN=ghp_${rep("A1b2C3d4", 5)} API_KEY=abc123`;
     const once = redactAndCount(text);
@@ -135,6 +152,8 @@ describe("redactAndCount: KEY=value", () => {
       "auth: required",
       'fetch(url, { credentials: "include" })',
       "BYPASS_CACHE=1",
+      "MAX_TOKEN=4096 MIN_PASSWORD=8",
+      "--token-file=/run/secrets/token --password-stdin",
     ]) {
       expect(redactAndCount(plain), plain).toEqual({ text: plain, count: 0 });
     }
@@ -184,6 +203,8 @@ describe("redactAndCount: large input", () => {
     ["JWT-like starts", "-eyJabcdefghij".repeat(size / 14)],
     ["unfinished private keys", "-----BEGIN RSA PRIVATE KEY-----\n".repeat(size / 32)],
     ["secret keys without values", "token: token: ".repeat(size / 14)],
+    ["double dashes", "ab--".repeat(size / 4)],
+    ["option-like dashes", "--a".repeat(size / 3)],
   ];
 
   it.each(inputs)("redacts %s of 200 KB in well under a second", (_name, text) => {

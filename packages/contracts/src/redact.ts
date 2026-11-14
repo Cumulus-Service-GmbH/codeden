@@ -122,6 +122,8 @@ const NOT_SECRET_TAIL = new Set([
   "method",
   "policy",
 ]);
+/** A key starting with one of these is a limit or a count (`MAX_TOKEN=4096`). */
+const NOT_SECRET_HEAD = new Set(["max", "min", "num"]);
 /** The shell's working directories, not passwords. */
 const NOT_SECRET_NAMES = new Set(["PWD", "OLDPWD"]);
 
@@ -139,7 +141,7 @@ function secretName(name: string): boolean {
     .split(/[^a-z0-9]+/)
     .filter(Boolean);
   const last = words.at(-1);
-  if (!last || NOT_SECRET_TAIL.has(last)) return false;
+  if (!last || NOT_SECRET_TAIL.has(last) || NOT_SECRET_HEAD.has(words[0] ?? "")) return false;
   return words.some((w, i) => secretWord(w, words[i - 1]));
 }
 
@@ -191,10 +193,13 @@ function regexRule(pattern: RegExp, rewrite: Rewrite): Rule {
 }
 
 /**
- * A key and `=` or `:`. The key is at most 64 characters and starts after a separator (never
- * inside a word or after `-`), so a long run is tried once, not from each of its characters.
+ * A key and `=` or `:`. The key is at most 64 characters and starts after a separator, never
+ * inside a word or a kebab-case run, so a long run is tried once, not from each of its
+ * characters. It may start after an option's dashes (`--db-password=…`, `-api-token=…`): a `-`
+ * that doesn't follow a word character.
  */
-const KEY_SEP = /(?<![\w$.-])(["']?)([A-Za-z_][A-Za-z0-9_.-]{0,63})\1([ \t]*[=:][ \t]*)/g;
+const KEY_SEP =
+  /(?<![\w$.])(?<![\w$.]-)(["']?)([A-Za-z_][A-Za-z0-9_.-]{0,63})\1([ \t]*[=:][ \t]*)/g;
 /** The value after a key: quoted, or up to whitespace or punctuation that ends a value. */
 const VALUE = /"[^"\n]*"|'[^'\n]*'|[^\s"'`,;&)\]}]+/y;
 
@@ -235,7 +240,7 @@ const option: Rewrite = (mask, _match, [flag = "", sep = "", value = ""]) =>
 const authorization: Rewrite = (mask, _match, [label = "", scheme = "", value = ""]) =>
   scheme || /\d/.test(value) ? `${label}${mask}` : null;
 
-/** `Bearer …` or `Basic …` outside a header: only a value that looks random. */
+/** `Bearer …`, `Basic …` or `token …` outside a header: only a value that looks random. */
 const bearer: Rewrite = (mask, _match, [label = "", value = ""]) =>
   /\d/.test(value) ? `${label}${mask}` : null;
 
@@ -261,8 +266,8 @@ const RULES: readonly Rule[] = [
     ),
     authorization,
   ),
-  // Bearer <token> elsewhere (`curl --oauth2-bearer`, prose).
-  regexRule(new RegExp(`\\b((?:bearer|basic)[ \\t]+)(${TOKEN_VALUE})`, "gi"), bearer),
+  // Bearer <token> or token <value> elsewhere (`curl --oauth2-bearer`, prose).
+  regexRule(new RegExp(`\\b((?:bearer|basic|token)[ \\t]+)(${TOKEN_VALUE})`, "gi"), bearer),
   // Well-known token formats.
   regexRule(
     new RegExp(

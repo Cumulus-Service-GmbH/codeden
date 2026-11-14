@@ -183,10 +183,12 @@ describe("transcript export: secrets (#315)", () => {
       source([
         rec(command("c6", "PGPASSWORD=hunter2-correct psql -h db -c 'select 1'")),
         rec(command("c7", "MYSQL_PWD=hunter22 mysql -u app")),
+        rec(command("c8", "wp core install --admin_password=hunter22 --url=x.dev")),
       ]),
     );
     expect(md).toContain("* Ran `PGPASSWORD=[redacted] psql -h db -c 'select 1'`");
     expect(md).toContain("* Ran `MYSQL_PWD=[redacted] mysql -u app`");
+    expect(md).toContain("* Ran `wp core install --admin_password=[redacted] --url=x.dev`");
     expect(md).not.toContain("hunter2");
   });
 
