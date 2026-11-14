@@ -17,6 +17,12 @@ export function applyTranscriptMessage(
     turns: { ...prev.turns },
     items: { ...prev.items },
   };
+  // A transcript holding only the latest turns ignores changes to root turns before them (a late
+  // update to an old item): those arrive, current, with their page.
+  const root = prev.rootThreadId ? prev.threads[prev.rootThreadId] : undefined;
+  const partial = prev.earlierTurns > 0 && root !== undefined;
+  const firstStart = root ? prev.turns[root.turnIds[0] ?? ""]?.startedAt : undefined;
+  const firstPosition = root ? prev.items[root.itemIds[0] ?? ""]?.position : undefined;
   const touched = new Set<string>();
   const thread = (id: string): ThreadState => {
     const existing = state.threads[id];
@@ -46,6 +52,13 @@ export function applyTranscriptMessage(
     if (!t.parentThreadId && !state.rootThreadId) state.rootThreadId = t.id;
   }
   for (const turn of msg.turns) {
+    const unloaded =
+      partial &&
+      turn.threadId === root?.id &&
+      !prev.turns[turn.id] &&
+      firstStart !== undefined &&
+      turn.startedAt < firstStart;
+    if (unloaded) continue;
     state.turns[turn.id] = {
       id: turn.id,
       threadId: turn.threadId,
@@ -70,6 +83,13 @@ export function applyTranscriptMessage(
   }
   for (const r of msg.items) {
     const existing = state.items[r.item.id];
+    const unloaded =
+      partial &&
+      !existing &&
+      r.threadId === root?.id &&
+      firstPosition !== undefined &&
+      r.position < firstPosition;
+    if (unloaded) continue;
     state.items[r.item.id] = {
       item: r.item,
       threadId: r.threadId,

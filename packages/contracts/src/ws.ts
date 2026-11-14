@@ -70,13 +70,21 @@ export const Snapshot = z.object({
 });
 export type Snapshot = z.infer<typeof Snapshot>;
 
-/** One session's transcript (`GET /api/sessions/:id/snapshot`). */
+/**
+ * One session's transcript (`GET /api/sessions/:id/snapshot`): the whole session, or with
+ * `SessionSnapshotQuery.turns` the latest root turns only (and the subagent threads they hold).
+ */
 export const SessionSnapshot = z.object({
   seq: z.int().nonnegative(),
   session: Session,
   threads: z.array(Thread),
   turns: z.array(Turn),
   items: z.array(ItemRecord),
+  /**
+   * Root-thread turns that started before the earliest one included, left out of this snapshot
+   * (load them with `before`). Always 0 for the whole session.
+   */
+  earlierTurns: z.int().nonnegative().default(0),
 });
 export type SessionSnapshot = z.infer<typeof SessionSnapshot>;
 

@@ -484,6 +484,7 @@ describe("the quick chat's latest turns (#181)", () => {
       usage: null,
       title: null,
       model: null,
+      earlierTurns: 0,
     } as unknown as Parameters<typeof latestTurns>[0];
     const { transcript: cut, hidden } = latestTurns(transcript, "root", 3);
     expect(hidden).toBe(2);

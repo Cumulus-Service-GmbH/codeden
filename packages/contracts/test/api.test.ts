@@ -19,6 +19,8 @@ import {
   ReorderProjectsRequest,
   RetryInboxResponse,
   SendMessageRequest,
+  SessionSnapshot,
+  SessionSnapshotQuery,
   SessionTranscriptExport,
   SetupCheck,
   SetupToolId,
@@ -309,6 +311,33 @@ describe("api schemas", () => {
     expect(roundTrip(ArchivedSessionsPage, { sessions: [], nextCursor: null }).nextCursor).toBe(
       null,
     );
+  });
+
+  it("pages a session snapshot by root turns", () => {
+    expect(roundTrip(SessionSnapshotQuery, {})).toEqual({});
+    expect(SessionSnapshotQuery.parse({ turns: "20" })).toEqual({ turns: 20 });
+    expect(roundTrip(SessionSnapshotQuery, { turns: 20, before: "u9" })).toEqual({
+      turns: 20,
+      before: "u9",
+    });
+    expect(roundTrip(SessionSnapshotQuery, { turns: 3, item: "i1" })).toEqual({
+      turns: 3,
+      item: "i1",
+    });
+    expect(() => SessionSnapshotQuery.parse({ turns: "0" })).toThrow();
+    expect(() => SessionSnapshotQuery.parse({ before: "u9" })).toThrow();
+    expect(() => SessionSnapshotQuery.parse({ item: "i1" })).toThrow();
+    expect(() => SessionSnapshotQuery.parse({ turns: 5, before: "u9", item: "i1" })).toThrow();
+    const snapshot = {
+      seq: 3,
+      session: sampleSession,
+      threads: [],
+      turns: [],
+      items: [],
+    };
+    // A server from before paging sent no count: it was always the whole session.
+    expect(roundTrip(SessionSnapshot, snapshot).earlierTurns).toBe(0);
+    expect(roundTrip(SessionSnapshot, { ...snapshot, earlierTurns: 12 }).earlierTurns).toBe(12);
   });
 
   it("coerces query strings", () => {

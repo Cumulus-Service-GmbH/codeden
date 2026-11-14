@@ -189,6 +189,7 @@ describe("transcript watch", () => {
         updatedAt: ts,
       },
     ],
+    earlierTurns: 0,
   };
 
   it("replaces rows by id and orders new items by position", () => {

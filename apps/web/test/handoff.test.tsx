@@ -218,6 +218,7 @@ describe("handing a session off", () => {
         ],
         turns: [],
         items: [],
+        earlierTurns: 0,
       }),
     );
     let blocked: string | null | undefined;

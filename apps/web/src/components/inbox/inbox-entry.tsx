@@ -29,7 +29,11 @@ function planBefore(transcript: TranscriptState, itemId: string): string | undef
 
 /** The mirrored approval or question, answered with the same card as the transcript. */
 function MirroredRequest({ item }: { item: InboxItem }) {
-  const { transcript } = useTranscript(item.sessionId ?? undefined);
+  // The latest turn, reaching back to the request if it is older.
+  const { transcript } = useTranscript(item.sessionId ?? undefined, {
+    turns: 1,
+    ...(item.itemId ? { item: item.itemId } : {}),
+  });
   const mirrored = item.itemId ? transcript?.items[item.itemId]?.item : undefined;
   if (!item.sessionId) return null;
   if (!transcript) return <Skeleton className="h-24 w-full rounded-xl" />;

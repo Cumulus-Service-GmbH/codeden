@@ -95,7 +95,8 @@ export function startReadAloud(
   const readFinished = async (session: Session) => {
     const sessionId = session.id;
     if (!allowed(sessionId)) return;
-    const state = transcriptFromSnapshot(await client.getSessionSnapshot(sessionId));
+    // The turn that just finished is among the latest few.
+    const state = transcriptFromSnapshot(await client.getSessionSnapshot(sessionId, { turns: 3 }));
     const turnId = latestCompletedRootTurn(state);
     const text = turnId ? finalAssistantText(state, turnId) : null;
     const s = settings();

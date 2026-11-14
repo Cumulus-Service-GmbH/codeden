@@ -53,6 +53,11 @@ export interface TranscriptState {
   usage: Usage | null;
   title: string | null;
   model: string | null;
+  /**
+   * Root-thread turns before the earliest loaded one, still only on the server: a long session
+   * opens at its latest turns and loads earlier ones on demand (0 when it is all here).
+   */
+  earlierTurns: number;
 }
 
 export function emptyTranscript(sessionId: string): TranscriptState {
@@ -66,6 +71,7 @@ export function emptyTranscript(sessionId: string): TranscriptState {
     usage: null,
     title: null,
     model: null,
+    earlierTurns: 0,
   };
 }
 
@@ -76,6 +82,7 @@ export function transcriptFromSnapshot(snap: SessionSnapshot): TranscriptState {
   state.rootThreadId = snap.session.rootThreadId;
   state.title = snap.session.title;
   state.model = snap.session.model;
+  state.earlierTurns = snap.earlierTurns;
   for (const t of snap.threads) {
     state.threads[t.id] = {
       id: t.id,

@@ -85,6 +85,7 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
   const client: CodeDenClient = {
     kind: "mock",
     getSnapshot: () => delay(world.snapshot, 150),
+    // The mock's sessions are short: it always answers with the whole session.
     getSessionSnapshot: (id) => delay(world.sessionSnapshot(id), 120),
     searchTranscripts: (req) => delay(mockSearch(world, req), 150),
     subscribe: (fromSeq, onMessage) => world.subscribe(fromSeq, onMessage),

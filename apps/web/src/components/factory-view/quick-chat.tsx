@@ -16,7 +16,8 @@ const LATEST_TURNS = 3;
 
 /** The PM session's latest turns, streamed like any session, and its composer. */
 function PmThread({ session, projectId }: { session: Session; projectId: string }) {
-  const { transcript, isLoading } = useTranscript(session.id);
+  // Only the turns it shows: the PM's whole history stays on the server.
+  const { transcript, isLoading } = useTranscript(session.id, { turns: LATEST_TURNS });
   const threadId = transcript?.rootThreadId ?? session.rootThreadId ?? null;
   const running = Boolean(transcript && threadId && activeTurn(transcript, threadId));
   const latest = useMemo(

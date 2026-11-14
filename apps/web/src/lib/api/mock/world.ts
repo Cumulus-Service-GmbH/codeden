@@ -182,6 +182,7 @@ export class MockWorld {
       })),
       turns: Object.values(t.turns).map((turn) => ({ ...turn, sessionId })),
       items,
+      earlierTurns: 0,
     };
   }
 }

@@ -59,14 +59,13 @@ export function handoffBlocked(session: Session, turns: number | undefined): str
 }
 
 /**
- * How many turns a session has had, from its loaded transcript (the session on screen: a
- * transcript is only kept once its snapshot, every turn included, has loaded); undefined when
- * it isn't loaded.
+ * How many turns a session has had, from its loaded transcript (the session on screen): the
+ * turns loaded plus the earlier root turns still on the server; undefined when it isn't loaded.
  */
 export function useTurnCount(sessionId: string): number | undefined {
   return useTranscriptsStore((s) => {
     const transcript = s.byId[sessionId];
-    return transcript ? Object.keys(transcript.turns).length : undefined;
+    return transcript ? Object.keys(transcript.turns).length + transcript.earlierTurns : undefined;
   });
 }
 

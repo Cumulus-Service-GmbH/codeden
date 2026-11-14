@@ -1,6 +1,7 @@
 import type { AgentEvent, SessionSnapshot, TranscriptMessage } from "@codeden/contracts";
 import { create } from "zustand";
 import { applyTranscriptMessage } from "@/lib/transcript/apply-transcript";
+import { coversTranscript, mergeTranscripts } from "@/lib/transcript/merge";
 import {
   applyAgentEvent,
   type TranscriptState,
@@ -36,8 +37,9 @@ function finishedTurns(prev: TranscriptState, next: TranscriptState): TurnFinish
 interface TranscriptsState {
   byId: Record<string, TranscriptState>;
   /**
-   * Load (or refresh) a session from its snapshot. Never goes backwards in seq unless
-   * `replace` is set (after a `transcript_resync`).
+   * Load (or refresh) a session from its snapshot, merged into what is already loaded: an
+   * earlier page, or a page reaching back to a search hit, adds to the latest turns. Never goes
+   * backwards in seq unless `replace` is set (after a `transcript_resync`).
    */
   load: (snap: SessionSnapshot, opts?: { replace?: boolean }) => void;
   /** Apply a live agent event. Ignored for sessions not loaded or already past `seq`. */
@@ -52,8 +54,10 @@ export const useTranscriptsStore = create<TranscriptsState>()((set, get) => ({
   load: (snap, opts) =>
     set((s) => {
       const existing = s.byId[snap.session.id];
-      if (existing && existing.seq >= snap.seq && !opts?.replace) return s;
-      return { byId: { ...s.byId, [snap.session.id]: transcriptFromSnapshot(snap) } };
+      const loaded = transcriptFromSnapshot(snap);
+      if (!existing || opts?.replace) return { byId: { ...s.byId, [snap.session.id]: loaded } };
+      if (coversTranscript(existing, loaded)) return s;
+      return { byId: { ...s.byId, [snap.session.id]: mergeTranscripts(existing, loaded) } };
     }),
   apply: (sessionId, event, seq, ts) => {
     const existing = get().byId[sessionId];

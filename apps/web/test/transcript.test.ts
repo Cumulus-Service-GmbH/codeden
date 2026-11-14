@@ -184,6 +184,7 @@ describe("turn order", () => {
     ],
     turns: [turn("a", 3), turn("b", 1), turn("c", 2)],
     items: [...turnItems("b", 0), ...turnItems("c", 2), ...turnItems("a", 4)],
+    earlierTurns: 0,
   };
 
   it("builds a snapshot's turns in start order, whatever their ids", () => {

@@ -357,6 +357,34 @@ export const ThreadItemsQuery = z.object({
 });
 export type ThreadItemsQuery = z.infer<typeof ThreadItemsQuery>;
 
+/**
+ * `GET /api/sessions/:id/snapshot` query. Without `turns` the snapshot holds the whole session.
+ * With it, the snapshot holds only the latest `turns` turns of the root thread, their items, and
+ * the subagent threads those items started (with all of their turns and items), so opening a
+ * long-lived session costs a page, not its history. `SessionSnapshot.earlierTurns` counts the
+ * root turns left out before them.
+ */
+export const SessionSnapshotQuery = z
+  .object({
+    /** Only the latest this many turns of the root thread. */
+    turns: z.coerce.number().int().min(1).max(500).optional(),
+    /** With `turns`: the page before this root turn (the turns that started before it). */
+    before: Id.optional(),
+    /**
+     * With `turns`: reach back far enough to include the root turn that holds this item (in the
+     * root thread, or in a subagent thread under it), so a search hit or link opens at it. An
+     * item the session doesn't have is ignored.
+     */
+    item: Id.optional(),
+  })
+  .refine((q) => q.turns !== undefined || (q.before === undefined && q.item === undefined), {
+    message: "before and item need turns",
+  })
+  .refine((q) => q.before === undefined || q.item === undefined, {
+    message: "before and item can't be combined",
+  });
+export type SessionSnapshotQuery = z.infer<typeof SessionSnapshotQuery>;
+
 /** A page of transcript items. Large tool outputs are previews (`output.truncated`). */
 export const ThreadItemsPage = z.object({
   threadId: Id,

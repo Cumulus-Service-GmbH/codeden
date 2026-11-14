@@ -39,6 +39,7 @@ import type {
   SessionFileContent,
   SessionFileList,
   SessionSnapshot,
+  SessionSnapshotQuery,
   SessionTranscriptExport,
   Settings,
   SettingsPatch,
@@ -112,7 +113,11 @@ export interface CodeDenClient {
 
   // Realtime (§6): snapshot, then subscribe from its seq.
   getSnapshot(): Promise<Snapshot>;
-  getSessionSnapshot(sessionId: string): Promise<SessionSnapshot>;
+  /**
+   * A session's transcript: the whole session, or with `query.turns` its latest root turns
+   * (`before` pages back, `item` reaches back to an item).
+   */
+  getSessionSnapshot(sessionId: string, query?: SessionSnapshotQuery): Promise<SessionSnapshot>;
   /**
    * Subscribe to the live event stream (domain events; the mock also sends agent events).
    * Calling it again replaces the subscription. Returns an unsubscribe function.

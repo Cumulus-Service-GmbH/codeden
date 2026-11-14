@@ -1,6 +1,7 @@
 import type { Project, Session, Snapshot } from "@codeden/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useRef } from "react";
+import { toast } from "sonner";
 import { useTranscriptsStore } from "@/stores/transcripts";
 import { useClient } from "./api";
 import type { TranscriptState } from "./transcript/reducer";
@@ -86,17 +87,30 @@ export function useProject(projectId: string | null | undefined): Project | unde
   return useSnapshotData((s) => s.projects.find((x) => x.id === projectId), undefined);
 }
 
-/** Load a session transcript into the live store and return it. */
-export function useTranscript(sessionId: string | undefined): {
+/** Root turns a transcript opens with, and each page of earlier ones adds. */
+export const TRANSCRIPT_PAGE_TURNS = 20;
+
+/**
+ * Load a session's transcript into the live store and return it. Only its latest root turns are
+ * fetched (`turns`, a page by default), reaching back to `item` when given (a search hit), so a
+ * long-lived session never downloads its whole history; `useEarlierTurns` adds earlier pages.
+ * Every caller shares the session's one transcript in the store.
+ */
+export function useTranscript(
+  sessionId: string | undefined,
+  opts: { turns?: number; item?: string } = {},
+): {
   transcript: TranscriptState | undefined;
   isLoading: boolean;
   error: Error | null;
 } {
   const client = useClient();
   const queryClient = useQueryClient();
+  const turns = opts.turns ?? TRANSCRIPT_PAGE_TURNS;
+  const item = opts.item;
   const query = useQuery({
-    queryKey: ["session", sessionId],
-    queryFn: () => client.getSessionSnapshot(sessionId ?? ""),
+    queryKey: ["session", sessionId, turns, item ?? null],
+    queryFn: () => client.getSessionSnapshot(sessionId ?? "", { turns, ...(item ? { item } : {}) }),
     enabled: Boolean(sessionId),
     staleTime: Infinity,
   });
@@ -120,4 +134,39 @@ export function useTranscript(sessionId: string | undefined): {
   }, [client, queryClient, sessionId, seq]);
   const transcript = useTranscriptsStore((s) => (sessionId ? s.byId[sessionId] : undefined));
   return { transcript, isLoading: query.isLoading, error: query.error };
+}
+
+/** The root turns before a loaded transcript's earliest one, and loading them a page at a time. */
+export interface EarlierTurns {
+  /** How many there are on the server (0 once the whole thread is loaded). */
+  count: number;
+  loading: boolean;
+  /** Load the page before the earliest loaded turn into the session's transcript. */
+  load: () => void;
+}
+
+/** Earlier root turns of a session's loaded transcript (scrolling up a long session). */
+export function useEarlierTurns(sessionId: string): EarlierTurns {
+  const client = useClient();
+  const count = useTranscriptsStore((s) => s.byId[sessionId]?.earlierTurns ?? 0);
+  const page = useMutation({
+    mutationFn: async () => {
+      const t = useTranscriptsStore.getState().byId[sessionId];
+      const before = t?.rootThreadId ? t.threads[t.rootThreadId]?.turnIds[0] : undefined;
+      if (!t || !before || t.earlierTurns === 0) return;
+      const snap = await client.getSessionSnapshot(sessionId, {
+        turns: TRANSCRIPT_PAGE_TURNS,
+        before,
+      });
+      useTranscriptsStore.getState().load(snap);
+    },
+    onError: (error) => toast.error("Couldn't load earlier turns", { description: error.message }),
+  });
+  return {
+    count,
+    loading: page.isPending,
+    load: () => {
+      if (!page.isPending) page.mutate();
+    },
+  };
 }

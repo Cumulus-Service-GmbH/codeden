@@ -98,8 +98,14 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
   return {
     kind: "http",
     getSnapshot: () => get("/snapshot", (v) => Snapshot.parse(v)),
-    getSessionSnapshot: (id) =>
-      get(`/sessions/${enc(id)}/snapshot`, (v) => SessionSnapshot.parse(v)),
+    getSessionSnapshot: (id, query = {}) => {
+      const params = new URLSearchParams();
+      if (query.turns !== undefined) params.set("turns", String(query.turns));
+      if (query.before) params.set("before", query.before);
+      if (query.item) params.set("item", query.item);
+      const qs = params.size ? `?${params}` : "";
+      return get(`/sessions/${enc(id)}/snapshot${qs}`, (v) => SessionSnapshot.parse(v));
+    },
     subscribe: (fromSeq, onMessage) => socket.subscribe(fromSeq, onMessage),
     watchSession: (id, fromSeq, onMessage) => socket.watch(id, fromSeq, onMessage),
     onConnectionChange: (listener) => socket.onState(listener),

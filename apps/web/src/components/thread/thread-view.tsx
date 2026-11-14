@@ -6,7 +6,7 @@ import { EmptyState } from "@/components/common/bits";
 import { SessionComposer } from "@/components/composer/composer";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useClient } from "@/lib/api";
-import { useSessionLookup, useSnapshotData, useTranscript } from "@/lib/queries";
+import { useEarlierTurns, useSessionLookup, useSnapshotData, useTranscript } from "@/lib/queries";
 import { activeTurn } from "@/lib/transcript/reducer";
 import { latestFollowups } from "@/lib/transcript/timeline";
 import { useComposerStore } from "@/stores/composer";
@@ -81,7 +81,9 @@ export function ThreadView({
 }) {
   // An older archived session isn't in the snapshot: it is fetched by id.
   const { session, loading } = useSessionLookup(sessionId);
-  const { transcript, isLoading, error } = useTranscript(sessionId);
+  // The latest turns, reaching back to the item it opens at; earlier ones load on scroll.
+  const { transcript, isLoading, error } = useTranscript(sessionId, { item: focusItemId });
+  const earlier = useEarlierTurns(sessionId);
   const threadId = transcript?.rootThreadId ?? session?.rootThreadId ?? null;
   const running = Boolean(transcript && threadId && activeTurn(transcript, threadId));
   const followups = useMemo(
@@ -132,6 +134,7 @@ export function ThreadView({
           threadId={threadId}
           sessionId={sessionId}
           focusItemId={focusItemId}
+          earlier={earlier}
         />
       ) : firstMessage ? (
         <FirstMessage input={firstMessage} status={session.status} />
