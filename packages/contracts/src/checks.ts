@@ -35,6 +35,11 @@ export type SessionChecks = z.infer<typeof SessionChecks>;
 /** `NoticeItem.code` of a check run's card in the transcript; its `data` is `CheckRunData`. */
 export const CHECK_RUN_NOTICE = "check_run";
 
+/** The id of the card for the checks that ran after a turn: one run per turn. */
+export function checkRunItemId(turnId: string): string {
+  return `checks-${turnId}`;
+}
+
 /** Where one check of a run is. */
 export const CheckStatus = z.enum([
   "pending",

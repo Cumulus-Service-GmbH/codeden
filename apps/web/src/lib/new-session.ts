@@ -1,11 +1,12 @@
-import type {
-  AutonomyLevel,
-  ConflictRecord,
-  ProviderInfo,
-  ReasoningEffort,
-  StartSessionRequestInit,
-  StartWorkResult,
-  UserInputInit,
+import {
+  type AutonomyLevel,
+  type ConflictRecord,
+  DEFAULT_CHECK_ROUNDS,
+  type ProviderInfo,
+  type ReasoningEffort,
+  type StartSessionRequestInit,
+  type StartWorkResult,
+  type UserInputInit,
 } from "@codeden/contracts";
 
 /**
@@ -24,6 +25,13 @@ export interface DraftChoice {
   autonomy: AutonomyLevel | null;
   /** Start in plan mode (sent only when the provider reports `capabilities.planMode`). */
   planMode: boolean;
+  /**
+   * Keep going until checks pass (§9 Project checks); offered only when the project has checks.
+   * Absent on drafts saved before it existed: off.
+   */
+  untilChecksPass?: boolean;
+  /** Automatic rounds for `untilChecksPass`; absent: the default. */
+  checkRounds?: number;
 }
 
 export const emptyChoice: DraftChoice = {
@@ -68,6 +76,9 @@ export interface ResolvedDraft {
   autonomy: AutonomyLevel;
   /** On only where the provider supports plan mode. */
   planMode: boolean;
+  /** Off at Read-only, where the agent can't fix anything. */
+  untilChecksPass: boolean;
+  checkRounds: number;
 }
 
 /**
@@ -78,7 +89,8 @@ export interface ResolvedDraft {
  *   first default naming that provider and a model or effort (the project's, then Settings'),
  *   else the provider's default model and the model's own effort. A default for another provider
  *   never applies: its model id means nothing there;
- * - autonomy: the one picked, else the project's, else the Settings default.
+ * - autonomy: the one picked, else the project's, else the Settings default;
+ * - keep going until checks pass: as picked, but never at Read-only.
  */
 export function resolveDraftChoice(choice: DraftChoice, defaults: DraftDefaults): ResolvedDraft {
   const { providers, project } = defaults;
@@ -104,14 +116,17 @@ export function resolveDraftChoice(choice: DraftChoice, defaults: DraftDefaults)
     (d) => d && d.provider === provider?.id && (d.model !== null || d.effort !== null),
   );
   const fallback = provider?.models.find((m) => m.isDefault) ?? provider?.models[0];
+  const autonomy = choice.autonomy ?? project?.autonomy ?? defaults.defaultAutonomy;
   return {
     provider,
     model: (mine ? choice.model : null) ?? preset?.model ?? fallback?.id ?? null,
     effort: provider?.capabilities.reasoningEffort
       ? ((mine ? choice.effort : null) ?? preset?.effort ?? null)
       : null,
-    autonomy: choice.autonomy ?? project?.autonomy ?? defaults.defaultAutonomy,
+    autonomy,
     planMode: choice.planMode && (provider?.capabilities.planMode ?? false),
+    untilChecksPass: (choice.untilChecksPass ?? false) && autonomy !== "read_only",
+    checkRounds: choice.checkRounds ?? DEFAULT_CHECK_ROUNDS,
   };
 }
 
@@ -142,6 +157,10 @@ export function buildStartRequest(
     input,
     autonomy: resolved.autonomy,
     ...(resolved.planMode ? { planMode: true } : {}),
+    // The server freezes the project's checks; without any it ignores these.
+    ...(resolved.untilChecksPass
+      ? { untilChecksPass: true, checkRounds: resolved.checkRounds }
+      : {}),
     ...(resolved.provider ? { provider: resolved.provider.id } : {}),
     ...(resolved.model ? { model: resolved.model } : {}),
     ...(resolved.effort ? { effort: resolved.effort } : {}),

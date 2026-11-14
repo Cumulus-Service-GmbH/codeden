@@ -1,4 +1,4 @@
-import type { ForkOrigin, Session } from "@codeden/contracts";
+import type { ForkOrigin, Session, SessionChecks } from "@codeden/contracts";
 import { Link } from "@tanstack/react-router";
 import { Brain } from "lucide-react";
 import type { ReactNode } from "react";
@@ -7,7 +7,7 @@ import { AutonomyBadge } from "@/components/thread/autonomy";
 import { Switch } from "@/components/ui/switch";
 import { SessionCostText } from "@/components/usage/session-cost";
 import { forkOriginLabel, forkOriginText } from "@/lib/fork-origin";
-import { ago, compact, statusLabel } from "@/lib/format";
+import { ago, compact, duration, statusLabel } from "@/lib/format";
 import { useSession } from "@/lib/queries";
 import { useTranscriptsStore } from "@/stores/transcripts";
 import { useVoiceStore } from "@/stores/voice";
@@ -28,6 +28,36 @@ const startedByLabel = {
   pm: "Project manager",
   automation: "Automation",
 };
+
+/**
+ * The session's project checks, frozen when it was created (§9 Project checks): exactly what
+ * CodeDen runs for it, whatever its agent writes in `.codeden/project.json` since.
+ */
+function ChecksRow({ checks }: { checks: SessionChecks }) {
+  return (
+    <Row label="Checks">
+      <ul className="space-y-0.5" data-testid="session-checks">
+        {checks.commands.map((c, i) => (
+          // biome-ignore lint/suspicious/noArrayIndexKey: the frozen list never changes
+          <li key={i} className="flex items-baseline gap-1.5">
+            <code className="min-w-0 truncate font-mono text-[12px]">{c.command}</code>
+            {c.timeoutSec !== undefined && (
+              <span className="shrink-0 text-2xs text-muted-foreground">
+                · {duration(c.timeoutSec * 1000)} limit
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+      <span className="block text-2xs text-muted-foreground">
+        {checks.untilPass
+          ? `Keeps going until they pass, up to ${checks.maxRounds} ${checks.maxRounds === 1 ? "round" : "rounds"}`
+          : "Keep going until checks pass is off"}
+        {" · fixed when the session started"}
+      </span>
+    </Row>
+  );
+}
 
 /**
  * The session a fork, a handoff or a review came from, the checkpoint its worktree started at
@@ -116,6 +146,9 @@ export function DetailsPanel({ session }: { session: Session }) {
         <Row label="Autonomy">
           <AutonomyBadge level={session.autonomy} />
         </Row>
+        {session.checks && session.checks.commands.length > 0 && (
+          <ChecksRow checks={session.checks} />
+        )}
         {session.branch && (
           <Row label="Branch">
             <code className="font-mono text-[12px]">{session.branch}</code>{" "}

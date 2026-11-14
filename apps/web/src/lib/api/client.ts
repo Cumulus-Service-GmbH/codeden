@@ -25,6 +25,7 @@ import type {
   LoginCommandResponse,
   LoginToolId,
   Project,
+  ProjectCheck,
   ProviderHistoryResponse,
   RefreshModelsResponse,
   RefreshProjectResponse,
@@ -285,6 +286,8 @@ export interface CodeDenClient {
   searchProjectMentions(projectId: string, query: string): Promise<MentionCandidate[]>;
   /** The `/` commands and skills `provider` would load in the project (the New session draft). */
   listProjectSlashCommands(projectId: string, provider: string): Promise<SlashCommand[]>;
+  /** The project's checks a new session would freeze (§9 Project checks), for the draft. */
+  listProjectChecks(projectId: string): Promise<ProjectCheck[]>;
   openTerminal(opts: OpenTerminalOptions): TerminalChannel;
   /** The session browser: live viewer socket, tabs, navigation, dev servers (§12.2). */
   readonly browser: BrowserApi;

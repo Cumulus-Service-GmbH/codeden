@@ -16,6 +16,7 @@ import {
   InboxItem,
   LoginCommandResponse,
   Project,
+  ProjectChecksResponse,
   ProviderHistoryResponse,
   RefreshModelsResponse,
   RefreshProjectResponse,
@@ -247,6 +248,8 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
       get(`/projects/${enc(id)}/commands?provider=${enc(provider)}`, (v) =>
         SlashCommandList.parse(v),
       ),
+    listProjectChecks: (id) =>
+      get(`/projects/${enc(id)}/checks`, (v) => ProjectChecksResponse.parse(v).checks),
     openTerminal: (o) => openTerminalSocket(wsBase, o),
     artifactUrl: (id) => `${origin}/api/artifacts/${enc(id)}`,
     remoteImageUrl: async (url) => {

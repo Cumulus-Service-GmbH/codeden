@@ -5,6 +5,7 @@ import {
   type CheckResult,
   CheckRunData,
   type CheckRunOutcome,
+  checkRunItemId,
   checkTimeoutMs,
   type Item,
   type Project,
@@ -255,7 +256,7 @@ export class ChecksLoop {
       ...(run.outcome ? { outcome: run.outcome } : {}),
     };
     const item: Item = {
-      id: `checks-${run.turnId}`,
+      id: checkRunItemId(run.turnId),
       kind: "notice",
       status: run.outcome ? "completed" : "in_progress",
       level: run.outcome && run.outcome !== "passed" ? "warning" : "info",

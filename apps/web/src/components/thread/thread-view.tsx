@@ -7,6 +7,7 @@ import { SessionComposer } from "@/components/composer/composer";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useClient } from "@/lib/api";
 import { useEarlierTurns, useSessionLookup, useSnapshotData, useTranscript } from "@/lib/queries";
+import { checksRunning } from "@/lib/transcript/checks";
 import { activeTurn } from "@/lib/transcript/reducer";
 import { latestFollowups } from "@/lib/transcript/timeline";
 import { useComposerStore } from "@/stores/composer";
@@ -86,6 +87,7 @@ export function ThreadView({
   const earlier = useEarlierTurns(sessionId);
   const threadId = transcript?.rootThreadId ?? session?.rootThreadId ?? null;
   const running = Boolean(transcript && threadId && activeTurn(transcript, threadId));
+  const checking = Boolean(transcript && threadId && checksRunning(transcript, threadId));
   const followups = useMemo(
     () => (transcript && threadId ? latestFollowups(transcript, threadId) : null),
     [transcript, threadId],
@@ -147,7 +149,7 @@ export function ThreadView({
       )}
       {followups && !running && <FollowupChips sessionId={sessionId} suggestions={followups} />}
       <QueuedMessages session={session} running={running} />
-      <SessionComposer session={session} running={running} />
+      <SessionComposer session={session} running={running} checking={checking} />
     </div>
   );
 }

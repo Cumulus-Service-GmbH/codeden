@@ -2,8 +2,10 @@ import { CircleSlash, OctagonX } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTurnCostText } from "@/components/usage/session-cost";
 import { duration, plural } from "@/lib/format";
+import { checkRunOf } from "@/lib/transcript/checks";
 import type { TimelineRow as Row } from "@/lib/transcript/timeline";
 import { ApprovalCard } from "./cards/approval-card";
+import { CheckRunCard } from "./cards/check-run-card";
 import { NoticeBatchCard, noticeBatchOf } from "./cards/notice-cards";
 import { QuestionCard } from "./cards/question-card";
 import { SharedArtifactCard, sharedArtifactOf } from "./cards/shared-artifact-card";
@@ -116,6 +118,8 @@ export function TimelineRowView({
           if (artifact) return <SharedArtifactCard item={item} artifact={artifact} />;
           const notices = noticeBatchOf(item);
           if (notices) return <NoticeBatchCard notices={notices} />;
+          const checks = checkRunOf(item);
+          if (checks) return <CheckRunCard item={item} data={checks} sessionId={sessionId} />;
           return <NoticeCard item={item} />;
         }
         case "error":
