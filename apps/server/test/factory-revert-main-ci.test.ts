@@ -14,7 +14,14 @@ afterEach(() => env?.close());
 
 const s = factorySteps(() => env);
 const loop = () => env.factory.data.loopOrNew(env.project.id);
-const openInbox = () => env.inbox.list({ projectId: env.project.id });
+/**
+ * Open inbox items that ask something of the user. The daily digest isn't one: moving the test
+ * clock past midnight (two hours on, late in the day) raises it.
+ */
+const openInbox = () =>
+  env.inbox
+    .list({ projectId: env.project.id })
+    .filter((i) => !i.id.startsWith("inbox:factory-digest:"));
 const GRACE_MS = 60_000; // `ciGraceMs` in the factory test env
 
 /**
