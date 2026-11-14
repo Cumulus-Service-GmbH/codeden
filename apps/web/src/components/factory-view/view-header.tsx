@@ -14,6 +14,7 @@ import {
 import { type ReactNode, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ExperimentalBadge } from "@/components/factory/autonomy-dialog";
+import { DrainChip } from "@/components/factory/drain-chip";
 import { FactoryRunButtons } from "@/components/factory/factory-actions";
 import { FactoryGuideButton } from "@/components/factory/factory-guide";
 import { KillSwitchButton } from "@/components/factory/kill-switch";
@@ -53,6 +54,7 @@ function LoopChip({ f }: { f: FactoryStatus }) {
       : f.loopState === "paused"
         ? f.pausedReason
         : null;
+  if (f.drain && !stopped) return <DrainChip f={f} />;
   return (
     <span
       className={cn(
@@ -162,13 +164,18 @@ export function ViewHeader({
         />
       </div>
       <div className="ml-auto flex flex-wrap items-center gap-1">
-        {f.loopState === "paused" && !stopped && (
+        {f.loopState === "paused" && !stopped && !f.drain && (
           <Button size="sm" onClick={() => resume.mutate()} disabled={resume.isPending}>
             <Play /> Resume
           </Button>
         )}
         <FactoryRunButtons f={f} stopped={stopped} />
-        <KillSwitchButton scope={{ projectId: f.projectId }} on={f.killSwitch} />
+        <KillSwitchButton
+          scope={{ projectId: f.projectId }}
+          on={f.killSwitch}
+          drain={f.drain}
+          paused={f.loopState === "paused"}
+        />
         <FactoryGuideButton />
         {pixel.available && (
           <Button
