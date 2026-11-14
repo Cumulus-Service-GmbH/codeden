@@ -11,6 +11,7 @@ import {
 import { useMutation } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
+import { NumberField } from "@/components/common/number-field";
 import { Segmented } from "@/components/settings/settings-ui";
 import { Button } from "@/components/ui/button";
 import {
@@ -263,11 +264,12 @@ export function HookDialog({
               />
               <div className="w-32">
                 <Field id="hook-timeout" label="Timeout (seconds)">
-                  <Input
+                  <NumberField
                     id="hook-timeout"
-                    inputMode="numeric"
-                    value={form.timeout}
-                    onChange={(e) => set({ timeout: e.target.value.trim() })}
+                    optional
+                    min={1}
+                    value={form.timeout === "" ? null : Number(form.timeout)}
+                    onChange={(t) => set({ timeout: t === null ? "" : String(t) })}
                     placeholder="Default"
                     className="font-mono text-xs"
                   />

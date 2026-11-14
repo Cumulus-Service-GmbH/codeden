@@ -9,6 +9,7 @@ import { ImageEngineRegistry } from "@codeden/providers";
 import { createAdaptorServer, upgradeWebSocket } from "@hono/node-server";
 import { Hono } from "hono";
 import { WebSocketServer } from "ws";
+import { contentSecurityPolicy } from "./content-security";
 import { type Database, openDatabase } from "./db/client";
 import { EventStore } from "./events/store";
 import type { ExecutionBackend } from "./execution/backend";
@@ -305,6 +306,8 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
     const own = [...network.ownHosts()].map((h) => `http://${h}:${port}`);
     return own.length === 0 ? baseOrigins : new Set([...baseOrigins, ...own]);
   };
+  // First, so the "locked" and "forbidden" answers carry the policy too.
+  app.use("*", contentSecurityPolicy());
   app.use(
     "*",
     securityMiddleware({

@@ -7,24 +7,26 @@ import {
   type FactoryLoop,
   type FactoryPlanRoundRequest,
   type ScoutFinding,
-  type ScoutLensRun,
+  type ScoutPlan,
+  type ScoutRound,
   type Session,
 } from "@codeden/contracts";
-import { badRequest, conflict, errorMessage } from "../errors";
+import { badRequest, conflict } from "../errors";
 import { TYPE_LABEL } from "./classify";
-import { type FactoryContext, visionOf } from "./context";
+import type { FactoryContext } from "./context";
 import { FACTORY_LABEL } from "./intake";
 import { slugify } from "./policy";
-import { lensPrompt } from "./prompts-scout";
-import { DRAINING_TEXT, defaultBranch, knownTitles, SCOUT_SLOT } from "./scout";
-import { busySlots, slotsFor } from "./slots";
+import { DRAINING_TEXT, knownTitles } from "./scout";
+import { busySlots, SCOUT_SLOT, slotsFor } from "./slots";
 import { ACTIVE_STAGES, WAITING_STAGES } from "./store";
 import { wipOf, wipText } from "./wip";
 
 /**
  * What the scout and its area reviewers (`lenses` in the code) report (§10.1): the scout's plan
- * for the round, the area reviewers' findings and the issues the scout files. Each changes the loop record, so the service runs
- * them one at a time with the loop's ticks.
+ * for the round, the area reviewers' findings and the issues the scout files. Each is recorded
+ * in the loop record at once: the service runs them one at a time, but never behind a tick, and
+ * a tick that read the loop before keeps what they recorded (`keepScoutReports`). Each is safe to
+ * repeat after a call timed out: the plan, "already reported", the issue filed.
  */
 
 const PRIORITY_SCORE = { high: 0.9, normal: 0.6, low: 0.3 } as const;
@@ -47,7 +49,7 @@ function scoutRound(
 }
 
 /** Why a review area the scout asked for got no area reviewer this round. */
-type DropReason = "not_allowed" | "duplicate" | "round_limit" | "no_slot" | "failed";
+type DropReason = "not_allowed" | "duplicate" | "round_limit" | "no_slot";
 type Dropped = Record<DropReason, DiscoveryArea[]>;
 
 /**
@@ -62,13 +64,7 @@ export function pickLenses(
   const allowed = new Set(limits.areas);
   const seen = new Set<DiscoveryArea>();
   const picked: FactoryPlanRoundRequest["lenses"] = [];
-  const dropped: Dropped = {
-    not_allowed: [],
-    duplicate: [],
-    round_limit: [],
-    no_slot: [],
-    failed: [],
-  };
+  const dropped: Dropped = { not_allowed: [], duplicate: [], round_limit: [], no_slot: [] };
   for (const lens of requests) {
     if (!allowed.has(lens.area)) {
       dropped.not_allowed.push(lens.area);
@@ -117,21 +113,30 @@ function dropNote(
       `${list(dropped.no_slot)}: no free agent slot (Agents at once is ${opts.maxConcurrent}; other factory sessions hold ${opts.busy}${waiting}${given}). Raising Agents at once in the factory limits allows more area reviewers.`,
     );
   }
-  if (dropped.failed.length > 0) {
-    parts.push(`${list(dropped.failed)}: the area reviewer couldn't start.`);
-  }
   return parts.length > 0 ? ` Not started: ${parts.join(" ")}` : "";
 }
 
-/** `factory_plan_round`: start (or wake) the area reviewers the scout asked for, within the limits. */
-export async function planRound(
+/** What `factory_plan_round` answers: the review areas that get an area reviewer, and what next. */
+export interface PlanRoundResult {
+  lenses: Array<{ area: DiscoveryArea; focus: string }>;
+  next: string;
+}
+
+/**
+ * `factory_plan_round`: record the scout's plan and answer at once. The area reviewers it gets
+ * (allowed areas within the round's limit and the agents free now) start on the loop's next
+ * passes (`advanceRound`), so the call never waits for a session to start, however busy the
+ * runner is. A repeated call (one whose answer the scout never got) returns the same plan.
+ */
+export function planRound(
   ctx: FactoryContext,
   session: Session,
   req: FactoryPlanRoundRequest,
-): Promise<{ lenses: Array<{ area: DiscoveryArea; sessionId: string }>; next: string }> {
+): PlanRoundResult {
   const { loop, projectId } = scoutRound(ctx, session);
-  const round = loop.scout.round;
-  if (round?.phase !== "planning") {
+  const round = loop.scout.round as ScoutRound;
+  if (round.plan) return planResult(round.plan);
+  if (round.phase !== "planning") {
     throw conflict("This round is already planned", "already_planned");
   }
   const project = ctx.projects.get(projectId);
@@ -149,58 +154,6 @@ export async function planRound(
   // At the work-in-progress limit nothing gets filed: a round without area reviewers waits to
   // review until a PR merges (`advanceRound` holds it like one waiting on its reviewers' findings).
   const wip = wipOf(ctx, project, loop);
-  const lensSessions = { ...loop.scout.lensSessions };
-  const started: ScoutLensRun[] = [];
-  for (const lens of picked) {
-    const reuse = ctx.sessions.reusable(lensSessions[lens.area]);
-    const text = lensPrompt({
-      area: lens.area,
-      focus: lens.focus,
-      vision: visionOf(project).text,
-      defaultBranch: defaultBranch(project),
-      known: knownTitles(ctx, projectId),
-      firstRun: !reuse,
-    });
-    try {
-      let sessionId: string;
-      if (reuse) {
-        await ctx.sessions.message(reuse.id, text);
-        sessionId = reuse.id;
-      } else {
-        const res = await ctx.sessions.startLens(projectId, lens.area, text);
-        if (res.status !== "started" && res.status !== "queued") {
-          dropped.failed.push(lens.area);
-          continue;
-        }
-        sessionId = res.sessionId;
-      }
-      lensSessions[lens.area] = sessionId;
-      started.push({
-        area: lens.area,
-        focus: lens.focus,
-        sessionId,
-        sentAt: at,
-        reported: false,
-        nudgedAt: null,
-      });
-    } catch (error) {
-      ctx.log?.(`factory: area reviewer ${lens.area}: ${errorMessage(error)}`);
-      dropped.failed.push(lens.area);
-    }
-  }
-  ctx.store.saveLoop({
-    ...loop,
-    scout: {
-      ...loop.scout,
-      lensSessions,
-      round: {
-        ...round,
-        phase: started.length > 0 || wip.holding ? "reviewing" : "filing",
-        lenses: started,
-        sentAt: at,
-      },
-    },
-  });
   const note = dropNote(dropped, {
     perRound: loop.tuning.discoveryPerRound,
     busy,
@@ -210,13 +163,33 @@ export async function planRound(
   const alone = wip.holding
     ? `No area reviewers this round.${note} ${wipText(wip)}: the factory files no new issues until open pull requests merge. End your turn now without reviewing: CodeDen asks you to review and file once one has merged.`
     : `No area reviewers this round.${note} Review by yourself now and file at most ${loop.tuning.maxIssuesPerRound} issues with \`factory_file_issue\`, then end your turn.`;
-  return {
-    lenses: started.map((l) => ({ area: l.area, sessionId: l.sessionId })),
+  const plan: ScoutPlan = {
+    at,
+    lenses: picked,
+    pending: picked.map((l) => l.area),
     next:
-      started.length > 0
-        ? `Started ${started.map((l) => l.area).join(", ")}.${note} End your turn now: CodeDen sends you their findings when they are done.`
+      picked.length > 0
+        ? `Planned ${picked.map((l) => l.area).join(", ")}: CodeDen starts their area reviewers as agents free up.${note} End your turn now: CodeDen sends you their findings when they are done.`
         : alone,
   };
+  ctx.store.saveLoop({
+    ...loop,
+    scout: {
+      ...loop.scout,
+      round: {
+        ...round,
+        plan,
+        // With area reviewers the round stays in planning until the first one starts.
+        phase: picked.length > 0 ? "planning" : wip.holding ? "reviewing" : "filing",
+        sentAt: at,
+      },
+    },
+  });
+  return planResult(plan);
+}
+
+function planResult(plan: ScoutPlan): PlanRoundResult {
+  return { lenses: plan.lenses.map((l) => ({ area: l.area, focus: l.focus })), next: plan.next };
 }
 
 /** `factory_report_findings`: an area reviewer reports what it found this round. */
@@ -283,6 +256,14 @@ export async function fileIssue(
   const { loop, projectId } = scoutRound(ctx, session);
   const round = loop.scout.round;
   if (!round) throw conflict("No scout round is running", "no_round");
+  const slug = slugify(req.title);
+  const duplicate = ctx.store
+    .items(projectId, [...WAITING_STAGES, ...ACTIVE_STAGES, "escalated"])
+    .find((i) => slugify(i.title) === slug);
+  // A retry of a call whose answer the scout never got: the issue that call filed.
+  if (duplicate?.source === "discovery" && duplicate.createdAt >= round.startedAt) {
+    return { itemId: duplicate.id, issue: duplicate.issue, filedThisRound: round.filed };
+  }
   // At the work-in-progress limit the factory finishes open work before it takes on more.
   const wip = wipOf(ctx, ctx.projects.get(projectId), loop);
   if (wip.holding) {
@@ -291,7 +272,8 @@ export async function fileIssue(
       "wip_limit",
     );
   }
-  if (round.phase === "reviewing") {
+  // Area reviewers that are reviewing, or planned and waiting for a free agent, come first.
+  if (round.phase === "reviewing" || (round.phase === "planning" && round.plan?.lenses.length)) {
     throw conflict(
       "The area reviewers are still reviewing; end your turn and wait for their findings",
       "lenses_reviewing",
@@ -303,10 +285,6 @@ export async function fileIssue(
       "round_limit",
     );
   }
-  const slug = slugify(req.title);
-  const duplicate = ctx.store
-    .items(projectId, [...WAITING_STAGES, ...ACTIVE_STAGES, "escalated"])
-    .find((i) => slugify(i.title) === slug);
   if (duplicate) {
     throw conflict(`Already open as "${duplicate.title}"`, "duplicate");
   }
@@ -344,7 +322,12 @@ export async function fileIssue(
     score: PRIORITY_SCORE[req.priority],
     issue,
   });
-  const filed = round.filed + 1;
-  ctx.store.saveLoop({ ...loop, scout: { ...loop.scout, round: { ...round, filed } } });
+  // Counted on the loop as it is now: ticks may have saved it while GitHub answered.
+  const latest = ctx.store.loopOrNew(projectId, ctx.now());
+  const current = latest.scout.round?.id === round.id ? latest.scout.round : null;
+  const filed = (current?.filed ?? round.filed) + 1;
+  if (current) {
+    ctx.store.saveLoop({ ...latest, scout: { ...latest.scout, round: { ...current, filed } } });
+  }
   return { itemId: item.id, issue: item.issue, filedThisRound: filed };
 }

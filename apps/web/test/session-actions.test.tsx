@@ -383,13 +383,15 @@ describe("session row menu", () => {
     ]);
   });
 
-  it("copies and downloads the transcript as Markdown", () => {
+  it("copies and downloads the transcript as Markdown, saying secrets are redacted", () => {
     const actions = fake({});
     const entries = sessionMenuEntries(actions, vi.fn());
     action(entries, "Copy as Markdown")?.onSelect();
     expect(actions.copyMarkdown).toHaveBeenCalled();
     action(entries, "Download as Markdown")?.onSelect();
     expect(actions.downloadMarkdown).toHaveBeenCalled();
+    expect(action(entries, "Copy as Markdown")?.hint).toBe("Secrets redacted");
+    expect(action(entries, "Download as Markdown")?.hint).toBe("Secrets redacted");
   });
 
   it("offers Unarchive for archived sessions and keeps focus for Rename", () => {

@@ -31,6 +31,17 @@ export interface PathContext {
    */
   codedenHome?: string;
   /**
+   * The session's own artifacts folder in CodeDen's home (`SessionOptions.artifactsDir`,
+   * `<home>/artifacts/<session id>`): its screenshots and pasted images. A call that only reads
+   * may read there freely (`./codeden-home`'s `forReading`); writes and deletes there still ask.
+   */
+  artifactsDir?: string;
+  /**
+   * Set by `forReading` (`./codeden-home`) on the context of a call that only reads: the session's
+   * own artifacts folder then counts as one of its own folders in CodeDen's home.
+   */
+  reading?: boolean;
+  /**
    * The agent's environment, for where the agent CLIs keep their logins (`CODEX_HOME`,
    * `CLAUDE_CONFIG_DIR`, `XDG_*`, ...; `./provider-logins`). Defaults to `process.env`.
    */

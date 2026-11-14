@@ -1,9 +1,17 @@
 import type { EventOf } from "@codeden/contracts";
-import { factoryDigests, factoryItems, factoryLoops } from "../../db/schema-factory";
+import {
+  factoryDigests,
+  factoryItems,
+  factoryLessons,
+  factoryLoops,
+} from "../../db/schema-factory";
 import type { Tx } from "../../events/projection-db";
 
 type FactoryEvent = EventOf<
-  "factory.loop.updated" | "factory.item.updated" | "factory.digest.created"
+  | "factory.loop.updated"
+  | "factory.item.updated"
+  | "factory.digest.created"
+  | "factory.lesson.updated"
 >;
 
 /** Project factory events (§10.1) inside the append transaction, so they can be rebuilt. */
@@ -46,6 +54,22 @@ export function applyFactoryProjection(tx: Tx, e: FactoryEvent): void {
           createdAt: digest.createdAt,
         })
         .onConflictDoNothing()
+        .run();
+      return;
+    }
+    case "factory.lesson.updated": {
+      const { lesson } = e.payload;
+      const row = {
+        id: lesson.id,
+        projectId: lesson.projectId,
+        key: lesson.key,
+        lesson,
+        lastSeenAt: lesson.lastSeenAt,
+        removedAt: lesson.removedAt,
+      };
+      tx.insert(factoryLessons)
+        .values(row)
+        .onConflictDoUpdate({ target: factoryLessons.id, set: row })
         .run();
       return;
     }

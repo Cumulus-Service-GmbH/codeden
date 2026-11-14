@@ -5,6 +5,7 @@ import { CODEDEN_WHAT, codedenCommand, pathsOf } from "./codeden-command";
 import {
   codedenAccess,
   credentialsRisk,
+  forReading,
   touchesCodedenCredentials,
   touchesCodedenHome,
 } from "./codeden-home";
@@ -314,11 +315,11 @@ export function classifyWrite(target: string, ctx: RiskContext): RiskAssessment 
 
 /**
  * Classify a file read or search. Reads anywhere are fine except credential files and CodeDen's
- * own home: anything there outside the session's own worktree, and the agent CLIs' logins (or a
- * folder holding them), ask at every level.
+ * own home: anything there outside the session's own worktree and its own artifacts folder, and
+ * the agent CLIs' logins (or a folder holding them), ask at every level.
  */
 export function classifyRead(target: string, ctx: RiskContext): RiskAssessment {
-  const access = codedenAccess(target, ctx);
+  const access = codedenAccess(target, forReading(ctx));
   if (access) return credentialsRisk(`Reads ${CODEDEN_WHAT[access]}: ${target}`);
   if (touchesProviderLogin(target, ctx)) return loginRisk(`Reads an agent CLI's login: ${target}`);
   if (isSecretPath(target)) return risky("secrets", `Reads the secrets file ${target}`);
@@ -329,7 +330,7 @@ export function classifyRead(target: string, ctx: RiskContext): RiskAssessment {
  * Classify a file-name search: `pattern` (Claude's Glob, or a search's `--glob` filter) from
  * `base` (default: the current directory). Listing names reads nothing, so only a pattern that
  * reaches CodeDen's own home (its credential files, or anything outside the session's own
- * worktree there) asks; `{a,b}` alternatives are followed.
+ * worktree and artifacts folder there) asks; `{a,b}` alternatives are followed.
  */
 export function classifyGlob(
   pattern: string,
@@ -342,7 +343,7 @@ export function classifyGlob(
   if (alts.some((alt) => touchesCodedenCredentials(alt, { ...ctx, dir }))) {
     return credentialsRisk(`Lists CodeDen's own credential files: ${pattern}`);
   }
-  const reaches = alts.some((alt) => touchesCodedenHome(alt, { ...ctx, dir }));
+  const reaches = alts.some((alt) => touchesCodedenHome(alt, forReading({ ...ctx, dir })));
   return reaches ? credentialsRisk(`Lists CodeDen's own home: ${pattern}`) : SAFE;
 }
 

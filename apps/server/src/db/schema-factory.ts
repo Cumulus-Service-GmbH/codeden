@@ -1,11 +1,11 @@
-import type { FactoryDigest, FactoryItem, FactoryLoop } from "@codeden/contracts";
+import type { FactoryDigest, FactoryItem, FactoryLesson, FactoryLoop } from "@codeden/contracts";
 import { index, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 /**
  * Factory loop projections (§10.1), written in the same transaction as their events
- * (`factory.loop.updated`, `factory.item.updated`, `factory.digest.created`), so the loop can be
- * rebuilt from the log and resumed after a restart. Mode, limits and the project kill switch
- * live on the project row.
+ * (`factory.loop.updated`, `factory.item.updated`, `factory.digest.created`,
+ * `factory.lesson.updated`), so the loop can be rebuilt from the log and resumed after a restart.
+ * Mode, limits and the project kill switch live on the project row.
  */
 
 const json = <T>(name: string) => text(name, { mode: "json" }).$type<T>();
@@ -44,4 +44,23 @@ export const factoryDigests = sqliteTable(
     createdAt: text("created_at").notNull(),
   },
   (t) => [index("factory_digests_project").on(t.projectId, t.createdAt)],
+);
+
+/** The lessons the factory's reviewers recorded, one row per lesson (forgotten ones included). */
+export const factoryLessons = sqliteTable(
+  "factory_lessons",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull(),
+    /** `lessonKey` of the text: a lesson recorded again updates its row. */
+    key: text("key").notNull(),
+    lesson: json<FactoryLesson>("lesson").notNull(),
+    lastSeenAt: text("last_seen_at").notNull(),
+    /** Set once a person told the factory to forget it. */
+    removedAt: text("removed_at"),
+  },
+  (t) => [
+    index("factory_lessons_project_key").on(t.projectId, t.key),
+    index("factory_lessons_project_seen").on(t.projectId, t.lastSeenAt),
+  ],
 );

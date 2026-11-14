@@ -36,6 +36,7 @@ const approve: ReviewVerdict = {
   vision: { aligned: true },
   tests: { adequate: true },
   security: { concerns: [] },
+  lessons: [],
 };
 
 function pr(patch: Partial<FactoryPr> = {}): FactoryPr {
@@ -60,6 +61,7 @@ function checks(patch: Partial<Parameters<typeof evaluateChecks>[0]> = {}) {
     pr: pr(),
     issueTitle: "Add a counter",
     review: approve,
+    approvedHead: patch.pr?.headSha ?? "abc",
     reviewer: "codex",
     type: "feature",
     evidence: null,

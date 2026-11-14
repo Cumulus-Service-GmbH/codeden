@@ -56,6 +56,7 @@ function expectFullSchema(file: string): void {
         "factory_loops",
         "factory_items",
         "factory_digests",
+        "factory_lessons",
         "runners",
       ]),
     );

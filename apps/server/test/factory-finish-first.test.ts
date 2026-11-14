@@ -242,11 +242,13 @@ describe("the work-in-progress limit (maxOpenPrs)", () => {
     });
     await tick();
     const scout = env.repo.get(loop().scout.sessionId as string);
-    const { lenses } = await env.factory.planRound(scout, {
+    await env.factory.planRound(scout, {
       lenses: [{ area: "ux", focus: "The counter's empty state" }],
     });
     await env.setStatus(scout.id, "idle");
-    const lens = env.repo.get(lenses[0]?.sessionId as string);
+    // The area reviewer starts on the next tick.
+    await tick();
+    const lens = env.repo.get(loop().scout.lensSessions.ux as string);
 
     // Two PRs open while the area reviewer works; it reports, and filing waits for the limit.
     const a = await verifying("success", "Add a counter", 3);

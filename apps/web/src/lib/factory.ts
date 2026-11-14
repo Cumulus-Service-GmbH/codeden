@@ -15,6 +15,7 @@ const FACTORY_EVENTS = new Set<string>([
   "factory.loop.updated",
   "factory.item.updated",
   "factory.digest.created",
+  "factory.lesson.updated",
   "project.updated",
   "settings.updated",
 ]);

@@ -282,8 +282,26 @@ export const ScoutLensRun = z.object({
 export type ScoutLensRun = z.infer<typeof ScoutLensRun>;
 
 /**
- * One review round of the scout: `planning` (the scout picks review areas), `reviewing` (the
- * area reviewers work), `filing` (the scout files the issues worth doing).
+ * The scout's plan for a round (`factory_plan_round`), recorded the moment it plans. Its area
+ * reviewers start on the loop's next passes as agent slots free up, so planning never waits for
+ * a session to start. A repeated plan call gets this plan back unchanged.
+ */
+export const ScoutPlan = z.object({
+  /** When the scout planned. Area reviewers that haven't started 15 minutes later never do. */
+  at: Timestamp,
+  /** The review areas that get an area reviewer this round, in the scout's order. */
+  lenses: z.array(ScoutLensRequest).default([]),
+  /** Those whose area reviewer hasn't started yet: it waits for a free agent. */
+  pending: z.array(DiscoveryArea).default([]),
+  /** What the scout was told when it planned. */
+  next: z.string(),
+});
+export type ScoutPlan = z.infer<typeof ScoutPlan>;
+
+/**
+ * One review round of the scout: `planning` (the scout picks review areas, then its area
+ * reviewers wait for free agents), `reviewing` (the area reviewers work), `filing` (the scout
+ * files the issues worth doing).
  */
 export const ScoutRound = z.object({
   id: z.string().min(1),
@@ -292,6 +310,8 @@ export const ScoutRound = z.object({
   /** When the scout was last sent work in this round (its turn must end after this). */
   sentAt: Timestamp,
   nudgedAt: Timestamp.nullable().default(null),
+  /** The scout's plan; null until it plans. */
+  plan: ScoutPlan.nullable().default(null),
   lenses: z.array(ScoutLensRun).default([]),
   findings: z.array(ScoutFinding).max(60).default([]),
   filed: z.int().nonnegative().default(0),
@@ -316,6 +336,11 @@ export const ScoutState = z.object({
   lensSessions: z.partialRecord(DiscoveryArea, Id).default({}),
   round: ScoutRound.nullable().default(null),
   lastRoundAt: Timestamp.nullable().default(null),
+  /**
+   * Why the last round closed before it ran its course, in plain words ("Couldn't start area
+   * reviewers (ux): no free agent within 15 minutes."); null when it ran its course.
+   */
+  lastRoundNote: z.string().nullable().default(null),
   rounds: z.int().nonnegative().default(0),
 });
 export type ScoutState = z.infer<typeof ScoutState>;
@@ -328,9 +353,13 @@ export const ScoutStatus = z.object({
   lenses: z.array(
     z.object({ area: DiscoveryArea, sessionId: Id, reported: z.boolean(), active: z.boolean() }),
   ),
+  /** Review areas the scout planned whose area reviewer waits for a free agent. */
+  waiting: z.array(DiscoveryArea).default([]),
   findings: z.int().nonnegative(),
   filed: z.int().nonnegative(),
   lastRoundAt: Timestamp.nullable(),
+  /** Why the last round closed before it ran its course (`ScoutState.lastRoundNote`). */
+  lastRoundNote: z.string().nullable().default(null),
   /**
    * When the next round may start (it also waits for the queue to run low); null while a round
    * runs, before the first one, and when scheduled rounds are off (`minBacklog` 0).

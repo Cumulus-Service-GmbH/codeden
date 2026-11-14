@@ -1,6 +1,8 @@
 import {
+  cleanLessons,
   FactoryAnalysisReport,
   FactoryReproductionReport,
+  LESSONS_PER_VERDICT,
   REVIEW_SUMMARY_MAX,
   ReviewVerdictSubmission,
   truncateReviewSummary,
@@ -43,11 +45,12 @@ const SUMMARY_MAX = REVIEW_SUMMARY_MAX.toLocaleString("en-US");
 /**
  * `factory_submit_review`: the independent reviewer's structured verdict. A summary over
  * `REVIEW_SUMMARY_MAX` is stored truncated rather than rejected, so a verdict is never lost
- * over its length; the full text stays in the reviewer's session (its tool call).
+ * over its length; the full text stays in the reviewer's session (its tool call). Its lessons
+ * are cleaned the same way (`cleanLessons`): never a reason to reject the verdict.
  */
 export const factorySubmitReview = defineTool({
   name: "factory_submit_review",
-  description: `Submit your review verdict for the factory pull request you were asked to review: \`approve\`, \`request_changes\` (it goes back to the author for a revision) or \`reject\`, a specific summary (up to ${SUMMARY_MAX} characters are stored; a longer one is cut), one entry per acceptance criterion (met or not), whether it fits the vision, whether its tests are adequate (or none are needed), and any security concerns. CI on the PR's head is the authority for the full test suite: request changes only for a cause in the pull request; if only your local environment kept you from verifying it, set \`blockers: "environment"\` and you get the CI result instead. Submit one verdict; if the call is rejected for invalid input, fix what the error names and call it again.`,
+  description: `Submit your review verdict for the factory pull request you were asked to review: \`approve\`, \`request_changes\` (it goes back to the author for a revision) or \`reject\`, a specific summary (up to ${SUMMARY_MAX} characters are stored; a longer one is cut), one entry per acceptance criterion (met or not), whether it fits the vision, whether its tests are adequate (or none are needed), and any security concerns. Optionally add up to ${LESSONS_PER_VERDICT} \`lessons\`: general rules for this repository that later builders and reviewers should know, not findings about this change alone. CI on the PR's head is the authority for the full test suite: request changes only for a cause in the pull request; if only your local environment kept you from verifying it, set \`blockers: "environment"\` and you get the CI result instead. Submit one verdict; if the call is rejected for invalid input, fix what the error names and call it again.`,
   roles: ["agent"],
   scope: "session",
   alwaysLoad: true,
@@ -57,7 +60,11 @@ export const factorySubmitReview = defineTool({
   ),
   input: ReviewVerdictSubmission,
   handler: async (input, { services, sessionId }) => {
-    const verdict = { ...input, summary: truncateReviewSummary(input.summary) };
+    const verdict = {
+      ...input,
+      summary: truncateReviewSummary(input.summary),
+      lessons: cleanLessons(input.lessons),
+    };
     const res = await asTool(() =>
       services.factory.submitReview(services.sessionRepo.get(sessionId), verdict),
     );

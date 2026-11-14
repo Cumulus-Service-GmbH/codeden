@@ -4,6 +4,8 @@ import {
   type FactoryDismissRequest,
   type FactoryItem,
   FactoryItemResponse,
+  type FactoryLesson,
+  FactoryLessonResponse,
   FactoryLoop,
   type FactoryRetryOptions,
   type FactorySetTypeRequest,
@@ -71,6 +73,11 @@ export interface FactoryApi {
    * while its PR is open, `not_failed` for other stages.
    */
   dismiss(projectId: string, itemId: string, req?: FactoryDismissRequest): Promise<FactoryItem>;
+  /**
+   * Forget one of the lessons the factory's reviewers recorded: it leaves the briefs and is never
+   * learned again. 404 `lesson_not_found`.
+   */
+  forgetLesson(projectId: string, lessonId: string): Promise<FactoryLesson>;
 }
 
 const enc = encodeURIComponent;
@@ -103,5 +110,12 @@ export function httpFactoryApi(http: Fetcher): FactoryApi {
       post(`${p(id)}/factory/items/${enc(itemId)}/retry`, opts ?? {}, item),
     dismiss: (id, itemId, req = {}) =>
       post(`${p(id)}/factory/items/${enc(itemId)}/dismiss`, req, item),
+    forgetLesson: (id, lessonId) =>
+      call(
+        "DELETE",
+        `${p(id)}/factory/lessons/${enc(lessonId)}`,
+        undefined,
+        (v) => FactoryLessonResponse.parse(v).lesson,
+      ),
   };
 }
