@@ -49,6 +49,11 @@ export interface CheckInputs {
   tuning: FactoryTuning;
   /** Why the PM let this item go over the size limit; null when it didn't. */
   largeChange: string | null;
+  /**
+   * An automatic revert of a factory merge (`revert.ts`): its own CI run is its test evidence,
+   * it needs no screenshots (it restores what was reviewed with them) and its size isn't counted.
+   */
+  revert?: boolean;
   areas: ProtectedAreas;
   now: string;
 }
@@ -142,7 +147,8 @@ export function evaluateChecks(i: CheckInputs): { checks: MergeCheck[]; outcome:
 
   const size = changeSize(i.pr);
   const measured = `${size.lines.toLocaleString("en")} lines in ${size.files} files${size.uncounted ? ` (${size.uncounted} lockfiles or generated files not counted)` : ""}`;
-  if (!overSizeLimit(size, i.tuning)) set("size", "pass", measured);
+  if (i.revert) set("size", "skipped", `A revert: not counted (${measured})`);
+  else if (!overSizeLimit(size, i.tuning)) set("size", "pass", measured);
   else if (i.largeChange) set("size", "pass", `${measured}; allowed by the PM: ${i.largeChange}`);
   else set("size", "fail", `${measured}, over the limit of ${sizeLimitText(i.tuning)}`);
 
@@ -217,7 +223,16 @@ export function evaluateChecks(i: CheckInputs): { checks: MergeCheck[]; outcome:
       tests.length ? `${tests.length} test files changed` : "Reviewer: no tests needed",
     );
 
-  if (hasTestResults(i.pr.body)) set("test_results", "pass", "Test results in the PR description");
+  const ci = out.get("ci")?.state;
+  if (i.revert) {
+    // The revert restores code CI passed before: its own CI run is the evidence.
+    const evidence = "A revert: its own CI run is the test evidence";
+    if (ci === "pass") set("test_results", "pass", evidence);
+    else if (ci === "fail") set("test_results", "fail", `${evidence}, and it failed`);
+    else if (ci === "skipped") set("test_results", "skipped", "A revert, and no CI is configured");
+    else set("test_results", "pending", `${evidence}: waiting for it`);
+  } else if (hasTestResults(i.pr.body))
+    set("test_results", "pass", "Test results in the PR description");
   else if (i.testOutput === true) set("test_results", "pass", "Test output attached");
   else if (code.length === 0) set("test_results", "skipped", "No code changed");
   else if (i.testOutput === null) set("test_results", "pending", "Checking for test results");
@@ -257,6 +272,8 @@ export function evaluateChecks(i: CheckInputs): { checks: MergeCheck[]; outcome:
 
   const ui = files.filter(isUiFile);
   if (ui.length === 0) set("ui_evidence", "skipped", "No UI files changed");
+  else if (i.revert)
+    set("ui_evidence", "skipped", "A revert: it restores UI that was reviewed with screenshots");
   else if (i.evidence === true) set("ui_evidence", "pass", "Screenshots attached");
   else if (i.evidence === null) set("ui_evidence", "pending", "Checking for screenshots");
   else

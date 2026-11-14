@@ -129,7 +129,8 @@ export async function advanceQueue(
     note(ctx, head, "Checks passed; waiting while the loop is paused");
     return loop;
   }
-  if (!mayMerge(loop.mergesToday, project.factoryLimits)) {
+  // A revert repairs the default branch: neither the pause nor the daily merge limit holds it.
+  if (!mayMerge(loop.mergesToday, project.factoryLimits) && head.source !== "revert") {
     note(ctx, head, "Checks passed; the daily merge limit is reached");
     return loop;
   }

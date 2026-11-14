@@ -16,6 +16,7 @@ import { prInboxIds } from "./merge";
 import { localDay } from "./policy";
 import { ownedPr } from "./pr-status";
 import { recoverable } from "./recover";
+import { lastMergeReverted } from "./stats";
 import { OWNED_STAGES } from "./store";
 import { DECISION_INBOX_PREFIX } from "./unattended";
 
@@ -119,7 +120,7 @@ export function buildDigest(opts: {
 }): FactoryDigest {
   const shipped = opts.items
     .filter((i) => i.mergedAt !== null && dayOf(i.mergedAt) === opts.day)
-    .map((i) => ({ itemId: i.id, title: i.title, pr: i.pr, reverted: i.stage === "reverted" }));
+    .map((i) => ({ itemId: i.id, title: i.title, pr: i.pr, reverted: lastMergeReverted(i) }));
   const rejected = opts.items
     .filter((i) => i.stage === "rejected" || i.stage === "failed")
     .map((i) => ({

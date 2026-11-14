@@ -71,6 +71,13 @@ export interface FactoryContext {
   log?: (message: string) => void;
 }
 
+/** The branch factory PRs target. */
+export function baseBranchOf(project: Project): string {
+  return project.kind === "github"
+    ? project.github.defaultBranch
+    : (project.defaultBranch ?? "main");
+}
+
 /** The vision text and its parsed form ("" and empty when the file is missing). */
 export function visionOf(project: Project): {
   text: string;

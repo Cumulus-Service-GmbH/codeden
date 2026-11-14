@@ -329,7 +329,9 @@ describe("the fast merge policy", () => {
     await tick();
     await tick();
     expect(env.gh.reverts.map((r) => r.prNumber)).toEqual([a.pr.ref.number]);
-    expect(item(a.id).stage).toBe("reverted");
+    // A's revert merged and main is green: A went back to its builder, still on record as reverted.
+    expect(item(a.id).nudges.reverted_at).toBeDefined();
+    expect(item(a.id).stage).toBe("building");
     expect(item(b.id).stage).toBe("merged");
     expect(item(b.id).note).toMatch(
       new RegExp(`#${a.pr.ref.number} merged before it, broke it and is being reverted`),

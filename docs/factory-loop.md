@@ -60,7 +60,7 @@ The loop **pauses itself** for one of these reasons:
 
 - **The daily budget is spent** ("daily budget reached ($10.00 of $10.00)"). It resumes by itself the next day.
 - **Failures in a row**: 3 failed items or reverts in a row ("3 failed merge checks or reverts in a row").
-- **A regression**: CI on the default branch failed after an automatic merge, and a revert pull request is open.
+- **A regression**: CI on the default branch failed after an automatic merge, and a revert pull request is open. The loop resumes by itself once the revert merged and CI on the default branch is green again (see [Watching main after a merge](#watching-main-after-a-merge)).
 
 While paused, work already in flight keeps moving (builds and reviews finish), but nothing merges except a revert. Nothing new starts: no intake, no new builds, no scout round, no automatic recovery or re-review. **Resume** clears the pause and the failure count.
 
@@ -109,7 +109,22 @@ With every check green:
 After an automatic merge the factory watches CI on the default branch for up to **120 minutes**:
 
 - **Green**, or no CI after 10 minutes, or still running after 120 minutes: the work counts as merged.
-- **Red**: a regression. The factory opens a revert pull request, counts a failure and pauses the loop. The revert goes to the front of the merge queue, and may merge while the loop is paused.
+- **Red**: a regression. The factory opens a revert pull request, counts a failure, pauses the loop and raises an inbox item.
+
+**The revert** has its own merge rules, so nobody has to merge it by hand:
+
+- **Test results:** its own CI run is the evidence (its description says so). It merges only once that CI is green.
+- **Screenshots:** none needed. It restores UI that was reviewed with screenshots before.
+- **Size:** not counted.
+- **Review:** when the revert is exactly the inverse of the merge (checked by comparing the trees: the commit before the merge and the revert's own), an automated check stands in for the reviewer. A revert that isn't (an agent had to resolve conflicts to write it, or something else changed) gets the normal review.
+- **Order:** it goes first in the merge queue. Neither the pause nor **Auto-merges per day** holds it.
+
+Once the revert merged and CI on the default branch is green again:
+
+- the regression's inbox item is resolved, and the loop resumes by itself;
+- the reverted work goes back to its builder as a revise round, with the checks that failed on the default branch. The item's note says so ("Revise round 1 after the revert: CI on main failed after #42 merged (test); reverted in #43"). The builder brings its change back on top of the default branch, fixes it and opens a new pull request. This happens once per item: reverted a second time, it stays reverted.
+
+**A revert that can't merge** (CI red on the revert too, conflicts that still aren't resolved after 3 requests, other failed checks, or the agent writing it giving up) stops there. You get one inbox item, "main is red and the revert can't merge: CI failed on the revert too (test)", and the loop stays paused until you get the default branch green and resume it.
 
 ## The merge queue
 
@@ -119,7 +134,7 @@ With auto-merge on, a pull request whose checks all pass doesn't merge on the sp
 - **Only the head of the queue acts.** The others say "queued to merge (number 2 in line)".
 - **Behind the default branch?** The factory asks GitHub to update the head pull request (**Update branch**, pinned to its current head commit). No agent is needed, and no new review while the pull request's own changes stay the same; only when the default branch changed lines right next to them does the reviewer look at the new head first. CI then runs on the new head.
 - **Merged on a later pass** once CI on that head is green: a squash merge, again pinned to the head commit, at most one per pass. Right before the merge the factory checks again that the review's approval covers that exact commit. If the head moved, nothing merges until the new commits are reviewed.
-- **Held** while the loop is paused (reverts excepted), when today's merges reached **Auto-merges per day** (5), and while a kill switch is on.
+- **Held** while the loop is paused and when today's merges reached **Auto-merges per day** (5), reverts excepted, and while a kill switch is on.
 
 **Why one at a time?** Every merge changes the default branch. A pull request that passed CI against the old default branch hasn't been tested against the new one, so each pull request is updated and tested on top of the one before it. Merging several at once could merge two changes that each pass alone but break together.
 
@@ -219,7 +234,7 @@ The **Needs you** lane in the Factory view, and the header's **need you** count,
 - **Retry or dismiss: stopped without a pull request**: work that stopped in the last day without one.
 - **Answer the agent's question**: an agent asked you something or wants an approval.
 
-Your **inbox** also gets: pull requests ready for you, escalations, a paused loop (except for the budget), a regression, and work that's **stuck**: still conflicting after its one rebuild, refused by GitHub three times, waiting on CI that can never run (GitHub Actions off, or no workflow), or at its **per-item spend cap**.
+Your **inbox** also gets: pull requests ready for you, escalations, a paused loop (except for the budget), a regression (and a revert that can't merge), and work that's **stuck**: still conflicting after its one rebuild, refused by GitHub three times, waiting on CI that can never run (GitHub Actions off, or no workflow), or at its **per-item spend cap**.
 
 **The factory handles by itself:** merge conflicts and rebases, pull requests behind the default branch, infrastructure failures, re-reviews after new commits, CI that never started, issues closed on GitHub, and changes that are too large (the PM's call).
 

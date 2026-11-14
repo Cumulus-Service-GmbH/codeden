@@ -28,6 +28,7 @@ import {
 } from "./rebase";
 import { adoptAgentPr } from "./rebuild";
 import { recheckCause } from "./recheck";
+import { checkRevert } from "./revert";
 import { ensureReviewer, reviewerStalled } from "./reviewer";
 import { mayAutoMerge } from "./trust";
 
@@ -104,6 +105,10 @@ export async function advanceVerifying(
     auditCache.set(headKey, await runAudit(ctx, loop.tuning.auditCommand, worktree));
   }
   const evidence = await gatherEvidence(ctx, project, item, pr, headKey);
+  // An exact revert's automated check stands in for the agent review (`revert.ts`).
+  const checked = await checkRevert(ctx, project, item, pr);
+  if (!checked) return loop;
+  item = checked;
   // CI gets its time from when this head first appeared, not from when verification began. An
   // approval covers one head: a new head keeps it only with the same change (`approval.ts`).
   const at = now.toISOString();
@@ -129,6 +134,7 @@ export async function advanceVerifying(
     limits: project.factoryLimits,
     tuning: loop.tuning,
     largeChange: item.largeChange ?? null,
+    revert: item.source === "revert",
     areas: vision.parsed.protectedAreas,
     now: now.toISOString(),
   });
@@ -186,8 +192,10 @@ async function gatherEvidence(
   pr: FactoryPr,
   headKey: string,
 ): Promise<{ screenshots: boolean | null; testOutput: boolean | null }> {
-  const wantScreens = pr.files.some(isUiFile);
-  const wantTests = codeFiles(pr.files).length > 0 && !hasTestResults(pr.body);
+  // A revert needs neither: its own CI is its evidence (`checks.ts`).
+  const revert = item.source === "revert";
+  const wantScreens = !revert && pr.files.some(isUiFile);
+  const wantTests = !revert && codeFiles(pr.files).length > 0 && !hasTestResults(pr.body);
   if (!wantScreens && !wantTests) return { screenshots: null, testOutput: null };
   let found = evidenceCache.get(headKey);
   if (!found || (wantScreens && !found.screenshots) || (wantTests && !found.testOutput)) {

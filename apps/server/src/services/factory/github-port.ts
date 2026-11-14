@@ -13,6 +13,7 @@ import { EVIDENCE_HEADING } from "../github/evidence";
 import type { GithubService } from "../github/github-service";
 import { authorAssociation } from "../github/graphql";
 import * as prOps from "./github-port-prs";
+import * as revertOps from "./github-port-revert";
 
 /** A pull request as the merge checks read it. */
 export interface FactoryPr {
@@ -120,6 +121,8 @@ export interface FactoryGithub {
     opts: { sha: string | null; title: string },
   ): Promise<{ merged: boolean; sha: string | null }>;
   commitChecks(projectId: string, sha: string): Promise<CommitChecks>;
+  /** Names of the checks that failed on a commit (CI on the default branch after a merge). */
+  failedChecks(projectId: string, sha: string): Promise<string[]>;
   /** Head of the default branch and its CI state. */
   mainHead(projectId: string): Promise<{ sha: string; checks: CommitChecks; failed: string[] }>;
   /** Commits the default branch has that the PR's head (`headSha`) doesn't; 0 when up to date. */
@@ -149,6 +152,12 @@ export interface FactoryGithub {
     projectId: string,
     merge: { sha: string; prNumber: number; title: string },
   ): Promise<GitHubPrRef | null>;
+  /**
+   * Whether a revert PR's head is exactly the inverse of the squash merge it reverts, by tree
+   * comparison: its only parent is the merge and its tree is the merge's parent's. False for a
+   * revert that had conflicts to resolve or changes anything else (it gets the normal review).
+   */
+  revertMatches(projectId: string, revert: { headSha: string; mergeSha: string }): Promise<boolean>;
   /**
    * Commit the vision file to the `codeden/vision` branch (from the default branch, or on top
    * of its open PR) and open or update that PR. Null when the file already matches.
@@ -314,6 +323,10 @@ export class GithubFactoryPort implements FactoryGithub {
     return (await this.checksFor(projectId, sha)).state;
   }
 
+  async failedChecks(projectId: string, sha: string): Promise<string[]> {
+    return (await this.checksFor(projectId, sha)).failed;
+  }
+
   async mainHead(projectId: string) {
     const repo = this.github.githubRepo(projectId);
     const branch = await this.github.client.run(
@@ -422,49 +435,12 @@ export class GithubFactoryPort implements FactoryGithub {
     return result;
   }
 
-  async revertMerge(projectId: string, merge: { sha: string; prNumber: number; title: string }) {
-    const repo = this.github.githubRepo(projectId);
-    const { owner, repo: name, defaultBranch } = repo;
-    return this.github.client.run(async (o) => {
-      const head = (await o.rest.git.getRef({ owner, repo: name, ref: `heads/${defaultBranch}` }))
-        .data.object.sha;
-      if (head !== merge.sha) return null;
-      const commit = (await o.rest.git.getCommit({ owner, repo: name, commit_sha: merge.sha }))
-        .data;
-      const parent = commit.parents[0]?.sha;
-      if (!parent || commit.parents.length !== 1) return null;
-      const parentTree = (await o.rest.git.getCommit({ owner, repo: name, commit_sha: parent }))
-        .data.tree.sha;
-      const revert = await o.rest.git.createCommit({
-        owner,
-        repo: name,
-        message: `Revert "${merge.title}" (#${merge.prNumber})\n\nAutomatic revert by the CodeDen factory: CI on ${defaultBranch} failed after the merge.`,
-        tree: parentTree,
-        parents: [merge.sha],
-      });
-      const branch = `codeden/revert-${merge.prNumber}-${merge.sha.slice(0, 7)}`;
-      await o.rest.git.createRef({
-        owner,
-        repo: name,
-        ref: `refs/heads/${branch}`,
-        sha: revert.data.sha,
-      });
-      const pr = await o.rest.pulls.create({
-        owner,
-        repo: name,
-        head: branch,
-        base: defaultBranch,
-        title: `Revert "${merge.title}"`,
-        body: `Reverts #${merge.prNumber} (${merge.sha}).\n\nCI on \`${defaultBranch}\` failed after the merge, so the CodeDen factory opened this revert and paused its loop. It goes through the same merge checks.`,
-      });
-      this.github.sync.soon(projectId);
-      return {
-        number: pr.data.number,
-        url: pr.data.html_url,
-        state: "open" as const,
-        title: pr.data.title,
-      };
-    });
+  revertMerge(projectId: string, merge: { sha: string; prNumber: number; title: string }) {
+    return revertOps.revertMerge(this.github, projectId, merge);
+  }
+
+  revertMatches(projectId: string, revert: { headSha: string; mergeSha: string }) {
+    return revertOps.revertMatches(this.github, projectId, revert);
   }
 
   private async checksFor(

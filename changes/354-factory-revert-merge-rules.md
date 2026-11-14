@@ -1,0 +1,5 @@
+---
+section: fixed
+---
+
+- **A red default branch no longer stays red because the factory's own revert can't merge.** The revert the factory opens when CI on the default branch fails after one of its merges used to fail the test-results and screenshot checks at once, leaving the loop paused with nobody to merge it. A revert now has its own merge rules: its own CI run is its test evidence, it needs no screenshots, its size isn't counted, and when it is exactly the inverse of the merge (checked by comparing trees) an automated check stands in for the agent review (a revert an agent had to resolve conflicts for still gets the normal review). It merges first once its CI is green, whatever the daily merge limit. When CI on the default branch is green again, the loop resumes by itself and the reverted work goes back to its builder as a revise round with the checks that failed. A revert that can't merge (CI red on it too, conflicts nobody resolved) raises one inbox item, "main is red and the revert can't merge: …", and the loop stays paused for you.

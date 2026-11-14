@@ -17,13 +17,8 @@ import type {
   ProviderRunnable,
   Unavailable,
 } from "./availability";
-import {
-  type BriefLessons,
-  builderPrompt,
-  NO_LESSONS,
-  revertPrompt,
-  reviewerPrompt,
-} from "./prompts";
+import { type BriefLessons, builderPrompt, NO_LESSONS, reviewerPrompt } from "./prompts";
+import { revertPrompt } from "./prompts-revert";
 import { FACTORY_STARTER, isFactorySession } from "./starter";
 
 export { FACTORY_STARTER, isFactorySession };

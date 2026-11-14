@@ -22,6 +22,7 @@ import { advanceBuilding, advanceWatching } from "./progress";
 import { advanceQueue } from "./queue";
 import { closeReplacedPrs } from "./rebuild";
 import { recoverInfraFailures } from "./recover";
+import { reviseAfterReverts } from "./revert";
 import { advanceScout } from "./scout";
 import { claimSlot } from "./slots";
 import { OWNED_STAGES } from "./store";
@@ -110,6 +111,11 @@ export async function runTick(
     }
     if (stage === "verifying") loop = await advanceQueue(ctx, project, loop);
   }
+  // Work whose revert merged (and CI on the default branch is green again) goes back to its
+  // builder as a revise round (`revert.ts`), also while paused, like any revise round.
+  await reviseAfterReverts(ctx, project).catch((error: unknown) =>
+    ctx.log?.(`factory: revise rounds after reverts: ${errorMessage(error)}`),
+  );
   // PRs a rebuild or an integrator replaced are closed, whatever their item's stage by now.
   await closeReplacedPrs(ctx, project).catch((error: unknown) =>
     ctx.log?.(`factory: closing replaced PRs: ${errorMessage(error)}`),

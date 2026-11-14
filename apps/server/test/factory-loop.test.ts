@@ -297,6 +297,9 @@ describe("factory loop state machine (§10.1)", () => {
 
   it("opens a revert PR and pauses when main CI fails after a merge", async () => {
     env = createFactoryEnv();
+    // Not an exact revert (someone pushed to it), so it gets the normal review
+    // (`factory-revert.test.ts` covers the exact one's automated check).
+    env.gh.revertsExact = false;
     enable();
     const it1 = backlogItem();
     const verifying = await toVerifying(it1);
@@ -313,7 +316,7 @@ describe("factory loop state machine (§10.1)", () => {
     const loop = env.factory.data.loopOrNew(env.project.id);
     expect(loop.state).toBe("paused");
     expect(env.inbox.find(`inbox:factory-regression:${it1.id}`)?.priority).toBe("high");
-    // The revert goes through the same checks and may merge while the loop is paused.
+    // The revert may merge while the loop is paused.
     await tick();
     // No builder worktree: the reviewer gets one on the revert PR's head, fetched by CodeDen,
     // so the review itself is offline.

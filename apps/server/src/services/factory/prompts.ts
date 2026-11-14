@@ -391,11 +391,3 @@ export const BUILDER_RESUME =
 
 export const REVIEWER_NUDGE =
   "You ended your turn without a verdict. Call `factory_submit_review` now with `approve`, `request_changes` or `reject`.";
-
-/** An agent writes the revert when the API cannot (main moved on after the merge). */
-export function revertPrompt(opts: { sha: string; prNumber: number; title: string }): string {
-  return [
-    `CI on the default branch failed after pull request #${opts.prNumber} ("${opts.title}") was merged as ${opts.sha}.`,
-    `Revert that commit in this worktree (\`git revert --no-edit ${opts.sha}\`), resolve conflicts conservatively, run the tests, and open a pull request titled \`Revert "${opts.title}"\` with \`create_pull_request\`. Do nothing else. Then call \`finish\`.`,
-  ].join("\n");
-}

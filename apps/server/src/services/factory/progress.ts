@@ -8,6 +8,9 @@ import { ANALYZE_NUDGE, BUILDER_NUDGE, REPRODUCE_NUDGE } from "./prompts";
 import { providerFailure, providerWide } from "./provider-failure";
 import { baseBranchOf } from "./rebase";
 import { rebuildFailed, unreplacedOriginal } from "./rebuild";
+import { recordMainFailure, revertLanded } from "./revert";
+import { regressionInboxId, regressionPausePrefix, revertBlocked } from "./revert-blocked";
+import { REVERTED_AT, revertedAt } from "./stats";
 import { awaitTurnRaceResume, BUILDER_FAILED_REASON } from "./turn-race";
 
 const BUSY = new Set(["created", "queued", "starting", "running", "waiting"]);
@@ -29,8 +32,13 @@ export async function advanceBuilding(
   const infra = { kind: "infrastructure" } as const;
   // A rebuild that ends without its new PR leaves the PR it was replacing stuck with the user.
   const original = unreplacedOriginal(ctx, item);
-  const fail = (reason: string) =>
-    original ? rebuildFailed(ctx, loop, item, original, reason) : failItem(ctx, loop, item, reason);
+  const fail = (reason: string) => {
+    if (original) return rebuildFailed(ctx, loop, item, original, reason);
+    // The agent writing a revert gave up: the default branch stays red, and the user hears it.
+    if (item.source === "revert")
+      return revertBlocked(ctx, project, loop, item, lowerFirst(reason));
+    return failItem(ctx, loop, item, reason);
+  };
   if (!s) return failItem(ctx, loop, item, "The builder session is gone", infra);
   if (BUSY.has(s.status)) return loop;
   const fixAt = item.attempts > 0 ? item.nudges[`fix_${item.attempts}`] : undefined;
@@ -116,6 +124,11 @@ export async function advanceWatching(
     return loop;
   };
   if (!item.mergeSha) return done("Merged (no merge commit reported)");
+  // A revert whose merge is green ends the regression: the loop resumes (`revert.ts`).
+  const landed = () => {
+    done(null);
+    return item.source === "revert" ? revertLanded(ctx, project, loop, item) : loop;
+  };
   let state: Awaited<ReturnType<typeof ctx.github.commitChecks>>;
   try {
     state = await ctx.github.commitChecks(project.id, item.mergeSha);
@@ -128,7 +141,7 @@ export async function advanceWatching(
   }
   const age = ctx.now().getTime() - Date.parse(item.mergedAt ?? item.updatedAt);
   const timedOut = age > loop.tuning.watchTimeoutMin * 60_000;
-  if (state === "success") return done(null);
+  if (state === "success") return landed();
   if (state === "none")
     return age > ctx.ciGraceMs || !loop.tuning.requireCi
       ? done("No CI ran on the default branch")
@@ -148,7 +161,11 @@ export async function advanceWatching(
     if (item.note !== text) ctx.store.updateItem(item.id, (i) => ({ ...i, note: text }));
     return loop;
   }
-  const culprit = earlier.find((i) => i.stage === "reverted");
+  // Reverted after this one merged: its revert may have landed and sent it back to its builder.
+  const culprit = earlier.find((i) => {
+    const at = revertedAt(i);
+    return at !== null && at >= (item.nudges[`${MERGED_AFTER}${i.id}`] ?? "");
+  });
   if (culprit)
     return done(
       `CI on ${branch} failed, but #${culprit.pr?.number ?? "?"} merged before it, broke it and is being reverted, so this one is not`,
@@ -167,7 +184,7 @@ async function regression(
   const branch = baseBranchOf(project);
   const at = ctx.now().toISOString();
   // Fast merges wait until CI on the default branch is green again (`fast-merge.ts`).
-  let next: FactoryLoop = {
+  const next: FactoryLoop = {
     ...loop,
     consecutiveFailures: loop.consecutiveFailures + 1,
     fastMergeHold: `CI on ${branch} failed after #${prNumber} merged`,
@@ -185,6 +202,8 @@ async function regression(
       `CI on ${branch} still fails after the automatic revert #${prNumber}`,
     );
   }
+  // What failed on the merge goes back to the builder with its revise round (`revert.ts`).
+  const failed = await recordMainFailure(ctx, project, item);
   const revertPr = await ctx.github
     .revertMerge(project.id, { sha, prNumber, title: item.title })
     .catch((error: unknown) => {
@@ -215,19 +234,22 @@ async function regression(
     revertOf: item.id,
   };
   let revertNote: string;
+  /** The revert item when no agent could start to write it, and why. */
+  let unstarted: { revert: FactoryItem; why: string } | null = null;
   if (revertPr) {
     ctx.store.createItem({ ...base, stage: "verifying", pr: revertPr, nudges: { verifying: at } });
     revertNote = `revert PR #${revertPr.number} is open`;
   } else {
     const res = await ctx.sessions.startRevert(project.id, { sha, prNumber, title: item.title });
     const sessionId = res.status === "started" ? res.sessionId : null;
-    ctx.store.createItem({
+    const revert = ctx.store.createItem({
       ...base,
       stage: sessionId ? "building" : "failed",
       builderSessionId: sessionId,
       note: sessionId ? "An agent is writing the revert" : null,
       reason: sessionId ? null : `Could not start the revert session (${res.status})`,
     });
+    if (!sessionId) unstarted = { revert, why: `no agent could start to write it (${res.status})` };
     revertNote = sessionId
       ? "an agent is writing the revert PR"
       : "the revert could not be started";
@@ -235,12 +257,13 @@ async function regression(
   ctx.store.updateItem(item.id, (i) => ({
     ...i,
     stage: "reverted",
-    reason: `CI on ${branch} failed after the merge`,
+    reason: `CI on ${branch} failed after the merge${failed.length ? ` (${failed.join(", ")})` : ""}`,
     note: revertNote,
     finishedAt: at,
+    nudges: { ...i.nudges, [REVERTED_AT]: at },
   }));
   raiseInbox(ctx, {
-    id: `inbox:factory-regression:${item.id}`,
+    id: regressionInboxId(item.id),
     kind: "run_failed",
     notify: "failure",
     priority: "high",
@@ -248,7 +271,7 @@ async function regression(
     issue: item.issue,
     pr: revertPr ?? item.pr,
     title: `Factory regression on ${branch}: ${item.title}`,
-    body: `CI on ${branch} failed after merging #${prNumber} (${sha}); ${revertNote}. The factory loop is paused until you resume it.`,
+    body: `CI on ${branch} failed after merging #${prNumber} (${sha}); ${revertNote}. The factory loop is paused: it resumes by itself once the revert merged and CI on ${branch} is green again, and the work goes back to its builder.`,
   });
   factoryNotice(ctx, {
     id: `factory.regression:${item.id}`,
@@ -260,8 +283,19 @@ async function regression(
     itemIds: [item.id],
     wake: false,
   });
-  next = pauseLoop(ctx, next, `CI on ${branch} failed after merging #${prNumber}; ${revertNote}`, {
-    inbox: false,
-  });
-  return next;
+  // The regression pauses the loop (and resumes it once the revert landed, `revert.ts`). A pause
+  // the user must lift (a failure streak, a revert that can't merge) stays as it is; the budget's
+  // gives way, so a new day doesn't lift it while the default branch is red.
+  const prefix = regressionPausePrefix(branch);
+  const held = loop.pausedReason ?? "";
+  const keep = loop.state === "paused" && !held.startsWith(prefix) && !held.startsWith("daily");
+  const reason = `${prefix}${prNumber}; ${revertNote}`;
+  const paused = keep ? next : pauseLoop(ctx, next, reason, { inbox: false });
+  if (!unstarted) return paused;
+  return revertBlocked(ctx, project, paused, unstarted.revert, unstarted.why);
+}
+
+/** "The builder ..." as the middle of a sentence. */
+function lowerFirst(text: string): string {
+  return text.charAt(0).toLowerCase() + text.slice(1);
 }

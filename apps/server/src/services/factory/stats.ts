@@ -4,6 +4,26 @@ import { localDay } from "./policy";
 const DAY_MS = 24 * 60 * 60 * 1000;
 const WEEK_MS = 7 * DAY_MS;
 
+/**
+ * Nudge on an item whose merge was reverted because CI on the default branch failed after it:
+ * when. It stays when the item goes back to its builder after the revert (`revert.ts`), as do the
+ * merge's `mergedAt` and `mergePath` until it merges again.
+ */
+export const REVERTED_AT = "reverted_at";
+
+type RevertFacts = Pick<FactoryItem, "stage" | "finishedAt" | "mergedAt" | "nudges">;
+
+/** When the item's merge was last reverted; null when it never was (older items: when it finished). */
+export function revertedAt(item: RevertFacts): string | null {
+  return item.nudges[REVERTED_AT] ?? (item.stage === "reverted" ? item.finishedAt : null);
+}
+
+/** Whether the item's last merge was reverted (not a merge that came after the revert). */
+export function lastMergeReverted(item: RevertFacts): boolean {
+  const at = revertedAt(item);
+  return at !== null && (item.mergedAt === null || at >= item.mergedAt);
+}
+
 /** The middle value (the mean of the two middle ones for an even count); null when empty. */
 export function median(values: number[]): number | null {
   if (values.length === 0) return null;
@@ -36,13 +56,13 @@ export function factoryStats(items: FactoryItem[], now: Date): FactoryStats {
   return {
     mergedToday: items.filter((i) => on(i.mergedAt)).length,
     failedToday: items.filter((i) => i.stage === "failed" && on(i.finishedAt)).length,
-    revertedToday: items.filter((i) => i.stage === "reverted" && on(i.finishedAt)).length,
+    revertedToday: items.filter((i) => on(revertedAt(i))).length,
     medianMergeMs7d: median(durations),
     merged7d: durations.length,
     fastMerges7d: merged7d.filter((i) => i.mergePath === "fast").length,
     retestedMerges7d: merged7d.filter((i) => i.mergePath === "retested").length,
     fastReverts7d: items.filter(
-      (i) => i.stage === "reverted" && i.mergePath === "fast" && inWeek(i.finishedAt),
+      (i) => i.mergePath === "fast" && lastMergeReverted(i) && inWeek(revertedAt(i)),
     ).length,
   };
 }

@@ -7,6 +7,7 @@ import { fixPrompt, tooLargePrompt } from "./prompts";
 import { MERGE_QUEUED } from "./queue";
 import { repairSlot } from "./rebase";
 import { reviseRoundsAllowed } from "./rereview";
+import { revertBlocked } from "./revert-blocked";
 
 /**
  * Failed merge checks (§10.1, Review and revise): a revise round when one is allowed, the
@@ -46,6 +47,12 @@ export async function handleFailure(
   conflictsWith: string | null = null,
 ): Promise<FactoryLoop> {
   const failed = failedChecks(item.checks);
+  // CI red on a revert too: the default branch can't be fixed by merging it (`revert-blocked.ts`).
+  const ciRed = failed.find((c) => c.name === "ci" && !notAuthorFixable(c));
+  if (item.source === "revert" && ciRed) {
+    const names = ciRed.detail?.replace(/^CI failed: /, "") ?? "";
+    return revertBlocked(ctx, project, loop, item, `CI failed on the revert too (${names})`);
+  }
   // A revise round can't make work smaller without cutting scope: the PM splits or allows it.
   if (failed.some((c) => c.name === "size")) return tooLarge(ctx, project, loop, item);
   const builder = item.builderSessionId ? ctx.repo.find(item.builderSessionId)?.session : undefined;
@@ -94,6 +101,10 @@ export async function handleFailure(
   if (failed.length > 0 && failed.every(notAuthorFixable)) return ciNeverStarted(ctx, loop, item);
   const reason =
     failed.map((c) => `${c.name}: ${c.detail ?? "failed"}`).join("; ") || "Merge checks failed";
+  if (item.source === "revert") {
+    const why = `its merge checks failed (${reason})`;
+    return revertBlocked(ctx, project, loop, item, why);
+  }
   const next = failItem(ctx, loop, item, reason);
   if (item.pr) {
     await ctx.github

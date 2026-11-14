@@ -1,11 +1,12 @@
 import type { FactoryItem, FactoryLoop, Project, Session } from "@codeden/contracts";
-import type { FactoryContext } from "./context";
+import { baseBranchOf, type FactoryContext } from "./context";
 import type { FactoryPr } from "./github-port";
 import { failItem } from "./outcomes";
 import { REBASE_WHY, rebasePrompt } from "./prompts";
 import { type IntegratorTask, integratorPrompt } from "./prompts-integration";
 import { rebuild } from "./rebuild";
 import { owedRecheck, recheckOf, settleRecheck } from "./recheck";
+import { revertBlocked } from "./revert-blocked";
 import { isBusy } from "./sessions";
 import { claimSlot } from "./slots";
 import { FINISHED_STAGES } from "./store";
@@ -18,7 +19,8 @@ import { FINISHED_STAGES } from "./store";
  * when that head first appeared. The agent is the builder while its session exists (a message
  * resumes a failed one and brings an archived one and its worktree back): it has the context
  * and owns the PR's branch. Otherwise a fresh integrator session takes over the PR. After
- * `MAX_REBASE_ASKS` requests the work is rebuilt from the default branch instead.
+ * `MAX_REBASE_ASKS` requests the work is rebuilt from the default branch instead (a revert, which
+ * has nothing to rebuild, goes to the user: `revert-blocked.ts`).
  */
 
 /** Requests to rebase per conflict before the item is rebuilt. */
@@ -39,12 +41,7 @@ export const STRICT = "strict_";
 /** When the merge queue last brought the PR up to date (any head): it merges as `retested`. */
 export const QUEUE_UPDATED = "queue_updated";
 
-/** The branch factory PRs target. */
-export function baseBranchOf(project: Project): string {
-  return project.kind === "github"
-    ? project.github.defaultBranch
-    : (project.defaultBranch ?? "main");
-}
+export { baseBranchOf };
 
 /** How many times the PR's agent was asked to rebase during the current conflict. */
 export function rebaseAsks(item: FactoryItem): number {
@@ -260,6 +257,11 @@ export async function advanceConflicting(
     return loop;
   }
   if (asked >= MAX_REBASE_ASKS) {
+    // A revert isn't rebuilt: the default branch stays red, and a person hears it once.
+    if (item.source === "revert") {
+      const why = `it still conflicts with ${branch} after ${asked} requests to resolve them`;
+      return revertBlocked(ctx, project, loop, item, why);
+    }
     return rebuild(
       ctx,
       project,

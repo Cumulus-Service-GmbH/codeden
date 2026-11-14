@@ -43,6 +43,13 @@ export class FakeFactoryGithub implements FactoryGithub {
   reverts: Array<{ sha: string; prNumber: number }> = [];
   /** CI state per commit sha (default success). */
   commitState = new Map<string, CommitChecks>();
+  /** Checks that failed per commit sha (default: `test` when its state is a failure). */
+  commitFailures = new Map<string, string[]>();
+  /**
+   * Revert PR heads that are exactly the inverse of a merge (tree comparison), by head sha: the
+   * merge sha. `revertMerge` adds its own (see `revertsExact`); an agent's revert isn't one.
+   */
+  exactReverts = new Map<string, string>();
   main = { sha: MAIN_START, checks: "success" as ChecksState, failed: [] as string[] };
   /**
    * Commits on main after `MAIN_START`, oldest first, with the files each changed: merges and
@@ -60,6 +67,10 @@ export class FakeFactoryGithub implements FactoryGithub {
   githubProjects = new Set<string>();
   /** When false, `revertMerge` returns null (main moved on). */
   canRevertViaApi = true;
+  /** CI on the revert PRs `revertMerge` opens. */
+  revertChecks: ChecksState = "success";
+  /** When false, the reverts `revertMerge` opens aren't exact (as if someone pushed to them). */
+  revertsExact = true;
   /** The account CodeDen uses on GitHub (always trusted); null: unknown. */
   viewer: string | null = "codeden";
   /** `update-branch` calls, in order. */
@@ -363,6 +374,15 @@ export class FakeFactoryGithub implements FactoryGithub {
     return this.commitState.get(sha) ?? "success";
   }
 
+  async failedChecks(_projectId: string, sha: string): Promise<string[]> {
+    const failing = this.commitState.get(sha) === "failure";
+    return this.commitFailures.get(sha) ?? (failing ? ["test"] : []);
+  }
+
+  async revertMatches(_projectId: string, revert: { headSha: string; mergeSha: string }) {
+    return this.exactReverts.get(revert.headSha) === revert.mergeSha;
+  }
+
   async mainHead() {
     return { ...this.main };
   }
@@ -383,8 +403,9 @@ export class FakeFactoryGithub implements FactoryGithub {
   }
 
   /**
-   * Like the real port: a revert PR with the merged PR's files, whose description says what it
-   * reverts (no `## Test results` section) and that has no evidence attached.
+   * Like the real port: a revert PR with the merged PR's files and no evidence attached, whose
+   * head is exactly the inverse of the merge (`exactReverts`). Its description has no
+   * `## Test results` section, so the merge checks can't lean on one.
    */
   async revertMerge(_projectId: string, merge: { sha: string; prNumber: number; title: string }) {
     if (!this.canRevertViaApi) return null;
@@ -394,7 +415,9 @@ export class FakeFactoryGithub implements FactoryGithub {
       title: `Revert "${merge.title}"`,
       files: this.prs.get(merge.prNumber)?.files ?? ["src/app.ts", "test/app.test.ts"],
       body: `Reverts #${merge.prNumber} (${merge.sha}).\n\nCI on \`main\` failed after the merge, so the CodeDen factory opened this revert and paused its loop.`,
+      checks: this.revertChecks,
     });
+    if (pr.headSha && this.revertsExact) this.exactReverts.set(pr.headSha, merge.sha);
     return pr.ref;
   }
 }
