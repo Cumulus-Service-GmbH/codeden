@@ -51,10 +51,10 @@ describe.skipIf(!hasBrowser)("browser engine (installed Edge/Chrome)", { timeout
     await site?.close();
   });
 
-  it("launches lazily with a loopback CDP endpoint and opens a session tab", async () => {
-    expect(manager.cdpUrl).toBeNull();
+  it("launches lazily, with no CDP endpoint, and opens a session tab", async () => {
+    expect(manager.channel).toBeNull();
     const opened = await browser.execute({ name: "browser.open", sessionId: "s1", url: site.url });
-    expect(opened).toMatchObject({ cdpUrl: expect.stringMatching(/^ws:\/\/127\.0\.0\.1:\d+\//) });
+    expect(opened).toMatchObject({ cdpUrl: null });
     expect(["msedge", "chrome"]).toContain(manager.channel);
     expect(manager.pid).toBeGreaterThan(0);
     const tabs = await browser.handlers["browser.tabs.list"]({
@@ -359,7 +359,7 @@ describe.skipIf(!hasBrowser)("browser shutdown", { timeout: 30_000 }, () => {
       async () => (await survivors([pid, ...children], seenAt)).length === 0,
       15_000,
     );
-    expect(manager.cdpUrl).toBeNull();
+    expect(manager.channel).toBeNull();
     await expect(manager.open("s")).rejects.toMatchObject({ code: "unavailable" });
   });
 });

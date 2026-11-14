@@ -13,6 +13,7 @@ To report a vulnerability, see [SECURITY.md](../SECURITY.md).
 - **`Host` must be a loopback name** (`127.0.0.1`, `localhost`, `[::1]`), which blocks DNS-rebinding attacks.
 - **`Origin`, when present, must be CodeDen's own**, which blocks other websites, including other apps on other localhost ports.
 - The cookie name includes the port, so two installs side by side don't clash.
+- **The browsers have no debugging port.** The runner's Chromium holds every session's tabs and cookies, so it opens no TCP port at all: the runner drives it over a private pipe, and nothing else on the machine (another session's agent, another OS user, a container reaching the host) can attach to it. The desktop app has no debugging port either; the runner reaches a session's native browser views through the app's relay on 127.0.0.1, one path per session, which needs that session's random secret, refuses web pages, and sees only that session's views.
 
 ### Network access
 

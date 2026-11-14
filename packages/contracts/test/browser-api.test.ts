@@ -20,6 +20,9 @@ describe("browser panel contracts", () => {
   it("carries the engine and the desktop window's native preference", () => {
     roundTrip(BrowserOpenRequest, { native: true });
     roundTrip(BrowserOpenResponse, { cdpUrl: null, tabs: [tab], engine: "native" });
+    // No browser exposes a CDP endpoint, so the API never carries one (issue #318).
+    const endpoint = { cdpUrl: "ws://127.0.0.1:9222/devtools/browser/x", tabs: [tab] };
+    expect(BrowserOpenResponse.safeParse(endpoint).success).toBe(false);
     roundTrip(BrowserTabsResponse, { open: true, tabs: [tab], engine: "native" });
     roundTrip(BrowserServerMessage, {
       type: "state",
