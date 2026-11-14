@@ -13,6 +13,7 @@ import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { advanceDrain } from "./drain";
 import { fileDueFollowUps } from "./follow-ups";
 import { classifyPending, intakeFailedChecks, intakeIssues } from "./intake";
+import { enforceItemBudgets } from "./item-budget";
 import { briefLessons } from "./lessons";
 import { openPrFiles, scheduleOrder } from "./overlap";
 import { advanceOwned } from "./owned";
@@ -90,6 +91,9 @@ export async function runTick(
   const failedAtStart = new Set(ctx.store.items(projectId, ["failed"]).map((i) => i.id));
   const drainedAtStart = loop.drain ? new Set(loop.drain.itemIds) : undefined;
   loop = await recoverInfraFailures(ctx, project, loop, { resume: false, only: drainedAtStart });
+  // Work that reached the per-item spend cap stops before it takes another step, also while
+  // paused or draining (in-flight work moves on then).
+  loop = await enforceItemBudgets(ctx, project, loop);
   // Items already in flight move on even while paused (merges stay blocked, reverts excepted).
   // Watch merges first, then builds, then verification, so a PR found while building is
   // verified in the same step and a fresh merge is watched from the next one. Then the merge

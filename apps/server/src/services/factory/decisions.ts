@@ -154,6 +154,8 @@ export function retry(
     stage: i.type ? "backlog" : "candidate",
     investigation: null,
     attempts: 0,
+    // A retry is a call to spend more: the per-item cap counts afresh (its cost still shows all).
+    itemBudgetSince: ctx.now().toISOString(),
     review: null,
     checks: [],
     pr: null,

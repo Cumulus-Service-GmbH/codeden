@@ -47,29 +47,32 @@ export function projectFactoryRoutes(s: AppServices) {
       return c.json(await f.status(c.req.param("id")));
     })
     .post("/:id/factory/digest", async (c) => c.json(await f.digestNow(c.req.param("id"))))
-    .get("/:id/factory/items/:itemId", (c) =>
-      c.json<FactoryItemResponse>({ item: f.item(c.req.param("id"), c.req.param("itemId")) }),
-    )
-    .post("/:id/factory/admit", jsonBody(FactoryAdmitRequest), async (c) =>
-      c.json<FactoryItemResponse>({
-        item: await f.admit(c.req.param("id"), c.req.valid("json"), "user"),
-      }),
-    )
-    .post("/:id/factory/set-type", jsonBody(FactorySetTypeRequest), async (c) =>
-      c.json<FactoryItemResponse>({
-        item: await f.setType(c.req.param("id"), c.req.valid("json"), "user"),
-      }),
-    )
-    .post("/:id/factory/items/:itemId/retry", jsonBody(FactoryRetryOptions), (c) =>
-      c.json<FactoryItemResponse>({
-        item: f.retry(c.req.param("id"), c.req.param("itemId"), c.req.valid("json").mode),
-      }),
-    )
-    .post("/:id/factory/items/:itemId/dismiss", jsonBody(FactoryDismissRequest), (c) =>
-      c.json<FactoryItemResponse>({
-        item: f.dismiss(c.req.param("id"), c.req.param("itemId"), c.req.valid("json"), "user"),
-      }),
-    )
+    .get("/:id/factory/items/:itemId", async (c) => {
+      const id = c.req.param("id");
+      return c.json<FactoryItemResponse>(
+        await f.itemResponse(id, f.item(id, c.req.param("itemId"))),
+      );
+    })
+    .post("/:id/factory/admit", jsonBody(FactoryAdmitRequest), async (c) => {
+      const id = c.req.param("id");
+      const item = await f.admit(id, c.req.valid("json"), "user");
+      return c.json<FactoryItemResponse>(await f.itemResponse(id, item));
+    })
+    .post("/:id/factory/set-type", jsonBody(FactorySetTypeRequest), async (c) => {
+      const id = c.req.param("id");
+      const item = await f.setType(id, c.req.valid("json"), "user");
+      return c.json<FactoryItemResponse>(await f.itemResponse(id, item));
+    })
+    .post("/:id/factory/items/:itemId/retry", jsonBody(FactoryRetryOptions), async (c) => {
+      const id = c.req.param("id");
+      const item = f.retry(id, c.req.param("itemId"), c.req.valid("json").mode);
+      return c.json<FactoryItemResponse>(await f.itemResponse(id, item));
+    })
+    .post("/:id/factory/items/:itemId/dismiss", jsonBody(FactoryDismissRequest), async (c) => {
+      const id = c.req.param("id");
+      const item = f.dismiss(id, c.req.param("itemId"), c.req.valid("json"), "user");
+      return c.json<FactoryItemResponse>(await f.itemResponse(id, item));
+    })
     .delete("/:id/factory/lessons/:lessonId", (c) =>
       c.json<FactoryLessonResponse>({
         lesson: f.forgetLesson(c.req.param("id"), c.req.param("lessonId")),
@@ -78,14 +81,11 @@ export function projectFactoryRoutes(s: AppServices) {
     .post(
       "/:id/factory/items/:itemId/follow-ups/file",
       jsonBody(FactoryFileFollowUpRequest),
-      async (c) =>
-        c.json<FactoryItemResponse>({
-          item: await f.fileFollowUp(
-            c.req.param("id"),
-            c.req.param("itemId"),
-            c.req.valid("json").index,
-          ),
-        }),
+      async (c) => {
+        const id = c.req.param("id");
+        const item = await f.fileFollowUp(id, c.req.param("itemId"), c.req.valid("json").index);
+        return c.json<FactoryItemResponse>(await f.itemResponse(id, item));
+      },
     );
 }
 

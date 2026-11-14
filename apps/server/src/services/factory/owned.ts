@@ -2,6 +2,7 @@ import type { FactoryItem, FactoryLoop, GitHubPrRef, Project } from "@codeden/co
 import { errorMessage } from "../errors";
 import type { FactoryContext } from "./context";
 import type { FactoryPr } from "./github-port";
+import { overBudgetNote, overItemBudget } from "./item-budget";
 import { prDecidedOutside } from "./merge";
 import {
   advanceConflicting,
@@ -97,7 +98,9 @@ export async function advanceOwned(
   }
   if (pr.mergeable !== "conflicting") {
     const resolved = rebaseAsks(item) > 0 && pr.mergeable === "mergeable";
-    if (current.stage === "failed") return settleStopped(ctx, loop, current, pr, resolved);
+    if (current.stage === "failed") {
+      return settleStopped(ctx, project, loop, current, pr, resolved);
+    }
     // Escalated (a protected area): only a person merges it.
     if (resolved) note(ctx, current, "Merge conflicts resolved; waiting for a person to merge it");
     return loop;
@@ -111,6 +114,12 @@ export async function advanceOwned(
     note(ctx, current, `Merge conflicts with ${branch}: waiting while ${why}`);
     return loop;
   }
+  // An item at its spend cap gets no rebase, integrator or rebuild until a person retries it.
+  const over = overItemBudget(ctx, project, current);
+  if (over) {
+    note(ctx, current, overBudgetNote(over));
+    return loop;
+  }
   return advanceConflicting(ctx, project, loop, current, pr);
 }
 
@@ -122,6 +131,7 @@ export async function advanceOwned(
  */
 function settleStopped(
   ctx: FactoryContext,
+  project: Project,
   loop: FactoryLoop,
   item: FactoryItem,
   pr: FactoryPr,
@@ -129,6 +139,12 @@ function settleStopped(
 ): FactoryLoop {
   const due = autoReReview(item, pr, loop.tuning.requireCi);
   if (due === "now" && pr.headSha && !holdsAgentTurns(loop)) {
+    // A review spends an agent turn: not for an item at its spend cap.
+    const over = overItemBudget(ctx, project, item);
+    if (over) {
+      note(ctx, item, overBudgetNote(over));
+      return loop;
+    }
     const n = autoReReviews(item) + 1;
     resumeReview(ctx, item, pr.ref, {
       note: `Back in review by itself: #${pr.ref.number} has commits its last review didn't cover (${n} of ${MAX_AUTO_REREVIEWS})`,

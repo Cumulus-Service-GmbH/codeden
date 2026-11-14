@@ -14,8 +14,10 @@ import type { ReactNode } from "react";
 import { SectionLabel } from "@/components/common/bits";
 import { StatusDot } from "@/components/common/status-dot";
 import { FollowUps } from "@/components/factory/follow-ups";
+import { capText } from "@/components/factory/item-cost";
 import {
   CheckRow,
+  CostValue,
   InvestigationCard,
   ItemActions,
   SessionLink,
@@ -107,12 +109,17 @@ function Verdict({ review, item }: { review: ReviewVerdict; item: FactoryItem })
   );
 }
 
-/** One factory work item (§10.1): its pipeline, merge checks, the review and its sessions. */
+/**
+ * One factory work item (§10.1): its pipeline, merge checks, the review, its sessions and what
+ * it cost.
+ */
 export function FactoryItemPage({ projectId, itemId }: { projectId: string; itemId: string }) {
   const project = useProject(projectId);
-  const { data: item, error } = useFactoryItem(projectId, itemId);
+  const { data, error } = useFactoryItem(projectId, itemId);
   if (error) return <div className="p-8 text-sm text-muted-foreground">{error.message}</div>;
-  if (!item || !project) return <Skeleton className="m-6 h-64 rounded-xl" />;
+  if (!data || !project) return <Skeleton className="m-6 h-64 rounded-xl" />;
+  const { item, cost } = data;
+  const cap = capText(cost);
   const stage = STAGE_LABEL[item.stage];
   const step = pipelineStep(item);
   const met = new Map(item.review?.criteria.map((c) => [c.criterion, c]) ?? []);
@@ -285,6 +292,10 @@ export function FactoryItemPage({ projectId, itemId }: { projectId: string; item
               <SessionLink id={item.reviewerSessionId} label={item.reviewerProvider ?? "session"} />
             </Fact>
             <Fact label="Revise rounds">{item.attempts}</Fact>
+            <Fact label="Cost">
+              <CostValue cost={cost} />
+            </Fact>
+            {cap && <Fact label="Spend cap">{cap}</Fact>}
             {item.mergeSha && (
               <Fact label="Merge commit">
                 <code className="font-mono text-2xs">{item.mergeSha.slice(0, 10)}</code>

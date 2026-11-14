@@ -264,14 +264,18 @@ export class FactoryStore {
       createdAt: now,
       updatedAt: now,
     };
-    this.events.append([{ type: "factory.item.updated", sessionId: null, payload: { item } }]);
-    return item;
+    const tracked = { ...item, sessionIds: trackedSessions(item) };
+    this.events.append([
+      { type: "factory.item.updated", sessionId: null, payload: { item: tracked } },
+    ]);
+    return tracked;
   }
 
   /**
    * Apply a change to an item; writes only when something changed. `touch: false` keeps
    * `updatedAt`, for bookkeeping that isn't progress (the digest and the recent list go by it).
-   * A change that moves the item to another pipeline step restarts `stepSince`.
+   * A change that moves the item to another pipeline step restarts `stepSince`. Every session
+   * the item had or has now stays in `sessionIds`, for its cost.
    */
   updateItem(
     id: string,
@@ -280,8 +284,11 @@ export class FactoryStore {
   ): FactoryItem {
     const current = this.item(id);
     if (!current) throw new Error(`No factory item ${id}`);
-    const changed = change(current);
-    if (JSON.stringify(changed) === JSON.stringify(current)) return current;
+    const proposed = change(current);
+    // A change that changes nothing writes nothing, not even the sessions it would track (an
+    // item from before `sessionIds` gets them with its next real change).
+    if (JSON.stringify(proposed) === JSON.stringify(current)) return current;
+    const changed = { ...proposed, sessionIds: trackedSessions(proposed, current) };
     const now = new Date().toISOString();
     const stepped =
       pipelineStep(changed) === pipelineStep(current) ? changed : { ...changed, stepSince: now };
@@ -356,6 +363,8 @@ const ITEM_DEFAULTS = {
   largeChange: null,
   sessionsArchivedAt: null,
   earlierSessionIds: [],
+  sessionIds: [],
+  itemBudgetSince: null,
   failureKind: null,
   rebuiltFrom: null,
   stepSince: null,
@@ -366,6 +375,21 @@ const ITEM_DEFAULTS = {
 /** An item as read from the projection, with the fields newer versions added. */
 export function withItemDefaults(item: FactoryItem): FactoryItem {
   return { ...ITEM_DEFAULTS, ...item };
+}
+
+/**
+ * `sessionIds` after a write: what it held, plus the builder, reviewer and earlier sessions of
+ * the item before and after the change, so a session a change clears from those fields (a
+ * replaced reviewer, an earlier attempt once archived) is still counted in the item's cost.
+ */
+function trackedSessions(next: FactoryItem, before?: FactoryItem): string[] {
+  const ids = new Set([...(before?.sessionIds ?? []), ...(next.sessionIds ?? [])]);
+  for (const i of before ? [before, next] : [next]) {
+    for (const id of [i.builderSessionId, i.reviewerSessionId, ...(i.earlierSessionIds ?? [])]) {
+      if (id) ids.add(id);
+    }
+  }
+  return [...ids];
 }
 
 /** Same loop apart from the stamps a save sets; key order and `undefined` fields don't count. */

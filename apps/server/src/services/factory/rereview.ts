@@ -130,6 +130,8 @@ export function resumeReview(
     pr,
     review: null,
     attempts: opts.retry ? 0 : i.attempts,
+    // A retry is a person's (or the PM's) call to spend more: the per-item cap counts afresh.
+    itemBudgetSince: opts.retry ? at : i.itemBudgetSince,
     reviewerSessionId: null,
     reviewerProvider: null,
     reviewerNote: null,

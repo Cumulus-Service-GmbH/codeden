@@ -1,4 +1,5 @@
 import type {
+  BillingMode,
   FactoryItem,
   FactoryLimits,
   FactoryLoop,
@@ -16,6 +17,7 @@ import type { ProjectService } from "../projects/project-service";
 import type { SessionRepo } from "../sessions/repo";
 import type { RateLimitReading } from "./availability";
 import type { FactoryGithub } from "./github-port";
+import type { LedgerTurn } from "./item-cost";
 import type { PrFiles } from "./overlap";
 import type { FactorySessions } from "./sessions";
 import type { SlotBoard } from "./slots";
@@ -37,6 +39,10 @@ export interface FactoryContext {
     ): { usd: number; tokens: number };
     /** Latest rate-limit window of every provider: a `limited` one makes it unavailable. */
     rateLimitWindows?(): RateLimitReading[];
+    /** Priced ledger turns of these sessions, all time, for item costs (`item-cost.ts`). */
+    turnsOf?(sessionIds: ReadonlySet<string>): LedgerTurn[];
+    /** How each provider is paid for, for "API-equivalent" costs (§12.6). */
+    providerBilling?(): Promise<Record<string, BillingMode>>;
   };
   inbox: InboxService;
   /** Record an orchestration notice (wakes its target unless `wake` is false). */

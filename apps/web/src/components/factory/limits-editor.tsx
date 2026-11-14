@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { type AgentsDraft, AgentsTuning } from "./agents-tuning";
+import { BudgetFields } from "./budget-fields";
 import { WIP_HELP } from "./meta";
 import { type ScoutDraft, ScoutTuning } from "./scout-tuning";
 
@@ -82,7 +83,8 @@ export function hasBudget(limits: FactoryLimits): boolean {
 
 /**
  * Factory settings (§10.1), enforced by the server rather than left to agents: who the factory
- * works for (trusted authors) and whether it merges by itself, a daily budget, the agent pool,
+ * works for (trusted authors) and whether it merges by itself, a daily budget and an optional
+ * per-item cap, the agent pool,
  * merges per day, the failure streak that pauses the loop, protected paths and deploys.
  * Optionally the merge-check tuning and, for a dark factory, the scout's limits.
  */
@@ -105,12 +107,6 @@ export function LimitsEditor({
 }) {
   const id = useId();
   const [authors, setAuthors] = useState(() => limits.trustedAuthors.join("\n"));
-  const budget = limits.dailyBudget;
-  const setBudget = (patch: Partial<FactoryLimits["dailyBudget"]>) => {
-    const next = { ...budget, ...patch };
-    for (const k of ["usd", "tokens"] as const) if (!next[k]) delete next[k];
-    onChange({ ...limits, dailyBudget: next });
-  };
   return (
     <div className="space-y-4" data-testid="limits-editor">
       <div className="flex items-start gap-2.5 text-xs">
@@ -162,51 +158,7 @@ export function LimitsEditor({
           className="min-h-16 font-mono text-[12.5px]"
         />
       </Field>
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Field
-          label="Daily budget (USD)"
-          htmlFor={`${id}-usd`}
-          help="The loop pauses until tomorrow when today's spend reaches it."
-        >
-          <NumberField
-            id={`${id}-usd`}
-            decimal
-            optional
-            min={0}
-            value={budget.usd}
-            placeholder="e.g. 10"
-            onChange={(usd) => setBudget({ usd: usd || undefined })}
-            className="text-[13px]"
-          />
-        </Field>
-        <Field label="Daily budget (tokens)" htmlFor={`${id}-tok`} help="Optional, alongside USD.">
-          <NumberField
-            id={`${id}-tok`}
-            optional
-            min={0}
-            value={budget.tokens}
-            placeholder="e.g. 5000000"
-            onChange={(tokens) => setBudget({ tokens: tokens || undefined })}
-            className="text-[13px]"
-          />
-        </Field>
-      </div>
-      <div className="flex items-start gap-2.5 text-xs">
-        <Switch
-          checked={limits.budgetScope === "project"}
-          aria-label="Count all project spend against the budget"
-          onCheckedChange={(all) =>
-            onChange({ ...limits, budgetScope: all ? "project" : "factory" })
-          }
-          className="mt-0.5"
-        />
-        <span>
-          Count all spend in this project
-          <span className="block text-3xs text-muted-foreground">
-            Off: only the factory's own sessions (builders, reviewers, the scout, reverts) count.
-          </span>
-        </span>
-      </div>
+      <BudgetFields limits={limits} onChange={onChange} />
       <div className="grid gap-3 sm:grid-cols-3">
         <Field
           label="Agents at once"

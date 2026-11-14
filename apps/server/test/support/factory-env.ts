@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  type BillingMode,
   FactoryLimits,
   type Notice,
   type Project,
@@ -17,6 +18,7 @@ import { EventStore } from "../../src/events/store";
 import type { Exec, ExecResult } from "../../src/services/exec";
 import type { RateLimitReading } from "../../src/services/factory/availability";
 import { FactoryService } from "../../src/services/factory/factory-service";
+import type { LedgerTurn } from "../../src/services/factory/item-cost";
 import { VISION_TEMPLATE } from "../../src/services/factory/vision";
 import { InboxService } from "../../src/services/inbox-service";
 import type { NoticeDraft } from "../../src/services/orchestration/notices";
@@ -61,6 +63,16 @@ export interface FactoryEnv {
   spend: { usd: number; tokens: number };
   /** Session filters the budget asked spend for (null: the whole project). */
   spendFilters: Array<string[] | null>;
+  /** Priced ledger turns the usage service holds, for item costs and the per-item cap. */
+  ledger: LedgerTurn[];
+  /** How each provider is paid for ("API-equivalent" item costs). */
+  billing: Record<string, BillingMode>;
+  /** Record a turn of a session in the ledger (now, unless `ts` is given). */
+  spendOn: (
+    sessionId: string,
+    usd: number,
+    opts?: { tokens?: number; ts?: string; costSource?: LedgerTurn["costSource"] },
+  ) => void;
   providers: string[];
   /** What detection reports per provider, over "installed and signed in". */
   detected: Record<string, Partial<ProviderStatus>>;
@@ -147,6 +159,8 @@ export function createFactoryEnv(
     notices: [],
     spend: { usd: 0, tokens: 0 },
     spendFilters: [],
+    ledger: [],
+    billing: {},
     providers: opts.providers ?? ["claude", "codex"],
     detected: {},
     detections: 0,
@@ -244,6 +258,8 @@ export function createFactoryEnv(
           return env.spend;
         },
         rateLimitWindows: () => env.rateLimits,
+        turnsOf: (ids: ReadonlySet<string>) => env.ledger.filter((t) => ids.has(t.sessionId)),
+        providerBilling: async () => env.billing,
       },
       inbox,
       notify: (draft) => {
@@ -275,6 +291,20 @@ export function createFactoryEnv(
     return env.factory;
   };
   env.now = () => new Date(Date.now() + env.clock.offsetMs);
+  env.spendOn = (sessionId, usd, o = {}) => {
+    const tokens = o.tokens ?? Math.round(usd * 100_000);
+    env.ledger.push({
+      sessionId,
+      provider: repo.find(sessionId)?.session.provider ?? "claude",
+      ts: o.ts ?? new Date().toISOString(),
+      inputTokens: tokens,
+      outputTokens: 0,
+      cacheReadTokens: 0,
+      cacheWriteTokens: 0,
+      costUsd: usd,
+      costSource: o.costSource ?? "estimated",
+    });
+  };
   env.setStatus = async (sessionId, status) => {
     await new Promise((r) => setTimeout(r, 5));
     repo.update(sessionId, (s) => ({ ...s, status }));

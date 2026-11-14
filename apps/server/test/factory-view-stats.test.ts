@@ -48,6 +48,8 @@ const base: FactoryItem = {
   largeChange: null,
   sessionsArchivedAt: null,
   earlierSessionIds: [],
+  sessionIds: [],
+  itemBudgetSince: null,
   stepSince: null,
   createdAt: at(100),
   updatedAt: at(1),

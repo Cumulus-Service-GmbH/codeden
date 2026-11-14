@@ -10,6 +10,7 @@ import {
   type FactoryFileIssueRequest,
   type FactoryFinding,
   type FactoryItem,
+  type FactoryItemResponse,
   type FactoryLesson,
   type FactoryLoop,
   type FactoryLoopState,
@@ -50,6 +51,7 @@ import { writeDigest } from "./digest";
 import { advanceDrain, drainInboxId, drainStatus, startDrain } from "./drain";
 import { fileFollowUp } from "./follow-ups";
 import type { FactoryGithub } from "./github-port";
+import { itemCosts } from "./item-cost";
 import { allowLargeChange } from "./large-change";
 import { forgetLesson } from "./lessons";
 import { runTick } from "./loop";
@@ -455,6 +457,13 @@ export class FactoryService {
     if (!item || item.projectId !== projectId)
       throw notFound(`No factory item ${itemId}`, "item_not_found");
     return item;
+  }
+
+  /** An item with what it cost so far (`FactoryItemResponse`; `item-cost.ts`). */
+  async itemResponse(projectId: string, item: FactoryItem): Promise<FactoryItemResponse> {
+    const limits = this.deps.projects.get(projectId).factoryLimits;
+    const costs = await itemCosts(this.ctx, projectId, limits, [item]);
+    return { item, cost: costs.get(item.id) ?? null };
   }
 
   /** Write today's digest now (the loop writes one per day on its own). */
