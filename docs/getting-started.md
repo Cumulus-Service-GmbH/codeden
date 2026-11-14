@@ -82,13 +82,15 @@ Commit this file to tell CodeDen how to prepare a fresh worktree:
 {
   "setup": ["pnpm install"],
   "devServer": { "command": "pnpm dev", "port": 5173 },
-  "defaultProvider": "codex"
+  "defaultProvider": "codex",
+  "checks": ["pnpm typecheck", { "command": "pnpm test", "timeoutSec": 900 }]
 }
 ```
 
 - `setup` runs, in order, in every new worktree; the output streams into the session. Setup stops at the first command that fails, and the session starts anyway: the agent's first message then begins with the failed command, its exit code and the end of its output, so it can fix the problem instead of tripping over it.
 - `devServer` (a command string or `{ command, port, cwd }`) records how to start your app, so agents (and the UI review automation) know what to run and where to point the browser. Running dev servers are also discovered automatically.
 - `defaultProvider` (`claude`, `codex` or `opencode`) is the provider new sessions in this project use unless you pick one (a default agent chosen on the project's **Settings** tab wins).
+- `checks` are your project's checks: commands such as `pnpm typecheck` or `pnpm test` that pass when they exit 0, as a string or `{ command, timeoutSec }` (10 minutes by default, at most an hour). With checks, the New session view and a session's composer offer **Checks**: **Keep going until checks pass**, with a round cap (3 by default). With it on, CodeDen runs the checks in the session's worktree after each turn, one after another, with `CI=true` like the agent's own shell. Each run shows in the transcript as a card with each check's result, duration and output. When some fail, the agent gets a message with each failing command, its exit code and the end of its output, and another turn fixes them. When they pass, or the round cap is reached, the session waits for you. **Stop**, or a message of your own, ends the loop. A session's checks are fixed when it starts: they come from the project's own folder, not from the session's worktree, so an agent that edits this file can't change what runs (Session details lists the commands). An agent's edit to `.codeden/project.json` asks first at the Auto level.
 
 ## 5. Start your first session
 
