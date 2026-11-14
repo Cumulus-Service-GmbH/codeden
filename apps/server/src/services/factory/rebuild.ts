@@ -4,6 +4,7 @@ import { sessionsToArchive } from "./cleanup";
 import { type FactoryContext, factoryNotice } from "./context";
 import { closeInboxFor, retargetInboxFor } from "./merge";
 import { markStuck } from "./outcomes";
+import { isEarlyPrRecord } from "./spec-early-pr";
 
 /**
  * Rebuilds (§10.1): a PR that still conflicts after three requests to rebase is usually cheaper
@@ -152,9 +153,14 @@ export function replacedPrs(item: FactoryItem): ReplacedPr[] {
   return out;
 }
 
-/** The nudges that must outlive a fresh attempt: PRs still to be closed. */
+/**
+ * The nudges that must outlive a fresh attempt: PRs still to be closed, and PRs held for the
+ * spec (`spec-early-pr.ts`), closed once the work goes on in another PR or stops.
+ */
 export function pendingClosures(nudges: FactoryItem["nudges"]): FactoryItem["nudges"] {
-  return Object.fromEntries(Object.entries(nudges).filter(([k]) => k.startsWith(SUPERSEDE)));
+  return Object.fromEntries(
+    Object.entries(nudges).filter(([k]) => k.startsWith(SUPERSEDE) || isEarlyPrRecord(k)),
+  );
 }
 
 /**

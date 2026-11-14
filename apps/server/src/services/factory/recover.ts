@@ -1,4 +1,10 @@
-import type { FactoryItem, FactoryLoop, GitHubPrRef, Project, Session } from "@codeden/contracts";
+import {
+  type FactoryItem,
+  type FactoryLoop,
+  type Project,
+  type Session,
+  specHeld,
+} from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import { isTransientRunnerError, isTurnRunningError } from "../sessions/outbox-holds";
 import { CI_KICK_NUDGE } from "./ci-kick";
@@ -12,6 +18,7 @@ import { isReReviewRecord } from "./rereview";
 import { CLEAN_REVIEW } from "./review-environment";
 import { isBusy } from "./sessions";
 import { claimSlot } from "./slots";
+import { builderOpenPr, isEarlyPrRecord } from "./spec-early-pr";
 import { ownsTurnRaceFailure } from "./turn-race";
 
 /**
@@ -57,13 +64,17 @@ export function recoverable(item: FactoryItem): boolean {
   return isInfraFailure(item) && recoveries(item) < MAX_RECOVERIES;
 }
 
-/** The item's open PR: its own, or one its builder opened (found by session or branch). */
+/**
+ * The item's open PR: its own, or one its builder opened (found by session or branch). Not one
+ * opened while its spec is held: that waits for the approval (`spec-early-pr.ts`).
+ */
 function openPr(ctx: FactoryContext, project: Project, item: FactoryItem, builder?: Session) {
-  const open = (ref: GitHubPrRef | null | undefined) =>
-    ref && (ref.state === "open" || ref.state === "draft") ? ref : null;
-  if (item.pr) return open(ctx.github.prRef(project.id, item.pr.number) ?? item.pr);
-  if (!builder) return null;
-  return open(builder.pr ?? ctx.github.prForSession(project.id, builder.id, builder.branch));
+  if (item.pr) {
+    const ref = ctx.github.prRef(project.id, item.pr.number) ?? item.pr;
+    return ref.state === "open" || ref.state === "draft" ? ref : null;
+  }
+  if (!builder || specHeld(item)) return null;
+  return builderOpenPr(ctx, project.id, builder);
 }
 
 /**
@@ -82,6 +93,7 @@ function freshNudges(nudges: FactoryItem["nudges"], at: string): FactoryItem["nu
       k.startsWith("conflict_from_") ||
       isRecheckObligation(k) ||
       k.startsWith("supersede_") ||
+      isEarlyPrRecord(k) ||
       isReReviewRecord(k) ||
       k === CLEAN_REVIEW,
   );

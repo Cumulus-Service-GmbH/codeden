@@ -13,6 +13,7 @@ import { implementStep } from "./prompts";
 import { specRevisionStep } from "./prompts-spec";
 import { isBusy } from "./sessions";
 import { claimSlot } from "./slots";
+import { builderOpenPr, holdEarlyPr } from "./spec-early-pr";
 import { finishesOpenWork, unopenedBuilds, wipOf, wipText } from "./wip";
 
 /**
@@ -199,7 +200,10 @@ export async function advanceSpec(
   if (!spec) return null;
   if (spec.state === "pending") {
     if (specGateOn(project, loop)) {
-      note(ctx, item, WAITING);
+      // A PR on the builder's branch (`gh pr create`, or a person's) waits too (`spec-early-pr.ts`).
+      const early = builder ? builderOpenPr(ctx, project.id, builder) : null;
+      if (early) await holdEarlyPr(ctx, item, early);
+      else note(ctx, item, WAITING);
       return loop;
     }
     // Approval was turned off (or the project became a dark factory) while it waited.

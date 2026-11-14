@@ -1,4 +1,4 @@
-import type { FactoryItem, FactoryLoop, Project } from "@codeden/contracts";
+import { type FactoryItem, type FactoryLoop, type Project, specHeld } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import { type FactoryContext, factoryNotice, pauseLoop, raiseInbox } from "./context";
 import { stoppedSinceNudge } from "./idle";
@@ -11,6 +11,7 @@ import { rebuildFailed, unreplacedOriginal } from "./rebuild";
 import { recordMainFailure, revertLanded } from "./revert";
 import { regressionInboxId, regressionPausePrefix, revertBlocked } from "./revert-blocked";
 import { advanceSpec } from "./spec-approval";
+import { builderOpenPr, holdEarlyPr } from "./spec-early-pr";
 import { REVERTED_AT, revertedAt } from "./stats";
 import { awaitTurnRaceResume, BUILDER_FAILED_REASON } from "./turn-race";
 
@@ -49,8 +50,10 @@ export async function advanceBuilding(
   const fixAt = item.attempts > 0 ? item.nudges[`fix_${item.attempts}`] : undefined;
   // After a fix request, wait until the builder has taken a turn since.
   if (fixAt && Date.parse(s.updatedAt) <= Date.parse(fixAt) && s.status === "idle") return loop;
-  const pr = s.pr ?? ctx.github.prForSession(project.id, s.id, s.branch);
-  if (pr && pr.state !== "closed" && pr.state !== "merged") {
+  const pr = builderOpenPr(ctx, project.id, s);
+  // Opened while the spec is being revised: it waits for the approval (`spec-early-pr.ts`).
+  if (pr && specHeld(item)) item = await holdEarlyPr(ctx, item, pr);
+  else if (pr) {
     const at = ctx.now().toISOString();
     ctx.store.updateItem(item.id, (i) => ({
       ...i,
