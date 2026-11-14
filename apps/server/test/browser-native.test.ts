@@ -6,11 +6,13 @@ import {
   type BrowserServerMessage,
   BrowserTabsResponse,
 } from "@codeden/contracts";
-import { findInstalledChannels, type LaunchedBrowser, launchChromium } from "@codeden/runner";
+import { findInstalledChannels } from "@codeden/runner";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import WebSocket, { WebSocketServer } from "ws";
+// The runner's own Chromium opens no CDP port, so the stand-in app is a second Chromium.
+import { launchStandInApp, type StandInApp } from "../../runner/test/browser-stand-in";
 import { type Harness, startHarness, TOKEN, waitUntil } from "./support/harness";
 
 const hasBrowser = findInstalledChannels().length > 0;
@@ -52,7 +54,7 @@ describe.skipIf(!hasBrowser)("native browser views through the desktop app (stan
   let siteUrl: string;
   let sessionId: string;
   let mcp: Client;
-  let app: LaunchedBrowser;
+  let app: StandInApp;
   let relayServer: Server;
   let host: WebSocket;
   const hostMessages: BrowserHostServerMessage[] = [];
@@ -79,7 +81,7 @@ describe.skipIf(!hasBrowser)("native browser views through the desktop app (stan
     );
 
     // The stand-in app: a Chromium whose CDP endpoint is reachable only with the secret.
-    app = await launchChromium();
+    app = await launchStandInApp();
     const wss = new WebSocketServer({ noServer: true });
     relayServer = createServer();
     relayServer.on("upgrade", (req, socket, head) => {

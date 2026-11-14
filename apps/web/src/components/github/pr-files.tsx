@@ -2,7 +2,8 @@ import type { GithubPrDetails, GithubPrDiffFile, GithubPrFile } from "@codeden/c
 import { PatchDiff } from "@pierre/diffs/react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, ExternalLink, FileCode2 } from "lucide-react";
-import { useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
+import { ErrorBoundary } from "@/components/error-boundary";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useClient } from "@/lib/api";
@@ -165,17 +166,28 @@ function FileDiffBody({
 }) {
   const theme = useResolvedTheme();
   if (diff?.patch) {
+    // A patch the renderer can't parse shows a note for this file only, not a broken PR view.
     return (
-      <PatchDiff
-        patch={diff.patch}
-        options={{
-          theme: { dark: "pierre-dark", light: "pierre-light" },
-          themeType: theme,
-          diffStyle: "unified",
-          overflow: "wrap",
-          disableFileHeader: true,
-        }}
-      />
+      <ErrorBoundary
+        key={diff.patch}
+        fallback={
+          <DiffNote>
+            Couldn't render this file's diff.
+            <OpenOnGithub pr={pr} />
+          </DiffNote>
+        }
+      >
+        <PatchDiff
+          patch={diff.patch}
+          options={{
+            theme: { dark: "pierre-dark", light: "pierre-light" },
+            themeType: theme,
+            diffStyle: "unified",
+            overflow: "wrap",
+            disableFileHeader: true,
+          }}
+        />
+      </ErrorBoundary>
     );
   }
   const message = !diff
@@ -184,9 +196,18 @@ function FileDiffBody({
       ? "Renamed without content changes."
       : "GitHub shows no diff for this file (binary, empty or too large).";
   return (
-    <div className="flex flex-wrap items-center gap-x-2 px-3 py-2 text-xs text-muted-foreground">
+    <DiffNote>
       {message}
       {diff && <OpenOnGithub pr={pr} />}
+    </DiffNote>
+  );
+}
+
+/** A one-line note in place of a file's diff. */
+function DiffNote({ children }: { children: ReactNode }) {
+  return (
+    <div className="flex flex-wrap items-center gap-x-2 px-3 py-2 text-xs text-muted-foreground">
+      {children}
     </div>
   );
 }

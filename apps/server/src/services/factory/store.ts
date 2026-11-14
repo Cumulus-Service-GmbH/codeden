@@ -81,6 +81,7 @@ export class FactoryStore {
         seenFailedShas: [],
         fastMergeHold: null,
         tuning: FactoryTuning.parse({}),
+        drain: null,
         lastTickAt: null,
         updatedAt: now.toISOString(),
       }
@@ -317,6 +318,8 @@ export function upgradeLoop(loop: FactoryLoop): FactoryLoop {
     fastMergeHold: loop.fastMergeHold ?? null,
     scout: ScoutState.parse(loop.scout ?? {}),
     tuning: { ...TUNING_DEFAULTS, ...loop.tuning },
+    // Loops saved before drains existed have none.
+    drain: loop.drain ? { ...loop.drain, deadline: loop.drain.deadline ?? null } : null,
   });
 }
 

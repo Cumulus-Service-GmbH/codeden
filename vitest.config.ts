@@ -44,6 +44,7 @@ const RUNNER_PROCESS_TESTS = [
   "test/browser-agent.test.ts",
   "test/browser-native.test.ts",
   "test/browser-dialogs.test.ts",
+  "test/browser-listeners.test.ts",
   "test/sessions.test.ts",
   "test/pty.test.ts",
 ];

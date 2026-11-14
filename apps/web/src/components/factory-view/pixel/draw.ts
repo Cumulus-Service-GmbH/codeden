@@ -6,6 +6,7 @@ import {
   CI_LAMP,
   COUNTER,
   GAUGE,
+  IN_DOOR,
   PALLET,
   type Rect,
   SCENE_H,
@@ -25,8 +26,9 @@ import { type GlyphName, glyph, INK, prop } from "./sprites";
 /**
  * Paints a frame of the factory floor (#264) on the 384×216 canvas: the static layer, then the
  * moving belt, the wall's gauge, CI lamp and shipped counter, the tickets at intake, the crates
- * on the conveyor and in the repair bay, the agents and their desks, the one-off effects, and
- * the dim overlay when the loop is stopped. `tick` counts frames; with `animate` off it is 0 and
+ * on the conveyor and in the repair bay, the agents and their desks, the one-off effects, a
+ * "CLOSED" board on the IN door while the factory drains, and the dim overlay when the loop is
+ * stopped. `tick` counts frames; with `animate` off it is 0 and
  * nothing moves.
  */
 
@@ -165,6 +167,17 @@ function effects(ctx: Ctx, list: readonly Fx[], tick: number) {
   }
 }
 
+/** A "CLOSED" board hung across the IN door while the factory drains (#286). */
+function closedSign(ctx: Ctx) {
+  const text = "CLOSED";
+  const w = textWidth(text) + 6;
+  const x = IN_DOOR.x + Math.floor((IN_DOOR.w - w) / 2);
+  const y = IN_DOOR.y + Math.floor(IN_DOOR.h / 2) - 2;
+  fill(ctx, { x: x - 1, y: y - 1, w: w + 2, h: 11 }, INK);
+  fill(ctx, { x, y, w, h: 9 }, "#e43b44");
+  pixelText(ctx, text, x + 3, y + 2, "#f4f4f4");
+}
+
 /** Paints the whole scene for frame `tick`. */
 export function drawScene(
   ctx: Ctx,
@@ -188,6 +201,8 @@ export function drawScene(
   for (const [station, n] of Object.entries(scene.seating.more))
     more(ctx, n ?? 0, STATIONS[station as StationId].more);
   if (moving) effects(ctx, fx, t);
+  // Draining: the IN door is closed; the work on the floor carries on.
+  if (scene.draining !== null && !scene.stopped) closedSign(ctx);
   if (scene.stopped) {
     // The lights go down.
     ctx.fillStyle = "rgba(10,12,28,0.55)";

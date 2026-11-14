@@ -14,9 +14,49 @@ interface RawPrFile {
   previous_filename?: string;
 }
 
+/** The characters git writes as a named C escape inside a quoted file name. */
+const NAMED_ESCAPES: Record<string, string> = {
+  "\u0007": "a",
+  "\b": "b",
+  "\t": "t",
+  "\n": "n",
+  "\v": "v",
+  "\f": "f",
+  "\r": "r",
+  '"': '"',
+  "\\": "\\",
+};
+
+const utf8 = new TextEncoder();
+
+/**
+ * A file name as git writes it in a diff header (with `core.quotePath`, its default): a name with
+ * a quote, a backslash, a control character or a non-ASCII byte goes in double quotes, with C
+ * escapes and octal bytes, so it can never break out of its line. Other names are left bare.
+ */
+function quoteDiffPath(name: string): string {
+  let quoted = "";
+  let needsQuotes = false;
+  for (const byte of utf8.encode(name)) {
+    const char = String.fromCharCode(byte);
+    const named = NAMED_ESCAPES[char];
+    if (named !== undefined) {
+      quoted += `\\${named}`;
+      needsQuotes = true;
+    } else if (byte < 0x20 || byte >= 0x7f) {
+      quoted += `\\${byte.toString(8).padStart(3, "0")}`;
+      needsQuotes = true;
+    } else {
+      quoted += char;
+    }
+  }
+  return needsQuotes ? `"${quoted}"` : name;
+}
+
 /**
  * A full unified patch for one file. GitHub's `patch` holds only the hunks; the diff renderer
  * needs the `diff --git`, `---` and `+++` headers to name the file (and pick its language).
+ * Names come from whoever opened the PR, so they are quoted as git quotes them.
  * Null when GitHub sent no patch (binary, too large, or no content change).
  */
 export function toUnifiedPatch(
@@ -24,11 +64,12 @@ export function toUnifiedPatch(
   patch: string | null | undefined,
 ): string | null {
   if (!patch) return null;
-  const from = file.previousPath ?? file.path;
-  const oldName = file.status === "added" ? "/dev/null" : `a/${from}`;
-  const newName = file.status === "removed" ? "/dev/null" : `b/${file.path}`;
+  const a = quoteDiffPath(`a/${file.previousPath ?? file.path}`);
+  const b = quoteDiffPath(`b/${file.path}`);
+  const oldName = file.status === "added" ? "/dev/null" : a;
+  const newName = file.status === "removed" ? "/dev/null" : b;
   const hunks = patch.endsWith("\n") ? patch : `${patch}\n`;
-  return `diff --git a/${from} b/${file.path}\n--- ${oldName}\n+++ ${newName}\n${hunks}`;
+  return `diff --git ${a} ${b}\n--- ${oldName}\n+++ ${newName}\n${hunks}`;
 }
 
 function toDiffFile(raw: RawPrFile): GithubPrDiffFile {

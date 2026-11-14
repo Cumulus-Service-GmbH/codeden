@@ -34,8 +34,8 @@ export interface BrowserManagerOptions extends LaunchOptions {
 /**
  * The runner's browser (§12.2). Each CodeDen session has one browser, on one of two engines:
  *
- * - `runner`: an isolated `BrowserContext` in one Chromium the runner launches lazily (its CDP
- *   endpoint stays on 127.0.0.1);
+ * - `runner`: an isolated `BrowserContext` in one Chromium the runner launches lazily (driven
+ *   over a pipe; it opens no debugging port);
  * - `native`: the desktop app's views for that session, reached through the app's per-session
  *   CDP relay (§17 Phase 2). When the app quits, the session moves to the runner's Chromium
  *   (`handoff`); if the relay just drops, its tabs reopen there at their last URLs.
@@ -53,11 +53,6 @@ export class BrowserManager {
 
   constructor(private readonly opts: BrowserManagerOptions) {
     this.evaluateGuard = { ...DEFAULT_EVALUATE_GUARD, ...opts.evaluate };
-  }
-
-  /** CDP endpoint of the running browser, or null before the first launch. */
-  get cdpUrl(): string | null {
-    return this.launched?.cdpUrl ?? null;
   }
 
   /** Browser process id, or null when not running. */
