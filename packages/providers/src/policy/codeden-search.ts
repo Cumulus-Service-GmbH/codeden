@@ -5,6 +5,7 @@ import {
   resolvePattern,
   slashes,
   touchesCodedenCredentials,
+  touchesCodedenHome,
 } from "./codeden-home";
 import { isInside, type PathContext, pathApi, samePath } from "./paths";
 import {
@@ -19,11 +20,12 @@ import type { WordPaths } from "./shell";
 import { wildcardMatchesNumbered, wildcardPattern } from "./wildcard";
 
 /**
- * Searches and listings that reach CodeDen's credential files from a folder above them
- * (§11.2). A recursive search (`grep -r`, `rg`, `findstr /s`) reads every file under its roots
- * that its name filters let through. A listing (`find`, `fd`, `ls`, `Get-ChildItem`) only names
- * files, which counts once the names feed another command: through a pipe
+ * Searches and listings that reach CodeDen's home, or its credential files, from a folder above
+ * them (§11.2, #320). A recursive search (`grep -r`, `rg`, `findstr /s`) reads every file under
+ * its roots that its name filters let through. A listing (`find`, `fd`, `ls`, `Get-ChildItem`)
+ * only names files, which counts once the names feed another command: through a pipe
  * (`find ~ -name install-token | xargs cat`), a substitution (`cat $(find …)`) or `-exec`.
+ * Listing a folder inside the home counts by itself (`listsCodedenHome`).
  */
 
 /** Where a command looks for files: its roots, whether it goes into subfolders, and the name
@@ -190,6 +192,23 @@ function walkReaches(walk: Walk, ctx: PathContext): string | undefined {
 }
 
 /**
+ * The root of `walk` from which it goes into CodeDen's home outside the session's own folders:
+ * a root there, or a folder above the home when it goes into subfolders. Name filters don't
+ * narrow it: other sessions' worktrees there hold every kind of file.
+ */
+function walkReachesHome(walk: Walk, ctx: PathContext): string | undefined {
+  const home = ctx.codedenHome;
+  if (!home) return undefined;
+  for (const root of walk.roots.length ? walk.roots : ["."]) {
+    for (const alt of braceAlternatives(root)) {
+      if (touchesCodedenHome(alt, ctx)) return root;
+      if (walk.recursive && holds(resolvePattern(alt, ctx), home, true, ctx)) return root;
+    }
+  }
+  return undefined;
+}
+
+/**
  * A recursive search from `roots` (Claude's Grep), keeping files whose names match `names`:
  * the root it reaches a credential file from, if any.
  */
@@ -201,33 +220,94 @@ export function searchReaches(
   return ctx.codedenHome ? walkReaches({ roots, recursive: true, names }, ctx) : undefined;
 }
 
+/** A recursive search from `roots` (Claude's Grep): the root it reaches CodeDen's home from. */
+export function searchReachesHome(roots: string[], ctx: PathContext): string | undefined {
+  return walkReachesHome({ roots, recursive: true, names: [] }, ctx);
+}
+
+/** How a walk reaches what is guarded, and how a single path does. */
+interface Guard {
+  walk: (walk: Walk, ctx: PathContext) => string | undefined;
+  path: (path: string, ctx: PathContext) => boolean;
+}
+const CREDENTIALS: Guard = { walk: walkReaches, path: touchesCodedenCredentials };
+const HOME: Guard = { walk: walkReachesHome, path: touchesCodedenHome };
+
 /**
- * How a command reaches CodeDen's credential files other than by naming one: a recursive search
- * from a folder above them, or a listing (or `echo`ed path) whose output `feeds` another command.
- * `paths` gives what a word may stand for (a PowerShell list's elements). Returns the word it
- * reaches them through.
+ * How a command reaches what `guard` protects other than by naming it: a recursive search from a
+ * folder above it, or a listing (or `echo`ed path) whose output `feeds` another command. `paths`
+ * gives what a word may stand for (a PowerShell list's elements). Returns the word it reaches
+ * it through.
  */
-export function reachesThroughFolder(
+function throughFolder(
+  guard: Guard,
   bin: string,
   args: string[],
   ctx: PathContext,
   feeds: boolean,
-  paths: WordPaths = (word, from) => [word.slice(from)],
+  paths: WordPaths,
 ): string | undefined {
   if (!ctx.codedenHome) return undefined;
   if (SEARCHES.has(bin)) {
     for (const walk of searchWalks(bin, args, ctx, paths)) {
-      const root = walkReaches(walk, ctx);
+      const root = guard.walk(walk, ctx);
       if (root) return root;
     }
   }
   if (feeds || ((bin === "find" || bin === "fd") && args.some((a) => RUNS.test(a)))) {
     const walk = listingWalk(bin, args);
-    const root = walk && walkReaches(walk, ctx);
+    const root = walk && guard.walk(walk, ctx);
     if (root) return root;
   }
   if (feeds && DATA.has(bin)) {
-    return args.find((a) => paths(a, 0).some((path) => touchesCodedenCredentials(path, ctx)));
+    return args.find((a) => paths(a, 0).some((path) => guard.path(path, ctx)));
   }
   return undefined;
+}
+
+const ANY_WORD: WordPaths = (word, from) => [word.slice(from)];
+
+/** `throughFolder` for CodeDen's credential files. */
+export function reachesThroughFolder(
+  bin: string,
+  args: string[],
+  ctx: PathContext,
+  feeds: boolean,
+  paths: WordPaths = ANY_WORD,
+): string | undefined {
+  return throughFolder(CREDENTIALS, bin, args, ctx, feeds, paths);
+}
+
+/** `throughFolder` for the rest of CodeDen's home. */
+export function reachesHomeThroughFolder(
+  bin: string,
+  args: string[],
+  ctx: PathContext,
+  feeds: boolean,
+  paths: WordPaths = ANY_WORD,
+): string | undefined {
+  return throughFolder(HOME, bin, args, ctx, feeds, paths);
+}
+
+/** Listings `listingWalk` doesn't follow: every operand is a folder (or file) they describe. */
+const DESCRIBES = new Set(["tree", "du", "stat"]);
+
+/**
+ * The folder a listing (`ls`, `dir`, `Get-ChildItem`, `find`, `fd`, `tree`, `du`, `stat`) names
+ * inside CodeDen's home, outside the session's own folders, if any: listing the home, the
+ * runner's folder or another session's worktree asks, whether or not the names feed a command.
+ * With no folder given, a listing names the current one (`stat` needs one).
+ */
+export function listsCodedenHome(
+  bin: string,
+  args: string[],
+  ctx: PathContext,
+): string | undefined {
+  if (!ctx.codedenHome) return undefined;
+  const roots = DESCRIBES.has(bin)
+    ? args.filter((a) => !a.startsWith("-"))
+    : listingWalk(bin, args)?.roots;
+  if (!roots) return undefined;
+  const listed = roots.length || bin === "stat" ? roots : ["."];
+  return listed.find((root) => braceAlternatives(root).some((alt) => touchesCodedenHome(alt, ctx)));
 }

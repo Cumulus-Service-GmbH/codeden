@@ -31,8 +31,8 @@ export const BrowserOpenRequest = z.object({
 export type BrowserOpenRequest = z.infer<typeof BrowserOpenRequest>;
 
 export const BrowserOpenResponse = z.object({
-  /** CDP endpoint on 127.0.0.1 (for diagnostics; the panel never connects to it). */
-  cdpUrl: z.string().nullable(),
+  /** Always null, kept for older clients: no browser exposes a CDP endpoint (§12.2). */
+  cdpUrl: z.null(),
   tabs: z.array(BrowserTab),
   /** What backs the browser; absent from older servers (`runner`). */
   engine: BrowserEngine.optional(),

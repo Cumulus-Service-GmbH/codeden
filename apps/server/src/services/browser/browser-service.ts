@@ -126,7 +126,8 @@ export class BrowserService {
   ): Promise<BrowserOpenResponse> {
     const relay = opts.native ? await this.nativeRelay(sessionId) : undefined;
     const result = await this.command({ name: "browser.open", sessionId, url, relay });
-    return { cdpUrl: result.cdpUrl, tabs: result.tabs ?? [], engine: result.engine ?? "runner" };
+    // Never pass on a CDP endpoint, even the one an older runner still reports (§12.2).
+    return { cdpUrl: null, tabs: result.tabs ?? [], engine: result.engine ?? "runner" };
   }
 
   /**

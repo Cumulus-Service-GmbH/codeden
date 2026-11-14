@@ -1,5 +1,5 @@
 import type { GithubPrDetails } from "@codeden/contracts";
-import { fireEvent, screen } from "@testing-library/react";
+import { fireEvent, screen, within } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { PrFiles, PrFilesToggle, useOpenFiles } from "@/components/github/pr-files";
 import { createMockClient } from "@/lib/api/mock";
@@ -7,9 +7,15 @@ import { mockPrs } from "@/lib/api/mock/fixtures/github";
 import { mockPrDiff } from "@/lib/api/mock/fixtures/github-pr-diffs";
 import { renderWithClient } from "./utils";
 
-// The real renderer needs a browser (custom elements, workers); show the patch it was given.
+// The real renderer needs a browser (custom elements, workers); show the patch it was given, and
+// throw while rendering, as it does, when the patch holds more than one file.
 vi.mock("@pierre/diffs/react", () => ({
-  PatchDiff: ({ patch }: { patch: string }) => <pre data-testid="patch">{patch}</pre>,
+  PatchDiff: ({ patch }: { patch: string }) => {
+    if (patch.match(/^diff --git /gm)?.length !== 1) {
+      throw new Error("FileDiff: Provided patch must contain exactly 1 file diff");
+    }
+    return <pre data-testid="patch">{patch}</pre>;
+  },
 }));
 
 // PR 58: two files with patches and a binary image without one.
@@ -58,6 +64,31 @@ describe("PR files", () => {
     expect(screen.getAllByRole("button", { expanded: true })).toHaveLength(3);
     fireEvent.click(screen.getByRole("button", { name: "Collapse all" }));
     expect(screen.queryAllByTestId("patch")).toHaveLength(0);
+  });
+
+  it("shows a fallback for a file whose diff fails to render, and keeps the other files", async () => {
+    // React reports the caught render error on the console.
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    const client = createMockClient();
+    client.github.prDiff = vi.fn(async () => {
+      const diff = mockPrDiff(pr);
+      const files = diff.files.map((f) =>
+        f.path === "src/theme/tokens.css" ? { ...f, patch: `${f.patch}diff --git a/x b/x\n` } : f,
+      );
+      return { ...diff, files };
+    });
+    renderWithClient(<Files pr={pr} />, client);
+
+    fireEvent.click(screen.getByRole("button", { name: "Expand all" }));
+    expect(await screen.findByText(/Couldn't render this file's diff/)).toBeTruthy();
+    const broken = document.querySelector('[data-file="src/theme/tokens.css"]') as HTMLElement;
+    expect(within(broken).getByText(/Couldn't render this file's diff/)).toBeTruthy();
+    expect(within(broken).getByRole("button", { name: /Open on GitHub/ })).toBeTruthy();
+    // The other file's diff and every row still render.
+    expect(screen.getAllByTestId("patch")).toHaveLength(1);
+    expect(screen.getAllByText(/Couldn't render this file's diff/)).toHaveLength(1);
+    expect(screen.getAllByRole("button", { expanded: true })).toHaveLength(3);
+    consoleError.mockRestore();
   });
 
   it("says when GitHub listed only part of the files", () => {

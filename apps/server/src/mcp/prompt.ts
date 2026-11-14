@@ -1,5 +1,5 @@
 import type { Project, Session } from "@codeden/contracts";
-import { rolePrompt } from "../services/orchestration/prompts";
+import { CODEDEN_HOME_RULE, rolePrompt } from "../services/orchestration/prompts";
 
 /** Name of CodeDen's MCP server inside agent sessions (tools appear as `codeden` tools). */
 export const MCP_SERVER_NAME = "codeden";
@@ -98,6 +98,7 @@ export function agentPrompt(session: PromptSession, project: PromptProject): str
     ...gitLines(session, project),
     `- Ask with \`ask_user\` only for a decision that is the user's to make: ${USER_DECISIONS}. First do everything that doesn't depend on the answer, then ask one question with your recommended option first.`,
     starterLine(session),
+    `- ${CODEDEN_HOME_RULE}`,
     '- End each turn with what you did and what you assumed, not with a question. Put optional next steps in `suggest_followups` instead of asking "Want me to ...?".',
   ].filter((l): l is string => l !== null);
   return [

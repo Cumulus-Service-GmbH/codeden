@@ -1,7 +1,7 @@
 import type { ApprovalAction, FileChange, ItemStatus, ToolCallItem } from "@codeden/contracts";
 import { mostSevere, SAFE } from "../policy/assessment";
 import { credentialsRisk } from "../policy/codeden-home";
-import { searchReaches } from "../policy/codeden-search";
+import { searchReaches, searchReachesHome } from "../policy/codeden-search";
 import {
   classifyCommand,
   classifyFetch,
@@ -231,15 +231,17 @@ export function assessClaudeTool(name: string, input: Input, ctx: RiskContext): 
   if (EDIT_TOOLS.has(name)) return classifyWrite(editPath(input), ctx);
   if (name === "Read") return classifyRead(str(input, "file_path") ?? "", ctx);
   // Grep reads the files under `path` (those its `glob` filter matches, at any depth), like
-  // `rg`; its `pattern` is not a file. Glob only lists names, so only CodeDen's own credential
-  // files ask.
+  // `rg`; its `pattern` is not a file. Glob only lists names, so only CodeDen's own home asks.
   if (name === "Grep") {
     const target = str(input, "path");
     const filter = str(input, "glob");
-    const root = searchReaches(target ? [target] : [], filter ? [filter] : [], ctx);
+    const roots = target ? [target] : [];
+    const root = searchReaches(roots, filter ? [filter] : [], ctx);
+    const below = root ? undefined : searchReachesHome(roots, ctx);
     return mostSevere([
       target ? classifyRead(target, ctx) : SAFE,
       root ? credentialsRisk(`Reaches CodeDen's own credentials from ${root}`) : SAFE,
+      below ? credentialsRisk(`Reaches CodeDen's own home from ${below}`) : SAFE,
     ]);
   }
   if (name === "Glob") return classifyGlob(str(input, "pattern") ?? "", str(input, "path"), ctx);

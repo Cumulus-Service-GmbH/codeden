@@ -128,15 +128,11 @@ describe("copies of CodeDen's credential files", () => {
     ).toMatchObject({ codeden: true });
   });
 
-  it("leaves same-named files elsewhere and other copies in the home alone", () => {
+  it("leaves same-named files elsewhere alone", () => {
     for (const file of [
       "remote-access.json.invalid-1",
       "/home/me/project/remote-access.json.invalid-1234567890",
       "/home/me/.codeden/wt/repo/abc123/remote-access.json.invalid-1",
-      // Copies of files that hold no credentials.
-      "/home/me/.codeden/settings.json.invalid-1234567890",
-      "/home/me/.codeden/usage-settings.json.invalid-1",
-      "/home/me/.codeden/remote-access.json.bak",
     ]) {
       expect(classifyRead(file, posix), file).toEqual({ risky: false });
       expect(assessClaudeTool("Read", { file_path: file }, posix), file).toEqual({ risky: false });
@@ -144,29 +140,43 @@ describe("copies of CodeDen's credential files", () => {
     expect(classifyRead("C:\\Users\\me\\project\\remote-access.json.invalid-1", win)).toEqual({
       risky: false,
     });
+    expect(guarded("rg -g '*.invalid-*' . src", posix)).toBe(false);
+    // Without the session's home the rule is off.
+    const { codedenHome: _, ...noHome } = posix;
+    expect(classifyRead(COPY, noHome)).toEqual({ risky: false });
+  });
+
+  it("other copies in the home ask as the home, not as credentials (#320)", () => {
+    const asHome = (r: ReturnType<typeof classifyRead>, label: string) => {
+      expect(r, label).toMatchObject({ risky: true, codeden: true });
+      expect(r.risky && r.reason, label).toMatch(/CodeDen's own home/);
+    };
+    for (const file of [
+      // Copies of files that hold no credentials.
+      "/home/me/.codeden/settings.json.invalid-1234567890",
+      "/home/me/.codeden/usage-settings.json.invalid-1",
+      "/home/me/.codeden/remote-access.json.bak",
+    ]) {
+      asHome(classifyRead(file, posix), file);
+      asHome(assessClaudeTool("Read", { file_path: file }, posix), file);
+    }
     for (const cmd of [
       "cat ~/.codeden/settings.json.invalid-*",
       "cat ~/.codeden/logs/*.invalid-*",
       "cat ~/.codeden/remote-access.json.invalid-x*",
-      "rg -g '*.invalid-*' . src",
+      // From a folder above the home: its other sessions' worktrees hold every kind of file.
       "rg -g '*.ts' token ~",
-      // From a folder above the home (searching the home itself always asks).
       "grep -r --include='settings.json.invalid-*' x ~",
       "find ~ -name '*.log' | xargs cat",
     ]) {
-      expect(guarded(cmd, posix), cmd).toBe(false);
+      asHome(classifyCommand(cmd, posix), cmd);
     }
     for (const input of [
       { path: "/home/me/.codeden", pattern: "**/*.log" },
       { path: "/home/me/.codeden", pattern: "settings.json.invalid-*" },
     ]) {
-      expect(assessClaudeTool("Glob", input, posix), JSON.stringify(input)).toEqual({
-        risky: false,
-      });
+      asHome(assessClaudeTool("Glob", input, posix), JSON.stringify(input));
     }
-    // Without the session's home the rule is off.
-    const { codedenHome: _, ...noHome } = posix;
-    expect(classifyRead(COPY, noHome)).toEqual({ risky: false });
   });
 });
 

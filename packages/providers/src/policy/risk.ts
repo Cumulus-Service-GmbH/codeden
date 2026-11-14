@@ -1,9 +1,14 @@
 import { currentGitBranch } from "../util/git-head";
 import { agentPermissionsCommand, agentPermissionsWrite } from "./agent-permissions";
 import { type RiskAssessment, risky, SAFE } from "./assessment";
-import { credentialsRisk, touchesCodedenCredentials } from "./codeden-home";
-import { reachesThroughFolder } from "./codeden-search";
-import { binName, unwrap } from "./command-words";
+import { CODEDEN_WHAT, codedenCommand, pathsOf } from "./codeden-command";
+import {
+  codedenAccess,
+  credentialsRisk,
+  touchesCodedenCredentials,
+  touchesCodedenHome,
+} from "./codeden-home";
+import { binName, CD, DISCARD, unwrap } from "./command-words";
 import { classifyGit } from "./git";
 import { classifyInstall } from "./installs";
 import {
@@ -18,13 +23,7 @@ import {
 import { loginRisk, providerLoginCommand, touchesProviderLogin } from "./provider-logins";
 import { pipesDownloadIntoInterpreter } from "./remote-scripts";
 import { braceAlternatives, dumpsEnvironment, secretArgument, toolOutputs } from "./secrets";
-import {
-  parseShell,
-  type ShellDialect,
-  type SimpleCommand,
-  type WordPaths,
-  wordPaths,
-} from "./shell";
+import { parseShell, type ShellDialect, type SimpleCommand } from "./shell";
 
 /**
  * Risky-action classifier for the `auto` and `full` autonomy levels (§11.2). Provider-neutral:
@@ -53,16 +52,16 @@ const MAX_DEPTH = 4;
  * Classify a shell command (any shell: POSIX, PowerShell or cmd). Downloads piped into an
  * interpreter (`curl … | sh`, `irm … | iex`) are found on the parsed pipeline in
  * `classifyList`; here, a download run through a substitution (`iex (irm …)`,
- * `bash -c "$(curl …)"`, `bash <(curl …)`). CodeDen's own credentials, then the agent CLIs'
- * logins, are looked for first, across the whole command, so an earlier ordinary risk
+ * `bash -c "$(curl …)"`, `bash <(curl …)`). CodeDen's own home and credentials, then the agent
+ * CLIs' logins, are looked for first, across the whole command, so an earlier ordinary risk
  * (`cat .env; …`) can't hide them.
  */
 export function classifyCommand(command: string, ctx: RiskContext): RiskAssessment {
   const list = parseShell(command, ctx.shell ?? "auto");
-  // What every level asks about, looked for across the whole command first: CodeDen's own
-  // credentials, an agent CLI's login, then a write of an agent's own allow-list.
+  // What every level asks about, looked for across the whole command first: CodeDen's own home
+  // and credentials, an agent CLI's login, then a write of an agent's own allow-list.
   const always =
-    firstInList(list, ctx, 0, credentialCommand) ??
+    firstInList(list, ctx, 0, codedenCommand) ??
     firstInList(list, ctx, 0, (cmd, here) => providerLoginCommand(cmd, here)) ??
     firstInList(list, ctx, 0, (cmd, here) => agentPermissionsCommand(cmd, here));
   if (always) return always;
@@ -124,42 +123,6 @@ function firstInList(
   return undefined;
 }
 
-/** The paths each word of `cmd` may stand for: itself, and a PowerShell list's elements. */
-const pathsOf =
-  (cmd: SimpleCommand): WordPaths =>
-  (word, from) =>
-    wordPaths(cmd, word, from);
-
-/**
- * One simple command's access to CodeDen's credentials: a redirect onto one, any argument (or
- * here-string) that reaches one (read, written, copied or deleted), or a search or listing that
- * reaches one from a folder above it (`./codeden-search`). Moving into CodeDen's home with `cd`
- * reads nothing; the command that then reads is caught.
- */
-function credentialCommand(
-  cmd: SimpleCommand,
-  ctx: RiskContext,
-  feeds: boolean,
-): RiskAssessment | undefined {
-  const { tokens } = unwrap(cmd.words);
-  const bin = binName(tokens[0]);
-  const args = tokens.slice(1);
-  for (const target of cmd.writes) {
-    if (!DISCARD.test(target) && touchesCodedenCredentials(target, ctx)) {
-      return credentialsRisk(`Writes CodeDen's own credentials: ${target}`);
-    }
-  }
-  const given = (cmd.input ?? []).find((word) => touchesCodedenCredentials(word, ctx));
-  if (given) return credentialsRisk(`Passes CodeDen's own credentials: ${given}`);
-  if (CD.has(bin)) return undefined;
-  const paths = pathsOf(cmd);
-  const reads = (a: string) => touchesCodedenCredentials(a, ctx);
-  const touched = secretArgument(bin, args, [], reads, paths);
-  if (touched) return credentialsRisk(`Accesses CodeDen's own credentials: ${touched}`);
-  const through = reachesThroughFolder(bin, args, ctx, feeds, paths);
-  return through ? credentialsRisk(`Reaches CodeDen's own credentials from ${through}`) : undefined;
-}
-
 /**
  * Classify commands in order. A `cd` moves where later relative paths resolve; commands in
  * substitutions and subshells are classified too, without their `cd` leaking out.
@@ -180,8 +143,6 @@ function classifyList(list: SimpleCommand[], ctx: RiskContext, depth: number): R
   }
   return SAFE;
 }
-
-const CD = new Set(["cd", "pushd", "chdir", "set-location", "sl", "push-location"]);
 
 /** The context after `cmd` when it changes directory (`cd dir`, `Set-Location -Path dir`). */
 function afterCd(cmd: SimpleCommand, ctx: RiskContext): RiskContext {
@@ -228,8 +189,6 @@ function inlineScript(
   }
   return undefined;
 }
-
-const DISCARD = /^(\/dev\/(null|stdout|stderr|tty)|nul|\$null)$/i;
 
 function classifySimple(cmd: SimpleCommand, ctx: RiskContext, depth: number): RiskAssessment {
   const { tokens, elevated } = unwrap(cmd.words);
@@ -336,13 +295,13 @@ function copyTargets(bin: string, args: string[], dest: string, ctx: RiskContext
  * Classify a file write/edit. The worktree, extra roots and OS temp are fine, secrets files in
  * the worktree included: writing one (`cp .env.example .env`) reads nothing. A secrets file in
  * temp counts as outside the worktree, so Full autonomy (which only asks for writes outside the
- * worktree) still asks for it. CodeDen's own credential files and agents' own allow-lists
- * (`./agent-permissions`) ask at every level.
+ * worktree) still asks for it. CodeDen's own home (its credential files, and anything else
+ * outside the session's own worktree there) and agents' own allow-lists (`./agent-permissions`)
+ * ask at every level.
  */
 export function classifyWrite(target: string, ctx: RiskContext): RiskAssessment {
-  if (touchesCodedenCredentials(target, ctx)) {
-    return credentialsRisk(`Writes CodeDen's own credentials: ${target}`);
-  }
+  const access = codedenAccess(target, ctx);
+  if (access) return credentialsRisk(`Writes ${CODEDEN_WHAT[access]}: ${target}`);
   const permissions = agentPermissionsWrite(target, ctx);
   if (permissions) return permissions;
   if (!isWritable(target, ctx))
@@ -354,13 +313,13 @@ export function classifyWrite(target: string, ctx: RiskContext): RiskAssessment 
 }
 
 /**
- * Classify a file read or search. Reads anywhere are fine except credential files; CodeDen's own
- * and the agent CLIs' logins (or a folder holding them) ask at every level.
+ * Classify a file read or search. Reads anywhere are fine except credential files and CodeDen's
+ * own home: anything there outside the session's own worktree, and the agent CLIs' logins (or a
+ * folder holding them), ask at every level.
  */
 export function classifyRead(target: string, ctx: RiskContext): RiskAssessment {
-  if (touchesCodedenCredentials(target, ctx)) {
-    return credentialsRisk(`Reads CodeDen's own credentials: ${target}`);
-  }
+  const access = codedenAccess(target, ctx);
+  if (access) return credentialsRisk(`Reads ${CODEDEN_WHAT[access]}: ${target}`);
   if (touchesProviderLogin(target, ctx)) return loginRisk(`Reads an agent CLI's login: ${target}`);
   if (isSecretPath(target)) return risky("secrets", `Reads the secrets file ${target}`);
   return SAFE;
@@ -369,7 +328,8 @@ export function classifyRead(target: string, ctx: RiskContext): RiskAssessment {
 /**
  * Classify a file-name search: `pattern` (Claude's Glob, or a search's `--glob` filter) from
  * `base` (default: the current directory). Listing names reads nothing, so only a pattern that
- * reaches CodeDen's own credential files asks; `{a,b}` alternatives are followed.
+ * reaches CodeDen's own home (its credential files, or anything outside the session's own
+ * worktree there) asks; `{a,b}` alternatives are followed.
  */
 export function classifyGlob(
   pattern: string,
@@ -378,10 +338,12 @@ export function classifyGlob(
 ): RiskAssessment {
   if (!pattern.trim()) return SAFE;
   const dir = base ? resolveAgainst(base, ctx) : (ctx.dir ?? ctx.cwd);
-  const reaches = braceAlternatives(pattern).some((alt) =>
-    touchesCodedenCredentials(alt, { ...ctx, dir }),
-  );
-  return reaches ? credentialsRisk(`Lists CodeDen's own credential files: ${pattern}`) : SAFE;
+  const alts = braceAlternatives(pattern);
+  if (alts.some((alt) => touchesCodedenCredentials(alt, { ...ctx, dir }))) {
+    return credentialsRisk(`Lists CodeDen's own credential files: ${pattern}`);
+  }
+  const reaches = alts.some((alt) => touchesCodedenHome(alt, { ...ctx, dir }));
+  return reaches ? credentialsRisk(`Lists CodeDen's own home: ${pattern}`) : SAFE;
 }
 
 /** Classify a web fetch. Only flagged when the context has an allowlist of hosts. */

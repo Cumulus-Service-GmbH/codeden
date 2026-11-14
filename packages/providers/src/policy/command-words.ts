@@ -26,6 +26,12 @@ export function unwrap(words: string[]): { tokens: string[]; elevated: boolean }
   return { tokens: rest, elevated };
 }
 
+/** Commands that change the shell's current directory. */
+export const CD = new Set(["cd", "pushd", "chdir", "set-location", "sl", "push-location"]);
+
+/** Redirect targets that write nothing anywhere (`2>/dev/null`, `> nul`, `> $null`). */
+export const DISCARD = /^(\/dev\/(null|stdout|stderr|tty)|nul|\$null)$/i;
+
 /** The program a command word names, lower-cased, without its directory or extension. */
 export const binName = (token: string | undefined): string =>
   (token ?? "")

@@ -1,21 +1,24 @@
 import { CODEDEN_CREDENTIAL_FILES, INVALID_COPY_SUFFIX } from "@codeden/contracts";
 import type { RiskAssessment } from "./assessment";
-import { isWin, type PathContext, pathApi, resolveAgainst, samePath } from "./paths";
-import { WILDCARD, wildcardMatchesNumbered, wildcardPattern } from "./wildcard";
+import { isInside, isWin, type PathContext, pathApi, resolveAgainst, samePath } from "./paths";
+import { WILDCARD, wildcardMatchesNumbered, wildcardPattern, wildcardReaches } from "./wildcard";
 
 export { wildcardPattern } from "./wildcard";
 
 /**
- * CodeDen's own credential files (§15): the install token, the runner lock and the remote
- * access store in its data directory, and the copies CodeDen keeps of one it found damaged
- * (`<file>.invalid-<timestamp>`, with the same secrets in it). An agent holding the install
- * token or the runner's token could drive CodeDen itself and approve its own requests, so
- * touching one asks at every level, Full included, and is refused for read-only sessions
- * (§11.2). The data directory comes from the session (`SessionOptions.codedenHome`); without
- * it, this rule is off.
+ * CodeDen's own home (§15, #320). Its credential files are the install token, the runner lock
+ * and the remote access store, and the copies CodeDen keeps of one it found damaged
+ * (`<file>.invalid-<timestamp>`, with the same secrets in it): an agent holding the install
+ * token or the runner's token could drive CodeDen itself and approve its own requests. The rest
+ * of the home holds the database (other sessions' transcripts, inbox items, MCP token hashes),
+ * settings, logs, backups and other sessions' worktrees. Touching anything there asks at every
+ * level, Full included, and is refused for read-only sessions (§11.2); agents get CodeDen state
+ * through its MCP tools. The one exception is the session's own folders under the home (its
+ * worktree in `<home>/wt/`, the orchestrator's folder). The data directory comes from the
+ * session (`SessionOptions.codedenHome`); without it, this rule is off.
  */
 
-/** A risky verdict on CodeDen's own credentials, which every level asks about. */
+/** A risky verdict on CodeDen's own home or credentials, which every level asks about. */
 export function credentialsRisk(reason: string): RiskAssessment {
   return { risky: true, action: "secrets", reason, codeden: true };
 }
@@ -127,4 +130,61 @@ export function touchesCodedenCredentials(target: string, ctx: PathContext): boo
   return codedenCredentialCopies(ctx).some(
     (copy) => wildcardMatchesNumbered(glob, slashes(copy, ctx), isWin(ctx), literal) === true,
   );
+}
+
+/**
+ * The session's own folders inside CodeDen's home: its worktree (`<home>/wt/<project>/<id>`,
+ * or the orchestrator's `<home>/orchestrator`) and extra roots there. A working directory that
+ * is the home, or holds it, opens nothing.
+ */
+function ownFolders(ctx: PathContext): string[] {
+  const home = ctx.codedenHome;
+  if (!home) return [];
+  return [ctx.cwd, ...(ctx.extraRoots ?? [])].filter(
+    (root) => isInside(root, home, ctx) && !samePath(root, home, ctx),
+  );
+}
+
+/**
+ * The folder of `abs` (from `resolvePattern`) before its first wildcard, which holds every path
+ * it matches; undefined when it has no wildcard.
+ */
+function fixedFolder(abs: string, ctx: PathContext): string | undefined {
+  const value = slashes(abs, ctx);
+  const literal = literalPrefix(abs, ctx);
+  const at = value.slice(literal).search(WILDCARD);
+  if (at < 0) return undefined;
+  return value.slice(0, value.lastIndexOf("/", literal + at) + 1) || "/";
+}
+
+/**
+ * True when `target` reaches into CodeDen's home outside the session's own folders: a path in
+ * the home (the home itself included), or a wildcard that can match one (`~/.c*`,
+ * `$CODEDEN_HOME/*`). A path or pattern inside the session's own worktree doesn't; one in
+ * another session's worktree does. Resolved like `touchesCodedenCredentials`.
+ */
+export function touchesCodedenHome(target: string, ctx: PathContext): boolean {
+  const home = ctx.codedenHome;
+  if (!home || !target.trim()) return false;
+  const abs = resolvePattern(target, ctx);
+  const folder = fixedFolder(abs, ctx);
+  const fixed = folder ?? abs;
+  if (ownFolders(ctx).some((root) => isInside(fixed, root, ctx))) return false;
+  if (isInside(fixed, home, ctx)) return true;
+  if (folder === undefined) return false;
+  const glob = slashes(abs, ctx);
+  const homeGlob = slashes(pathApi(ctx).resolve(home), ctx);
+  return wildcardReaches(glob, homeGlob, isWin(ctx), literalPrefix(abs, ctx)) !== false;
+}
+
+/**
+ * What `target` touches of CodeDen's home: one of its credential files (or a folder holding
+ * one), anything else in it, or nothing.
+ */
+export function codedenAccess(
+  target: string,
+  ctx: PathContext,
+): "credentials" | "home" | undefined {
+  if (touchesCodedenCredentials(target, ctx)) return "credentials";
+  return touchesCodedenHome(target, ctx) ? "home" : undefined;
 }
