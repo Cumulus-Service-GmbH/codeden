@@ -146,7 +146,8 @@ export function useProjectChecks(projectId: string): ProjectCheck[] {
     queryKey: ["project-checks", projectId] as const,
     queryFn: () => client.listProjectChecks(projectId),
     staleTime: 30_000,
-    retry: false,
+    // A server restart mid-request must not hide the option until the view opens again.
+    retry: 3,
   });
   return data ?? NO_CHECKS;
 }

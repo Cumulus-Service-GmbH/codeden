@@ -145,7 +145,7 @@ export function cardMessage(data: CheckRunData, outcome?: CheckRunOutcome): stri
     case "continuing":
       return `${failed} of ${total} ${noun} failed; sent to the agent (round ${data.round + 1} of ${data.maxRounds})`;
     case "cap_reached":
-      return `${failed} of ${total} ${noun} still fail after ${data.maxRounds} ${data.maxRounds === 1 ? "round" : "rounds"}; CodeDen stopped. The session is waiting for you.`;
+      return `${failed} of ${total} ${noun} still fail after ${data.maxRounds} ${data.maxRounds === 1 ? "round" : "rounds"}; CodeDen stopped`;
     case "stopped":
       return "Checks stopped";
     case "superseded":

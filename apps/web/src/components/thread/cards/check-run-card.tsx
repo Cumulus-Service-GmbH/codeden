@@ -47,7 +47,10 @@ function CheckRow({ check }: { check: CheckResult }) {
         aria-label={`${check.command}: ${l.label}`}
       >
         <l.icon className={cn("size-3.5 shrink-0", l.tone)} />
-        <code className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-foreground">
+        <code
+          className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-foreground"
+          title={check.command}
+        >
           {check.command}
         </code>
         {detail && <span className="shrink-0 text-status-failed">{detail}</span>}

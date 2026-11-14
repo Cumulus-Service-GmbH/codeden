@@ -40,7 +40,9 @@ function ChecksRow({ checks }: { checks: SessionChecks }) {
         {checks.commands.map((c, i) => (
           // biome-ignore lint/suspicious/noArrayIndexKey: the frozen list never changes
           <li key={i} className="flex items-baseline gap-1.5">
-            <code className="min-w-0 truncate font-mono text-[12px]">{c.command}</code>
+            <code className="min-w-0 truncate font-mono text-[12px]" title={c.command}>
+              {c.command}
+            </code>
             {c.timeoutSec !== undefined && (
               <span className="shrink-0 text-2xs text-muted-foreground">
                 · {duration(c.timeoutSec * 1000)} limit
