@@ -54,12 +54,14 @@ function renderHeader(f: FactoryStatus) {
     inFlight: 2,
   }));
   client.factory.killSwitch = killSwitch;
+  const resume = vi.fn(async () => ({}) as never);
+  client.factory.resume = resume;
   renderWithClient(
     <ViewHeader project={project} f={f} needsPerson={0} failed={0} pixel={pixel} />,
     client,
     { withRouter: true },
   );
-  return killSwitch;
+  return Object.assign(killSwitch, { resume });
 }
 
 describe("the kill switch's two ways to stop (#286)", () => {
@@ -105,5 +107,26 @@ describe("the kill switch's two ways to stop (#286)", () => {
         drainLimitMin: undefined,
       }),
     );
+    expect(killSwitch.resume).not.toHaveBeenCalled();
+  });
+
+  it("resumes the paused loop too when Resume is pressed while paused and draining", async () => {
+    const killSwitch = renderHeader(
+      status({
+        loopState: "paused",
+        pausedReason: "daily budget reached",
+        drain: { since: at, inFlight: 1, total: 1, deadline: null },
+      }),
+    );
+    expect((await screen.findByTestId("factory-drain")).textContent).toContain(
+      "paused: daily budget reached",
+    );
+    // One Resume only: the pause's own button stays hidden while draining.
+    expect(screen.getAllByRole("button", { name: /Resume/ })).toHaveLength(1);
+    const resume = screen.getByTestId("factory-drain-resume");
+    expect(resume.getAttribute("title")).toMatch(/the drain and the pause/);
+    fireEvent.click(resume);
+    await waitFor(() => expect(killSwitch.resume).toHaveBeenCalledWith("p-app"));
+    expect(killSwitch).not.toHaveBeenCalled();
   });
 });

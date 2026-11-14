@@ -90,6 +90,7 @@ export function KillSwitchButton({
   scope,
   on,
   drain = null,
+  paused = false,
   size = "sm",
 }: {
   scope: Scope;
@@ -97,6 +98,11 @@ export function KillSwitchButton({
   on: boolean;
   /** The drain in progress (`FactoryStatus.drain`). */
   drain?: FactoryDrainStatus | null;
+  /**
+   * The loop is paused too: Resume during the drain then resumes the loop, which ends both the
+   * pause and the drain (the panel's own Resume is hidden while draining).
+   */
+  paused?: boolean;
   size?: "sm" | "xs";
 }) {
   const client = useClient();
@@ -116,6 +122,15 @@ export function KillSwitchButton({
     },
     onError: (e) => toast.error("Couldn't change the kill switch", { description: e.message }),
   });
+  const resumeLoop = useMutation({
+    mutationFn: () => client.factory.resume(typeof scope === "string" ? "" : scope.projectId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: factoryKeys.all });
+      toast.success("Factory resumed");
+    },
+    onError: (e) => toast.error("Couldn't resume", { description: e.message }),
+  });
+  const busy = kill.isPending || resumeLoop.isPending;
   const act = (which: Confirm) => {
     if (which === "release") kill.mutate({ on: false });
     else if (which === "now") kill.mutate({ on: true, mode: "now" });
@@ -154,19 +169,18 @@ export function KillSwitchButton({
       <>
         <Button
           size={size}
-          disabled={kill.isPending}
-          onClick={() => kill.mutate({ on: false })}
-          title="Cancel the drain: the factory takes on new work again"
+          disabled={busy}
+          onClick={() => (paused ? resumeLoop.mutate() : kill.mutate({ on: false }))}
+          title={
+            paused
+              ? "Cancel the drain and the pause: the factory takes on new work again"
+              : "Cancel the drain: the factory takes on new work again"
+          }
           data-testid="factory-drain-resume"
         >
           <Play /> Resume
         </Button>
-        <Button
-          size={size}
-          variant="destructive"
-          disabled={kill.isPending}
-          onClick={() => ask("now")}
-        >
+        <Button size={size} variant="destructive" disabled={busy} onClick={() => ask("now")}>
           <Power /> Stop now
         </Button>
       </>

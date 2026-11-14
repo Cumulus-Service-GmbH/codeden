@@ -155,7 +155,12 @@ export function FactoryPanel({ project }: { project: Project }) {
             </Link>
           </Button>
           <FactoryGuideButton />
-          <KillSwitchButton scope={{ projectId }} on={f.killSwitch} drain={f.drain} />
+          <KillSwitchButton
+            scope={{ projectId }}
+            on={f.killSwitch}
+            drain={f.drain}
+            paused={f.loopState === "paused"}
+          />
         </div>
       </div>
 

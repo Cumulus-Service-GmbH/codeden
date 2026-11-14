@@ -1,5 +1,6 @@
 import {
   DRAIN_PER_PROJECT,
+  DRAIN_UNAVAILABLE,
   FACTORY_DRAINING,
   FactoryFileIssueRequest,
   type FactoryItem,
@@ -82,8 +83,8 @@ function backlogItem(title: string): FactoryItem {
   });
 }
 
-/** Take a building item through its PR, review and merge until it is merged. */
-async function toMerged(it: FactoryItem): Promise<void> {
+/** Take a building item through its PR and an approving review; returns the PR's number. */
+async function toApproved(it: FactoryItem): Promise<number> {
   const builder = item(it.id).builderSessionId as string;
   const pr = env.gh.openPr({
     sessionId: builder,
@@ -96,7 +97,13 @@ async function toMerged(it: FactoryItem): Promise<void> {
   const reviewer = env.repo.get(item(it.id).reviewerSessionId as string);
   env.factory.submitReview(reviewer, ReviewVerdict.parse(APPROVE));
   await env.setStatus(reviewer.id, "idle");
-  env.gh.commitState.set(`merge${pr.ref.number}`, "success");
+  return pr.ref.number;
+}
+
+/** Take a building item through its PR, review and merge until it is merged. */
+async function toMerged(it: FactoryItem): Promise<void> {
+  const pr = await toApproved(it);
+  env.gh.commitState.set(`merge${pr}`, "success");
   for (let i = 0; i < 4 && item(it.id).stage !== "merged"; i++) await tick();
   expect(item(it.id).stage).toBe("merged");
 }
@@ -245,9 +252,73 @@ describe("finish current work, then stop (#286)", () => {
     expect(loop()).toMatchObject({ state: "stopped", drain: null });
     const notice = env.inbox.find(drainInboxId(env.project.id));
     expect(notice).toMatchObject({ status: "open", notify: "failure", priority: "high" });
-    expect(notice?.title).toBe(
-      "Factory stopped: the drain's time limit ran out with 1 item in flight",
+    expect(notice?.title).toBe("Drain time limit reached; stopped with 1 item still in flight");
+  });
+
+  it("doesn't wait for pull requests only a person merges (auto-merge off, the default)", async () => {
+    env = createFactoryEnv();
+    await env.factory.setMode(env.project.id, {
+      mode: "software_factory",
+      limits: { ...env.project.factoryLimits, autoMerge: false },
+    });
+    const ready = backlogItem("Add a counter");
+    const a = backlogItem("Add a reset button");
+    await tick();
+    const readyPr = await toApproved(ready);
+    await tick();
+    expect(item(ready.id)).toMatchObject({ stage: "verifying" });
+    expect(item(ready.id).note).toMatch(/^Ready to merge/);
+
+    // The PR waiting for a person isn't work in flight: only the build is.
+    expect(await drain()).toMatchObject({ draining: true, inFlight: 1 });
+    expect((await status()).drain).toMatchObject({ inFlight: 1, total: 1 });
+    const aPr = await toApproved(a);
+    await tick();
+    expect(item(a.id).note).toMatch(/^Ready to merge/);
+
+    // Both wait for the person, so the drain is over: stopped, one notice, nothing merged.
+    expect(project().killSwitch).toBe(true);
+    expect(loop()).toMatchObject({ state: "stopped", drain: null });
+    const notices = stoppedNotices();
+    expect(notices.map((n) => n.title)).toEqual(["Factory stopped after finishing 1 item"]);
+    expect(notices[0]?.body).toContain(
+      `Add a reset button (#${aPr}): ready for you to merge (every check passed; the pull request stays open)`,
     );
+    expect(env.gh.merges).toEqual([]);
+    expect(env.gh.prs.get(readyPr)?.ref.state).toBe("open");
+    expect(env.gh.prs.get(aPr)?.ref.state).toBe("open");
+
+    // A drain begun when only such PRs are open stops at once.
+    await env.factory.setKillSwitch(env.project.id, false);
+    expect(await drain()).toMatchObject({ on: true, draining: false, inFlight: 0 });
+    expect(project().killSwitch).toBe(true);
+  });
+
+  it("keeps a project stopped whose drain the global switch cut short", async () => {
+    env = createFactoryEnv();
+    await enable();
+    backlogItem("Add a counter");
+    const other = backlogItem("Add a reset button");
+    await tick();
+    await drain();
+    await env.factory.setGlobalKillSwitch(true);
+    expect(project().killSwitch).toBe(true);
+    expect(loop().drain).toBeNull();
+    await env.factory.setGlobalKillSwitch(false);
+    await tick();
+    expect(await status()).toMatchObject({ loopState: "stopped", killSwitch: true });
+    expect(item(other.id).stage).toBe("backlog");
+  });
+
+  it("refuses a drain outside the factory modes or while the global switch is on", async () => {
+    env = createFactoryEnv();
+    expect(await failure(() => drain())).toBe(DRAIN_UNAVAILABLE);
+    expect(project().killSwitch).toBe(false);
+    await enable();
+    await env.factory.setGlobalKillSwitch(true);
+    expect(await failure(() => drain())).toBe(DRAIN_UNAVAILABLE);
+    expect(project().killSwitch).toBe(false);
+    expect(stoppedNotices()).toEqual([]);
   });
 
   it("closes the scout's round and files nothing while draining", async () => {

@@ -170,7 +170,12 @@ export function ViewHeader({
           </Button>
         )}
         <FactoryRunButtons f={f} stopped={stopped} />
-        <KillSwitchButton scope={{ projectId: f.projectId }} on={f.killSwitch} drain={f.drain} />
+        <KillSwitchButton
+          scope={{ projectId: f.projectId }}
+          on={f.killSwitch}
+          drain={f.drain}
+          paused={f.loopState === "paused"}
+        />
         <FactoryGuideButton />
         {pixel.available && (
           <Button

@@ -1,5 +1,6 @@
 import {
   DRAIN_PER_PROJECT,
+  DRAIN_UNAVAILABLE,
   type FactoryAdmitRequest,
   type FactoryAllowLargeChangeRequest,
   type FactoryAnalysisReport,
@@ -30,7 +31,7 @@ import {
 import type { Db } from "../../db/client";
 import type { EventStore } from "../../events/store";
 import type { SettingsStore } from "../../settings-store";
-import { badRequest, errorMessage, notFound } from "../errors";
+import { badRequest, conflict, errorMessage, notFound } from "../errors";
 import type { Exec } from "../exec";
 import type { InboxService } from "../inbox-service";
 import type { NoticeDraft } from "../orchestration/notices";
@@ -342,7 +343,9 @@ export class FactoryService {
 
   /**
    * The global kill switch (`settings.factory.killSwitch`): stops every project's loop at once.
-   * A drain is per project, so `mode: "drain"` is refused (400 `drain_per_project`).
+   * A drain is per project, so `mode: "drain"` is refused (400 `drain_per_project`). A project
+   * whose drain it cuts short keeps its own switch on, so releasing the global switch leaves it
+   * stopped, as its user asked.
    */
   async setGlobalKillSwitch(
     on: boolean,
@@ -358,8 +361,10 @@ export class FactoryService {
     this.deps.store.append([{ type: "settings.updated", sessionId: null, payload: { settings } }]);
     const stoppedSessions: string[] = [];
     for (const p of this.deps.projects.list()) {
-      if (on) stoppedSessions.push(...(await this.halt(p.id)));
-      else if (!p.killSwitch && this.data.loop(p.id)) this.resumeAfterKill(p.id);
+      if (on) {
+        if (this.data.loop(p.id)?.drain) this.writeKillSwitch(p.id, true);
+        stoppedSessions.push(...(await this.halt(p.id)));
+      } else if (!p.killSwitch && this.data.loop(p.id)) this.resumeAfterKill(p.id);
     }
     return { on, stoppedSessions, draining: false, inFlight: 0 };
   }
@@ -582,15 +587,29 @@ export class FactoryService {
 
   /**
    * Begin a drain, or change the time limit of the one running. With nothing in flight the loop
-   * stops at once. A kill switch that is on already has nothing left to drain.
+   * stops at once. A kill switch that is on already has nothing left to drain (it stays on).
+   * Outside the factory modes, or while the global kill switch is on, there is nothing a drain
+   * could do: 409 `drain_unavailable`, with the reason.
    */
   private async drain(
     projectId: string,
     limitMin: number | null | undefined,
   ): Promise<KillSwitchResponse> {
     const project = this.deps.projects.get(projectId);
-    if (project.killSwitch || this.deps.settings.get().factory.killSwitch) {
-      return { on: project.killSwitch, stoppedSessions: [], draining: false, inFlight: 0 };
+    if (!isFactoryMode(project.autonomyMode)) {
+      throw conflict(
+        "Only the software and dark factory finish their current work before stopping",
+        DRAIN_UNAVAILABLE,
+      );
+    }
+    if (this.deps.settings.get().factory.killSwitch) {
+      throw conflict(
+        "The global kill switch is on: every factory is stopped already",
+        DRAIN_UNAVAILABLE,
+      );
+    }
+    if (project.killSwitch) {
+      return { on: true, stoppedSessions: [], draining: false, inFlight: 0 };
     }
     const res = await this.serialize(projectId, "drain", async () => {
       const started = await startDrain(this.ctx, projectId, limitMin);

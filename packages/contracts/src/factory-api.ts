@@ -556,6 +556,13 @@ export const DRAIN_LIMIT_MAX_MIN = 7 * 24 * 60;
 /** Error code of `POST /api/factory/kill-switch` with `mode: "drain"` (400): drains are per project. */
 export const DRAIN_PER_PROJECT = "drain_per_project";
 
+/**
+ * Error code of `POST /api/projects/:id/kill-switch` with `mode: "drain"` when there is nothing
+ * a drain could do (409): the project isn't in a factory mode, or the global kill switch is on
+ * (every factory is stopped already). The message says which.
+ */
+export const DRAIN_UNAVAILABLE = "drain_unavailable";
+
 /** Error code of the scout's tools while the factory drains (409): it files no new work. */
 export const FACTORY_DRAINING = "draining";
 

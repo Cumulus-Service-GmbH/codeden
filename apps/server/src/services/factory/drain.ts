@@ -1,9 +1,11 @@
 import {
+  checksPassed,
   drainText,
   type FactoryDrain,
   type FactoryDrainStatus,
   type FactoryItem,
   type FactoryItemStage,
+  type FactoryLimits,
   type FactoryLoop,
   type Project,
 } from "@codeden/contracts";
@@ -11,6 +13,7 @@ import { type FactoryContext, factoryNotice, raiseInbox } from "./context";
 import { stoppedLoop, stopWork } from "./controls";
 import { awaitedProvider } from "./provider-wait";
 import { recoverable } from "./recover";
+import { mayAutoMerge } from "./trust";
 
 /**
  * The kill switch's "Finish current work, then stop" (§10.1): a drain. Nothing new starts (no
@@ -28,48 +31,74 @@ const MOVING: FactoryItemStage[] = ["building", "verifying", "watching"];
 export const drainInboxId = (projectId: string) => `inbox:factory-drained:${projectId}`;
 
 /**
- * Whether an item is still in flight: moving through its pipeline, or failed for a reason
- * outside its code while the loop still puts it back by itself, unless that waits on a provider
- * that can't take work (signed out, at its usage limit), which never holds a drain, as it never
- * holds the work-in-progress limit. `queued`: a drain's item back in the queue (its builder gone,
- * or rebuilt) is in flight too.
+ * A PR whose checks all passed and that only a person merges (auto-merge off, or work let in
+ * from an untrusted author): the factory has nothing left to do on it, as for escalated work.
+ * It waits for the person ("Review and merge PR #n", `factoryNeed`) and never holds a drain.
+ * Work held only by the daily merge cap still does: the factory merges it itself, in its turn.
+ */
+function waitsForPersonsMerge(item: FactoryItem, limits: FactoryLimits): boolean {
+  return item.stage === "verifying" && checksPassed(item) && !mayAutoMerge(item, limits);
+}
+
+/** What `stillInFlight` reads besides the item: the providers that can take work, the limits. */
+interface InFlightFacts {
+  available: readonly string[];
+  limits: FactoryLimits;
+}
+
+function inFlightFacts(ctx: FactoryContext, projectId: string): InFlightFacts {
+  return {
+    available: ctx.sessions.providers(),
+    limits: ctx.projects.get(projectId).factoryLimits,
+  };
+}
+
+/**
+ * Whether an item is still in flight: moving through its pipeline (not waiting for a person to
+ * merge it), or failed for a reason outside its code while the loop still puts it back by
+ * itself, unless that waits on a provider that can't take work (signed out, at its usage limit),
+ * which never holds a drain, as it never holds the work-in-progress limit. `queued`: a drain's
+ * item back in the queue (its builder gone, or rebuilt) is in flight too.
  */
 function stillInFlight(
   ctx: FactoryContext,
   item: FactoryItem,
-  available: readonly string[],
+  facts: InFlightFacts,
   queued: boolean,
 ): boolean {
-  if (MOVING.includes(item.stage)) return true;
+  if (MOVING.includes(item.stage)) return !waitsForPersonsMerge(item, facts.limits);
   if (item.stage === "backlog") return queued;
   if (item.stage !== "failed" || !recoverable(item)) return false;
-  return awaitedProvider(ctx, item, available) === undefined;
+  return awaitedProvider(ctx, item, facts.available) === undefined;
 }
 
 /** The work in flight right now: what a drain that begins now waits for. */
 export function workInFlight(ctx: FactoryContext, projectId: string): FactoryItem[] {
-  const available = ctx.sessions.providers();
+  const facts = inFlightFacts(ctx, projectId);
   return ctx.store
     .items(projectId, [...MOVING, "failed"])
-    .filter((i) => stillInFlight(ctx, i, available, false));
+    .filter((i) => stillInFlight(ctx, i, facts, false));
 }
 
 /**
- * The drain's items still in flight, and all of its items. Work that is moving without having
- * started from the queue during the drain (the revert of a merge whose CI on main failed) joins
- * it, so a drain never stops while anything is moving.
+ * The drain's items still in flight, and all of its items. Work that is moving in flight without
+ * having started from the queue during the drain (the revert of a merge whose CI on main failed)
+ * joins it, so a drain never stops while anything is moving; a PR waiting for a person's merge
+ * doesn't.
  */
 export function drainProgress(
   ctx: FactoryContext,
   projectId: string,
   drain: FactoryDrain,
 ): { inFlight: FactoryItem[]; itemIds: string[] } {
-  const available = ctx.sessions.providers();
+  const facts = inFlightFacts(ctx, projectId);
   const ids = new Set(drain.itemIds);
-  for (const i of ctx.store.items(projectId, MOVING)) ids.add(i.id);
+  for (const i of ctx.store.items(projectId, MOVING)) {
+    if (stillInFlight(ctx, i, facts, false)) ids.add(i.id);
+  }
   const inFlight = [...ids].flatMap((id) => {
     const item = ctx.store.item(id);
-    return item && stillInFlight(ctx, item, available, true) ? [item] : [];
+    return item && stillInFlight(ctx, item, facts, true) ? [item] : [];
   });
   return { inFlight, itemIds: [...ids] };
 }
@@ -155,9 +184,10 @@ function finishDrain(
   const items = drain.itemIds.flatMap((id) => ctx.store.item(id) ?? []);
   const n = items.length;
   const title = `Factory stopped after finishing ${n} item${n === 1 ? "" : "s"}`;
+  const limits = project.factoryLimits;
   const body = [
     `${project.name}: the factory finished the work it had in flight and stopped. It takes on no new work until you resume it.`,
-    ...(n > 0 ? ["", ...items.map((i) => `- ${itemLine(i)}`)] : []),
+    ...(n > 0 ? ["", ...items.map((i) => `- ${itemLine(i, limits)}`)] : []),
   ].join("\n");
   announce(ctx, project, drain, { title, body, failure: false });
   ctx.log?.(`factory: ${project.id}: drained (${n} items), stopped`);
@@ -175,7 +205,7 @@ async function drainTimedOut(
   ctx.setKillSwitch(project.id, true);
   await stopWork(ctx, project.id);
   const n = inFlight.length;
-  const title = `Factory stopped: the drain's time limit ran out with ${n} item${n === 1 ? "" : "s"} in flight`;
+  const title = `Drain time limit reached; stopped with ${n} item${n === 1 ? "" : "s"} still in flight`;
   const body = [
     `${project.name}: the factory stopped everything at once, as Stop now does. Work that hadn't opened a pull request went back to the queue; open pull requests stay open.`,
     "",
@@ -216,7 +246,7 @@ function announce(
 }
 
 /** "Add a counter (#12): merged". */
-function itemLine(i: FactoryItem): string {
+function itemLine(i: FactoryItem, limits: FactoryLimits): string {
   const ref = i.pr ? ` (#${i.pr.number})` : "";
   const why = i.reason ? `: ${i.reason}` : "";
   const outcome: Partial<Record<FactoryItemStage, string>> = {
@@ -226,6 +256,9 @@ function itemLine(i: FactoryItem): string {
     escalated: `waits for you${why}`,
     failed: `failed${why}`,
   };
+  if (waitsForPersonsMerge(i, limits)) {
+    return `${i.title}${ref}: ready for you to merge (every check passed; the pull request stays open)`;
+  }
   return `${i.title}${ref}: ${outcome[i.stage] ?? i.stage}`;
 }
 
