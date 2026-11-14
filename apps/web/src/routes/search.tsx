@@ -1,4 +1,4 @@
-import type { Project, Role, Session, TranscriptSearchHit } from "@codeden/contracts";
+import type { Role, TranscriptSearchHit } from "@codeden/contracts";
 import { Link, useNavigate } from "@tanstack/react-router";
 import { Loader2, SearchX, TextSearch } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -17,7 +17,7 @@ import {
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { ago } from "@/lib/format";
-import { useSnapshotData } from "@/lib/queries";
+import { useProject, useSession, useSnapshotData } from "@/lib/queries";
 import {
   canSearchTranscripts,
   hitKindLabel,
@@ -45,15 +45,10 @@ function Badge({ children }: { children: string }) {
   );
 }
 
-function HitRow({
-  hit,
-  session,
-  project,
-}: {
-  hit: TranscriptSearchHit;
-  session: Session | undefined;
-  project: Project | undefined;
-}) {
+function HitRow({ hit }: { hit: TranscriptSearchHit }) {
+  // An older archived session isn't in the snapshot: it is fetched by id.
+  const session = useSession(hit.sessionId);
+  const project = useProject(session?.projectId);
   return (
     <Link
       to="/sessions/$sessionId"
@@ -84,8 +79,6 @@ function HitRow({
 }
 
 function Results({ q, filters }: { q: string; filters: TranscriptSearchFilters }) {
-  const sessions = useSnapshotData((s) => s.sessions, []);
-  const projects = useSnapshotData((s) => s.projects, []);
   const { hits, query, error, searching, hasMore, loadingMore, loadMore } =
     useTranscriptSearchPages(q, { ...filters, limit: PAGE });
 
@@ -137,17 +130,9 @@ function Results({ q, filters }: { q: string; filters: TranscriptSearchFilters }
   return (
     <div className={searching ? "opacity-70 transition-opacity" : undefined}>
       <div className="divide-y divide-border/60">
-        {hits.map((hit) => {
-          const session = sessions.find((s) => s.id === hit.sessionId);
-          return (
-            <HitRow
-              key={`${hit.sessionId}:${hit.itemId}`}
-              hit={hit}
-              session={session}
-              project={projects.find((p) => p.id === session?.projectId)}
-            />
-          );
-        })}
+        {hits.map((hit) => (
+          <HitRow key={`${hit.sessionId}:${hit.itemId}`} hit={hit} />
+        ))}
       </div>
       {hasMore && (
         <div className="flex justify-center pt-4">

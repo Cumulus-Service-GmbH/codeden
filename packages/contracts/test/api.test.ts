@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  ARCHIVED_SESSIONS_DEFAULT_LIMIT,
+  ArchivedSessionsPage,
+  ArchivedSessionsQuery,
   CreateProjectRequest,
   DismissInboxRequest,
   DismissInboxResponse,
@@ -26,7 +29,7 @@ import {
   UiServerMessage,
   UpdateProjectRequest,
 } from "../src";
-import { sampleInboxItem } from "./fixtures";
+import { sampleInboxItem, sampleSession } from "./fixtures";
 
 function roundTrip<T>(schema: { parse: (v: unknown) => T }, value: unknown): T {
   const first = schema.parse(value);
@@ -289,6 +292,23 @@ describe("api schemas", () => {
     roundTrip(ReorderProjectsRequest, { projectIds: [] });
     expect(() => ReorderProjectsRequest.parse({ projectIds: [""] })).toThrow();
     expect(() => ReorderProjectsRequest.parse({})).toThrow();
+  });
+
+  it("pages a project's archived sessions (#323)", () => {
+    expect(ArchivedSessionsQuery.parse({})).toEqual({ limit: ARCHIVED_SESSIONS_DEFAULT_LIMIT });
+    expect(roundTrip(ArchivedSessionsQuery, { cursor: "abc", limit: "20" })).toEqual({
+      cursor: "abc",
+      limit: 20,
+    });
+    expect(() => ArchivedSessionsQuery.parse({ limit: "0" })).toThrow();
+    expect(() => ArchivedSessionsQuery.parse({ limit: "101" })).toThrow();
+    expect(() => ArchivedSessionsQuery.parse({ cursor: "" })).toThrow();
+    const archived = { ...sampleSession, archivedAt: sampleSession.updatedAt };
+    const page = roundTrip(ArchivedSessionsPage, { sessions: [archived], nextCursor: "c1" });
+    expect(page.sessions[0]?.archivedAt).toBe(sampleSession.updatedAt);
+    expect(roundTrip(ArchivedSessionsPage, { sessions: [], nextCursor: null }).nextCursor).toBe(
+      null,
+    );
   });
 
   it("coerces query strings", () => {

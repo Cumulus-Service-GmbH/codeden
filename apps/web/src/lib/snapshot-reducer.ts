@@ -1,4 +1,10 @@
-import { type EventEnvelope, type Project, type Snapshot, sortProjects } from "@codeden/contracts";
+import {
+  type EventEnvelope,
+  type Project,
+  type Session,
+  type Snapshot,
+  sortProjects,
+} from "@codeden/contracts";
 import { withOrder } from "./project-order";
 
 function upsert<T extends { id: string }>(list: T[], next: T): T[] {
@@ -13,6 +19,40 @@ function upsert<T extends { id: string }>(list: T[], next: T): T[] {
 function upsertProject(list: Project[], project: Project): Project[] {
   if (project.archivedAt !== null) return list.filter((p) => p.id !== project.id);
   return sortProjects(upsert(list, project));
+}
+
+/** Move a project's archived agent session count by `delta`; projects at zero are left out. */
+function shiftArchivedCount(
+  counts: Record<string, number>,
+  session: Session,
+  delta: number,
+): Record<string, number> {
+  if (delta === 0 || session.role !== "agent" || !session.projectId) return counts;
+  const { [session.projectId]: current = 0, ...rest } = counts;
+  const next = Math.max(0, current + delta);
+  return next > 0 ? { ...rest, [session.projectId]: next } : rest;
+}
+
+/**
+ * Apply a session event. The snapshot holds every session that isn't archived plus the recently
+ * archived ones, so an update for a session it doesn't have is for one archived before that:
+ * it stays out (nothing is copied) unless it was unarchived. The archived counts follow.
+ */
+function applySession(
+  snap: Snapshot,
+  session: Session,
+  created: boolean,
+): Pick<Snapshot, "sessions" | "archivedSessionCounts"> {
+  const prev = snap.sessions.find((s) => s.id === session.id);
+  if (!prev && !created && session.archivedAt) {
+    return { sessions: snap.sessions, archivedSessionCounts: snap.archivedSessionCounts };
+  }
+  const wasArchived = prev ? Boolean(prev.archivedAt) : !created;
+  const delta = Number(Boolean(session.archivedAt)) - Number(wasArchived);
+  return {
+    sessions: upsert(snap.sessions, session),
+    archivedSessionCounts: shiftArchivedCount(snap.archivedSessionCounts, session, delta),
+  };
 }
 
 /**
@@ -43,9 +83,12 @@ export function applyDomainEvent(snap: Snapshot, env: EventEnvelope): Snapshot {
       next.projects = withOrder(snap.projects, env.payload.projectIds);
       break;
     case "session.created":
-    case "session.updated":
-      next.sessions = upsert(snap.sessions, env.payload.session);
+    case "session.updated": {
+      const applied = applySession(snap, env.payload.session, env.type === "session.created");
+      next.sessions = applied.sessions;
+      next.archivedSessionCounts = applied.archivedSessionCounts;
       break;
+    }
     case "inbox.created":
     case "inbox.updated":
       next.inbox = upsert(snap.inbox, env.payload.item);

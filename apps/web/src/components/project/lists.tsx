@@ -1,9 +1,11 @@
 import type { Session } from "@codeden/contracts";
 import { Link } from "@tanstack/react-router";
-import { ArchiveRestore } from "lucide-react";
+import { ArchiveRestore, Loader2 } from "lucide-react";
 import { IssueBadge, PrBadge, ProviderMark } from "@/components/common/bits";
 import { StatusDot } from "@/components/common/status-dot";
 import { Button } from "@/components/ui/button";
+import { Skeleton } from "@/components/ui/skeleton";
+import { useArchivedSessions } from "@/lib/archived-sessions";
 import { ageShort, statusLabel } from "@/lib/format";
 import { useSessionActions } from "@/lib/session-actions";
 
@@ -22,6 +24,48 @@ function UnarchiveButton({ session }: { session: Session }) {
     >
       <ArchiveRestore /> Unarchive
     </Button>
+  );
+}
+
+const emptyBox =
+  "rounded-xl border border-dashed border-border px-4 py-6 text-center text-xs text-muted-foreground";
+
+/**
+ * A project's archived agent sessions, most recently archived first, paged from the server
+ * (the snapshot carries only the recent ones).
+ */
+export function ArchivedSessionsList({ projectId }: { projectId: string }) {
+  const { data, error, isPending, hasNextPage, isFetchingNextPage, fetchNextPage } =
+    useArchivedSessions(projectId);
+  const sessions = data?.pages.flatMap((p) => p.sessions) ?? [];
+  if (isPending) return <Skeleton className="h-24 rounded-xl" />;
+  if (error && sessions.length === 0) {
+    return <p className={emptyBox}>Couldn't load the archived sessions: {error.message}</p>;
+  }
+  if (sessions.length === 0) {
+    return (
+      <p className={emptyBox}>
+        No archived sessions. Archive one from its menu to tidy the sidebar.
+      </p>
+    );
+  }
+  return (
+    <>
+      <SessionsList sessions={sessions} />
+      {hasNextPage && (
+        <div className="flex justify-center pt-3">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void fetchNextPage()}
+            disabled={isFetchingNextPage}
+          >
+            {isFetchingNextPage && <Loader2 className="animate-spin" />}
+            Load more
+          </Button>
+        </div>
+      )}
+    </>
   );
 }
 

@@ -9,6 +9,7 @@ import type { QueryClient } from "@tanstack/react-query";
 import { useConnectionStore } from "@/stores/connection";
 import { useTranscriptsStore } from "@/stores/transcripts";
 import type { CodeDenClient } from "./api/client";
+import { syncSessionQueries } from "./archived-sessions";
 import { invalidateAutomations } from "./automations";
 import { invalidateFactory } from "./factory";
 import { snapshotKey } from "./queries";
@@ -73,6 +74,7 @@ export function startRealtime(client: CodeDenClient, queryClient: QueryClient): 
       queryClient.setQueryData(snapshotKey, (s: Snapshot | undefined) =>
         s ? applyDomainEvent(s, env) : s,
       );
+      syncSessionQueries(queryClient, env);
       invalidateWorkbench(queryClient, env);
       invalidateAutomations(queryClient, env);
       invalidateFactory(queryClient, env);

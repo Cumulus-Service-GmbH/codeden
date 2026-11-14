@@ -5,6 +5,7 @@ import { Archive, Bot, ChevronRight, GripVertical, House, Plus } from "lucide-re
 import { type CSSProperties, useState } from "react";
 import { StatusDot } from "@/components/common/status-dot";
 import { statusTone } from "@/lib/format";
+import { useSnapshotData } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { useLayoutStore } from "@/stores/layout";
 import { childGroup, childRow, NavRow, rowBase, useIsActive } from "./nav-row";
@@ -77,7 +78,8 @@ export function ProjectGroup({
     .filter((s) => s.role === "pm")
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
   const agents = sortSessions(sessions.filter((s) => s.role === "agent" && !s.archivedAt));
-  const archived = sessions.filter((s) => s.role === "agent" && s.archivedAt).length;
+  // Counted by the server: the snapshot carries only the recently archived sessions.
+  const archived = useSnapshotData((s) => s.archivedSessionCounts[project.id] ?? 0, 0);
   const visible = showAll ? agents : agents.slice(0, LIMIT);
   const attention = agents.some((s) => s.status === "waiting");
   const running = agents.filter((s) => statusTone[s.status] === "running").length;

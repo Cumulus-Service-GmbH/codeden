@@ -1,4 +1,5 @@
 import {
+  ArchivedSessionsPage,
   ClaudeSdkStatus,
   CreateProjectResponse,
   DiffResult,
@@ -102,6 +103,15 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
     onConnectionChange: (listener) => socket.onState(listener),
 
     getSessionDetail: (id) => get(`/sessions/${enc(id)}`, (v) => SessionDetail.parse(v)),
+    listArchivedSessions: (projectId, { cursor, limit } = {}) => {
+      const params = new URLSearchParams();
+      if (cursor) params.set("cursor", cursor);
+      if (limit) params.set("limit", String(limit));
+      const qs = params.size ? `?${params}` : "";
+      return get(`/projects/${enc(projectId)}/sessions/archived${qs}`, (v) =>
+        ArchivedSessionsPage.parse(v),
+      );
+    },
     getToolOutput: (id, itemId) =>
       get(`/sessions/${enc(id)}/items/${enc(itemId)}/output`, (v) => ToolOutputResponse.parse(v)),
     async sendMessage(id, input, mode) {

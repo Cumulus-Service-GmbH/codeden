@@ -1,28 +1,25 @@
-import type { Session } from "@codeden/contracts";
+import type { Session, Snapshot } from "@codeden/contracts";
 
 /** Which of a project's sessions the project home lists. */
 export type SessionView = "active" | "archived";
 
-const agentsOf = (sessions: readonly Session[], projectId: string) =>
-  sessions.filter((s) => s.projectId === projectId && s.role === "agent");
-
-/** A project's agent sessions in one view, most recently updated first. */
-export function sessionsInView(
-  sessions: readonly Session[],
-  projectId: string,
-  view: SessionView,
-): Session[] {
-  return agentsOf(sessions, projectId)
-    .filter((s) => Boolean(s.archivedAt) === (view === "archived"))
+/**
+ * A project's active agent sessions, most recently updated first. Archived ones are paged from
+ * the server (`useArchivedSessions`): the snapshot carries only the recent ones.
+ */
+export function activeSessions(sessions: readonly Session[], projectId: string): Session[] {
+  return sessions
+    .filter((s) => s.projectId === projectId && s.role === "agent" && !s.archivedAt)
     .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
 }
 
 /** How many of a project's agent sessions are active and archived. */
 export function sessionCounts(
-  sessions: readonly Session[],
+  snapshot: Pick<Snapshot, "sessions" | "archivedSessionCounts">,
   projectId: string,
 ): Record<SessionView, number> {
-  const agents = agentsOf(sessions, projectId);
-  const archived = agents.filter((s) => s.archivedAt).length;
-  return { active: agents.length - archived, archived };
+  return {
+    active: activeSessions(snapshot.sessions, projectId).length,
+    archived: snapshot.archivedSessionCounts[projectId] ?? 0,
+  };
 }

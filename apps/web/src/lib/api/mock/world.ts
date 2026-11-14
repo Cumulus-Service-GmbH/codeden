@@ -12,6 +12,7 @@ import type {
 } from "@codeden/contracts";
 import { applyDomainEvent } from "@/lib/snapshot-reducer";
 import { applyAgentEvent, type TranscriptState } from "@/lib/transcript/reducer";
+import { mockArchivedCounts } from "./archived";
 import { conflicts, inboxItems, sessions } from "./fixtures/sessions";
 import { checkoutTranscript } from "./fixtures/transcript-checkout";
 import { a11yTranscript, orchestratorTranscript, searchTranscript } from "./fixtures/transcripts-a";
@@ -55,6 +56,7 @@ export class MockWorld {
       settings: structuredClone(settings),
       projects: structuredClone(projects),
       sessions: structuredClone(sessions),
+      archivedSessionCounts: mockArchivedCounts(sessions),
       inbox: structuredClone(inboxItems),
       automations: structuredClone(automations),
       scheduled: structuredClone(scheduled),

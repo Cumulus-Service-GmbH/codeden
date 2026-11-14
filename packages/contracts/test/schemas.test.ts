@@ -547,6 +547,7 @@ describe("ui websocket", () => {
       settings: defaultSettings(),
       projects: [sampleProject],
       sessions: [sampleSession],
+      archivedSessionCounts: { [sampleProject.id]: 4 },
       inbox: [sampleInboxItem],
       automations: [sampleAutomation],
       runner: {

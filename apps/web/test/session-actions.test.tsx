@@ -1,7 +1,7 @@
 import type { ArchiveSessionResponse, Session } from "@codeden/contracts";
 import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
-import { SessionsList } from "@/components/project/lists";
+import { ArchivedSessionsList, SessionsList } from "@/components/project/lists";
 import type { RowMenuAction, RowMenuEntry } from "@/components/shell/sidebar/row-menu";
 import { sessionMenuEntries } from "@/components/shell/sidebar/session-menu";
 import { forkableTurn } from "@/components/thread/fork-from-here";
@@ -16,7 +16,7 @@ import {
   useForkSession,
   useSessionActions,
 } from "@/lib/session-actions";
-import { sessionCounts, sessionsInView } from "@/lib/session-filter";
+import { activeSessions, sessionCounts } from "@/lib/session-filter";
 import { renderWithClient } from "./utils";
 
 const toast = vi.hoisted(() =>
@@ -349,29 +349,51 @@ describe("archived sessions", () => {
     s.id === "s-deps" || s.id === "s-a11y" ? { ...s, archivedAt } : s,
   );
 
-  it("splits a project's agent sessions into active and archived", () => {
-    const active = sessionsInView(list, "p-storefront", "active");
-    const archived = sessionsInView(list, "p-storefront", "archived");
-    expect(archived.map((s) => s.id).sort()).toEqual(["s-a11y", "s-deps"]);
+  const archived = list.filter((s) => s.archivedAt);
+
+  it("lists a project's active agent sessions and takes the archived count from the server", () => {
+    const active = activeSessions(list, "p-storefront");
     expect(active.every((s) => !s.archivedAt && s.role === "agent")).toBe(true);
     expect(active.some((s) => s.id === "s-deps")).toBe(false);
-    expect(sessionCounts(list, "p-storefront")).toEqual({
-      active: active.length,
-      archived: 2,
-    });
+    // The snapshot carries only the recent archived sessions (#323): the count is the server's.
+    const counts = { "p-storefront": 40 };
+    expect(
+      sessionCounts({ sessions: list, archivedSessionCounts: counts }, "p-storefront"),
+    ).toEqual({ active: active.length, archived: 40 });
     // Most recently updated first.
     const times = active.map((s) => Date.parse(s.updatedAt));
     expect(times).toEqual([...times].sort((a, b) => b - a));
   });
 
+  it("pages the archived list from the server (#323)", async () => {
+    const client = createMockClient();
+    const [first, second] = archived;
+    if (!first || !second) throw new Error("two archived fixture sessions expected");
+    const listArchived = vi
+      .spyOn(client, "listArchivedSessions")
+      .mockImplementation(async (_projectId, query) =>
+        query?.cursor === "c1"
+          ? { sessions: [second], nextCursor: null }
+          : { sessions: [first], nextCursor: "c1" },
+      );
+    renderWithClient(<ArchivedSessionsList projectId="p-storefront" />, client, {
+      withRouter: true,
+    });
+    expect(await screen.findAllByRole("button", { name: /^Unarchive / })).toHaveLength(1);
+    expect(listArchived).toHaveBeenCalledWith("p-storefront", {});
+
+    fireEvent.click(screen.getByRole("button", { name: "Load more" }));
+    await waitFor(() =>
+      expect(screen.getAllByRole("button", { name: /^Unarchive / })).toHaveLength(2),
+    );
+    expect(listArchived).toHaveBeenLastCalledWith("p-storefront", { cursor: "c1" });
+    expect(screen.queryByRole("button", { name: "Load more" })).toBeNull();
+  });
+
   it("unarchives from the project's archived list", async () => {
     const client = createMockClient();
     const unarchive = vi.spyOn(client, "unarchiveSession");
-    renderWithClient(
-      <SessionsList sessions={sessionsInView(list, "p-storefront", "archived")} />,
-      client,
-      { withRouter: true },
-    );
+    renderWithClient(<SessionsList sessions={archived} />, client, { withRouter: true });
     const buttons = await screen.findAllByRole("button", { name: /^Unarchive / });
     expect(buttons).toHaveLength(2);
     fireEvent.click(screen.getByRole("button", { name: /^Unarchive Dependency updates/ }));

@@ -241,12 +241,7 @@ export function CommandPalette() {
                 />
               ))}
           </CommandGroup>
-          <PaletteTranscripts
-            search={search}
-            sessions={data?.sessions ?? []}
-            projects={data?.projects ?? []}
-            close={() => setOpen(false)}
-          />
+          <PaletteTranscripts search={search} close={() => setOpen(false)} />
           <CommandSeparator />
           <CommandGroup heading="Actions">
             {current && <ForkCurrentSession session={current} close={() => setOpen(false)} />}

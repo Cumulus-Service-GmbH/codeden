@@ -1,4 +1,6 @@
 import type {
+  ArchivedSessionsPage,
+  ArchivedSessionsQueryInit,
   ArchiveSessionResponse,
   ClaudeSdkStatus,
   ConflictRecord,
@@ -128,6 +130,14 @@ export interface CodeDenClient {
 
   // Sessions and turns.
   getSessionDetail(sessionId: string): Promise<SessionDetail>;
+  /**
+   * A page of a project's archived agent sessions, most recently archived first. The snapshot
+   * carries only the recent ones (§6).
+   */
+  listArchivedSessions(
+    projectId: string,
+    query?: ArchivedSessionsQueryInit,
+  ): Promise<ArchivedSessionsPage>;
   /**
    * The output the server stored for a tool call, for when the transcript's copy was cut
    * (`output.truncated`): large outputs are fetched on demand, not pushed (§6).
