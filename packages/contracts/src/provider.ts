@@ -51,6 +51,13 @@ export const ProviderCapabilities = z.object({
    * False or absent: the provider's apps don't list them, or CodeDen can't hide them.
    */
   vendorHistory: z.boolean().optional(),
+  /**
+   * The provider runs with no sign-in, API key or file from this machine, so a sandbox's runner
+   * can host it (the Fake provider). Until provider credentials can be delivered into sandboxes
+   * (`docs/remote-runners.md` §14), only such providers run in a `docker` project's sessions.
+   * False or absent: it needs credentials.
+   */
+  credentialFree: z.boolean().optional(),
 });
 export type ProviderCapabilities = z.infer<typeof ProviderCapabilities>;
 

@@ -1,5 +1,5 @@
-// Copies runtime assets next to the bundle: drizzle migrations, automation templates and the
-// prebuilt web UI.
+// Copies runtime assets next to the bundle: drizzle migrations, automation templates, the
+// prebuilt web UI and the Dockerfile the Docker backend builds the runner image from.
 import { cpSync, existsSync, rmSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -8,6 +8,7 @@ const assets = [
   ["../server/drizzle", "dist/drizzle"],
   ["../server/templates", "dist/templates"],
   ["../web/dist", "dist/web"],
+  ["docker", "dist/docker"],
 ];
 for (const [from, to] of assets) {
   const src = resolve(root, from);
@@ -15,4 +16,4 @@ for (const [from, to] of assets) {
   rmSync(resolve(root, to), { recursive: true, force: true });
   cpSync(src, resolve(root, to), { recursive: true });
 }
-console.log("copied drizzle migrations, automation templates and web assets");
+console.log("copied drizzle migrations, automation templates, web assets and the Dockerfile");

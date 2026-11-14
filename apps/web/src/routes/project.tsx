@@ -17,6 +17,7 @@ import { FactoryPanel } from "@/components/factory/factory-panel";
 import { ProjectGithub } from "@/components/github/project-github";
 import { SessionsList } from "@/components/project/lists";
 import { NowNext } from "@/components/project/now-next";
+import { ProjectExecution } from "@/components/project/project-execution";
 import { ProjectSettings } from "@/components/project/project-settings";
 import { ProjectTile } from "@/components/shell/sidebar/project-group";
 import { Button } from "@/components/ui/button";
@@ -147,6 +148,7 @@ export function ProjectPage({
           ) : tab === "settings" ? (
             <div className="max-w-3xl">
               <ProjectSettings project={project} />
+              <ProjectExecution project={project} />
             </div>
           ) : (
             <>

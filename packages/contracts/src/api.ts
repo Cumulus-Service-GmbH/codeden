@@ -13,6 +13,7 @@ import {
 import { InboxItem, InboxItemKind, InboxItemStatus } from "./entities/inbox";
 import { GitHubRepo, Project } from "./entities/project";
 import { ItemRecord, Session, SessionStatus, Thread, Turn } from "./entities/session";
+import { ProjectExecutionBackend } from "./execution";
 import { UserInput } from "./input";
 import { FollowupsItem } from "./items";
 import { BrokenExecutable, ProviderInfo, RuntimeResponse } from "./provider";
@@ -103,6 +104,11 @@ export const UpdateProjectRequest = z.object({
   pinned: z.boolean().optional(),
   /** Run this project's agent sessions with `CI=true`, or not (`Project.agentCiEnv`, §4.2). */
   agentCiEnv: z.boolean().optional(),
+  /**
+   * Where new agent sessions run (`Project.execution`). `docker` is refused for a project that
+   * isn't on GitHub and while Docker isn't available, with the reason.
+   */
+  execution: z.object({ backend: ProjectExecutionBackend }).optional(),
 });
 export type UpdateProjectRequest = z.infer<typeof UpdateProjectRequest>;
 

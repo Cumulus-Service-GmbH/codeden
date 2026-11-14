@@ -11,6 +11,9 @@ import { Hono } from "hono";
 import { WebSocketServer } from "ws";
 import { type Database, openDatabase } from "./db/client";
 import { EventStore } from "./events/store";
+import type { ExecutionBackend } from "./execution/backend";
+import { DockerBackend } from "./execution/docker/backend";
+import { SandboxService } from "./execution/sandboxes";
 import { writeJsonFile } from "./json-file";
 import { createMcpHandler } from "./mcp/endpoint";
 import { NetworkAccess } from "./network/access";
@@ -32,7 +35,7 @@ import {
 } from "./runner/launcher";
 import { loopbackOrigins, securityMiddleware } from "./security";
 import { type AppServices, createServices, type ServicesOptions } from "./services/container";
-import type { Exec } from "./services/exec";
+import { type Exec, runTool } from "./services/exec";
 import { FILE_RESET_NOTICES, reportFileReset } from "./services/file-reset-notice";
 import { SearchBackfill } from "./services/search/backfill";
 import { createSecretStore, MemorySecretStore, type SecretStore } from "./services/secrets";
@@ -141,6 +144,13 @@ export interface StartServerOptions {
   autoRetry?: ServicesOptions["autoRetry"];
   /** Clone URLs and brokered git credentials for sandbox runners (tests inject one). */
   gitBroker?: ServicesOptions["gitBroker"];
+  /**
+   * Execution backends for projects whose sessions run in sandboxes (`docs/remote-runners.md`
+   * §5): Docker through the `docker` CLI by default; tests script one.
+   */
+  executionBackends?: { docker?: ExecutionBackend };
+  /** How long a new sandbox's runner may take to answer (default 2 minutes). */
+  sandboxConnectTimeoutMs?: number;
   /** Network interfaces for the address list (tests). */
   networkInterfaces?: () => InterfaceMap;
   log?: (message: string) => void;
@@ -210,6 +220,18 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
       ? new MemorySecretStore()
       : (opts.secrets ?? (await createSecretStore(log)));
   const builtin = opts.builtinProviders ?? process.env.CODEDEN_BUILTIN_PROVIDERS !== "0";
+  const exec = opts.exec ?? runTool;
+  const sandboxes = new SandboxService({
+    db: database.db,
+    hub: runners,
+    docker:
+      opts.executionBackends?.docker ??
+      new DockerBackend({ home: paths.home, exec, gitIdentity: () => gitIdentity(exec), log }),
+    // Sandboxes run only providers that need no credentials yet: Fake, when the server has it.
+    fake: opts.enableFakeProvider === true,
+    connectTimeoutMs: opts.sandboxConnectTimeoutMs,
+    log,
+  });
   const services = createServices({
     db: database.db,
     store,
@@ -217,6 +239,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
     paths,
     runner: runners.home(),
     runners,
+    sandboxes,
     secrets,
     exec: opts.exec,
     locate: opts.locate,
@@ -393,6 +416,9 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
     else started.catch((error: unknown) => log(`runner: ${String(error)}`));
   }
 
+  // Sessions in containers from before this start continue there, through new links.
+  void sandboxes.reattach();
+
   async function close(closeOpts: { stopRunner?: boolean } = {}): Promise<void> {
     closing ??= (async () => {
       services.lifecycle.stop();
@@ -441,3 +467,12 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
 
 /** Type of the HTTP API for the Hono RPC client (`hc<AppType>(baseUrl + "/api")`). */
 export type AppType = ReturnType<typeof createApi>;
+
+/** The user's git name and email on this machine, for commits made in sandboxes. */
+async function gitIdentity(exec: Exec): Promise<{ name: string | null; email: string | null }> {
+  const read = async (key: string) => {
+    const result = await exec("git", ["config", "--get", key], { timeoutMs: 5_000 });
+    return result.code === 0 ? result.stdout.trim() || null : null;
+  };
+  return { name: await read("user.name"), email: await read("user.email") };
+}

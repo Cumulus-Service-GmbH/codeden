@@ -30,9 +30,14 @@ export function projectRoutes(s: AppServices) {
       c.json({ projects: s.projects.reorder(c.req.valid("json").projectIds) }),
     )
     .get("/:id", (c) => c.json(s.projects.get(c.req.param("id"))))
-    .patch("/:id", jsonBody(UpdateProjectRequest), (c) =>
-      c.json(s.projects.update(c.req.param("id"), c.req.valid("json"))),
-    )
+    .patch("/:id", jsonBody(UpdateProjectRequest), async (c) => {
+      const patch = c.req.valid("json");
+      // Docker must be there to switch a project to it (checked now, not cached).
+      if (patch.execution) {
+        await s.sandboxes.assertUsable(s.projects.get(c.req.param("id")), patch.execution.backend);
+      }
+      return c.json(s.projects.update(c.req.param("id"), patch));
+    })
     .get("/:id/commands", queryOf(ProjectCommandsQuery), (c) =>
       c.json<SlashCommandList>(
         s.agentConfig.projectSlashCommands(c.req.param("id"), c.req.valid("query").provider),
