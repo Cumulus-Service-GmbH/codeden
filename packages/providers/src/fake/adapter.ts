@@ -42,6 +42,8 @@ const capabilities: ProviderCapabilities = {
   skills: false,
   liveAutonomy: true,
   readOnly: true,
+  // Scripted: it needs no sign-in, so a sandbox's runner can host it (`credentialFree`).
+  credentialFree: true,
 };
 
 /**

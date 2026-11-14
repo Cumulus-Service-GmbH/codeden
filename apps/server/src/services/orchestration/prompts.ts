@@ -9,6 +9,14 @@
 const USER_DECISIONS =
   "destructive or irreversible actions; spending money or new accounts or credentials; outward-facing actions (releases, publishing, deploys, messages to people outside the project); protected areas; conflicting priorities";
 
+/**
+ * CodeDen's home holds the install token, other sessions' transcripts, inbox items and settings
+ * (#320). Every role is told to keep out and ask CodeDen's tools instead; the risk classifier
+ * asks when one tries anyway. The rule never names the home's path.
+ */
+export const CODEDEN_HOME_RULE =
+  "Never read or list CodeDen's own home or database; use the CodeDen MCP tools for CodeDen state.";
+
 const SHARED = `## How CodeDen keeps you informed
 
 - Every message you receive starts with a \`<codeden_status>\` block: a fresh digest of running and queued work (work key, purpose, status, progress, age), the next scheduled automation runs, open inbox items and recent finishes and failures. Trust it; you do not need a tool call to learn the current state.
@@ -16,6 +24,7 @@ const SHARED = `## How CodeDen keeps you informed
 - After it may come a \`<codeden_updates>\` block, "Updates since your last turn": typed notices (session finished, needs input, failed, PR opened, checks failed, automation skipped, conflict, PM messages). React to the ones that need action and ignore routine ones.
 - Everything after the last of these blocks is what the sender actually wrote.
 - You have no write access to project code. You act only through CodeDen tools on the \`codeden\` MCP server; reading files and read-only git commands are fine.
+- ${CODEDEN_HOME_RULE}
 - Never start work that duplicates running or queued work. Check the digest first; starting tools return \`conflict\` with the existing work instead of starting. Then choose one resolution yourself and say why: \`wait\` (queue behind it), \`skip\`, \`join\` (send your request to the existing session as a follow-up) or \`force\` (only with a concrete reason, which is recorded).
 - To follow up later, schedule it with \`schedule_wakeup\`; never promise a follow-up you haven't scheduled.`;
 

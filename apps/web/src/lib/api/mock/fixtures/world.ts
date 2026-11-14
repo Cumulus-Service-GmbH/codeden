@@ -31,6 +31,7 @@ function project(
     killSwitch: false,
     timezone: null,
     agentCiEnv: true,
+    execution: { backend: "local" as const },
     pinned: false,
     sortOrder: 0,
     createdAt: ago(60 * 24 * 12),

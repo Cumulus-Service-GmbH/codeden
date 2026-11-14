@@ -23,6 +23,7 @@ import { explicitModel } from "../util/model";
 import { str, toJson } from "../util/text";
 import { policyHook, type ShellState } from "./hook";
 import { ClaudeEventMapper } from "./mapper";
+import { ClaudeMcpConfig } from "./mcp-config";
 import { claudeNotesDirs } from "./notes-dirs";
 import { buildQueryOptions, claudeEffort, toSdkUserMessage } from "./options";
 import { ClaudePolicy, permissionModeFor } from "./permissions";
@@ -93,6 +94,8 @@ export class ClaudeSession implements ProviderSession {
   private readonly steered = new Set<string>();
   /** The subscription's usage windows, read when a query starts and after each turn. */
   private readonly planUsage = new PlanUsageReader();
+  /** The session's MCP servers as a private file for `--mcp-config`, removed on close. */
+  private readonly mcpConfig: ClaudeMcpConfig;
 
   constructor(
     private readonly opts: SessionOptions,
@@ -124,6 +127,7 @@ export class ClaudeSession implements ProviderSession {
     );
     this.planMode = opts.planMode;
     this.policy.setPlanning(opts.planMode);
+    this.mcpConfig = new ClaudeMcpConfig(opts);
     this.mapper.start(opts.resumeToken);
     this.ensureQuery();
   }
@@ -247,6 +251,7 @@ export class ClaudeSession implements ProviderSession {
     } catch {
       this.abort?.abort();
     }
+    this.mcpConfig.remove();
     this.events.close();
   }
 
@@ -323,20 +328,27 @@ export class ClaudeSession implements ProviderSession {
     const prompts = new AsyncQueue<SDKUserMessage>();
     const abort = new AbortController();
     const preToolUse = policyHook(this.policy, this.shell);
-    const q = this.config.query({
-      prompt: prompts,
-      options: buildQueryOptions({
-        session: { ...this.opts, autonomy: this.autonomy, planMode: this.planMode },
-        executable: this.config.executable,
-        canUseTool: this.canUseTool,
-        hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
-        abortController: abort,
-        resume: this.resumeToken(),
-        stderr: (data) => {
-          this.stderrTail = (this.stderrTail + data).slice(-4000);
-        },
-      }),
-    });
+    let q: Query;
+    try {
+      q = this.config.query({
+        prompt: prompts,
+        options: buildQueryOptions({
+          session: { ...this.opts, autonomy: this.autonomy, planMode: this.planMode },
+          executable: this.config.executable,
+          canUseTool: this.canUseTool,
+          hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
+          abortController: abort,
+          resume: this.resumeToken(),
+          mcpConfigFile: this.mcpConfig.file(),
+          stderr: (data) => {
+            this.stderrTail = (this.stderrTail + data).slice(-4000);
+          },
+        }),
+      });
+    } catch (error) {
+      this.mcpConfig.remove();
+      throw error;
+    }
     this.q = q;
     this.prompts = prompts;
     this.abort = abort;

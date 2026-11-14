@@ -27,7 +27,7 @@ export function claudeEffort(effort: ReasoningEffort | undefined): EffortLevel |
   return effort === "minimal" ? "low" : effort;
 }
 
-/** CodeDen MCP server configs -> Claude `mcpServers`. */
+/** CodeDen MCP server configs -> Claude `mcpServers` (the private config file's content). */
 export function claudeMcpServers(
   servers: readonly McpServerConfig[],
 ): Record<string, SdkMcpServerConfig> {
@@ -92,6 +92,24 @@ export interface QueryOptionsInput {
   abortController: AbortController;
   resume?: string;
   stderr?: (data: string) => void;
+  /**
+   * The session's MCP servers as a private file (`writePrivateMcpConfig` with `{ mcpServers }`),
+   * required when it has any.
+   */
+  mcpConfigFile?: string;
+}
+
+/**
+ * The session's MCP servers for the CLI: `--mcp-config <file>`. Never the SDK's `mcpServers`,
+ * which it passes inline (`--mcp-config <json>`), bearer tokens included, on the command line any
+ * local process can read (§15).
+ */
+function mcpConfigArgs(input: QueryOptionsInput): Pick<Options, "extraArgs"> {
+  if (input.session.mcpServers.length === 0) return {};
+  if (!input.mcpConfigFile) {
+    throw new Error("A Claude session's MCP servers must be passed as a private config file");
+  }
+  return { extraArgs: { "mcp-config": input.mcpConfigFile } };
 }
 
 /** Build the `query()` options for a session (§7.2). */
@@ -115,7 +133,7 @@ export function buildQueryOptions(input: QueryOptionsInput): Options {
     ...(input.resume ? { resume: input.resume } : {}),
     // Read-only sessions (orchestrator, PMs) never get the edit tools (§11.2).
     ...(session.readOnly ? { disallowedTools: [...EDIT_TOOLS] } : {}),
-    mcpServers: claudeMcpServers(session.mcpServers),
+    ...mcpConfigArgs(input),
     ...trustedMcpTools(session.mcpServers),
     systemPrompt: {
       type: "preset",

@@ -112,12 +112,20 @@ describe("CodeDen's own credential files: the classifier", () => {
       { pattern: "**/*" },
       { pattern: "src/**/runner.json" },
       { path: "/home/me/.codeden/wt/repo/abc123", pattern: "**/install-token" },
+    ]) {
+      expect(assessClaudeTool("Glob", input, posix), JSON.stringify(input)).toEqual({
+        risky: false,
+      });
+    }
+    // The rest of the home asks too, as the home (#320).
+    for (const input of [
       { path: "/home/me/.codeden", pattern: "logs/*.log" },
       { path: "/home/me/.codeden", pattern: "**/*.log" },
       { path: "/home/me/.codeden/runner", pattern: "**/install-token" },
     ]) {
-      expect(assessClaudeTool("Glob", input, posix), JSON.stringify(input)).toEqual({
-        risky: false,
+      expect(assessClaudeTool("Glob", input, posix), JSON.stringify(input)).toMatchObject({
+        codeden: true,
+        reason: expect.stringMatching(/CodeDen's own home/),
       });
     }
   });
@@ -278,15 +286,12 @@ describe("CodeDen's own credential files: the classifier", () => {
     ]) {
       expect(guarded(cmd, win), cmd).toBe(true);
     }
-    // Filters that leave them out, other folders, and listings only shown to the user don't.
+    // Other folders, and listings only shown to the user, don't.
     for (const cmd of [
-      "rg -g '*.ts' token ~",
-      "grep -rn --include=*.md token ~",
       "rg -g '!*.ts' token src",
       "rg token src",
       "grep -r token .",
       "grep token ~",
-      "find ~ -name '*.ts' | xargs wc -l",
       "find . -name install-token | xargs cat",
       "find ~ -name install-token",
       "ls -R ~",
@@ -296,9 +301,21 @@ describe("CodeDen's own credential files: the classifier", () => {
       expect(guarded(cmd, posix), cmd).toBe(false);
     }
     expect(guarded("findstr /s token *.ts", win)).toBe(false);
+    // Name filters that leave the credential files out still read the rest of the home, other
+    // sessions' worktrees included, so they ask as the home (#320).
+    for (const cmd of [
+      "rg -g '*.ts' token ~",
+      "grep -rn --include=*.md token ~",
+      "find ~ -name '*.ts' | xargs wc -l",
+    ]) {
+      expect(classifyCommand(cmd, posix), cmd).toMatchObject({
+        codeden: true,
+        reason: expect.stringMatching(/CodeDen's own home/),
+      });
+    }
   });
 
-  it("leaves same-named files elsewhere, the rest of the home and other commands alone", () => {
+  it("leaves same-named files elsewhere and other commands alone", () => {
     for (const cmd of [
       // A project's own files with the same names, in the worktree.
       "cat runner/runner.json",
@@ -306,17 +323,25 @@ describe("CodeDen's own credential files: the classifier", () => {
       "cat remote-access.json",
       "cat /home/me/.codeden/wt/repo/abc123/runner/runner.json",
       "pnpm test",
-      "ls ~/.codeden",
-      "ls -la $CODEDEN_HOME/runner",
       "cd ~/.codeden/wt/repo/abc123 && pnpm build",
       "cd $CODEDEN_HOME",
-      "cat ~/.codeden/logs/server.log",
-      "cat ~/.codeden/settings.json",
       'rg -n "install-token" apps/server/src',
       "echo ~/.codeden/install-token",
       "git log --oneline",
     ]) {
       expect(action(cmd, posix), cmd).toBeNull();
+    }
+    // The rest of the home is not a credential file, but asks as the home (#320).
+    for (const cmd of [
+      "ls ~/.codeden",
+      "ls -la $CODEDEN_HOME/runner",
+      "cat ~/.codeden/logs/server.log",
+      "cat ~/.codeden/settings.json",
+    ]) {
+      expect(classifyCommand(cmd, posix), cmd).toMatchObject({
+        codeden: true,
+        reason: expect.stringMatching(/CodeDen's own home/),
+      });
     }
     for (const file of ["install-token", "remote-access.json", "runner/runner.json"]) {
       expect(classifyRead(file, posix), file).toEqual({ risky: false });

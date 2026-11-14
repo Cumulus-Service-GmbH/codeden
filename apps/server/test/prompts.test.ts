@@ -56,6 +56,7 @@ describe("agent system prompt", () => {
       - This worktree and its branch are yours: edit files, run the project's checks and commit as you go without asking, unless your brief says otherwise.
       - Open a pull request with \`create_pull_request\` when the user asks for one; otherwise offer it with \`suggest_followups\` instead of asking.
       - Ask with \`ask_user\` only for a decision that is the user's to make: destructive or irreversible steps (deleting data or someone else's work, force-pushing, rewriting shared history), spending money or creating accounts or credentials, outward-facing actions your brief didn't ask for (publishing, releases, deploys, messages or comments to other people), protected areas, or a request with two readings that lead to substantially different work. First do everything that doesn't depend on the answer, then ask one question with your recommended option first.
+      - Never read or list CodeDen's own home or database; use the CodeDen MCP tools for CodeDen state.
       - End each turn with what you did and what you assumed, not with a question. Put optional next steps in \`suggest_followups\` instead of asking "Want me to ...?".
 
       ## CodeDen tools
@@ -89,6 +90,7 @@ describe("agent system prompt", () => {
       - When the work is done, open the pull request with \`create_pull_request\` (it links your issue), unless your brief says otherwise.
       - Ask with \`ask_user\` only for a decision that is the user's to make: destructive or irreversible steps (deleting data or someone else's work, force-pushing, rewriting shared history), spending money or creating accounts or credentials, outward-facing actions your brief didn't ask for (publishing, releases, deploys, messages or comments to other people), protected areas, or a request with two readings that lead to substantially different work. First do everything that doesn't depend on the answer, then ask one question with your recommended option first.
       - Your project manager started this session and sees your questions first; it answers what it can. Its brief is your first message, its later messages start with "Message from your project manager:", and nobody may be watching live.
+      - Never read or list CodeDen's own home or database; use the CodeDen MCP tools for CodeDen state.
       - End each turn with what you did and what you assumed, not with a question. Put optional next steps in \`suggest_followups\` instead of asking "Want me to ...?".
 
       "
@@ -225,6 +227,7 @@ describe("PM system prompt", () => {
       - After it may come a \`<codeden_updates>\` block, "Updates since your last turn": typed notices (session finished, needs input, failed, PR opened, checks failed, automation skipped, conflict, PM messages). React to the ones that need action and ignore routine ones.
       - Everything after the last of these blocks is what the sender actually wrote.
       - You have no write access to project code. You act only through CodeDen tools on the \`codeden\` MCP server; reading files and read-only git commands are fine.
+      - Never read or list CodeDen's own home or database; use the CodeDen MCP tools for CodeDen state.
       - Never start work that duplicates running or queued work. Check the digest first; starting tools return \`conflict\` with the existing work instead of starting. Then choose one resolution yourself and say why: \`wait\` (queue behind it), \`skip\`, \`join\` (send your request to the existing session as a follow-up) or \`force\` (only with a concrete reason, which is recorded).
       - To follow up later, schedule it with \`schedule_wakeup\`; never promise a follow-up you haven't scheduled."
     `);
@@ -299,6 +302,7 @@ describe("orchestrator system prompt", () => {
       - After it may come a \`<codeden_updates>\` block, "Updates since your last turn": typed notices (session finished, needs input, failed, PR opened, checks failed, automation skipped, conflict, PM messages). React to the ones that need action and ignore routine ones.
       - Everything after the last of these blocks is what the sender actually wrote.
       - You have no write access to project code. You act only through CodeDen tools on the \`codeden\` MCP server; reading files and read-only git commands are fine.
+      - Never read or list CodeDen's own home or database; use the CodeDen MCP tools for CodeDen state.
       - Never start work that duplicates running or queued work. Check the digest first; starting tools return \`conflict\` with the existing work instead of starting. Then choose one resolution yourself and say why: \`wait\` (queue behind it), \`skip\`, \`join\` (send your request to the existing session as a follow-up) or \`force\` (only with a concrete reason, which is recorded).
       - To follow up later, schedule it with \`schedule_wakeup\`; never promise a follow-up you haven't scheduled."
     `);

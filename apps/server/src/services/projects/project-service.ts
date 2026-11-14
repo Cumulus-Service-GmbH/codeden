@@ -133,6 +133,16 @@ export class ProjectService {
     if (patch.pinned !== undefined) next.pinned = patch.pinned;
     // Applies to agent sessions opened from now on; running ones keep the environment they have.
     if (patch.agentCiEnv !== undefined) next.agentCiEnv = patch.agentCiEnv;
+    // Applies to sessions started from now on; running ones stay where they run.
+    if (patch.execution !== undefined) {
+      if (patch.execution.backend === "docker" && current.kind !== "github") {
+        throw badRequest(
+          "Docker sandboxes need a GitHub project: each container clones the repository from GitHub",
+          "backend_unavailable",
+        );
+      }
+      next.execution = { backend: patch.execution.backend };
+    }
     this.deps.store.append([
       { type: "project.updated", sessionId: null, payload: { project: next } },
     ]);
@@ -236,7 +246,13 @@ export class ProjectService {
     const current = this.get(id);
     if (current.kind !== "github") return { project: current };
     const { github: _github, remoteWarning: _warning, ...rest } = current;
-    const next: Project = { ...rest, kind: "local", updatedAt: new Date().toISOString() };
+    // Docker sandboxes clone from GitHub: a local project's sessions run locally again.
+    const next: Project = {
+      ...rest,
+      kind: "local",
+      execution: { backend: "local" },
+      updatedAt: new Date().toISOString(),
+    };
     this.deps.store.append([
       { type: "project.updated", sessionId: null, payload: { project: next } },
     ]);
@@ -274,6 +290,7 @@ export class ProjectService {
       killSwitch: false,
       timezone: null,
       agentCiEnv: true,
+      execution: { backend: "local" as const },
       pinned: false,
       sortOrder: this.nextSortOrder(),
       createdAt: now,
