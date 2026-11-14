@@ -15,6 +15,7 @@ import {
   restoreFiles,
 } from "./git/checkpoints";
 import * as gitOps from "./git/ops";
+import { unpushed } from "./git/unpushed";
 import type { Journal } from "./journal";
 import type { McpLinkChannel } from "./mcp/link-upstream";
 import { listPorts } from "./ports";
@@ -218,6 +219,8 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
     }
     case "git.status":
       return gitOps.status(command.cwd);
+    case "git.unpushed":
+      return unpushed(command.cwd);
     case "git.diff":
       return gitOps.diff(command);
     case "git.branches":

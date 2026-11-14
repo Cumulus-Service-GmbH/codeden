@@ -155,8 +155,10 @@ export class WorktreeCleanup {
     );
     const force = opts.force === true;
     if (force) this.forced.add(id);
-    // A session in a container has a clone there instead of a worktree: the container goes.
+    // A session in a container has a clone there instead of a worktree: the container goes,
+    // unless the clone holds work that exists nowhere else.
     const sandbox = await this.deps.sandboxes?.release(this.deps.repo.get(id), { force });
+    if (sandbox?.status === "removed") this.clearFailure(id);
     const worktree = sandbox ?? (await this.removeWorktree(id, { force }));
     return { session: this.deps.repo.get(id), worktree };
   }
@@ -293,19 +295,43 @@ export class WorktreeCleanup {
 
   /**
    * Clean up the worktrees, and the containers, of an archived project's sessions that are not
-   * in use.
+   * in use. A container kept because its clone holds work that exists nowhere else, or that
+   * couldn't be checked, is listed in `kept` and in the inbox, one item per session.
    */
-  async cleanProject(projectId: string): Promise<string[]> {
+  async cleanProject(
+    projectId: string,
+  ): Promise<{ removed: string[]; kept: Array<{ sessionId: string; message: string | null }> }> {
     const removed: string[] = [];
+    const kept: Array<{ sessionId: string; message: string | null }> = [];
     for (const session of this.deps.repo.list({ projectId, role: "agent" })) {
       if (IN_USE.has(session.status)) continue;
       const sandbox = await this.deps.sandboxes?.release(session, { force: false });
-      if (sandbox?.status === "removed") removed.push(session.id);
+      if (sandbox?.status === "removed") {
+        removed.push(session.id);
+        this.clearFailure(session.id);
+      } else if (sandbox && sandbox.status !== "none") {
+        kept.push({ sessionId: session.id, message: sandbox.message });
+        this.reportKeptContainer(session, sandbox);
+      }
       if (sandbox || !session.worktreePath || session.worktreeRemovedAt) continue;
       const result = await this.removeWorktree(session.id, { force: false });
       if (result.status === "removed") removed.push(session.id);
     }
-    return removed;
+    return { removed, kept };
+  }
+
+  /** A project archive kept a session's container: say why in the inbox (`cleanup_failed`). */
+  private reportKeptContainer(session: Session, result: WorktreeCleanupOutcome): void {
+    const unpushed = result.status === "kept_changes";
+    this.putCleanupItem(session, {
+      title: `Kept the container of ${session.title ?? session.purpose}`,
+      body: `${result.message ?? "Its container couldn't be removed."}\n\n${
+        unpushed
+          ? "Push the branch from the session, then try again to remove the container. To delete this work instead, try again and choose Delete anyway."
+          : "Try again once the container can be reached."
+      }`,
+      notify: unpushed ? "needs_you" : "failure",
+    });
   }
 
   private onEvents(events: RawEventEnvelope[]): void {
@@ -326,11 +352,23 @@ export class WorktreeCleanup {
    * after an earlier one was resolved, and left alone once the user dismissed it.
    */
   private reportFailure(session: Session, message: string): void {
+    this.putCleanupItem(session, {
+      title: `Couldn't remove the worktree: ${session.title ?? session.purpose}`,
+      body: `${message}\n\nCodeDen tries again every hour; archive the session again to retry now.`,
+      notify: "failure",
+    });
+  }
+
+  /** Put or update a session's `cleanup_failed` item; one the user dismissed stays dismissed. */
+  private putCleanupItem(
+    session: Session,
+    item: { title: string; body: string; notify: "failure" | "needs_you" },
+  ): void {
     const inbox = this.deps.inbox;
     if (!inbox) return;
     const id = cleanupInboxId(session.id);
     const existing = inbox.find(id);
-    const body = `${message}\n\nCodeDen tries again every hour; archive the session again to retry now.`;
+    const { title, body, notify } = item;
     if (
       existing?.status === "dismissed" ||
       (existing?.status === "open" && existing.body === body)
@@ -343,8 +381,8 @@ export class WorktreeCleanup {
       kind: "cleanup_failed",
       status: "open",
       priority: "normal",
-      notify: "failure",
-      title: `Couldn't remove the worktree: ${session.title ?? session.purpose}`,
+      notify,
+      title,
       body,
       projectId: session.projectId,
       sessionId: session.id,

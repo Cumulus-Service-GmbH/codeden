@@ -48,6 +48,19 @@ const GENERATED_DIRS = [
 /** File names that mark generated output. */
 const GENERATED_NAME = /\.(min\.(js|css)|map|snap|lock)$|\.(gen|generated)\.[a-z]+$/i;
 
+/**
+ * drizzle-kit's schema snapshots, thousands of lines each that `drizzle-kit generate` writes
+ * beside a migration: `<out>/<14-digit timestamp>_<name>/snapshot.json`, or
+ * `<out>/meta/0003_snapshot.json` before drizzle-kit 1.0. The migration's SQL still counts.
+ */
+function isDrizzleSnapshot(dirs: string[], name: string): boolean {
+  const parent = dirs.at(-1) ?? "";
+  return (
+    (name === "snapshot.json" && /^\d{14}_/.test(parent)) ||
+    (parent === "meta" && /^\d{4}_snapshot\.json$/.test(name))
+  );
+}
+
 /** True for a package manager's lockfile, in any folder. */
 export function isLockfile(path: string): boolean {
   const name = (path.replace(/\\/g, "/").split("/").at(-1) ?? "").toLowerCase();
@@ -61,6 +74,7 @@ export function isUncountedFile(path: string): boolean {
   if (LOCKFILES.has(name) || GENERATED_NAME.test(name)) return true;
   const dirs = parts.slice(0, -1);
   if (dirs.some((d) => GENERATED_DIRS.includes(d))) return true;
+  if (isDrizzleSnapshot(dirs, name)) return true;
   // shadcn/ui components are copied in by its CLI (`components/ui/...`).
   return dirs.some((d, i) => d === "components" && dirs[i + 1] === "ui");
 }

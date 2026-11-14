@@ -38,7 +38,7 @@ import { copyWithFeedback } from "@/lib/copy";
 import { isHandoff } from "@/lib/fork-origin";
 import { statusLabel } from "@/lib/format";
 import { useProject, useSession } from "@/lib/queries";
-import { useSessionActions } from "@/lib/session-actions";
+import { MARKDOWN_HINT, useSessionActions } from "@/lib/session-actions";
 import { cn } from "@/lib/utils";
 import { useViewport } from "@/lib/viewport";
 import { useLayoutStore } from "@/stores/layout";
@@ -250,10 +250,18 @@ export function ThreadHeader({ session, running }: { session: Session; running: 
               </DropdownMenuItem>
             )}
             <DropdownMenuItem onSelect={actions.copyMarkdown}>
-              <ClipboardCopy /> Copy as Markdown
+              <ClipboardCopy />
+              <span className="flex min-w-0 flex-col">
+                Copy as Markdown
+                <span className="text-2xs text-muted-foreground">{MARKDOWN_HINT}</span>
+              </span>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={actions.downloadMarkdown}>
-              <FileDown /> Download as Markdown
+              <FileDown />
+              <span className="flex min-w-0 flex-col">
+                Download as Markdown
+                <span className="text-2xs text-muted-foreground">{MARKDOWN_HINT}</span>
+              </span>
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => layout.openRightTab("details")}>
               <Bot /> Session details

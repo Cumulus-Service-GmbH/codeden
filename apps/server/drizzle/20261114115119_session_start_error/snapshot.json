@@ -3,7 +3,7 @@
   "dialect": "sqlite",
   "id": "13c0b7ab-5796-4dd7-9d62-6aace8ff605a",
   "prevIds": [
-    "60e67f2a-9e61-4c7d-9ae5-4c95b7606a39"
+    "8b5e0c61-a857-4662-a86c-e1c0fb7e4f9a"
   ],
   "ddl": [
     {
@@ -2225,6 +2225,16 @@
     {
       "table": "github_issues",
       "name": "closed_at",
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "entityType": "columns"
+    },
+    {
+      "table": "github_issues",
+      "name": "state_reason",
       "type": "text",
       "notNull": false,
       "autoincrement": false,

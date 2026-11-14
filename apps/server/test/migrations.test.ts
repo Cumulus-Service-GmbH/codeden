@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -113,6 +113,52 @@ describe("migrations", { timeout: 30_000 }, () => {
 
   it("create the full schema on a fresh database", () => {
     expectFullSchema(join(tempDir(), "fresh.db"));
+  });
+
+  it("upgrade a database at 0.7.3's migrations to a fresh database's schema, applying nothing twice", () => {
+    const file = join(tempDir(), "0.7.3.db");
+    openDatabase(
+      file,
+      partialMigrations((n) => n.slice(0, 14) <= "20261114131826"),
+    ).close();
+    const fresh = join(tempDir(), "fresh.db");
+    const objects = (path: string) => {
+      const database = openDatabase(path, all);
+      try {
+        return database.client
+          .prepare("SELECT type, name, tbl_name, sql FROM sqlite_master ORDER BY type, name")
+          .all();
+      } finally {
+        database.close();
+      }
+    };
+    expect(objects(file)).toEqual(objects(fresh));
+    expectFullSchema(file);
+  });
+
+  /**
+   * The newest snapshot is what `pnpm db:generate` diffs the schema against. When two migrations
+   * were made from the same main, each snapshot lacks the other's change, and the next migration
+   * would add those columns again.
+   */
+  it("end in a snapshot with every table and column the migrations create", () => {
+    const head = [...names].sort().at(-1) ?? "";
+    const { ddl } = JSON.parse(readFileSync(join(all, head, "snapshot.json"), "utf8")) as {
+      ddl: { entityType: string; name: string; table?: string }[];
+    };
+    const snapshot: Record<string, string[]> = {};
+    for (const e of ddl) if (e.entityType === "tables") snapshot[e.name] = [];
+    for (const e of ddl) if (e.entityType === "columns" && e.table) snapshot[e.table]?.push(e.name);
+    const database = openDatabase(join(tempDir(), "fresh.db"), all);
+    try {
+      const built = Object.fromEntries(
+        Object.keys(snapshot).map((table) => [table, columns(database.client, table).sort()]),
+      );
+      for (const table of Object.keys(snapshot)) snapshot[table]?.sort();
+      expect(built).toEqual(snapshot);
+    } finally {
+      database.close();
+    }
   });
 
   /**

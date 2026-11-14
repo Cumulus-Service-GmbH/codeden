@@ -90,6 +90,11 @@ Every pull request carries its test results, and screenshots when UI files chang
 - **Revise rounds.** A review that asks for changes, or a failed check, sends the work back to the same builder to fix in the same branch: up to **2 revise rounds**. After that the item stops (see [When things go wrong](#when-things-go-wrong)).
 - **Lessons.** With its verdict, a reviewer can record up to three general rules for the repository (a convention, a recurring mistake, a test to run or avoid). New builders and reviewers get the 20 most recent in their briefs, so a finding that keeps coming back stops costing a revise round. The panel lists them under **Lessons**, where **Forget** removes one for good. Only reviews of trusted work teach the factory, and **Learn from reviews** in the settings turns it off (see [Lessons](software-factory.md#lessons-the-factory-learns-from-its-reviews)).
 - **An approval covers one head commit.** The reviewer approves the commit it was asked to review, and only that commit merges on the approval. If new commits land on the pull request after it (from the builder, a conflict resolution or anyone else), the review check goes back to waiting and the reviewer reviews only what changed since the approved commit. The item says why: "New commits since the approval (abc1234 → def5678): re-review running". Merging the default branch in, or a rebase that brings only its commits in, leaves the pull request's own changes as they were, so the approval stands.
+- **Blocking findings and follow-ups.** A security concern the reviewer lists **blocks** the merge, so an approval can't list one: the reviewer asks for changes, or, when it can wait, makes it a **follow-up**. Follow-ups (up to 5 per review, each a title with an optional severity and area) never hold up the merge and never send the work back to the builder. Once the pull request merges:
+  - **Dark factory:** each follow-up is filed as an issue, labelled `codeden-factory` and `codeden-follow-up` and linked to the pull request, and the factory takes it on like any other issue.
+  - **Software factory:** they're listed on the item page under **Follow-ups**, each with a **File issue** button.
+
+  A follow-up whose title matches an open issue is linked to that issue instead of filed again, and none is filed twice.
 
 ### Merge
 
