@@ -314,6 +314,8 @@ export const inboxItems: InboxItem[] = [
     projectId: "p-storefront",
     issue: sf.issue(156, "Gift cards"),
     createdAt: ago(38),
+    // The spec's version (`requestedAt`): the factory raises the item with it.
+    updatedAt: ago(38),
   }),
   inbox({
     id: "ib-audit",
