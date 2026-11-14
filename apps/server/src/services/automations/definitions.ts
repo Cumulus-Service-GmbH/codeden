@@ -31,7 +31,7 @@ export interface DefinitionsDeps {
   projects: ProjectService;
   sources: AutomationSources;
   schedules: ScheduleStore;
-  /** Downloads for imports from a link (tests script it); the global `fetch` otherwise. */
+  /** Downloads for imports from a link (tests script it); public addresses only otherwise. */
   fetch?: typeof fetch;
 }
 

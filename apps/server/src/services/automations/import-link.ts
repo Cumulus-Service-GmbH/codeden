@@ -1,5 +1,7 @@
+import { isIP } from "node:net";
 import { type AutomationImportFile, AUTOMATION_IMPORT_LIMITS as LIMITS } from "@codeden/contracts";
 import { z } from "zod";
+import { isPrivateAddressError, isPublicAddress, publicFetch } from "../../network/public-fetch";
 import { badRequest, errorMessage, ServiceError } from "../errors";
 import { unzipMarkdownBytes } from "./import";
 
@@ -7,7 +9,8 @@ import { unzipMarkdownBytes } from "./import";
  * Importing automations from a link (§10 Sharing): an https `.md` or `.zip` file, a GitHub
  * file page (downloaded from its raw address) or a gist (read through GitHub's API). It is a
  * download the user starts: the server sends the request and nothing else (no cookies,
- * tokens or GitHub credentials), and never logs or stores the link.
+ * tokens or GitHub credentials), never logs or stores the link, and reaches only the public
+ * internet (never this computer or a private network, by link, redirect or DNS answer).
  */
 
 /** Bytes a downloaded file may have: the zip limit (one Markdown file is far smaller). */
@@ -20,6 +23,19 @@ const ZIP_SIGNATURE = [0x50, 0x4b, 0x03, 0x04];
 const invalidLink = (why: string) => badRequest(`${why}. ${WORKING_LINKS}.`, "invalid_link");
 const tooLarge = (message: string) => new ServiceError(413, "import_too_large", message);
 const fetchFailed = (message: string) => new ServiceError(502, "link_fetch_failed", message);
+
+const privateLink = (lead: string) =>
+  invalidLink(`${lead} this computer or a private network, and only public links can be imported`);
+
+/**
+ * Refuse a link to this computer or a private network by its name (`localhost`) or address.
+ * Names that resolve there are refused when connecting (`publicLookup`).
+ */
+function refusePrivate(url: URL, lead: string): void {
+  const host = url.hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  const local = host === "localhost" || host.endsWith(".localhost");
+  if (local || (isIP(host) !== 0 && !isPublicAddress(host))) throw privateLink(lead);
+}
 
 /** What a link downloads: one file (Markdown or a zip), or a gist through GitHub's API. */
 export type ImportLinkPlan =
@@ -36,12 +52,17 @@ export function planImportLink(link: string): ImportLinkPlan {
   }
   if (url.protocol !== "https:") throw invalidLink("Only https links can be imported");
   if (url.username || url.password) throw invalidLink("Links with a password can't be imported");
+  refusePrivate(url, "That link points to");
   url.hash = "";
   const host = url.hostname.toLowerCase();
   const parts = url.pathname.split("/").filter(Boolean);
   if (host === "github.com" || host === "www.github.com") {
-    // github.com/<owner>/<repo>/blob/<ref>/<path>: the same file from its raw address.
     const [owner, repo, kind, ...rest] = parts;
+    // "Download ZIP" (/archive/...) and release assets (/releases/download/...) are files.
+    if (kind === "archive" || (kind === "releases" && rest[0] === "download")) {
+      return { kind: "file", url };
+    }
+    // github.com/<owner>/<repo>/blob/<ref>/<path>: the same file from its raw address.
     if (!owner || !repo || (kind !== "blob" && kind !== "raw") || rest.length < 2) {
       throw invalidLink("That GitHub page isn't a file");
     }
@@ -140,6 +161,7 @@ async function download(
         headers: { "user-agent": "codeden", ...headers },
       });
     } catch (error) {
+      if (isPrivateAddressError(error)) throw privateLink(`${url.host} leads to`);
       throw unreachable(url, error, signal);
     }
     const location = res.status >= 300 && res.status < 400 ? res.headers.get("location") : null;
@@ -164,6 +186,7 @@ async function download(
     if (next.protocol !== "https:") {
       throw invalidLink(`${url.host} redirected to a link that isn't https`);
     }
+    refusePrivate(next, `${url.host} redirected to`);
     url = next;
   }
 }
@@ -253,7 +276,7 @@ async function downloadGist(
 }
 
 export interface ImportLinkOptions {
-  /** The downloader (tests script it); the global `fetch` otherwise. */
+  /** The downloader (tests script it); `publicFetch`, which reaches only public addresses, otherwise. */
   fetch?: typeof fetch;
 }
 
@@ -265,7 +288,7 @@ export async function resolveImportLink(
   link: string,
   opts: ImportLinkOptions = {},
 ): Promise<AutomationImportFile[]> {
-  const doFetch: typeof fetch = opts.fetch ?? ((input, init) => fetch(input, init));
+  const doFetch = opts.fetch ?? publicFetch;
   const plan = planImportLink(link);
   const files =
     plan.kind === "gist"

@@ -55,7 +55,7 @@ export interface AutomationServiceDeps {
   now?: () => Date;
   scheduler?: { graceMs?: number; maxWaitMs?: number };
   rescanMs?: number;
-  /** Downloads for imports from a link (tests script it); the global `fetch` otherwise. */
+  /** Downloads for imports from a link (tests script it); public addresses only otherwise. */
   fetch?: typeof fetch;
   log?: (message: string) => void;
 }

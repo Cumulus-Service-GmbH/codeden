@@ -9,6 +9,7 @@ import {
 import { strToU8, zipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { type RunningServer, startServer } from "../src";
+import { PrivateAddressError } from "../src/network/public-fetch";
 import { planImportLink, resolveImportLink } from "../src/services/automations/import-link";
 import type { Exec } from "../src/services/exec";
 
@@ -80,6 +81,12 @@ describe("planning a link", () => {
     expect(planImportLink("https://gist.github.com/someone/0123abcd/raw/a.md")).toMatchObject({
       kind: "file",
     });
+    for (const link of [
+      "https://github.com/acme/automations/archive/refs/heads/main.zip",
+      "https://github.com/acme/automations/releases/download/v1/automations.zip",
+    ]) {
+      expect(planImportLink(link)).toEqual({ kind: "file", url: new URL(link) });
+    }
   });
 
   it("refuses links that aren't https, and GitHub pages that aren't a file or a gist", () => {
@@ -99,6 +106,28 @@ describe("planning a link", () => {
       );
     }
     expect(() => planImportLink("http://example.com/a.md")).toThrow(/a GitHub file or a gist/);
+  });
+
+  it("refuses links to this computer or a private network, by name or address", () => {
+    for (const link of [
+      "https://localhost/a.md",
+      "https://app.localhost/a.md",
+      "https://127.0.0.1/a.md",
+      "https://2130706433/a.md",
+      "https://[::1]/a.md",
+      "https://192.168.1.10/team/a.md",
+      "https://10.0.0.8/a.md",
+      "https://169.254.169.254/latest/meta-data",
+      "https://[fd00::1]/a.md",
+    ]) {
+      expect(() => planImportLink(link), link).toThrow(
+        expect.objectContaining({
+          status: 400,
+          code: "invalid_link",
+          message: expect.stringMatching(/this computer or a private network/),
+        }),
+      );
+    }
   });
 });
 
@@ -186,6 +215,15 @@ describe("downloading a link", () => {
         "https://short.example/y": redirect("http://cdn.example/a.md"),
       }),
     ).rejects.toMatchObject({ status: 400, code: "invalid_link" });
+    await expect(
+      resolve("https://short.example/z", {
+        "https://short.example/z": redirect("https://169.254.169.254/latest/meta-data"),
+      }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "invalid_link",
+      message: expect.stringMatching(/^short\.example redirected to this computer or a private/),
+    });
     const loop = Object.fromEntries(
       Array.from({ length: 10 }, (_, i) => [
         `https://loop.example/${i}`,
@@ -254,6 +292,17 @@ describe("downloading a link", () => {
     ).rejects.toMatchObject({
       status: 502,
       message: "Couldn't reach nowhere.example: getaddrinfo ENOTFOUND nowhere.example",
+    });
+    // A name that resolves to a private address is refused when connecting: a 400, not a 502.
+    const intranet = (async () => {
+      throw new TypeError("fetch failed", { cause: new PrivateAddressError("intranet.example") });
+    }) as typeof fetch;
+    await expect(
+      resolveImportLink("https://intranet.example/a.md", { fetch: intranet }),
+    ).rejects.toMatchObject({
+      status: 400,
+      code: "invalid_link",
+      message: expect.stringMatching(/^intranet\.example leads to this computer or a private/),
     });
     await expect(
       resolve("https://gist.github.com/0123abcd", {
