@@ -16,8 +16,9 @@ import type { Db } from "../db/client";
 import { findRunnerByRunnerId, listRunnerRecords } from "../events/runner-projection";
 import type { RunnerHub } from "../runner/hub";
 import { errorMessage, ServiceError } from "../services/errors";
-import { type RunnerPort, runnerErrorCode } from "../services/runner-port";
+import type { RunnerPort } from "../services/runner-port";
 import { BackendError, type ExecutionBackend } from "./backend";
+import { checkClone, deletedMessage, keptOutcome } from "./clone-check";
 import { SANDBOX_HOME } from "./docker/args";
 
 /** What sandboxes need of the runner hub: adding, finding and removing their runners. */
@@ -324,9 +325,11 @@ export class SandboxService {
   }
 
   /**
-   * Remove an archived session's sandbox: its container and volume, with the clone in it. As
-   * with worktrees, uncommitted changes keep it unless `force`. Null when the session has no
-   * sandbox.
+   * Remove an archived session's sandbox: its container and volume, with the clone in it. The
+   * clone is the only copy of what it hasn't pushed (#337), so uncommitted changes, unpushed
+   * commits and stashes keep the sandbox unless `force`, and so does a clone that can't be
+   * checked: a stopped container is started to check it, and if that fails nothing is deleted.
+   * A forced removal says what it deleted. Null when the session has no sandbox.
    */
   async release(
     session: Session,
@@ -338,11 +341,24 @@ export class SandboxService {
     if (!docker) {
       return { status: "failed", message: "Docker sandboxes can't be removed by this copy" };
     }
-    if (!opts.force) {
-      const kept = await this.uncommitted(session);
-      if (kept) return kept;
-    }
     const ref = sandboxRefFor(record.sandboxRef as string);
+    const check = await checkClone({
+      runner: this.deps.hub.forRunnerId(session.runnerId as string),
+      docker,
+      ref,
+      cwd: session.cwd,
+      // Forced: what is connected is checked, to say what is deleted; nothing is started for it.
+      wakeMs: opts.force ? 0 : (this.deps.connectTimeoutMs ?? 120_000),
+    });
+    if (!opts.force) {
+      const kept = keptOutcome(check);
+      if (kept) {
+        this.deps.log?.(
+          `sandboxes: kept ${ref.container} of session ${session.id}: ${kept.message}`,
+        );
+        return kept;
+      }
+    }
     try {
       await this.deps.hub.remove(record.id);
       await docker.remove(ref);
@@ -350,31 +366,14 @@ export class SandboxService {
       return { status: "failed", message: errorMessage(error) };
     }
     await this.deps.hub.remove(record.id, { deleted: true });
-    this.deps.log?.(`sandboxes: removed ${ref.container} with session ${session.id}`);
-    return { status: "removed", message: null };
-  }
-
-  /** `kept_changes` when the sandbox's clone has uncommitted changes, or can't be checked. */
-  private async uncommitted(session: Session): Promise<WorktreeCleanupOutcome | null> {
-    const runner = this.deps.hub.forRunnerId(session.runnerId as string);
-    if (!runner.isConnected()) {
-      const name = runner.describe?.() ?? "The sandbox's runner";
-      return {
-        status: "failed",
-        message: `${name} is not connected, so its changes can't be checked; archive again and discard them to remove it`,
-      };
-    }
-    try {
-      const status = await runner.request({ name: "git.status", cwd: session.cwd }, 30_000);
-      if (status.files.length === 0) return null;
-    } catch (error) {
-      // No clone (a start that failed before it was made): nothing to keep.
-      if (runnerErrorCode(error) === "cwd_missing") return null;
-      return { status: "failed", message: errorMessage(error) };
-    }
+    const deleted = deletedMessage(check);
+    this.deps.log?.(
+      `sandboxes: removed ${ref.container} with session ${session.id}${deleted ? ` (${deleted})` : ""}`,
+    );
     return {
-      status: "kept_changes",
-      message: "The container's clone has uncommitted changes, so it was kept",
+      status: "removed",
+      message: deleted,
+      ...(check.kind === "work" ? { unpushed: check.work } : {}),
     };
   }
 }

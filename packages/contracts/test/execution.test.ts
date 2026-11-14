@@ -1,15 +1,21 @@
 import { describe, expect, it } from "vitest";
 import {
   BackendStatus,
+  describeUnpushedWork,
   ExecutionBackendsResponse,
+  hasUnpushedWork,
   Project,
   ProjectExecutionBackend,
   ProviderCapabilities,
+  RunnerCommand,
+  RunnerCommandResults,
   SandboxRef,
   SandboxSpec,
   SandboxSummary,
   sandboxRefFor,
+  UnpushedWork,
   UpdateProjectRequest,
+  WorktreeCleanupOutcome,
 } from "../src";
 import { sampleProject } from "./fixtures";
 
@@ -86,6 +92,56 @@ describe("execution backends", () => {
       version: "0.7.2",
       state: "exited",
     });
+  });
+
+  // #337: a container's clone is the only copy of what it hasn't pushed.
+  it("round-trips what exists only in a clone, its runner command and the archive outcome", () => {
+    expect(RunnerCommand.parse({ name: "git.unpushed", cwd: "/data/ws/s1" })).toEqual({
+      name: "git.unpushed",
+      cwd: "/data/ws/s1",
+    });
+    const work = roundTrip(RunnerCommandResults["git.unpushed"], {
+      current: "codeden/fix",
+      uncommitted: 3,
+      branches: [{ name: "codeden/fix", commits: 2 }],
+      stashes: 1,
+    });
+    expect(UnpushedWork.safeParse({ ...work, branches: [{ name: "x", commits: 0 }] }).success).toBe(
+      false,
+    );
+    const kept = roundTrip(WorktreeCleanupOutcome, {
+      status: "kept_changes",
+      message: "kept",
+      unpushed: work,
+    });
+    expect(kept.unpushed).toEqual(work);
+    // Outcomes from before it existed still parse.
+    expect(WorktreeCleanupOutcome.parse({ status: "removed", message: null }).unpushed).toBe(
+      undefined,
+    );
+  });
+
+  it("describes unpushed work in a few words", () => {
+    const none = { current: "main", uncommitted: 0, branches: [], stashes: 0 };
+    expect(hasUnpushedWork(none)).toBe(false);
+    expect(describeUnpushedWork(none)).toBe("");
+    const one = { ...none, branches: [{ name: "codeden/fix", commits: 1 }] };
+    expect(hasUnpushedWork(one)).toBe(true);
+    expect(describeUnpushedWork(one)).toBe("1 unpushed commit on codeden/fix");
+    expect(
+      describeUnpushedWork({
+        current: null,
+        uncommitted: 3,
+        branches: [
+          { name: "codeden/fix", commits: 2 },
+          { name: "HEAD", commits: 1 },
+        ],
+        stashes: 2,
+      }),
+    ).toBe(
+      "2 unpushed commits on codeden/fix, 1 unpushed commit on a detached HEAD, uncommitted changes in 3 files and 2 stashes",
+    );
+    expect(describeUnpushedWork({ ...none, stashes: 1 })).toBe("1 stash");
   });
 
   it("marks providers that need no credentials (absent: they need some)", () => {

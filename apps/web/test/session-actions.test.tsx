@@ -8,6 +8,8 @@ import { forkableTurn } from "@/components/thread/fork-from-here";
 import { createMockClient } from "@/lib/api/mock";
 import { sessions as fixtureSessions } from "@/lib/api/mock/fixtures/sessions";
 import {
+  announceArchive,
+  canPushFirst,
   canStop,
   forkBlocked,
   forkSupported,
@@ -157,6 +159,66 @@ describe("useSessionActions", () => {
     await waitFor(() => expect(archive).toHaveBeenLastCalledWith("s-deps", { force: true }));
     options.cancel.onClick();
     await waitFor(() => expect(unarchive).toHaveBeenCalledWith("s-deps"));
+  });
+
+  it("offers Push the branch first and Delete anyway for a container kept for unpushed commits", async () => {
+    toast.warning.mockClear();
+    const client = createMockClient();
+    const unpushed = {
+      current: "codeden/fix",
+      uncommitted: 0,
+      branches: [{ name: "codeden/fix", commits: 2 }],
+      stashes: 0,
+    };
+    const kept: ArchiveSessionResponse = {
+      session: { ...session("s-deps"), archivedAt: new Date().toISOString() },
+      worktree: { status: "kept_changes", message: "kept", unpushed },
+    };
+    const removed = { ...kept, worktree: { status: "removed" as const, message: null } };
+    const archive = vi
+      .spyOn(client, "archiveSession")
+      .mockResolvedValueOnce(kept)
+      .mockResolvedValue(removed);
+    const push = vi
+      .spyOn(client, "gitPush")
+      .mockResolvedValue({ remote: "origin", branch: "codeden/fix" });
+    const { actions } = await actionsFor(session("s-deps"), client);
+    actions.archive();
+    await waitFor(() => expect(toast.warning).toHaveBeenCalled());
+    const [title, options] = toast.warning.mock.calls[0] ?? [];
+    expect(title).toMatch(/container was kept/);
+    expect(options.description).toBe(
+      "2 unpushed commits on codeden/fix. Delete anyway deletes this work for good.",
+    );
+    expect(options.action.label).toBe("Push the branch first");
+    expect(options.cancel.label).toBe("Delete anyway");
+    options.action.onClick();
+    await waitFor(() => expect(push).toHaveBeenCalledWith("s-deps", {}));
+    await waitFor(() => expect(archive).toHaveBeenCalledTimes(2));
+    expect(archive).toHaveBeenLastCalledWith("s-deps", { force: false });
+    options.cancel.onClick();
+    await waitFor(() => expect(archive).toHaveBeenLastCalledWith("s-deps", { force: true }));
+  });
+
+  it("offers Delete anyway and Undo when pushing the branch wouldn't save the work", () => {
+    toast.warning.mockClear();
+    const actions = { undo: vi.fn(), retry: vi.fn(), force: vi.fn(), push: vi.fn() };
+    announceArchive(
+      {
+        session: { ...session("s-deps"), archivedAt: new Date().toISOString() },
+        worktree: {
+          status: "kept_changes",
+          message: "kept",
+          unpushed: { current: "codeden/fix", uncommitted: 0, branches: [], stashes: 1 },
+        },
+      },
+      actions,
+    );
+    const [, options] = toast.warning.mock.calls[0] ?? [];
+    expect(options.description).toBe("1 stash. Delete anyway deletes this work for good.");
+    expect(options.action.label).toBe("Delete anyway");
+    expect(options.cancel.label).toBe("Undo");
+    expect(canPushFirst({ current: null, uncommitted: 0, branches: [], stashes: 0 })).toBe(false);
   });
 
   it("renames with a trimmed title and ignores blank or unchanged ones", async () => {
@@ -321,13 +383,15 @@ describe("session row menu", () => {
     ]);
   });
 
-  it("copies and downloads the transcript as Markdown", () => {
+  it("copies and downloads the transcript as Markdown, saying secrets are redacted", () => {
     const actions = fake({});
     const entries = sessionMenuEntries(actions, vi.fn());
     action(entries, "Copy as Markdown")?.onSelect();
     expect(actions.copyMarkdown).toHaveBeenCalled();
     action(entries, "Download as Markdown")?.onSelect();
     expect(actions.downloadMarkdown).toHaveBeenCalled();
+    expect(action(entries, "Copy as Markdown")?.hint).toBe("Secrets redacted");
+    expect(action(entries, "Download as Markdown")?.hint).toBe("Secrets redacted");
   });
 
   it("offers Unarchive for archived sessions and keeps focus for Rename", () => {

@@ -117,7 +117,16 @@ The Markdown holds:
 - **One line per tool call:** the command it ran (with its exit code when it failed), the files it edited (with lines added and removed), read or searched, the pages it fetched, the MCP tools and browser actions it used. Paths are relative to the worktree.
 - **Subagents** with their task, result and cost, and their own thread folded into a collapsible block (GitHub shows it as a "details" toggle).
 
-It leaves out the agent's reasoning, tool output and diffs, so it stays readable and safe to paste. The pull request has the diffs. Skim it before posting it somewhere public all the same: the agent's messages and commands are included as written.
+It leaves out the agent's reasoning, tool output and diffs, so it stays readable. The pull request has the diffs.
+
+**Secrets are redacted** (the menu says so under both items). Anything in the messages, commands and approvals that looks like a secret reads `[redacted]`, and the summary says how many values were hidden ("3 values redacted"). That covers:
+
+- **Known token formats:** GitHub (`ghp_`, `gho_`, `github_pat_` and the rest), OpenAI and Anthropic (`sk-`, `sk-ant-`), Stripe, Slack (`xox…`), GitLab, npm, AWS access keys, Google API keys, Hugging Face, JSON Web Tokens, and CodeDen's own MCP and remote-access tokens.
+- **Bearer tokens and credentials:** `Authorization` headers, `Bearer …`, passwords in URLs (`https://user:password@host`) and private key blocks.
+- **Values of secret-named settings:** `GITHUB_TOKEN=…`, `DB_PASSWORD=…`, `PGPASSWORD=…`, `MYSQL_PWD=…`, `"api_key": "…"`, `--token …`, `--db-password=…`. References such as `$GITHUB_TOKEN` or `${{ secrets.X }}` stay as they are.
+- **Your install token,** wherever it appears.
+
+Ordinary words, file paths and hashes such as commit SHAs are left alone. Redaction goes by pattern, so it can't catch everything (a password typed with no name next to it, say). Skim the file before posting it somewhere public all the same: the agent's messages and commands are otherwise included as written.
 
 ## Files
 

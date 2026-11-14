@@ -26,9 +26,9 @@ import { jsonBody, queryOf } from "./validate";
 /**
  * `/api/sessions`: start (with conflict handling), message, steer, interrupt, respond, stop,
  * fork, handoff, export as Markdown, archive (removes the worktree, §9), unarchive and the
- * queued-message tray.
+ * queued-message tray. `installToken` is hidden from exports wherever it appears.
  */
-export function sessionRoutes(s: AppServices) {
+export function sessionRoutes(s: AppServices, installToken: string) {
   return (
     new Hono()
       .get("/", queryOf(ListSessionsQuery), (c) => c.json(s.sessionRepo.list(c.req.valid("query"))))
@@ -81,9 +81,11 @@ export function sessionRoutes(s: AppServices) {
         );
         return c.json(body);
       })
-      // The transcript as Markdown, to copy or download and share outside CodeDen (§13).
+      // The transcript as Markdown, secrets redacted, to copy or download and share (§13).
       .get("/:id/export", async (c) => {
-        const body: SessionTranscriptExport = await exportSessionTranscript(s, c.req.param("id"));
+        const body: SessionTranscriptExport = await exportSessionTranscript(s, c.req.param("id"), {
+          knownSecrets: [installToken],
+        });
         return c.json(body);
       })
       .post("/:id/archive", jsonBody(ArchiveSessionRequest), async (c) =>
