@@ -7,6 +7,7 @@ import type {
   DiffResult,
   DiffScope,
   DisconnectGithubResponse,
+  ExecutionBackendsResponse,
   ForkSessionRequest,
   ForkSessionResponse,
   FsListResponse,
@@ -185,6 +186,14 @@ export interface CodeDenClient {
   createProject(input: CreateProjectRequest): Promise<CreateProjectResponse>;
   /** Rename, change defaults, or pin and unpin a project (§13). */
   updateProject(projectId: string, patch: UpdateProjectRequest): Promise<Project>;
+  /**
+   * Where agent sessions can run (`docs/remote-runners.md` §5), each backend with the reason it
+   * can't be used; with `projectId`, also whether that project may use it.
+   */
+  executionBackends(query?: {
+    projectId?: string;
+    refresh?: boolean;
+  }): Promise<ExecutionBackendsResponse>;
   /**
    * Save the manual project order (§13): every non-archived project id, exactly once.
    * Resolves with the projects in their new order.

@@ -1,4 +1,4 @@
-import type { Project, Snapshot } from "@codeden/contracts";
+import type { Project, ProjectExecutionBackend, Snapshot } from "@codeden/contracts";
 import { useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { toast } from "sonner";
@@ -95,6 +95,24 @@ export function useProjectActions() {
         } catch (error) {
           set(project.agentCiEnv);
           toast.error(`Couldn't change ${project.name}'s agent environment`, {
+            description: message(error),
+          });
+          return false;
+        }
+      },
+      /** Where the project's new agent sessions run (`Project.execution`); refused with a toast. */
+      setExecutionBackend: async (project: Project, backend: ProjectExecutionBackend) => {
+        const set = (value: ProjectExecutionBackend) =>
+          setProjects((list) =>
+            list.map((p) => (p.id === project.id ? { ...p, execution: { backend: value } } : p)),
+          );
+        set(backend);
+        try {
+          await client.updateProject(project.id, { execution: { backend } });
+          return true;
+        } catch (error) {
+          set(project.execution?.backend ?? "local");
+          toast.error(`Couldn't change where ${project.name}'s sessions run`, {
             description: message(error),
           });
           return false;

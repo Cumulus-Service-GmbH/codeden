@@ -49,6 +49,8 @@ export function projectToRow(p: Project): ProjectRow {
     killSwitch: p.killSwitch,
     timezone: p.timezone,
     agentCiEnv: p.agentCiEnv,
+    // Events written before the setting existed carry none: those projects run locally.
+    executionBackend: p.execution?.backend ?? "local",
     pinned: p.pinned,
     sortOrder: p.sortOrder,
     github: p.kind === "github" ? p.github : null,
@@ -60,9 +62,10 @@ export function projectToRow(p: Project): ProjectRow {
 }
 
 export function rowToProject(r: ProjectRow): Project {
-  const { github, factoryLimits, remoteWarning, ...rest } = r;
+  const { github, factoryLimits, remoteWarning, executionBackend, ...rest } = r;
   return Project.parse({
     ...rest,
+    execution: { backend: executionBackend },
     factoryLimits: factoryLimits ?? undefined,
     ...(r.kind === "github" ? { github } : {}),
     ...(remoteWarning ? { remoteWarning } : {}),

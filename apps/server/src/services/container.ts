@@ -4,6 +4,7 @@ import { messageFrom, type Session } from "@codeden/contracts";
 import { createImageEngineRegistry, type ImageEngineRegistry } from "@codeden/providers";
 import type { Db } from "../db/client";
 import type { EventStore } from "../events/store";
+import { noSandboxes, type SandboxService } from "../execution/sandboxes";
 import { ToolRegistry } from "../mcp/registry";
 import { McpTokenStore } from "../mcp/tokens";
 import { allTools } from "../mcp/tools";
@@ -80,6 +81,11 @@ export interface ServicesOptions {
   runners?: RunnerRouter;
   /** Clone URLs and brokered git credentials for sandbox runners (§9); tests inject one. */
   gitBroker?: GitBroker;
+  /**
+   * Containers for projects whose sessions run in them (`docs/remote-runners.md` §8); made by
+   * the server next to its runner hub. Without it every project runs locally.
+   */
+  sandboxes?: SandboxService;
   secrets: SecretStore;
   exec?: Exec;
   /** Finds claude, codex and gh for the setup checks (tests fake it with `exec`). */
@@ -136,6 +142,8 @@ export interface AppServices {
   runner: RunnerPort;
   /** Which runner serves each session. */
   runners: RunnerRouter;
+  /** Execution backends and the sandboxes of projects whose sessions run in containers. */
+  sandboxes: SandboxService;
   secrets: SecretStore;
   utility: UtilityService;
   projects: ProjectService;
@@ -203,6 +211,7 @@ export function createServices(opts: ServicesOptions): AppServices {
   const exec = opts.exec ?? runTool;
   const userHome = opts.userHome ?? homedir();
   const runners = opts.runners ?? singleRunner(opts.runner);
+  const sandboxes = opts.sandboxes ?? noSandboxes(opts.db, opts.runner);
   const utility =
     opts.utility ??
     new ProviderUtilityService({
@@ -249,6 +258,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     orchestratorDir: opts.paths.orchestrator,
     tokens: mcpTokens,
     git: gitBroker,
+    sandboxes,
     log: opts.log,
   });
   sessions = new SessionService({
@@ -264,6 +274,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     questions,
     tokens: mcpTokens,
     utility,
+    sandboxes,
   });
   const queue = new QueueService({
     outbox,
@@ -373,6 +384,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     store: opts.store,
     settings: () => opts.settings.get(),
     stopSession: (id) => (sessions as SessionService).stop(id),
+    sandboxes,
     inbox,
     ...opts.worktreeCleanup,
     log: opts.log,
@@ -411,6 +423,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     paths: opts.paths,
     runner: opts.runner,
     runners,
+    sandboxes,
     secrets: opts.secrets,
     utility,
     projects,

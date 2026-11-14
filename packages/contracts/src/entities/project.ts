@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AutonomyLevel, Id, ProviderId, ReasoningEffort, Timestamp } from "../common";
+import { ProjectExecution } from "../execution";
 import { AutonomyMode, DEFAULT_VISION_PATH, FactoryLimits } from "../factory";
 
 /**
@@ -55,6 +56,12 @@ const projectBase = {
    * before the setting existed still parse.
    */
   agentCiEnv: z.boolean().default(true),
+  /**
+   * Where the project's new agent sessions run (`docs/remote-runners.md` §5): `local` worktrees
+   * (the default) or, experimentally, a Docker container per session. Only GitHub projects can
+   * use `docker`. Defaults to `local` so events written before the setting existed still parse.
+   */
+  execution: ProjectExecution.prefault({}),
   /**
    * Pinned projects are listed above the rest (§13). Defaults to false so events written
    * before pinning existed still parse.
