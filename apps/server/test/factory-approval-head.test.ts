@@ -1,4 +1,7 @@
+import { ReviewVerdict } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
+import { settleApproval, verdictHead } from "../src/services/factory/approval";
+import { recheckOf } from "../src/services/factory/recheck";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
 import { APPROVE, factorySteps } from "./support/factory-steps";
 import type { FakePr } from "./support/fake-factory-github";
@@ -18,6 +21,43 @@ const reviewCheck = (id: string) => item(id).checks.find((c) => c.name === "revi
 
 /** The builder (or anyone with push access) pushes a commit that changes the PR's code. */
 const push = (pr: FakePr, sha: string) => env.gh.push(pr, sha, ["src/network/public-fetch.ts"]);
+
+describe("settleApproval", () => {
+  const T = "2026-11-14T10:00:00.000Z";
+  const approved: ReviewVerdict = ReviewVerdict.parse(APPROVE);
+  const seenA = (diff: string | null) => ({
+    head_A: T,
+    verdict_A: T,
+    asked_A: T,
+    ...(diff ? { [`diff_${diff}`]: T } : {}),
+  });
+  const pass = (before: Record<string, string>, pr: { headSha: string; diffKey: string | null }) =>
+    settleApproval(before, { ...before, head_B: T }, pr, approved, T);
+
+  it("carries the approval to a new head with the same change as the approved one", () => {
+    const next = pass(seenA("A:k1"), { headSha: "B", diffKey: "k1" });
+    expect(Object.keys(next)).toEqual(
+      expect.arrayContaining(["verdict_B", "asked_B", "diff_B:k1"]),
+    );
+    expect(verdictHead({ nudges: next })).toBe("B");
+    expect(recheckOf({ nudges: next })).toBeNull();
+  });
+
+  it("owes a re-check when the change differs, can't be told, or was read for another head", () => {
+    for (const [before, diffKey] of [
+      [seenA("A:k1"), "k2"],
+      [seenA("A:k1"), null],
+      [seenA(null), "k1"],
+      // A fingerprint recorded for another head never vouches for this one.
+      [seenA("X:k1"), "k1"],
+    ] as const) {
+      const next = pass(before, { headSha: "B", diffKey });
+      expect(verdictHead({ nudges: next })).toBe("A");
+      expect(recheckOf({ nudges: next })).toBe("A");
+      expect(next.recheck_commits_A).toBe(T);
+    }
+  });
+});
 
 describe("an approval covers one head commit", () => {
   it("doesn't merge a commit pushed after the approval until a re-review approves it", async () => {

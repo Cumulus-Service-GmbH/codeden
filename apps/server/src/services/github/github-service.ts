@@ -253,16 +253,6 @@ export class GithubService {
 
   /** `/api/prs/:id`: status plus body, size and every changed file (without patches). */
   async getPrDetails(prId: string): Promise<GithubPrDetails> {
-    return (await this.getPrDetailsWithDiff(prId)).details;
-  }
-
-  /**
-   * `getPrDetails` together with every changed file's patch, from the same listing (no extra
-   * request): the factory fingerprints what the PR itself changes (`factory/diff-key.ts`).
-   */
-  async getPrDetailsWithDiff(
-    prId: string,
-  ): Promise<{ details: GithubPrDetails; diff: GithubPrDiff["files"] }> {
     const { projectId, number } = this.parsePrId(prId);
     const repo = this.githubRepo(projectId);
     const pr = await refreshPr(this.prDeps(), projectId, repo, number);
@@ -270,7 +260,7 @@ export class GithubService {
       readPrInfo(this.client, repo, number),
       this.prFiles.get(repo, number, pr),
     ]);
-    const details: GithubPrDetails = {
+    return {
       ...pr,
       body: info.body,
       additions: info.additions,
@@ -279,7 +269,6 @@ export class GithubService {
       mergeState: PrMergeState.parse(info.mergeableState),
       files: files.map(withoutPatch),
     };
-    return { details, diff: files };
   }
 
   /** `/api/prs/:id/diff`: every changed file with its patch, at the PR's current head. */
