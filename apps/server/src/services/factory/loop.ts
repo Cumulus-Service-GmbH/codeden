@@ -26,6 +26,7 @@ import { reviseAfterReverts } from "./revert";
 import { advanceScout } from "./scout";
 import { claimSlot } from "./slots";
 import { settleSpecInbox } from "./spec-approval";
+import { closeEarlyPrs } from "./spec-early-pr";
 import { OWNED_STAGES } from "./store";
 import { mayAutoMerge } from "./trust";
 import { recoverTurnRaceFailures } from "./turn-race";
@@ -120,6 +121,10 @@ export async function runTick(
   // PRs a rebuild or an integrator replaced are closed, whatever their item's stage by now.
   await closeReplacedPrs(ctx, project).catch((error: unknown) =>
     ctx.log?.(`factory: closing replaced PRs: ${errorMessage(error)}`),
+  );
+  // PRs opened before their spec was approved: adopted after it, or closed once the work stopped.
+  await closeEarlyPrs(ctx, project).catch((error: unknown) =>
+    ctx.log?.(`factory: settling PRs opened before the spec: ${errorMessage(error)}`),
   );
   // Merged work's review follow-ups become issues (dark factory), also while paused.
   await fileDueFollowUps(ctx, project).catch((error: unknown) =>
