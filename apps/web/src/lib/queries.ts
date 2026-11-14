@@ -1,9 +1,10 @@
 import type { Project, Session, Snapshot } from "@codeden/contracts";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useEffect, useRef } from "react";
+import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
 import { useTranscriptsStore } from "@/stores/transcripts";
-import { useClient } from "./api";
+import { type CodeDenClient, useClient } from "./api";
+import { sessionLoader } from "./session-batch";
 import type { TranscriptState } from "./transcript/reducer";
 
 export const snapshotKey = ["snapshot"] as const;
@@ -50,8 +51,25 @@ export function useRecheckSetup() {
   });
 }
 
-/** The query holding a session the snapshot doesn't carry, fetched by id. */
+/**
+ * The query holding a session the snapshot doesn't carry, fetched by id: the session, or null
+ * when the server has none by that id.
+ */
 export const sessionRecordKey = (sessionId: string) => ["session-record", sessionId] as const;
+
+/**
+ * The query of one session fetched by id. Fetched once and kept (realtime keeps it current),
+ * through the client's loader, so the lookups a render starts share one request.
+ */
+function sessionRecordQuery(client: CodeDenClient, sessionId: string, enabled: boolean) {
+  return {
+    queryKey: sessionRecordKey(sessionId),
+    queryFn: () => sessionLoader(client)(sessionId),
+    enabled,
+    staleTime: Infinity,
+    retry: false,
+  };
+}
 
 /**
  * A session by id, from the snapshot, or fetched when the snapshot doesn't carry it: one
@@ -66,17 +84,45 @@ export function useSessionLookup(sessionId: string | undefined): {
   const { data: snapshot } = useSnapshot();
   const listed = sessionId ? snapshot?.sessions.find((x) => x.id === sessionId) : undefined;
   const fetch = Boolean(sessionId && snapshot && !listed);
-  const record = useQuery({
-    queryKey: sessionRecordKey(sessionId ?? ""),
-    queryFn: async () => (await client.getSessionDetail(sessionId ?? "")).session,
-    enabled: fetch,
-    staleTime: Infinity,
-    retry: false,
-  });
+  const record = useQuery(sessionRecordQuery(client, sessionId ?? "", fetch));
   return {
-    session: listed ?? (fetch ? record.data : undefined),
+    session: listed ?? (fetch ? (record.data ?? undefined) : undefined),
     loading: Boolean(sessionId) && (!snapshot || (fetch && record.isLoading)),
   };
+}
+
+/** The sessions the lookups found (a combine for `useQueries`, so it stays stable). */
+function foundSessions(results: { data?: Session | null }[]): Session[] {
+  return results.flatMap((r) => (r.data ? [r.data] : []));
+}
+
+/**
+ * Several sessions by id, found as `useSessionLookup` finds one: from the snapshot, else
+ * fetched, all of them in one request, and kept current the same way. Ids that don't exist
+ * are left out. The map stays the same while what it holds doesn't change.
+ */
+export function useSessionLookups(sessionIds: readonly string[]): ReadonlyMap<string, Session> {
+  const client = useClient();
+  const { data: snapshot } = useSnapshot();
+  // The ids as one value, so a new array with the same ids changes nothing.
+  const key = [...new Set(sessionIds)].sort().join("\n");
+  const missing = useMemo(() => {
+    if (!snapshot || !key) return [];
+    const listed = new Set(snapshot.sessions.map((s) => s.id));
+    return key.split("\n").filter((id) => !listed.has(id));
+  }, [snapshot, key]);
+  const fetched = useQueries({
+    queries: missing.map((id) => sessionRecordQuery(client, id, true)),
+    combine: foundSessions,
+  });
+  return useMemo(() => {
+    const found = new Map<string, Session>();
+    if (!snapshot || !key) return found;
+    const wanted = new Set(key.split("\n"));
+    for (const s of snapshot.sessions) if (wanted.has(s.id)) found.set(s.id, s);
+    for (const s of fetched) found.set(s.id, s);
+    return found;
+  }, [snapshot, key, fetched]);
 }
 
 export function useSession(sessionId: string | undefined): Session | undefined {

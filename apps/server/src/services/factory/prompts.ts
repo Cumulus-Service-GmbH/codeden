@@ -7,7 +7,7 @@ import {
   type WorkType,
 } from "@codeden/contracts";
 import { CODEDEN_HOME_RULE } from "../orchestration/prompts";
-import { specFeedback, specResumeStep } from "./prompts-spec";
+import { SPEC_PENDING_STEP, specFeedback, specResumeStep } from "./prompts-spec";
 
 /**
  * Prompts of the software factory's pipelines (§10.1): the builder's steps (reproduce and fix a
@@ -184,6 +184,15 @@ function analyzeStep(item: FactoryItem): string {
 }
 
 /**
+ * A feature's step: Analyze, or the changes a person asked for to its spec; Implement once the
+ * spec stands; nothing while the spec waits for a person's approval (`spec-approval.ts`).
+ */
+function featureStep(item: FactoryItem): string {
+  if (item.specApproval?.state === "pending") return SPEC_PENDING_STEP;
+  return item.investigation && !specFeedback(item) ? implementStep(item) : analyzeStep(item);
+}
+
+/**
  * The first message of a builder: the issue, the vision, the project's lessons and its pipeline's
  * current step.
  */
@@ -201,9 +210,7 @@ export function builderPrompt(
         ? fixStep(item)
         : reproduceStep()
       : type === "feature"
-        ? item.investigation && !specFeedback(item)
-          ? implementStep(item)
-          : analyzeStep(item)
+        ? featureStep(item)
         : docsStep(item);
   const old = item.rebuiltFrom;
   const learned = lessonsBlock(lessons.lessons);

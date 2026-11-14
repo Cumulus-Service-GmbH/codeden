@@ -6,6 +6,7 @@ import {
   FactoryLimits,
   type NewEvent,
   Project,
+  SESSION_LOOKUP_MAX,
   type Session,
   SNAPSHOT_ARCHIVED_SESSIONS_MAX,
   Snapshot,
@@ -146,6 +147,24 @@ describe("GET /api/snapshot", () => {
     ]);
 
     expect((await snapshot()).archivedSessionCounts).toEqual({ p1: 3, p2: 1 });
+  });
+});
+
+describe("GET /api/sessions?ids=", () => {
+  it("looks up sessions by id, the ones archived long ago included", async () => {
+    seed([session(0, null), session(1, 30 * DAY), session(2, 400 * DAY), session(3, HOUR)]);
+
+    const res = await get("/sessions?ids=s0002,s0000,nope,s0001");
+
+    expect(res.status).toBe(200);
+    const ids = ((await res.json()) as Session[]).map((s) => s.id).sort();
+    expect(ids).toEqual(["s0000", "s0001", "s0002"]);
+  });
+
+  it("refuses more ids than one lookup takes", async () => {
+    const ids = Array.from({ length: SESSION_LOOKUP_MAX + 1 }, (_, i) => `s${i}`).join(",");
+    expect((await get(`/sessions?ids=${ids}`)).status).toBe(400);
+    expect((await get("/sessions?ids=")).status).toBe(400);
   });
 });
 

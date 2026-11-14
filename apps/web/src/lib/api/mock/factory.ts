@@ -18,6 +18,13 @@ import {
 } from "@codeden/contracts";
 import type { FactoryApi } from "../factory-api";
 import { demoScorecard } from "./factory-scorecard";
+import {
+  assertSpecVersion,
+  isRevised,
+  REVISED_DETAILS,
+  reviseSpecLater,
+  specInboxId,
+} from "./factory-spec";
 import type { FixtureWorkItem } from "./fixtures/factory-fixture-types";
 import { defaultFactoryLimits, factoryFor, visionDoc } from "./fixtures/ops";
 import type { MockWorld } from "./world";
@@ -167,6 +174,7 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
   const visions = new Map<string, string>();
   /** Decisions on specs that waited for approval, by item id. */
   const specs = new Map<string, SpecApproval>();
+  reviseSpecLater(world, specs);
   /** Follow-ups filed with "File issue", by `<itemId>:<index>`. */
   const filedFollowUps = new Map<string, GitHubIssueRef>();
   const project = (id: string) => world.snapshot.projects.find((p) => p.id === id);
@@ -255,7 +263,11 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
   const item = (projectId: string, itemId: string): FactoryItem => {
     const { cost: _cost, specApproval: specState, ...w } = find(projectId, itemId);
     const s = status(projectId);
-    const spec = specState ? (specs.get(itemId) ?? pendingSpec(w.stepSince ?? now())) : null;
+    // A waiting spec's version is its inbox item's `updatedAt`, as the server raises it.
+    const asked = world.snapshot.inbox.find((x) => x.id === specInboxId(itemId))?.updatedAt;
+    const spec = specState
+      ? (specs.get(itemId) ?? pendingSpec(asked ?? w.stepSince ?? now()))
+      : null;
     return {
       ...w,
       projectId,
@@ -265,7 +277,13 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
         ? { type: w.type, confidence: "high", rationale: "From its label", by: "label", at: now() }
         : null,
       admittedBy: null,
-      investigation: spec ? { ...DEMO_ANALYSIS, at: spec.requestedAt } : null,
+      investigation: spec
+        ? {
+            ...DEMO_ANALYSIS,
+            ...(isRevised(itemId) ? { details: REVISED_DETAILS } : {}),
+            at: spec.requestedAt,
+          }
+        : null,
       specApproval: spec,
       acceptanceCriteria: spec
         ? DEMO_CRITERIA
@@ -455,6 +473,7 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
     async decideSpec(id, itemId, req) {
       const current = item(id, itemId).specApproval;
       if (current?.state !== "pending") throw new Error("This spec doesn't wait for approval");
+      assertSpecVersion(current, req.version);
       const approve = req.decision === "approve";
       specs.set(itemId, {
         ...current,
@@ -478,7 +497,7 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
             };
       world.factory.set(id, { ...s, inProgress: s.inProgress.map(decided) });
       // Its inbox item no longer waits on you.
-      const ask = world.snapshot.inbox.find((x) => x.id === `inbox:factory-spec:${itemId}`);
+      const ask = world.snapshot.inbox.find((x) => x.id === specInboxId(itemId));
       if (ask?.status === "open") {
         const at = now();
         world.emitDomain({

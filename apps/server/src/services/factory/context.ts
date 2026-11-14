@@ -120,12 +120,17 @@ export function raiseInbox(
     sessionId?: string | null;
     issue?: GitHubIssueRef | null;
     pr?: GitHubPrRef | null;
+    /** When what it asks about changed (its `updatedAt`); now by default. */
+    at?: string;
   },
 ): void {
   const existing = ctx.inbox.find(item.id);
-  if (existing?.status === "open" && existing.title === item.title && existing.body === item.body)
-    return;
-  const now = ctx.now().toISOString();
+  const same =
+    existing?.title === item.title &&
+    existing.body === item.body &&
+    (!item.at || existing.updatedAt === item.at);
+  if (existing?.status === "open" && same) return;
+  const now = item.at ?? ctx.now().toISOString();
   ctx.inbox.put({
     id: item.id,
     kind: item.kind,

@@ -10,7 +10,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { useClient } from "@/lib/api";
 import { ApiRequestError } from "@/lib/api/http";
-import { useSetupStatus, useSnapshotData } from "@/lib/queries";
+import { useSession, useSetupStatus, useSnapshotData } from "@/lib/queries";
 import { useUiStore } from "@/stores/ui";
 
 /** Why Retry would only fail again, from the session's provider's setup check; null when it can run. */
@@ -42,10 +42,8 @@ export function RunFailedActions({
   dismissButton: React.ReactNode;
 }) {
   const client = useClient();
-  const session = useSnapshotData(
-    (s) => s.sessions.find((x) => x.id === item.sessionId) ?? null,
-    null,
-  );
+  // By id: a run's session may be archived and out of the snapshot (§6).
+  const session = useSession(item.sessionId ?? undefined) ?? null;
   const providers = useSnapshotData((s) => s.runner.providers, []);
   const checks = useSetupStatus({ staleTime: 60_000 }).data?.checks;
   const name = providers.find((p) => p.id === session?.provider)?.displayName ?? session?.provider;

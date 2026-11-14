@@ -165,13 +165,21 @@ export function specHeld(item: { specApproval?: { state: string } | null }): boo
   return state === "pending" || state === "changes_requested";
 }
 
+/**
+ * The version of the spec a decision was made on: the `requestedAt` of the spec that was shown.
+ * A decision on a spec revised since then is refused (409 `spec_changed`), so a stale page never
+ * approves a spec nobody read. Without it, the decision applies to the spec on record.
+ */
+const SpecVersion = Timestamp.optional();
+
 /** A person's decision on a spec that waits for approval. */
 export const FactorySpecDecisionRequest = z.discriminatedUnion("decision", [
-  z.object({ decision: z.literal("approve") }),
+  z.object({ decision: z.literal("approve"), version: SpecVersion }),
   z.object({
     decision: z.literal("request_changes"),
     /** What to change, for the builder (and posted on the issue). */
     feedback: z.string().trim().min(1).max(SPEC_FEEDBACK_MAX),
+    version: SpecVersion,
   }),
 ]);
 export type FactorySpecDecisionRequest = z.infer<typeof FactorySpecDecisionRequest>;

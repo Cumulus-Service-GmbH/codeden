@@ -21,14 +21,20 @@ import { ago } from "@/lib/format";
  * analysis first. Used on the item page and on the spec's inbox card.
  */
 
-/** Approve a spec that waits for you, or ask for changes (with what to change). */
+/**
+ * Approve a spec that waits for you, or ask for changes (with what to change). The decision
+ * carries the version shown, so one made on a spec the agent revised since is refused.
+ */
 export function SpecDecision({
   projectId,
   itemId,
+  version,
   compact = false,
 }: {
   projectId: string;
   itemId: string;
+  /** The version of the spec shown (`SpecApproval.requestedAt`). */
+  version: string;
   /** Smaller buttons, for an inbox card. */
   compact?: boolean;
 }) {
@@ -38,7 +44,7 @@ export function SpecDecision({
   const [feedback, setFeedback] = useState("");
   const decide = useMutation({
     mutationFn: (req: FactorySpecDecisionRequest) =>
-      client.factory.decideSpec(projectId, itemId, req),
+      client.factory.decideSpec(projectId, itemId, { ...req, version }),
     onSuccess: (_item, req) => {
       toast.success(
         req.decision === "approve"
@@ -49,7 +55,11 @@ export function SpecDecision({
       setFeedback("");
       void queryClient.invalidateQueries({ queryKey: factoryKeys.all });
     },
-    onError: (e: Error) => toast.error("Couldn't record your decision", { description: e.message }),
+    onError: (e: Error) => {
+      toast.error("Couldn't record your decision", { description: e.message });
+      // The spec changed or was decided meanwhile: show it as it is now.
+      void queryClient.invalidateQueries({ queryKey: factoryKeys.all });
+    },
   });
   const size = compact ? "sm" : "default";
   const text = feedback.trim();
@@ -158,7 +168,7 @@ export function SpecApprovalCard({ item, projectId }: { item: FactoryItem; proje
               You asked earlier: <span className="text-foreground">{spec.feedback}</span>
             </p>
           )}
-          <SpecDecision projectId={projectId} itemId={item.id} />
+          <SpecDecision projectId={projectId} itemId={item.id} version={spec.requestedAt} />
         </div>
       ) : (
         <div className="rounded-xl border border-border bg-card p-4 text-[13px]">

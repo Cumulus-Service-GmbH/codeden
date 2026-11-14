@@ -1,4 +1,4 @@
-import { isFactoryMode } from "@codeden/contracts";
+import { type FactoryStatus, isFactoryMode, type Session, type Snapshot } from "@codeden/contracts";
 import { Link } from "@tanstack/react-router";
 import { Bot, Factory, MessageSquare } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
@@ -16,9 +16,23 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useFactoryStatus } from "@/lib/factory";
-import { useProject, useSnapshot, useSnapshotData } from "@/lib/queries";
+import { useProject, useSessionLookups, useSnapshot, useSnapshotData } from "@/lib/queries";
 
 const CHAT_KEY = "codeden.factoryView.chat";
+const noSessions: Session[] = [];
+const noProviders: Snapshot["runner"]["providers"] = [];
+
+/** Every session the view reads: each item's builder, active and reviewer sessions, the scout's. */
+function sessionIdsOf(f: FactoryStatus): string[] {
+  const ids = new Set<string>();
+  for (const w of [...f.backlog, ...f.inProgress, ...f.viewRecent, ...f.recent]) {
+    for (const id of [w.activeSessionId, w.sessionId, w.reviewerSessionId]) if (id) ids.add(id);
+  }
+  const scout = f.mode === "dark_factory" ? f.scout : null;
+  if (scout?.sessionId) ids.add(scout.sessionId);
+  for (const lens of scout?.lenses ?? []) ids.add(lens.sessionId);
+  return [...ids];
+}
 
 /** Whether the PM chat column is open on wide screens; remembered across visits. */
 function useChatOpen(): [boolean, (open: boolean) => void] {
@@ -51,12 +65,15 @@ export function FactoryViewPage({ projectId }: { projectId: string }) {
   const project = useProject(projectId);
   const factory = project ? isFactoryMode(project.autonomyMode) : false;
   const { data: f } = useFactoryStatus(projectId, factory);
-  const sessionList = useSnapshotData((s) => s.sessions, []);
-  const providers = useSnapshotData((s) => s.runner.providers, []);
+  const sessionList = useSnapshotData((s) => s.sessions, noSessions);
+  // The items' sessions by id, in one request: finished work's are archived and may be out of
+  // the snapshot (§6).
+  const itemSessions = useSessionLookups(useMemo(() => (f ? sessionIdsOf(f) : []), [f]));
+  const providers = useSnapshotData((s) => s.runner.providers, noProviders);
   const sessions = useMemo(() => {
     const names = new Map(providers.map((p) => [p.id, p.displayName]));
     return new Map<string, SessionInfo>(
-      sessionList.map((s) => [
+      [...sessionList, ...itemSessions.values()].map((s) => [
         s.id,
         {
           status: s.status,
@@ -68,7 +85,7 @@ export function FactoryViewPage({ projectId }: { projectId: string }) {
         },
       ]),
     );
-  }, [sessionList, providers]);
+  }, [sessionList, itemSessions, providers]);
   const now = useNow();
   const pipeline = useMemo(() => (f ? viewPipeline(f, sessions, now) : null), [f, sessions, now]);
   const wide = useWide();
