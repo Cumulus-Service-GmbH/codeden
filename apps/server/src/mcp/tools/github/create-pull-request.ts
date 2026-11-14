@@ -45,6 +45,8 @@ export const createPullRequestTool = defineTool({
       .describe("Commit uncommitted changes with this message before pushing"),
   }),
   handler: async (input, { services, sessionId }) => {
+    // A factory builder whose spec waits for a person's approval builds nothing yet.
+    services.factory.assertMayOpenPr(sessionId);
     const result = await services.github.createPullRequest(sessionId, input);
     const verb = result.created ? "Opened" : "Updated";
     const commit = result.commit ? ` Committed ${result.commit.slice(0, 7)} first.` : "";

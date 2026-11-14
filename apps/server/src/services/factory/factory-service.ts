@@ -72,7 +72,7 @@ import {
   SCOUT_WORK_KEY,
 } from "./sessions";
 import { SlotBoard } from "./slots";
-import { decideSpec } from "./spec-approval";
+import { assertSpecAllowsPr, decideSpec } from "./spec-approval";
 import { buildStatus } from "./status";
 import { FactoryStore } from "./store";
 import { answerProviderQuestion, recordDecision, unattendedSession } from "./unattended";
@@ -644,6 +644,15 @@ export class FactoryService {
     const s = this.deps.repo.find(sessionId)?.session;
     if (!s?.projectId || !isFactorySession(s)) return false;
     return this.data.items(s.projectId, ["building"]).some((i) => i.builderSessionId === s.id);
+  }
+
+  /**
+   * Before `create_pull_request`: throws `409 spec_not_approved` for a factory builder whose spec
+   * waits for a person's approval or is being revised at their request (`spec-approval.ts`).
+   */
+  assertMayOpenPr(sessionId: string): void {
+    const s = this.deps.repo.find(sessionId)?.session;
+    if (s && isFactorySession(s)) assertSpecAllowsPr(this.ctx, s);
   }
 
   /** Whether a session is the dark factory's scout. */

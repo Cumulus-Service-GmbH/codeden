@@ -2,6 +2,7 @@ import {
   type FactoryItem,
   type FactorySpecDecisionRequest,
   SPEC_FEEDBACK_MAX,
+  type SpecApproval,
 } from "@codeden/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, MessageSquareWarning, PencilLine } from "lucide-react";
@@ -96,6 +97,40 @@ export function SpecDecision({
   );
 }
 
+/** Why a revised analysis decided not to build the feature after all. */
+const NOT_BUILT: Record<string, string> = {
+  already_done: "it is already possible",
+  needs_info: "it needs more information",
+  out_of_scope: "it is out of scope for the vision",
+};
+
+/**
+ * After a request for changes: the agent revises its analysis while the item is in building;
+ * once it stopped, what the revision decided (or that it stopped before one was submitted).
+ */
+function ChangesRequested({ item, spec }: { item: FactoryItem; spec: SpecApproval }) {
+  const asked = `Changes requested${spec.decidedAt ? ` ${ago(spec.decidedAt)}` : ""}`;
+  const inv = item.investigation;
+  const notBuilt = inv?.kind === "analysis" && inv.outcome !== "implement";
+  const text =
+    item.stage === "building"
+      ? `${asked}: the agent revises its analysis, then asks you again.`
+      : notBuilt
+        ? `${asked}. The revised analysis decided not to build it: ${NOT_BUILT[inv.outcome] ?? inv.outcome}.`
+        : `${asked}. The item stopped before the agent submitted a revised spec.`;
+  return (
+    <p className="flex items-start gap-2">
+      <MessageSquareWarning className="mt-0.5 size-3.5 shrink-0 text-status-waiting" />
+      <span>
+        {text}
+        {spec.feedback && (
+          <span className="mt-1 block text-2xs text-muted-foreground">{spec.feedback}</span>
+        )}
+      </span>
+    </p>
+  );
+}
+
 /**
  * Where the item's spec is in its approval, on the item page: the decision controls while it
  * waits for you, then what was decided. Nothing for a spec that needed no approval.
@@ -128,16 +163,7 @@ export function SpecApprovalCard({ item, projectId }: { item: FactoryItem; proje
       ) : (
         <div className="rounded-xl border border-border bg-card p-4 text-[13px]">
           {spec.state === "changes_requested" ? (
-            <p className="flex items-start gap-2">
-              <MessageSquareWarning className="mt-0.5 size-3.5 shrink-0 text-status-waiting" />
-              <span>
-                Changes requested{spec.decidedAt && ` ${ago(spec.decidedAt)}`}: the agent revises
-                its analysis, then asks you again.
-                {spec.feedback && (
-                  <span className="mt-1 block text-2xs text-muted-foreground">{spec.feedback}</span>
-                )}
-              </span>
-            </p>
+            <ChangesRequested item={item} spec={spec} />
           ) : spec.state === "approved" ? (
             <p className="flex items-start gap-2">
               <Check className="mt-0.5 size-3.5 shrink-0 text-status-done" />

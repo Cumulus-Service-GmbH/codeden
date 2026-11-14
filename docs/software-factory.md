@@ -62,7 +62,8 @@ A misunderstood request is cheapest to correct before anything is built. Turn on
 - **Approve spec**: the agent builds it to that spec, as soon as a free agent and room under **PRs open at most** allow it.
 - **Request changes**: say what to change. Your note goes to the agent, which revises its analysis and submits it again, and the new spec waits for you once more. Both decisions are also posted on the issue.
 - **Nothing runs while it waits.** The agent's session stays idle without holding an agent slot, it is never reminded or failed for waiting, the item doesn't count toward **PRs open at most**, and it doesn't hold up [Finish current work, then stop](#the-kill-switch). A spec you never look at never blocks other work.
-- **Off again.** Turning the setting off, or switching the project to a dark factory (which never waits on you), approves the specs still waiting, and their agents build them. A **Retry** that starts over asks for a fresh approval of the new spec; work picked up again after a failure outside its code keeps the approval it had.
+- **Nothing is built before you approve.** Until you approve the spec, the agent's `create_pull_request` is refused. An agent picked up again after a failure outside its code while it revised its spec is asked for the revised spec only. If the revised analysis decides not to build it after all (already possible, unclear or out of scope), the item stops and its page says so.
+- **Off again.** Turning the setting off, or switching the project to a dark factory (which never waits on you), approves the specs still waiting, says so on their issues ("Spec approved automatically"), and their agents build them. A **Retry** that starts over asks for a fresh approval of the new spec; work picked up again after a failure outside its code keeps the approval it had.
 
 You approve in CodeDen (the item page, its inbox card or the Factory view). Approving with a comment on the issue isn't supported yet.
 

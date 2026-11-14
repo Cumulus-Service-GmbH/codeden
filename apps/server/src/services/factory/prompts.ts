@@ -7,7 +7,7 @@ import {
   type WorkType,
 } from "@codeden/contracts";
 import { CODEDEN_HOME_RULE } from "../orchestration/prompts";
-import { specFeedback } from "./prompts-spec";
+import { specFeedback, specResumeStep } from "./prompts-spec";
 
 /**
  * Prompts of the software factory's pipelines (§10.1): the builder's steps (reproduce and fix a
@@ -396,6 +396,13 @@ export const ANALYZE_NUDGE =
 /** To a builder whose session CodeDen marked failed by mistake (a message raced its turn). */
 export const BUILDER_RESUME =
   "CodeDen marked your session failed by mistake: a message reached it while your turn was still running. Nothing you did failed. Carry on from where you left off (check `git status` and your last steps if you need to) and finish the task as your brief and the factory's latest message ask: report your step if it is still open, then commit, push and make sure your pull request is open.";
+
+/** `BUILDER_RESUME` for this item: while its spec waits for a person or is revised, the spec only. */
+export function builderResume(item: FactoryItem): string {
+  const spec = specResumeStep(item);
+  if (!spec) return BUILDER_RESUME;
+  return `CodeDen marked your session failed by mistake: a message reached it while your turn was still running. Nothing you did failed. Carry on from where you left off.\n${spec}`;
+}
 
 export const REVIEWER_NUDGE =
   "You ended your turn without a verdict. Call `factory_submit_review` now with `approve`, `request_changes` or `reject`.";

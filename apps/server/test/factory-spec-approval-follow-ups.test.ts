@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ServerToolContext } from "../src/mcp/define";
 import { createPullRequestTool } from "../src/mcp/tools/github/create-pull-request";
 import type { AppServices } from "../src/services/container";
+import { builderResume } from "../src/services/factory/prompts";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
 
 /**
@@ -105,11 +106,15 @@ describe("spec approval follow-ups (#365)", () => {
     const cont = toBuilder(id).at(-1)?.text ?? "";
     expect(cont).toMatch(/\*\*Continue\*\*/);
     expect(cont).toContain("factory_submit_analysis");
+    expect(cont).toContain("Also offer JSON");
     expect(cont).not.toContain("create_pull_request");
+    // So does the "carry on" after a message raced its turn.
+    expect(builderResume(item(id))).toContain("factory_submit_analysis");
+    expect(builderResume(item(id))).not.toMatch(/pull request is open/);
 
     // Opening a pull request anyway is refused, while revising and while the revision waits.
     const pr = prTool(builder);
-    await expect(pr.call()).rejects.toThrow(/spec/i);
+    await expect(pr.call()).rejects.toMatchObject({ code: "spec_not_approved" });
     await submit(id, { ...SPEC, spec: "Export as CSV or JSON" });
     expect(item(id).specApproval?.state).toBe("pending");
     await expect(pr.call()).rejects.toThrow(/spec/i);

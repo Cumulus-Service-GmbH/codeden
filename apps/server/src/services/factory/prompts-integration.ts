@@ -1,5 +1,6 @@
 import type { FactoryItem } from "@codeden/contracts";
 import { FOREGROUND_COMMANDS, INPUT_DATA_RULES, NON_INTERACTIVE_COMMANDS } from "./prompts";
+import { specResumeStep } from "./prompts-spec";
 import type { RecheckCause } from "./recheck";
 
 /**
@@ -137,11 +138,16 @@ function newCommitsPrompt(
   ].join("\n");
 }
 
-/** The builder's session ended for a reason outside its work (it died, the runner restarted). */
+/**
+ * The builder's session ended for a reason outside its work (it died, the runner restarted).
+ * While its spec waits for a person or is being revised, it owes the spec only (`prompts-spec.ts`).
+ */
 export function continuePrompt(item: FactoryItem): string {
+  const spec = specResumeStep(item);
   return [
     `**Continue**: your session for ${item.issue ? `issue #${item.issue.number}` : "this work item"} (**${item.title}**) stopped because of a problem outside your work, such as the session ending unexpectedly. It is fixed, so pick up where you left off.`,
-    "Check what is already done (`git status`, `git log`), finish your current step, and once the change is ready open the pull request with `create_pull_request` and call `finish`.",
+    spec ??
+      "Check what is already done (`git status`, `git log`), finish your current step, and once the change is ready open the pull request with `create_pull_request` and call `finish`.",
     FOREGROUND_COMMANDS,
     NON_INTERACTIVE_COMMANDS,
   ].join("\n");

@@ -1,10 +1,11 @@
-import type {
-  FactoryItem,
-  FactoryLoop,
-  FactorySpecDecisionRequest,
-  Project,
-  Session,
-  SpecApproval,
+import {
+  type FactoryItem,
+  type FactoryLoop,
+  type FactorySpecDecisionRequest,
+  type Project,
+  type Session,
+  type SpecApproval,
+  specHeld,
 } from "@codeden/contracts";
 import { conflict, errorMessage, notFound } from "../errors";
 import { type FactoryContext, raiseInbox } from "./context";
@@ -39,6 +40,25 @@ export function specGateOn(project: Project, loop: FactoryLoop): boolean {
 /** Whether the item's spec waits for a person's decision. */
 export function specPending(item: FactoryItem): boolean {
   return item.specApproval?.state === "pending";
+}
+
+/**
+ * Refuse `create_pull_request` from the builder of an item whose spec waits for a person or is
+ * being revised at their request (in building, or failed and waiting to be put back): nothing is
+ * built before the spec is approved, whatever a resumed or confused builder tries.
+ */
+export function assertSpecAllowsPr(ctx: FactoryContext, session: Session): void {
+  if (!session.projectId) return;
+  const item = ctx.store
+    .items(session.projectId, ["building", "failed"])
+    .find((i) => i.builderSessionId === session.id);
+  if (!item || !specHeld(item)) return;
+  throw conflict(
+    specPending(item)
+      ? "Your spec waits for a person's approval: a pull request is opened only after they approve it. End your turn now; CodeDen sends you the next step once they decide."
+      : "A person asked for changes to your spec: submit the revised spec with `factory_submit_analysis` first. A pull request is opened only after they approve it.",
+    "spec_not_approved",
+  );
 }
 
 async function comment(ctx: FactoryContext, item: FactoryItem, body: string): Promise<void> {
@@ -186,6 +206,17 @@ export async function advanceSpec(
     spec = { ...spec, state: "approved", decidedAt: ctx.now().toISOString(), by: "auto" };
     item = ctx.store.updateItem(item.id, (i) => ({ ...i, specApproval: spec }));
     closeSpecInbox(ctx, item.id, "Spec approval is off: approved automatically");
+    // The issue's last word was that the spec awaits approval (once: it is approved now).
+    const why = !loop.tuning.specApproval
+      ? "spec approval turned off"
+      : project.autonomyMode === "dark_factory"
+        ? "the project now runs as a dark factory"
+        : "the project no longer runs as a software factory";
+    await comment(
+      ctx,
+      item,
+      `**CodeDen software factory**: Spec approved automatically (${why}).\n\nNext: Implement.`,
+    );
   }
   if (!builder) return null;
   if (spec.sentAt) {

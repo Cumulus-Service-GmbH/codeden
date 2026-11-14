@@ -6,7 +6,7 @@ import {
   TURN_RUNNING_TEXT,
 } from "../sessions/outbox-holds";
 import type { FactoryContext } from "./context";
-import { BUILDER_RESUME } from "./prompts";
+import { builderResume } from "./prompts";
 import { isBusy } from "./sessions";
 import { claimSlot } from "./slots";
 
@@ -210,7 +210,7 @@ async function resumeBuilder(
     [TOLD_PREFIX + failure.id]: at,
   });
   try {
-    await ctx.sessions.startTurn(s.id, BUILDER_RESUME);
+    await ctx.sessions.startTurn(s.id, builderResume(item));
   } catch (error) {
     const why = errorMessage(error);
     ctx.log?.(`factory: ${item.id}: could not tell the builder to carry on: ${why}`);
