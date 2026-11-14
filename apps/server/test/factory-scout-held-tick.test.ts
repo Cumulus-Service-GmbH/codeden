@@ -142,4 +142,25 @@ describe("the scout's tools while a loop pass is held (#311)", () => {
     await pass.done;
     expect(loop().scout.round?.filed).toBe(1);
   });
+
+  it("files once when the retry arrives while the first call still waits on GitHub", async () => {
+    const scout = await darkFactory();
+    await env.factory.planRound(scout, { lenses: [] });
+    let answer = () => {};
+    const github = new Promise<void>((resolve) => {
+      answer = resolve;
+    });
+    const createIssue = env.gh.createIssue.bind(env.gh);
+    env.gh.createIssue = (async (...args: Parameters<typeof createIssue>) => {
+      await github;
+      return createIssue(...args);
+    }) as typeof createIssue;
+    const issue = { ...finding, priority: "high" as const };
+    const first = env.factory.fileIssue(scout, issue);
+    const retry = env.factory.fileIssue(scout, issue);
+    answer();
+    expect(await retry).toEqual(await first);
+    expect(env.gh.issues).toHaveLength(1);
+    expect(loop().scout.round?.filed).toBe(1);
+  });
 });
