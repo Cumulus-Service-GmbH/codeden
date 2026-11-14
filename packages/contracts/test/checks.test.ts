@@ -2,8 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   CHECK_RUN_NOTICE,
   CheckRunData,
-  checkTimeoutMs,
   checksOf,
+  checkTimeoutMs,
   Item,
   ProjectChecksResponse,
   ProjectConfigFile,

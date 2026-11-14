@@ -35,7 +35,8 @@ export class CodexEventMapper {
    * as a user message (with that id as `clientId`). Codex keeps only the text, so the sender
    * would otherwise be lost.
    */
-  private readonly senders = new Map<string, MessageSender>();
+  /** Who sent each message on its way, by `clientUserMessageId`, and the checks round it starts. */
+  private readonly senders = new Map<string, { from: MessageSender; checksRound?: number }>();
 
   constructor(
     sessionId: string,
@@ -81,16 +82,19 @@ export class CodexEventMapper {
     const id = randomUUID();
     // Bounded: an id whose echo never came (a failed turn/start) is dropped after a while.
     if (this.senders.size >= 50) this.senders.delete(this.senders.keys().next().value as string);
-    this.senders.set(id, input.from);
+    this.senders.set(id, {
+      from: input.from,
+      ...(input.checksRound ? { checksRound: input.checksRound } : {}),
+    });
     return id;
   }
 
   /** A user message with the sender recorded for its `clientId`. */
   private withSender(item: Item, clientId: string | null): Item {
-    const from = clientId ? this.senders.get(clientId) : undefined;
-    if (item.kind !== "user_message" || !clientId || !from) return item;
+    const sender = clientId ? this.senders.get(clientId) : undefined;
+    if (item.kind !== "user_message" || !clientId || !sender) return item;
     this.senders.delete(clientId);
-    return { ...item, input: { ...item.input, from } };
+    return { ...item, input: { ...item.input, ...sender } };
   }
 
   handle(n: ServerNotification): void {

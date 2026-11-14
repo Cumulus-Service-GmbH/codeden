@@ -9,6 +9,7 @@ import type {
 import { badRequest, conflict, type ServiceError } from "../errors";
 import type { ProjectService } from "../projects/project-service";
 import { type RunnerPort, toServiceError } from "../runner-port";
+import { freezeChecks } from "./checks";
 import { confirmedCheckpoint, forkPointMissing, forkTurn } from "./fork-turn";
 import type { LaunchFork } from "./launcher";
 import { inheritedStarter } from "./origin";
@@ -219,6 +220,11 @@ export function forkPlan(
     // The fork continues the same conversation: still planning if the source is, implementing
     // (at its permission level) if the source's plan was approved.
     planMode: source.planMode ?? false,
+    // Read again from the project's own folder, never the source's worktree (§9 Project checks).
+    checks: freezeChecks(project.path, "agent", {
+      untilPass: source.checks?.untilPass,
+      maxRounds: source.checks?.maxRounds,
+    }),
     status: "starting",
     cwd: project.path,
     worktreePath: null,

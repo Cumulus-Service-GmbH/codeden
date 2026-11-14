@@ -44,6 +44,7 @@ import {
 } from "./runner-port";
 import type { SecretStore } from "./secrets";
 import { AutoRetry, type AutoRetryDeps } from "./sessions/auto-retry";
+import { ChecksLoop } from "./sessions/checks-loop";
 import { GeneratedImages } from "./sessions/generated-images";
 import { SessionLauncher } from "./sessions/launcher";
 import { SessionLifecycle } from "./sessions/lifecycle";
@@ -200,6 +201,8 @@ export interface AppServices {
   prFeedback: PrFeedbackService;
   /** Continues agent sessions after transient failures and usage limits. */
   autoRetry: AutoRetry;
+  /** "Keep going until checks pass": runs a session's frozen checks after each turn (§9). */
+  checksLoop: ChecksLoop;
   /** Hides CodeDen's conversations from providers' own apps (Settings → Providers). */
   providerHistory: ProviderHistoryService;
   userHome: string;
@@ -277,6 +280,23 @@ export function createServices(opts: ServicesOptions): AppServices {
     utility,
     sandboxes,
   });
+  const checksLoop = new ChecksLoop({
+    db: opts.db,
+    store: opts.store,
+    repo: sessionRepo,
+    project: (id) => {
+      try {
+        return projects.get(id);
+      } catch {
+        return undefined;
+      }
+    },
+    runnerOf: (id) => runners.forSession(id),
+    send: (id, input) => sessions.send(id, { input, whenBusy: "queue" }, "codeden"),
+    hasPendingMessage: (id) => sessions.hasOutbox(id) || sessions.isDelivering(id),
+    log: opts.log,
+  });
+  sessions.setCheckRuns(checksLoop);
   const queue = new QueueService({
     outbox,
     repo: sessionRepo,
@@ -502,6 +522,7 @@ export function createServices(opts: ServicesOptions): AppServices {
       log: opts.log,
     }),
     providerHistory,
+    checksLoop,
     autoRetry: new AutoRetry({
       db: opts.db,
       store: opts.store,

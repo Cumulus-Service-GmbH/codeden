@@ -52,6 +52,18 @@ describe("CodexEventMapper", () => {
       e.type === "item.completed" && e.item.kind === "user_message" ? [e.item.input] : [],
     );
     expect(inputs.map((i) => i.from)).toEqual(["factory", undefined, undefined]);
+    // The checks loop's round (#371) comes back with its message too.
+    const checks = mapper.clientMessageId({
+      text: "Checks failed",
+      attachments: [],
+      from: "codeden",
+      checksRound: 2,
+    });
+    userMessage("u4", checks ?? null);
+    const last = events.at(-1);
+    expect(
+      last?.type === "item.completed" && last.item.kind === "user_message" && last.item.input,
+    ).toMatchObject({ from: "codeden", checksRound: 2 });
   });
 
   it("maps a turn with streamed text, a patch and a command", () => {

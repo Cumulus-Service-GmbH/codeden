@@ -10,6 +10,7 @@ import { badRequest, conflict, type ServiceError } from "../errors";
 import type { ProjectService } from "../projects/project-service";
 import { type RunnerPort, toServiceError } from "../runner-port";
 import type { UtilityService } from "../utility";
+import { freezeChecks } from "./checks";
 import type { ForkStart } from "./fork";
 import { buildHandoffBrief, handoffTranscript } from "./handoff-brief";
 import { inheritedStarter } from "./origin";
@@ -188,6 +189,11 @@ export function handoffPlan(
     effort: req.effort ?? (same ? source.effort : null),
     autonomy: source.autonomy,
     planMode: source.planMode ?? false,
+    // Read again from the project's own folder, never the source's worktree (§9 Project checks).
+    checks: freezeChecks(project.path, "agent", {
+      untilPass: source.checks?.untilPass,
+      maxRounds: source.checks?.maxRounds,
+    }),
     status: "starting",
     cwd: project.path,
     worktreePath: null,
