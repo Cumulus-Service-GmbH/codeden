@@ -217,6 +217,18 @@ export type ForkSessionRequest = z.infer<typeof ForkSessionRequest>;
 export const ForkSessionResponse = z.object({ sessionId: Id });
 export type ForkSessionResponse = z.infer<typeof ForkSessionResponse>;
 
+/**
+ * `GET /api/sessions/:id/export`: the session's transcript as Markdown, to copy or download and
+ * share outside CodeDen (§13). Messages, plans, one line per tool call and subagent threads,
+ * with the ledger's cost; reasoning, tool output and diffs are left out.
+ */
+export const SessionTranscriptExport = z.object({
+  /** `<slug of the title>-<YYYY-MM-DD>.md`. */
+  fileName: z.string().min(1),
+  markdown: z.string(),
+});
+export type SessionTranscriptExport = z.infer<typeof SessionTranscriptExport>;
+
 /** Longest note a handoff passes on ("What should it do next?"). */
 export const HANDOFF_NOTE_MAX = 4_000;
 

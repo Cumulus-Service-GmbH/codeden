@@ -9,6 +9,7 @@ import {
   type QueuedMessageList,
   RespondRequest,
   SendMessageRequest,
+  type SessionTranscriptExport,
   StartSessionRequest,
   SteerRequest,
   ThreadItemsQuery,
@@ -19,11 +20,13 @@ import { Hono } from "hono";
 import type { AppServices } from "../services/container";
 import { badRequest, notFound } from "../services/errors";
 import { clientItemRecord } from "../services/sessions/client-items";
+import { exportSessionTranscript } from "../services/sessions/transcript-export";
 import { jsonBody, queryOf } from "./validate";
 
 /**
  * `/api/sessions`: start (with conflict handling), message, steer, interrupt, respond, stop,
- * fork, handoff, archive (removes the worktree, §9), unarchive and the queued-message tray.
+ * fork, handoff, export as Markdown, archive (removes the worktree, §9), unarchive and the
+ * queued-message tray.
  */
 export function sessionRoutes(s: AppServices) {
   return (
@@ -76,6 +79,11 @@ export function sessionRoutes(s: AppServices) {
           c.req.param("id"),
           c.req.valid("json"),
         );
+        return c.json(body);
+      })
+      // The transcript as Markdown, to copy or download and share outside CodeDen (§13).
+      .get("/:id/export", async (c) => {
+        const body: SessionTranscriptExport = await exportSessionTranscript(s, c.req.param("id"));
         return c.json(body);
       })
       .post("/:id/archive", jsonBody(ArchiveSessionRequest), async (c) =>

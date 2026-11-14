@@ -106,6 +106,19 @@ In the dialog, pick the provider, model and effort, and optionally say what the 
 
 The new session's header shows **Handed off from …** with a link back, and **Details** shows where it came from. **Compare with** in the Diff panel shows how its code differs from the original's. Hand off works on every provider and needs no fork support. It's available once the session has done some work, and while no turn is running and nothing waits on you: a session that failed or was stopped (after a usage limit, say) can be handed off. CodeDen won't hand off to a provider that can't keep the session's permissions: read-only needs a provider that enforces it, and a session that's still planning needs one with plan mode.
 
+## Share a session
+
+Want to show how an agent solved something in an issue, a pull request or a write-up, or keep a record outside CodeDen? Open the session's **⋯** menu (in the thread header, or on its row in the sidebar) and choose **Copy as Markdown** to put the whole transcript on the clipboard, or **Download as Markdown** to save it as `<title>-<date>.md`. It works for every session, including the project manager, the orchestrator, archived sessions and one that's still working (you get what it has done so far).
+
+The Markdown holds:
+
+- **A summary at the top:** project, provider, model and effort, branch, the linked issue and pull request, when it started, its status, the result the agent recorded, and its cost and tokens, labelled as in the app (`≈` for an estimate from list prices, "API-equivalent" with a subscription login).
+- **Every turn in order,** with its time and cost: your messages (and messages from a project manager, the orchestrator, the software factory, an automation or CodeDen, each under who sent it), the agent's replies, plans, todo lists, questions and their answers, approvals and who decided them, notices and errors. Attachments are named, not included.
+- **One line per tool call:** the command it ran (with its exit code when it failed), the files it edited (with lines added and removed), read or searched, the pages it fetched, the MCP tools and browser actions it used. Paths are relative to the worktree.
+- **Subagents** with their task, result and cost, and their own thread folded into a collapsible block (GitHub shows it as a "details" toggle).
+
+It leaves out the agent's reasoning, tool output and diffs, so it stays readable and safe to paste. The pull request has the diffs. Skim it before posting it somewhere public all the same: the agent's messages and commands are included as written.
+
 ## Files
 
 A tree of the worktree with a syntax-highlighted viewer. Binary files are detected and skipped.
@@ -120,7 +133,7 @@ The shell is PowerShell on Windows and your `$SHELL` elsewhere. Set `CODEDEN_SHE
 
 ## Archiving and worktree cleanup
 
-**Archive** stops the session, hides it from the sidebar and removes its worktree. It's in the session's menu in the sidebar (right-click the row, use the **⋯** button that shows on hover, or press **Shift+F10** or the menu key) and in the **⋯** menu of the thread header. The same menu opens, renames, copies a link to, and stops the session. The toast offers **Undo**. If the worktree has uncommitted changes it is kept, and the toast also offers **Remove anyway** (it then says the changes were discarded). If something still has a file in the worktree open (a terminal, a dev server, an editor), nothing is deleted and the toast offers **Try again**; CodeDen also retries on its own every hour. Archiving a project cleans up the worktrees of its sessions that aren't working.
+**Archive** stops the session, hides it from the sidebar and removes its worktree. It's in the session's menu in the sidebar (right-click the row, use the **⋯** button that shows on hover, or press **Shift+F10** or the menu key) and in the **⋯** menu of the thread header. The same menu opens, renames, copies a link to, copies or downloads as Markdown ([Share a session](#share-a-session)), and stops the session. The toast offers **Undo**. If the worktree has uncommitted changes it is kept, and the toast also offers **Remove anyway** (it then says the changes were discarded). If something still has a file in the worktree open (a terminal, a dev server, an editor), nothing is deleted and the toast offers **Try again**; CodeDen also retries on its own every hour. Archiving a project cleans up the worktrees of its sessions that aren't working.
 
 Archived sessions live on the project home: an expanded project in the sidebar ends with an **N archived** row that opens the project's sessions on the **Archived** filter, where each one has **Unarchive**. The command palette (**Ctrl K**) still finds archived sessions and labels them **Archived**.
 

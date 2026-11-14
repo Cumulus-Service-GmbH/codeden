@@ -23,6 +23,7 @@ import {
   SessionFileContent,
   SessionFileList,
   SessionSnapshot,
+  SessionTranscriptExport,
   Settings,
   SetupStatus,
   SlashCommandList,
@@ -119,6 +120,8 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
       post(`/sessions/${enc(id)}/fork`, req ?? {}, (v) => ForkSessionResponse.parse(v)),
     handoffSession: (id, req) =>
       post(`/sessions/${enc(id)}/handoff`, req, (v) => HandoffSessionResponse.parse(v)),
+    exportSession: (id) =>
+      get(`/sessions/${enc(id)}/export`, (v) => SessionTranscriptExport.parse(v)),
     queue: httpQueueApi(http),
     searchTranscripts: ({ q, projectId, role, includeArchived, cursor, limit }) => {
       const params = new URLSearchParams({ q });

@@ -10,19 +10,8 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { useClient } from "@/lib/api";
 import { notifyCopyFailed } from "@/lib/copy";
+import { saveBlob, saveMarkdown } from "@/lib/download";
 import { platform } from "@/lib/platform";
-
-/** Save a blob as a file through a temporary link. */
-export function saveBlob(fileName: string, blob: Blob): void {
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = fileName;
-  document.body.append(a);
-  a.click();
-  a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
-}
 
 /** Bytes of a base64 string. */
 export function base64Bytes(b64: string): Uint8Array<ArrayBuffer> {
@@ -42,7 +31,7 @@ export function ExportMenu({ automationId }: { automationId: string }) {
     mutationFn: async (how: "download" | "copy") => {
       const file = await client.automations.exportOne(automationId);
       if (how === "download") {
-        saveBlob(file.fileName, new Blob([file.markdown], { type: "text/markdown" }));
+        saveMarkdown(file.fileName, file.markdown);
       } else {
         // Fetched first, so the gesture may have expired; a failed copy says so itself.
         const copied = await platform.writeClipboard(file.markdown);

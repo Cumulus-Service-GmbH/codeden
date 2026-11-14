@@ -7,6 +7,7 @@ import {
   type NewEvent,
   type ServerToClientMessage,
   SessionSnapshot,
+  SessionTranscriptExport,
   Settings,
   Snapshot,
 } from "@codeden/contracts";
@@ -137,6 +138,20 @@ describe("api", () => {
     expect(
       (await fetch(`${server.url}/api/sessions/nope/snapshot`, { headers: auth })).status,
     ).toBe(404);
+  });
+
+  it("exports a session's transcript as Markdown", async () => {
+    for (const e of sampleSessionEvent()) server.store.append([e]);
+    const res = await fetch(`${server.url}/api/sessions/s1/export`, { headers: auth });
+    expect(res.status).toBe(200);
+    const file = SessionTranscriptExport.parse(await res.json());
+    expect(file.fileName).toMatch(/^say-hello-\d{4}-\d{2}-\d{2}\.md$/);
+    expect(file.markdown).toMatch(/^# Say hello\n/);
+    expect(file.markdown).toContain("## Turn 1 · ");
+    expect(file.markdown).toContain("**Agent**\n\nHello world");
+    const missing = await fetch(`${server.url}/api/sessions/nope/export`, { headers: auth });
+    expect(missing.status).toBe(404);
+    expect(await missing.json()).toMatchObject({ error: { code: "session_not_found" } });
   });
 
   it("returns a session's turns in the order they started, not by id", async () => {

@@ -1,8 +1,20 @@
-import { Archive, ArchiveRestore, ExternalLink, Link2, Pencil, Square } from "lucide-react";
+import {
+  Archive,
+  ArchiveRestore,
+  ClipboardCopy,
+  ExternalLink,
+  FileDown,
+  Link2,
+  Pencil,
+  Square,
+} from "lucide-react";
 import type { SessionActions } from "@/lib/session-actions";
 import type { RowMenuEntry } from "./row-menu";
 
-/** A session row's menu: open, rename, copy link, stop (while working), archive or unarchive. */
+/**
+ * A session row's menu: open, rename, copy link, copy or download as Markdown, stop (while
+ * working), archive or unarchive.
+ */
 export function sessionMenuEntries(
   actions: SessionActions,
   startRename: () => void,
@@ -11,6 +23,8 @@ export function sessionMenuEntries(
     { label: "Open", icon: <ExternalLink />, onSelect: actions.open },
     { label: "Rename", icon: <Pencil />, onSelect: startRename, keepFocus: true },
     { label: "Copy link", icon: <Link2 />, onSelect: () => void actions.copyLink() },
+    { label: "Copy as Markdown", icon: <ClipboardCopy />, onSelect: actions.copyMarkdown },
+    { label: "Download as Markdown", icon: <FileDown />, onSelect: actions.downloadMarkdown },
   ];
   if (actions.canStop) entries.push({ label: "Stop", icon: <Square />, onSelect: actions.stop });
   entries.push(

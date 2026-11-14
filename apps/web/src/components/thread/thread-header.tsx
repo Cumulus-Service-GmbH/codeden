@@ -6,7 +6,9 @@ import {
   ArchiveRestore,
   ArrowRightLeft,
   Bot,
+  ClipboardCopy,
   Copy,
+  FileDown,
   FolderTree,
   GitBranch,
   GitFork,
@@ -247,6 +249,12 @@ export function ThreadHeader({ session, running }: { session: Session; running: 
                 <Copy /> Copy branch name
               </DropdownMenuItem>
             )}
+            <DropdownMenuItem onSelect={actions.copyMarkdown}>
+              <ClipboardCopy /> Copy as Markdown
+            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={actions.downloadMarkdown}>
+              <FileDown /> Download as Markdown
+            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => layout.openRightTab("details")}>
               <Bot /> Session details
             </DropdownMenuItem>

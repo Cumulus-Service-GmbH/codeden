@@ -10,7 +10,9 @@ import { toast } from "sonner";
 import { useTranscriptsStore } from "@/stores/transcripts";
 import { useUiStore } from "@/stores/ui";
 import { useClient } from "./api";
-import { copyWithFeedback } from "./copy";
+import { copyWithFeedback, notifyCopyFailed } from "./copy";
+import { saveMarkdown } from "./download";
+import { platform } from "./platform";
 import { useSnapshotData } from "./queries";
 
 /** Sessions that can be stopped from a menu: ones with a turn running or a question open. */
@@ -187,8 +189,9 @@ export function useForkSession(session: Session) {
 
 /**
  * What you can do to a session from its row menu, the thread header's ⋯ menu or the command
- * palette: open, rename, copy its link, make an automation from it, stop, fork, archive (with
- * Undo) and unarchive. They all use this, so they show the same toasts.
+ * palette: open, rename, copy its link, copy or download it as Markdown, make an automation from
+ * it, stop, fork, archive (with Undo) and unarchive. They all use this, so they show the same
+ * toasts.
  */
 export function useSessionActions(session: Session) {
   const client = useClient();
@@ -219,6 +222,25 @@ export function useSessionActions(session: Session) {
     mutationFn: (title: string) => client.updateSession(session.id, { title }),
     onError,
   });
+  // Share the transcript (§13): the server writes the Markdown, every thread included.
+  const exportMarkdown = useMutation({
+    mutationFn: async (how: "copy" | "download") => {
+      const file = await client.exportSession(session.id);
+      if (how === "download") {
+        saveMarkdown(file.fileName, file.markdown);
+        return { how, fileName: file.fileName, copied: false };
+      }
+      // Fetched first, so the click's gesture may have expired; a failed copy says so itself.
+      const copied = await platform.writeClipboard(file.markdown);
+      if (!copied) notifyCopyFailed();
+      return { how, fileName: file.fileName, copied };
+    },
+    onSuccess: ({ how, fileName, copied }) => {
+      if (how === "download") toast.success(`Downloaded ${fileName}`);
+      else if (copied) toast.success("Copied as Markdown");
+    },
+    onError: (error) => toast.error("Couldn't export the session", { description: message(error) }),
+  });
   const fork = useForkSession(session);
   const setHandoff = useUiStore((s) => s.setHandoff);
   const blocked = useHandoffBlocked(session);
@@ -233,6 +255,10 @@ export function useSessionActions(session: Session) {
     copyLink: async () => {
       await copyWithFeedback(sessionLink(session.id), "Link copied");
     },
+    /** Copy the transcript as Markdown, to paste into an issue, a PR or a write-up. */
+    copyMarkdown: () => exportMarkdown.mutate("copy"),
+    /** Download the transcript as a `.md` file. */
+    downloadMarkdown: () => exportMarkdown.mutate("download"),
     canMakeAutomation: canMakeAutomation(session),
     /** Open the New automation editor prefilled from this session; nothing is saved yet. */
     makeAutomation: () => {

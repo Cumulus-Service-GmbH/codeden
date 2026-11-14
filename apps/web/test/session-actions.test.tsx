@@ -281,6 +281,8 @@ describe("session row menu", () => {
     open: vi.fn(),
     rename: vi.fn(),
     copyLink: vi.fn(async () => {}),
+    copyMarkdown: vi.fn(),
+    downloadMarkdown: vi.fn(),
     canMakeAutomation: true,
     makeAutomation: vi.fn(),
     canStop: false,
@@ -297,11 +299,13 @@ describe("session row menu", () => {
     ...patch,
   });
 
-  it("lists Open, Rename, Copy link, Stop while working, then Archive", () => {
+  it("lists Open, Rename, Copy link, the Markdown exports, Stop while working, then Archive", () => {
     expect(labels(sessionMenuEntries(fake({ canStop: true }), vi.fn()))).toEqual([
       "Open",
       "Rename",
       "Copy link",
+      "Copy as Markdown",
+      "Download as Markdown",
       "Stop",
       "—",
       "Archive",
@@ -310,9 +314,20 @@ describe("session row menu", () => {
       "Open",
       "Rename",
       "Copy link",
+      "Copy as Markdown",
+      "Download as Markdown",
       "—",
       "Archive",
     ]);
+  });
+
+  it("copies and downloads the transcript as Markdown", () => {
+    const actions = fake({});
+    const entries = sessionMenuEntries(actions, vi.fn());
+    action(entries, "Copy as Markdown")?.onSelect();
+    expect(actions.copyMarkdown).toHaveBeenCalled();
+    action(entries, "Download as Markdown")?.onSelect();
+    expect(actions.downloadMarkdown).toHaveBeenCalled();
   });
 
   it("offers Unarchive for archived sessions and keeps focus for Rename", () => {

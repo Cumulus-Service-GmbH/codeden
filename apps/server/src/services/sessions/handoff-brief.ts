@@ -209,7 +209,8 @@ export function editedPaths(edits: FileEditCall[], root: string | null): string[
   return out;
 }
 
-function relativeTo(path: string, root: string | null): string {
+/** `path` with forward slashes, relative to `root` when inside it (else as given). */
+export function relativeTo(path: string, root: string | null): string {
   const p = path.replace(/\\/g, "/");
   if (!root) return p;
   const r = root.replace(/\\/g, "/").replace(/\/+$/, "");

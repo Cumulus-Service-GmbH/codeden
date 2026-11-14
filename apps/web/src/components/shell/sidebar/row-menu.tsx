@@ -143,7 +143,7 @@ export function RowMenu({
       <ContextMenuTrigger asChild onKeyDown={menu.onKeyDown} onContextMenu={menu.onContextMenu}>
         {children}
       </ContextMenuTrigger>
-      <ContextMenuContent className="w-44" onCloseAutoFocus={closeAutoFocus(menu)}>
+      <ContextMenuContent className="w-52" onCloseAutoFocus={closeAutoFocus(menu)}>
         <Entries
           entries={entries}
           menu={menu}
@@ -181,7 +181,7 @@ export function RowMenuButton({
       >
         <Ellipsis className="size-3.5" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-44" onCloseAutoFocus={closeAutoFocus(menu)}>
+      <DropdownMenuContent align="end" className="w-52" onCloseAutoFocus={closeAutoFocus(menu)}>
         <Entries
           entries={entries}
           menu={menu}

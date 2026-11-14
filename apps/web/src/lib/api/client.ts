@@ -36,6 +36,7 @@ import type {
   SessionFileContent,
   SessionFileList,
   SessionSnapshot,
+  SessionTranscriptExport,
   Settings,
   SettingsPatch,
   SetupStatus,
@@ -146,6 +147,11 @@ export interface CodeDenClient {
    * work as its first message instead of the conversation (§9). The source is left as it is.
    */
   handoffSession(sessionId: string, req: HandoffSessionRequest): Promise<HandoffSessionResponse>;
+  /**
+   * The session's transcript as Markdown, with a file name, to copy or download and share
+   * outside CodeDen (§13). Every thread is included; reasoning, tool output and diffs aren't.
+   */
+  exportSession(sessionId: string): Promise<SessionTranscriptExport>;
   /** Hide a session and remove its worktree (§9); `force` drops uncommitted changes. */
   archiveSession(sessionId: string, opts?: { force?: boolean }): Promise<ArchiveSessionResponse>;
   unarchiveSession(sessionId: string): Promise<Session>;
