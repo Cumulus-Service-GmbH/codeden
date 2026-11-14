@@ -1,4 +1,5 @@
 import { type FactoryItem, type GitHubPrRef, stoppedRetry } from "@codeden/contracts";
+import { isVerdictRecord, verdictHead } from "./approval";
 import type { FactoryContext } from "./context";
 import type { FactoryPr } from "./github-port";
 import { closeInboxFor } from "./merge";
@@ -11,7 +12,7 @@ import { CLEAN_REVIEW, withoutStrikes } from "./review-environment";
  * Stopped work with an open PR (§10.1, Ownership). An item whose revise rounds ran out keeps its
  * PR, and the PR often moves on afterwards: its builder resolves conflicts, or fixes a finding
  * after the last review. The verdict it stopped on then no longer covers the PR. So the loop
- * records the head each verdict covers, and a failed item whose open, mergeable PR has a newer
+ * records the head each verdict covers (`approval.ts`), and a failed item whose open, mergeable PR has a newer
  * head with CI green goes back to a fresh review by itself, with no new build: it merges on
  * approve as usual, and a request for changes gets one more revise round. Once per head, at
  * most `MAX_AUTO_REREVIEWS` times per item. Retry does the same with the PR open (fresh revise
@@ -21,26 +22,8 @@ import { CLEAN_REVIEW, withoutStrikes } from "./review-environment";
 /** Automatic re-reviews per item (each also allows one more revise round). */
 export const MAX_AUTO_REREVIEWS = 3;
 
-/** `verdict_<sha>`: the PR head the item's last recorded verdict covers. */
-const VERDICT = "verdict_";
 /** `auto_rereview_<sha>`: the loop sent the stopped item back to review for that head. */
 const AUTO = "auto_rereview_";
-
-/** The PR head the item's last recorded verdict covers; null when unknown. */
-export function verdictHead(item: Pick<FactoryItem, "nudges">): string | null {
-  const key = Object.keys(item.nudges).find((k) => k.startsWith(VERDICT));
-  return key ? key.slice(VERDICT.length) : null;
-}
-
-/** The nudges recording that the item's latest verdict covers `head`. */
-export function withVerdictHead(
-  nudges: FactoryItem["nudges"],
-  head: string | null,
-  at: string,
-): FactoryItem["nudges"] {
-  const rest = Object.fromEntries(Object.entries(nudges).filter(([k]) => !k.startsWith(VERDICT)));
-  return head ? { ...rest, [`${VERDICT}${head}`]: at } : rest;
-}
 
 /** How many times the loop sent the item back to review by itself. */
 export function autoReReviews(item: Pick<FactoryItem, "nudges">): number {
@@ -54,7 +37,7 @@ export function reviseRoundsAllowed(item: FactoryItem, maxFixAttempts: number): 
 
 /** Whether a nudge belongs to these records (kept when the item starts afresh, `recover.ts`). */
 export function isReReviewRecord(key: string): boolean {
-  return key.startsWith(VERDICT) || key.startsWith(AUTO);
+  return isVerdictRecord(key) || key.startsWith(AUTO);
 }
 
 /**

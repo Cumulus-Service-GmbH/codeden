@@ -89,6 +89,7 @@ Every pull request carries its test results, and screenshots when UI files chang
 - **The merge checks** run beside it: protected areas, size, CI, review, tests, test results, security and screenshots. CI on the pull request is the authority for the full test suite.
 - **Revise rounds.** A review that asks for changes, or a failed check, sends the work back to the same builder to fix in the same branch: up to **2 revise rounds**. After that the item stops (see [When things go wrong](#when-things-go-wrong)).
 - **Lessons.** With its verdict, a reviewer can record up to three general rules for the repository (a convention, a recurring mistake, a test to run or avoid). New builders and reviewers get the 20 most recent in their briefs, so a finding that keeps coming back stops costing a revise round. The panel lists them under **Lessons**, where **Forget** removes one for good. Only reviews of trusted work teach the factory, and **Learn from reviews** in the settings turns it off (see [Lessons](software-factory.md#lessons-the-factory-learns-from-its-reviews)).
+- **An approval covers one head commit.** The reviewer approves the commit it was asked to review, and only that commit merges on the approval. If new commits land on the pull request after it (from the builder, a conflict resolution or anyone else), the review check goes back to waiting and the reviewer reviews only what changed since the approved commit. The item says why: "New commits since the approval (abc1234 → def5678): re-review running". Merging the default branch in, or a rebase that brings only its commits in, leaves the pull request's own changes as they were, so the approval stands.
 
 ### Merge
 
@@ -110,8 +111,8 @@ With auto-merge on, a pull request whose checks all pass doesn't merge on the sp
 
 - **Order:** a revert goes first, then the pull request whose checks passed first.
 - **Only the head of the queue acts.** The others say "queued to merge (number 2 in line)".
-- **Behind the default branch?** The factory asks GitHub to update the head pull request (**Update branch**, pinned to its current head commit). No agent and no new review is needed. CI then runs on the new head.
-- **Merged on a later pass** once CI on that head is green: a squash merge, again pinned to the head commit, at most one per pass.
+- **Behind the default branch?** The factory asks GitHub to update the head pull request (**Update branch**, pinned to its current head commit). No agent is needed, and no new review while the pull request's own changes stay the same; only when the default branch changed lines right next to them does the reviewer look at the new head first. CI then runs on the new head.
+- **Merged on a later pass** once CI on that head is green: a squash merge, again pinned to the head commit, at most one per pass. Right before the merge the factory checks again that the review's approval covers that exact commit. If the head moved, nothing merges until the new commits are reviewed.
 - **Held** while the loop is paused (reverts excepted), when today's merges reached **Auto-merges per day** (5), and while a kill switch is on.
 
 **Why one at a time?** Every merge changes the default branch. A pull request that passed CI against the old default branch hasn't been tested against the new one, so each pull request is updated and tested on top of the one before it. Merging several at once could merge two changes that each pass alone but break together.

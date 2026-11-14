@@ -3,8 +3,10 @@ import {
   type FactoryLoop,
   isFactoryMode,
   type Project,
+  type ReviewVerdict,
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
+import { settleApproval, verdictHead } from "./approval";
 import { codeFiles, evaluateChecks, hasTestResults, sameChecks } from "./checks";
 import { kickCi } from "./ci-kick";
 import { type FactoryContext, visionOf } from "./context";
@@ -25,7 +27,7 @@ import {
   worktreeSettled,
 } from "./rebase";
 import { adoptAgentPr } from "./rebuild";
-import { recheckOf } from "./recheck";
+import { recheckCause } from "./recheck";
 import { ensureReviewer, reviewerStalled } from "./reviewer";
 import { mayAutoMerge } from "./trust";
 
@@ -102,16 +104,21 @@ export async function advanceVerifying(
     auditCache.set(headKey, await runAudit(ctx, loop.tuning.auditCommand, worktree));
   }
   const evidence = await gatherEvidence(ctx, project, item, pr, headKey);
-  // CI gets its time from when this head first appeared, not from when verification began.
-  const nudgesFor = (n: FactoryItem["nudges"], reviewed: boolean) =>
-    settleConflict(trackHead(n, pr, now.toISOString()).nudges, pr, reviewed);
-  const head = trackHead(item.nudges, pr, now.toISOString());
-  const recheck = recheckOf({ ...item, nudges: nudgesFor(item.nudges, Boolean(item.review)) });
+  // CI gets its time from when this head first appeared, not from when verification began. An
+  // approval covers one head: a new head keeps it only with the same change (`approval.ts`).
+  const at = now.toISOString();
+  const nudgesFor = (n: FactoryItem["nudges"], review: ReviewVerdict | null) => {
+    const tracked = settleConflict(trackHead(n, pr, at).nudges, pr, Boolean(review));
+    return settleApproval(n, tracked, pr, review, at);
+  };
+  const head = trackHead(item.nudges, pr, at);
+  const settled = { nudges: nudgesFor(item.nudges, item.review) };
   const { checks, outcome } = evaluateChecks({
     pr,
     issueTitle: item.issue?.title ?? item.title,
     review: item.review,
-    recheck: recheck !== null,
+    approvedHead: verdictHead(settled),
+    recheck: recheckCause(settled),
     reviewer: item.reviewerProvider,
     type: item.type,
     evidence: evidence.screenshots,
@@ -129,7 +136,7 @@ export async function advanceVerifying(
     ...i,
     pr: pr.ref,
     checks: sameChecks(i.checks, checks) ? i.checks : checks,
-    nudges: nudgesFor(i.nudges, Boolean(i.review)),
+    nudges: nudgesFor(i.nudges, i.review),
   }));
 
   if (outcome === "escalate") return escalate(ctx, loop, current, checks);
