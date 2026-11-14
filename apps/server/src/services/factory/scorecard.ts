@@ -192,11 +192,12 @@ export function scorecard(
 }
 
 /**
- * `GET /api/projects/:id/factory/scorecard`: the project's items, the models of its factory
- * sessions (archived ones included) and what the counted items cost, from one ledger read.
+ * `GET /api/projects/:id/factory/scorecard`: the project's items, the models of the counted
+ * items' builder and reviewer sessions (looked up by id, archived or not, however many sessions
+ * the project has had since) and what the counted items cost, from one ledger read.
  */
 export async function buildScorecard(
-  ctx: FactoryContext,
+  ctx: Pick<FactoryContext, "projects" | "now" | "store" | "repo" | "usage" | "sessions">,
   projectId: string,
   days: ScorecardDays,
 ): Promise<FactoryScorecard> {
@@ -207,7 +208,9 @@ export async function buildScorecard(
   const counted = ctx.store
     .items(projectId)
     .filter((i) => scorecardOutcome(i, since, end) !== null);
-  const models = new Map(ctx.sessions.list(projectId).map((s) => [s.id, s.model]));
+  const models = ctx.repo.modelsOf(
+    counted.flatMap((i) => [i.builderSessionId, i.reviewerSessionId].filter((id) => id !== null)),
+  );
   const costs = await itemCosts(ctx, projectId, project.factoryLimits, counted);
   return scorecard(projectId, counted, { models, costs }, now, days);
 }

@@ -26,6 +26,9 @@ import { notFound } from "../errors";
 import { ACTIVE_RUN_STATUSES, ACTIVE_SESSION_STATUSES } from "./conflicts";
 import type { ForkStart } from "./fork";
 
+/** Session ids per query of `modelsOf`, so no query has too many parameters. */
+const ID_CHUNK = 500;
+
 /** A `file_edit` tool call. */
 export type FileEditCall = Extract<ToolCallItem, { toolKind: "file_edit" }>;
 
@@ -148,6 +151,24 @@ export class SessionRepo {
       .limit(1000)
       .all()
       .map(rowToSession);
+  }
+
+  /**
+   * The model of each of these sessions that exists (null: the provider's default), by id. Not
+   * capped like `list`: a session far down a busy project's list is still found.
+   */
+  modelsOf(ids: Iterable<string>): Map<string, string | null> {
+    const all = [...new Set(ids)];
+    const out = new Map<string, string | null>();
+    for (let i = 0; i < all.length; i += ID_CHUNK) {
+      const rows = this.db
+        .select({ id: sessions.id, model: sessions.model })
+        .from(sessions)
+        .where(inArray(sessions.id, all.slice(i, i + ID_CHUNK)))
+        .all();
+      for (const r of rows) out.set(r.id, r.model);
+    }
+    return out;
   }
 
   /**

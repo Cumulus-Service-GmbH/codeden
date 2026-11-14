@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   type FactoryItem,
   type FactoryItemCost,
@@ -315,7 +316,7 @@ describe("the scorecard over the factory's store, sessions and ledger (#361)", (
     await enable();
     const created = backlogItem("Add a counter", 7);
     const builder = await session("issue:7", "codex", "gpt-5.5");
-    const reviewer = await session(`factory:review:${created.id}`, "claude", null);
+    const reviewer = await session(`factory:review:${created.id}`, "claude", "claude-opus-4-5");
     // Cleanup archived both once the item finished.
     for (const id of [builder, reviewer]) {
       env.repo.update(id, (s) => ({ ...s, archivedAt: new Date().toISOString() }));
@@ -346,7 +347,38 @@ describe("the scorecard over the factory's store, sessions and ledger (#361)", (
         estimatedUsd: 2,
       }),
     ]);
-    expect(card.reviewers[0]?.reviewer).toEqual({ provider: "claude", model: null });
+    expect(card.reviewers[0]?.reviewer).toEqual({ provider: "claude", model: "claude-opus-4-5" });
+
+    // A busy project starts many sessions after them (the session list stops at 1000): the
+    // models are still those the sessions ran, not the providers' defaults.
+    const newer = Date.now() + 60_000;
+    const template = env.repo.get(builder);
+    for (let n = 0; n < 1_001; n++) {
+      const at = new Date(newer + n).toISOString();
+      env.repo.create(
+        {
+          ...template,
+          id: randomUUID(),
+          startedBy: { kind: "user" },
+          workKey: `request:${n}`,
+          model: "other-model",
+          archivedAt: null,
+          createdAt: at,
+          updatedAt: at,
+        },
+        { workspaceMode: "worktree", workspaceFallback: null, forced: null, queuedBehind: [] },
+      );
+    }
+    expect(
+      env.repo.list({ projectId: env.project.id, role: "agent" }).map((s) => s.id),
+    ).not.toContain(builder);
+    const later = await env.factory.scorecard(env.project.id, 30);
+    expect(later.builders.map((r) => r.builder)).toEqual([{ provider: "codex", model: "gpt-5.5" }]);
+    expect(later.reviewers.map((r) => r.reviewer)).toEqual([
+      { provider: "claude", model: "claude-opus-4-5" },
+    ]);
+    // Its cost is found by the sessions the item recorded, not the capped list either.
+    expect(later.builders[0]?.costUsd).toBe(2);
   });
 });
 

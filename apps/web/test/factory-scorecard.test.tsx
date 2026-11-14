@@ -1,6 +1,13 @@
-import type { FactoryScorecard, FactoryScorecardRow, ScorecardDays } from "@codeden/contracts";
-import { fireEvent, screen, waitFor, within } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import type {
+  EventEnvelope,
+  FactoryScorecard,
+  FactoryScorecardRow,
+  ScorecardDays,
+} from "@codeden/contracts";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, fireEvent, renderHook, screen, waitFor, within } from "@testing-library/react";
+import type { ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   agentLabel,
   costPerMerge,
@@ -12,7 +19,9 @@ import {
   rowLabel,
 } from "@/components/factory/scorecard";
 import { ScorecardCard } from "@/components/factory/scorecard-card";
+import { ClientProvider, type CodeDenClient } from "@/lib/api";
 import { createMockClient } from "@/lib/api/mock";
+import { invalidateFactory, SCORECARD_REFRESH_MS, useFactoryScorecard } from "@/lib/factory";
 import { renderWithClient } from "./utils";
 
 /** The factory scorecard on the factory panel (#361). */
@@ -135,5 +144,57 @@ describe("the Scorecard card (#361)", () => {
     expect(total(demo.reviewers)).toBe(demo.finished);
     expect(total(demo.pairs)).toBe(demo.finished);
     expect((await client.factory.scorecard("p-nope", 30)).finished).toBe(0);
+  });
+});
+
+describe("the scorecard's refresh on factory events (#361)", () => {
+  const event = (type: string) => ({ type, seq: 1, sessionId: null }) as unknown as EventEnvelope;
+  let queryClient: QueryClient;
+  beforeEach(() => {
+    vi.useFakeTimers();
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  });
+  afterEach(() => {
+    queryClient.clear();
+    vi.useRealTimers();
+  });
+  const advance = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms));
+
+  it("refetches an open scorecard once per burst of events, not once per event", async () => {
+    const scorecard = vi.fn(async (_id: string, days: ScorecardDays) => ({
+      projectId: "p-app",
+      days,
+      since: "2026-10-15T12:00:00.000Z",
+      finished: 0,
+      builders: [],
+      reviewers: [],
+      pairs: [],
+    }));
+    const client = { factory: { scorecard } } as unknown as CodeDenClient;
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <ClientProvider client={client}>
+        <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
+      </ClientProvider>
+    );
+    const hook = renderHook(() => useFactoryScorecard("p-app", 30), { wrapper });
+    await advance(0);
+    expect(scorecard).toHaveBeenCalledTimes(1);
+
+    // A busy factory: an item update every second.
+    for (let n = 0; n < 10; n++) {
+      act(() => invalidateFactory(queryClient, event("factory.item.updated")));
+      await advance(1_000);
+    }
+    expect(scorecard).toHaveBeenCalledTimes(1);
+    await advance(SCORECARD_REFRESH_MS);
+    // One refetch covered the whole burst; with no event since, none follows.
+    expect(scorecard).toHaveBeenCalledTimes(2);
+    await advance(SCORECARD_REFRESH_MS);
+    expect(scorecard).toHaveBeenCalledTimes(2);
+    // Events that aren't the factory's change nothing.
+    act(() => invalidateFactory(queryClient, event("session.updated")));
+    await advance(SCORECARD_REFRESH_MS);
+    expect(scorecard).toHaveBeenCalledTimes(2);
+    hook.unmount();
   });
 });
