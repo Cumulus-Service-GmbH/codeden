@@ -382,13 +382,18 @@ export class FakeFactoryGithub implements FactoryGithub {
     return this.visionPr;
   }
 
+  /**
+   * Like the real port: a revert PR with the merged PR's files, whose description says what it
+   * reverts (no `## Test results` section) and that has no evidence attached.
+   */
   async revertMerge(_projectId: string, merge: { sha: string; prNumber: number; title: string }) {
     if (!this.canRevertViaApi) return null;
     this.reverts.push({ sha: merge.sha, prNumber: merge.prNumber });
     const pr = this.openPr({
       sessionId: null,
       title: `Revert "${merge.title}"`,
-      files: ["src/app.ts", "test/app.test.ts"],
+      files: this.prs.get(merge.prNumber)?.files ?? ["src/app.ts", "test/app.test.ts"],
+      body: `Reverts #${merge.prNumber} (${merge.sha}).\n\nCI on \`main\` failed after the merge, so the CodeDen factory opened this revert and paused its loop.`,
     });
     return pr.ref;
   }
