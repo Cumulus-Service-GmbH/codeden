@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { ExternalLink, MessageCircleQuestion, RotateCcw, X } from "lucide-react";
+import { ExternalLink, FileCheck, MessageCircleQuestion, RotateCcw, X } from "lucide-react";
 import { toast } from "sonner";
 import { useRetryItem } from "@/components/factory/use-retry-item";
 import { Button } from "@/components/ui/button";
@@ -13,8 +13,8 @@ import { ViewCardButton } from "./view-card";
 
 /**
  * What a "Needs you" card asks of a person, and the buttons that do it in place: open the pull
- * request to review and merge it, retry or dismiss stopped work, or open the agent's session
- * to answer it.
+ * request to review and merge it, retry or dismiss stopped work, open the agent's session to
+ * answer it, or open the item to approve its spec.
  */
 export function NeedActions({
   card,
@@ -80,6 +80,17 @@ export function NeedActions({
         <Button size="xs" variant="outline" asChild>
           <Link to="/sessions/$sessionId" params={{ sessionId: card.sessionId }}>
             <MessageCircleQuestion /> Answer
+          </Link>
+        </Button>
+      )}
+      {need.kind === "approve_spec" && (
+        <Button size="xs" variant="outline" asChild>
+          <Link
+            to="/projects/$projectId/factory/$itemId"
+            params={{ projectId, itemId: card.item.id }}
+            aria-label={`Review the spec of ${name}`}
+          >
+            <FileCheck /> Review spec
           </Link>
         </Button>
       )}

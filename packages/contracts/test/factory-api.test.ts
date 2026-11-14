@@ -60,6 +60,15 @@ const item: FactoryItem = {
     testPath: null,
     at: ts,
   },
+  specApproval: {
+    state: "approved",
+    requestedAt: ts,
+    decidedAt: ts,
+    by: "user",
+    feedback: "Show the count in the tab title too",
+    rounds: 1,
+    sentAt: ts,
+  },
   issue: { number: 3, url: "https://github.com/acme/app/issues/3" },
   pr: { number: 4, url: "https://github.com/acme/app/pull/4", state: "open" },
   builderSessionId: "s1",
@@ -185,6 +194,7 @@ describe("factory API contracts (§10.1)", () => {
       author: _a,
       admittedBy: _ab,
       investigation: _i,
+      specApproval: _spec,
       failureKind: _fk,
       rebuiltFrom: _rf,
       stepSince: _ss,
@@ -208,6 +218,7 @@ describe("factory API contracts (§10.1)", () => {
       type: null,
       trust: "trusted",
       investigation: null,
+      specApproval: null,
     });
     // A tuning change carries only what it sets: the rest of the saved tuning is kept.
     expect(
@@ -225,13 +236,21 @@ describe("factory API contracts (§10.1)", () => {
       SetAutonomyModeRequest.safeParse({ mode: "dark_factory", tuning: { idleGraceMin: 0 } })
         .success,
     ).toBe(false);
-    // Loops saved before the reviewer settings keep today's behaviour.
+    // Loops saved before the reviewer settings (and spec approval) keep today's behaviour.
     expect(loop.tuning).toMatchObject({
       builderModel: null,
       reviewerProvider: "auto",
       reviewerModel: null,
       reviewerFallback: "builder",
+      specApproval: false,
     });
+    // Turning spec approval on carries only that knob.
+    expect(
+      SetAutonomyModeRequest.parse({ mode: "software_factory", tuning: { specApproval: true } })
+        .tuning,
+    ).toEqual({ specApproval: true });
+    expect(FactoryTuning.parse({ specApproval: true }).specApproval).toBe(true);
+    expect(FactoryTuning.safeParse({ specApproval: "yes" }).success).toBe(false);
     const agents = {
       builderProvider: "claude",
       builderModel: "claude-opus-5-5",

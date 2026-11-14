@@ -8,6 +8,7 @@ import type {
   GitHubIssueRef,
   GitHubPrRef,
   PipelineStep,
+  SpecApprovalState,
   WorkKey,
   WorkTrust,
   WorkType,
@@ -45,6 +46,8 @@ export interface FixtureWorkItem {
   note?: string;
   reason?: string;
   failureKind?: FactoryFailureKind;
+  /** Where its feature spec is in a person's approval (spec approval on). */
+  specApproval?: SpecApprovalState;
   /** Merge check counts, when its PR has no `mergeChecks` fixture. */
   checks?: { passed: number; failed: number; total: number };
 }

@@ -105,6 +105,7 @@ export async function setType(
     type: req.type,
     classification,
     investigation: null,
+    specApproval: null,
     note: null,
   }));
   if (item.type !== req.type) await announceType(ctx, projectId, updated, classification);
@@ -152,7 +153,9 @@ export function retry(
   return ctx.store.updateItem(item.id, (i) => ({
     ...i,
     stage: i.type ? "backlog" : "candidate",
+    // From the first step: a fresh analysis, and a fresh approval of its spec when that is on.
     investigation: null,
+    specApproval: null,
     attempts: 0,
     // A retry is a call to spend more: the per-item cap counts afresh (its cost still shows all).
     itemBudgetSince: ctx.now().toISOString(),

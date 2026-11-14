@@ -9,10 +9,12 @@ import {
   FactoryTuning,
   type FactoryWorkItem,
   type GitHubIssueRef,
+  type Investigation,
   isFactoryMode,
   lessonKey,
   parseVision,
   type ReviewVerdict,
+  type SpecApproval,
 } from "@codeden/contracts";
 import type { FactoryApi } from "../factory-api";
 import { demoScorecard } from "./factory-scorecard";
@@ -26,6 +28,39 @@ const delay = <T>(value: T, ms = 120): Promise<T> =>
 const now = () => new Date().toISOString();
 
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+
+/** The analysis of the mock's feature whose spec waits for approval. */
+const DEMO_ANALYSIS: Omit<Investigation, "at"> = {
+  kind: "analysis",
+  outcome: "implement",
+  summary: "Checkout takes card payments only; nothing redeems a gift card yet.",
+  details: [
+    "A **Gift card** field under the order summary, with an Apply button.",
+    "",
+    "- A valid code reduces the total by its balance, never below zero; the remainder stays on the card.",
+    "- An invalid or used-up code shows an inline error and changes nothing.",
+    "- The order records the code and the amount taken from it.",
+    "- Docs: the checkout guide gets a short Gift cards section.",
+  ].join("\n"),
+  testPath: null,
+};
+
+const DEMO_CRITERIA = [
+  "A valid code lowers the order total by up to its balance",
+  "An invalid or used-up code shows an inline error and changes nothing",
+  "The remaining balance is saved with the order",
+];
+
+/** A spec waiting for approval since `at`. */
+const pendingSpec = (at: string): SpecApproval => ({
+  state: "pending",
+  requestedAt: at,
+  decidedAt: null,
+  by: null,
+  feedback: null,
+  rounds: 0,
+  sentAt: null,
+});
 
 /** The approval merged mock items carry, with its non-blocking follow-ups. */
 const MOCK_APPROVAL: ReviewVerdict = {
@@ -99,6 +134,7 @@ function work(w: FixtureWorkItem, limits?: Pick<FactoryLimits, "itemBudget">): F
     trust: w.trust ?? "trusted",
     author: w.author ?? "hearth-co",
     source: w.workKey.startsWith("issue:") ? "issue" : "discovery",
+    specApproval: w.specApproval ?? null,
     attempts: w.attempts ?? 0,
     reason:
       w.reason ??
@@ -129,6 +165,8 @@ function work(w: FixtureWorkItem, limits?: Pick<FactoryLimits, "itemBudget">): F
 /** In-memory factory API over the mock world's fixtures (§10.1). */
 export function mockFactoryApi(world: MockWorld): FactoryApi {
   const visions = new Map<string, string>();
+  /** Decisions on specs that waited for approval, by item id. */
+  const specs = new Map<string, SpecApproval>();
   /** Follow-ups filed with "File issue", by `<itemId>:<index>`. */
   const filedFollowUps = new Map<string, GitHubIssueRef>();
   const project = (id: string) => world.snapshot.projects.find((p) => p.id === id);
@@ -147,7 +185,8 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       experimental: isFactoryMode(f.mode),
       pausedReason: null,
       globalKillSwitch: world.snapshot.settings.factory.killSwitch,
-      tuning: FactoryTuning.parse({}),
+      // Spec approval is on where a spec waits for it.
+      tuning: FactoryTuning.parse({ specApproval: f.inProgress.some((w) => w.specApproval) }),
       activeSessions: Math.min(f.inProgress.length, f.limits.maxConcurrentSessions),
       // The work-in-progress limit follows the agent limit (no `maxOpenPrs` set).
       wip: {
@@ -214,8 +253,9 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
     return w;
   };
   const item = (projectId: string, itemId: string): FactoryItem => {
-    const { cost: _cost, ...w } = find(projectId, itemId);
+    const { cost: _cost, specApproval: specState, ...w } = find(projectId, itemId);
     const s = status(projectId);
+    const spec = specState ? (specs.get(itemId) ?? pendingSpec(w.stepSince ?? now())) : null;
     return {
       ...w,
       projectId,
@@ -225,8 +265,11 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
         ? { type: w.type, confidence: "high", rationale: "From its label", by: "label", at: now() }
         : null,
       admittedBy: null,
-      investigation: null,
-      acceptanceCriteria: ["Behaviour covered by tests", "No visual regressions"],
+      investigation: spec ? { ...DEMO_ANALYSIS, at: spec.requestedAt } : null,
+      specApproval: spec,
+      acceptanceCriteria: spec
+        ? DEMO_CRITERIA
+        : ["Behaviour covered by tests", "No visual regressions"],
       builderSessionId: w.sessionId,
       builderProvider: "claude",
       reviewerSessionId: null,
@@ -409,6 +452,45 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       stage: "rejected",
       reason: req?.reason ? `Dismissed by you: ${req.reason}` : "Dismissed by you",
     }),
+    async decideSpec(id, itemId, req) {
+      const current = item(id, itemId).specApproval;
+      if (current?.state !== "pending") throw new Error("This spec doesn't wait for approval");
+      const approve = req.decision === "approve";
+      specs.set(itemId, {
+        ...current,
+        state: approve ? "approved" : "changes_requested",
+        decidedAt: now(),
+        by: "user",
+        feedback: approve ? current.feedback : req.feedback,
+        rounds: current.rounds + (approve ? 0 : 1),
+      });
+      const s = status(id);
+      const decided = (w: FactoryWorkItem): FactoryWorkItem =>
+        w.id !== itemId
+          ? w
+          : {
+              ...w,
+              specApproval: approve ? "approved" : "changes_requested",
+              step: approve ? "implement" : "analyze",
+              note: approve
+                ? "Spec approved: the builder implements it next"
+                : "Changes requested to the spec: the builder revises it",
+            };
+      world.factory.set(id, { ...s, inProgress: s.inProgress.map(decided) });
+      // Its inbox item no longer waits on you.
+      const ask = world.snapshot.inbox.find((x) => x.id === `inbox:factory-spec:${itemId}`);
+      if (ask?.status === "open") {
+        const at = now();
+        world.emitDomain({
+          type: "inbox.updated",
+          sessionId: null,
+          payload: {
+            item: { ...ask, status: "resolved", resolvedAt: at, updatedAt: at, resolution: null },
+          },
+        });
+      }
+      return delay(item(id, itemId));
+    },
     forgetLesson: async (id, lessonId) => {
       const s = status(id);
       const lesson = s.lessons.find((l) => l.id === lessonId);

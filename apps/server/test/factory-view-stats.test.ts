@@ -26,6 +26,7 @@ const base: FactoryItem = {
   author: null,
   admittedBy: null,
   investigation: null,
+  specApproval: null,
   issue: null,
   pr: null,
   builderSessionId: null,

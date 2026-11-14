@@ -29,6 +29,7 @@ import {
   stepLabel,
   TYPE_LABEL,
 } from "@/components/factory/meta";
+import { SpecApprovalCard } from "@/components/factory/spec-approval";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useFactoryItem } from "@/lib/factory";
 import { ago } from "@/lib/format";
@@ -175,6 +176,7 @@ export function FactoryItemPage({ projectId, itemId }: { projectId: string; item
                 {item.summary || item.title}
               </p>
             </section>
+            <SpecApprovalCard item={item} projectId={projectId} />
             <InvestigationCard item={item} />
             {item.acceptanceCriteria.length > 0 && (
               <section>

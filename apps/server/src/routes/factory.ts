@@ -8,6 +8,7 @@ import {
   type FactoryScorecard,
   FactoryScorecardQuery,
   FactorySetTypeRequest,
+  FactorySpecDecisionRequest,
   KillSwitchRequest,
   PutVisionRequest,
   SetAutonomyModeRequest,
@@ -23,6 +24,8 @@ import { jsonBody, queryOf } from "./validate";
  * `drain`: finish the work in flight, then stop); `factory/resume` also cancels a drain.
  * `DELETE factory/lessons/:lessonId` forgets a lesson (404 `lesson_not_found`).
  * `follow-ups/file` is "File issue" for one review follow-up of a merged item.
+ * `items/:itemId/spec` approves a feature's spec or asks for changes (409 `spec_not_pending`
+ * unless it waits for approval).
  * `factory/scorecard?days=7|30|90` (30 by default) is the scorecard by builder and reviewer.
  */
 export function projectFactoryRoutes(s: AppServices) {
@@ -77,6 +80,11 @@ export function projectFactoryRoutes(s: AppServices) {
     .post("/:id/factory/items/:itemId/dismiss", jsonBody(FactoryDismissRequest), async (c) => {
       const id = c.req.param("id");
       const item = f.dismiss(id, c.req.param("itemId"), c.req.valid("json"), "user");
+      return c.json<FactoryItemResponse>(await f.itemResponse(id, item));
+    })
+    .post("/:id/factory/items/:itemId/spec", jsonBody(FactorySpecDecisionRequest), async (c) => {
+      const id = c.req.param("id");
+      const item = await f.decideSpec(id, c.req.param("itemId"), c.req.valid("json"));
       return c.json<FactoryItemResponse>(await f.itemResponse(id, item));
     })
     .delete("/:id/factory/lessons/:lessonId", (c) =>

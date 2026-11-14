@@ -410,6 +410,7 @@ const ITEM_DEFAULTS = {
   author: null,
   admittedBy: null,
   investigation: null,
+  specApproval: null,
   nudges: {},
   largeChange: null,
   sessionsArchivedAt: null,

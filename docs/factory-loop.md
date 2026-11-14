@@ -233,8 +233,9 @@ The **Needs you** lane in the Factory view, and the header's **need you** count,
 - **Retry: stopped after N review rounds**: stopped work whose pull request is still open.
 - **Retry or dismiss: stopped without a pull request**: work that stopped in the last day without one.
 - **Answer the agent's question**: an agent asked you something or wants an approval.
+- **Approve the spec**: with [Approve specs before building](software-factory.md#approve-specs-before-building) on, a feature's spec waits for you after Analyze. Approve it and the agent builds it, or ask for changes and it revises the spec. While it waits it holds no agent and no room under **PRs open at most**.
 
-Your **inbox** also gets: pull requests ready for you, escalations, a paused loop (except for the budget), a regression (and a revert that can't merge), and work that's **stuck**: still conflicting after its one rebuild, refused by GitHub three times, waiting on CI that can never run (GitHub Actions off, or no workflow), or at its **per-item spend cap**.
+Your **inbox** also gets: specs to approve, pull requests ready for you, escalations, a paused loop (except for the budget), a regression (and a revert that can't merge), and work that's **stuck**: still conflicting after its one rebuild, refused by GitHub three times, waiting on CI that can never run (GitHub Actions off, or no workflow), or at its **per-item spend cap**.
 
 **The factory handles by itself:** merge conflicts and rebases, pull requests behind the default branch, infrastructure failures, re-reviews after new commits, CI that never started, issues closed on GitHub, and changes that are too large (the PM's call).
 

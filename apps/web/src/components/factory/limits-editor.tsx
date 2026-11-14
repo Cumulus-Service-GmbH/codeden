@@ -26,6 +26,7 @@ export type TuningDraft = AgentsDraft &
     | "watchTimeoutMin"
     | "maxOpenPrs"
     | "learnFromReviews"
+    | "specApproval"
   >;
 
 /** The editable tuning knobs of a saved tuning. */
@@ -39,6 +40,7 @@ export function tuningDraft(t: FactoryTuning): TuningDraft {
     maxFixAttempts: t.maxFixAttempts,
     watchTimeoutMin: t.watchTimeoutMin,
     learnFromReviews: t.learnFromReviews,
+    specApproval: t.specApproval,
     minBacklog: t.minBacklog,
     discoveryIntervalMin: t.discoveryIntervalMin,
     discoveryPerRound: t.discoveryPerRound,
@@ -141,6 +143,24 @@ export function LimitsEditor({
             <option value="strict">Strict: always re-test against the default branch</option>
           </select>
         </Field>
+      )}
+      {!dark && tuning && onTuningChange && (
+        <div className="flex items-start gap-2.5 text-xs">
+          <Switch
+            checked={tuning.specApproval}
+            aria-label="Approve specs before building"
+            onCheckedChange={(specApproval) => onTuningChange({ ...tuning, specApproval })}
+            className="mt-0.5"
+          />
+          <span>
+            Approve specs before building
+            <span className="block text-3xs text-muted-foreground">
+              A feature stops after Analyze until you approve its spec or ask for changes, so a
+              misunderstood request costs a short spec instead of a build and a review. Off: the
+              agent builds its spec at once. A dark factory never waits, so it skips this.
+            </span>
+          </span>
+        </div>
       )}
       <Field
         label="Trusted authors"

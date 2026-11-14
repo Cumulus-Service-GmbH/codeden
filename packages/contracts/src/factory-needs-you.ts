@@ -14,9 +14,17 @@ import type { FactoryFailureKind } from "./factory-prs";
  *   factory doesn't merge it);
  * - `retry`: it stopped with its pull request still open (out of review rounds, or stuck);
  * - `retry_or_dismiss`: it stopped without a pull request;
- * - `answer`: its agent asked a question or for an approval.
+ * - `answer`: its agent asked a question or for an approval;
+ * - `approve_spec`: its feature spec waits for a person to approve it or ask for changes
+ *   (`FactoryTuning.specApproval`).
  */
-export const FactoryNeedKind = z.enum(["merge", "retry", "retry_or_dismiss", "answer"]);
+export const FactoryNeedKind = z.enum([
+  "merge",
+  "retry",
+  "retry_or_dismiss",
+  "answer",
+  "approve_spec",
+]);
 export type FactoryNeedKind = z.infer<typeof FactoryNeedKind>;
 
 /** How long a failure without an open pull request waits for a decision before it drops off. */
@@ -44,6 +52,8 @@ export interface FactoryNeedContext {
   prWaitsForYou?: boolean;
   /** Its agent waits on a person (a question or an approval). */
   agentWaiting?: boolean;
+  /** Its spec waits for a person's approval (`SpecApproval` pending). */
+  specPending?: boolean;
 }
 
 const LIVE: ReadonlySet<FactoryItemStage> = new Set([
@@ -68,6 +78,7 @@ export function factoryNeed(
   }
   if (!LIVE.has(item.stage)) return null;
   if (ctx.agentWaiting) return "answer";
+  if (ctx.specPending) return "approve_spec";
   if (ctx.prWaitsForYou) return "merge";
   return null;
 }
@@ -89,5 +100,7 @@ export function factoryNeedLabel(
       return "Retry or dismiss: stopped without a pull request";
     case "answer":
       return "Answer the agent's question";
+    case "approve_spec":
+      return "Approve the spec";
   }
 }

@@ -36,6 +36,7 @@ export function w(id: string, n: number, patch: Partial<FactoryWorkItem>): Facto
     trust: "trusted",
     author: "octocat",
     source: "issue",
+    specApproval: null,
     attempts: 0,
     reason: null,
     note: null,

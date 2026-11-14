@@ -11,6 +11,7 @@ import {
   type FactoryRetryOptions,
   FactoryScorecard,
   type FactorySetTypeRequest,
+  type FactorySpecDecisionRequest,
   FactoryStatus,
   type KillSwitchMode,
   type KillSwitchRequestInit,
@@ -83,6 +84,15 @@ export interface FactoryApi {
    */
   dismiss(projectId: string, itemId: string, req?: FactoryDismissRequest): Promise<FactoryItem>;
   /**
+   * Approve a feature's spec that waits for approval, or ask for changes to it (the builder
+   * revises its analysis). 409 `spec_not_pending` when its spec doesn't wait.
+   */
+  decideSpec(
+    projectId: string,
+    itemId: string,
+    req: FactorySpecDecisionRequest,
+  ): Promise<FactoryItem>;
+  /**
    * Forget one of the lessons the factory's reviewers recorded: it leaves the briefs and is never
    * learned again. 404 `lesson_not_found`.
    */
@@ -128,6 +138,7 @@ export function httpFactoryApi(http: Fetcher): FactoryApi {
       post(`${p(id)}/factory/items/${enc(itemId)}/retry`, opts ?? {}, item),
     dismiss: (id, itemId, req = {}) =>
       post(`${p(id)}/factory/items/${enc(itemId)}/dismiss`, req, item),
+    decideSpec: (id, itemId, req) => post(`${p(id)}/factory/items/${enc(itemId)}/spec`, req, item),
     forgetLesson: (id, lessonId) =>
       call(
         "DELETE",

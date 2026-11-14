@@ -17,6 +17,11 @@ export const InboxItemKind = z.enum([
    * CodeDen still uses it. Resolved by CodeDen once a later attempt removes it.
    */
   "cleanup_failed",
+  /**
+   * A software factory feature's spec waiting for the user's approval before it is built
+   * (§10.1, `FactoryTuning.specApproval`); resolved once they approve it or ask for changes.
+   */
+  "spec_approval",
 ]);
 export type InboxItemKind = z.infer<typeof InboxItemKind>;
 

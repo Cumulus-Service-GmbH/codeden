@@ -25,6 +25,7 @@ import { recoverInfraFailures } from "./recover";
 import { reviseAfterReverts } from "./revert";
 import { advanceScout } from "./scout";
 import { claimSlot } from "./slots";
+import { settleSpecInbox } from "./spec-approval";
 import { OWNED_STAGES } from "./store";
 import { mayAutoMerge } from "./trust";
 import { recoverTurnRaceFailures } from "./turn-race";
@@ -126,6 +127,8 @@ export async function runTick(
   );
   // Finished work gives back its sessions and worktrees, also while paused.
   archiveFinished(ctx, projectId);
+  // Requests to approve a spec that waits for nothing any more are resolved.
+  settleSpecInbox(ctx, projectId);
   // A drain whose work is all done stops the loop here (also while paused).
   if (loop.drain) {
     loop = await advanceDrain(ctx, project, loop);

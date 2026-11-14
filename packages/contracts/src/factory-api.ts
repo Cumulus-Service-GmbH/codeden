@@ -16,6 +16,8 @@ import {
   PipelineStep,
   ScoutState,
   ScoutStatus,
+  SpecApproval,
+  SpecApprovalState,
   WorkTrust,
   WorkType,
 } from "./factory-pipeline";
@@ -213,6 +215,11 @@ export const FactoryItem = z.object({
   admittedBy: z.enum(["user", "pm"]).nullable().default(null),
   /** The bug's reproduction or the feature's analysis, once the builder reported it. */
   investigation: Investigation.nullable().default(null),
+  /**
+   * A person's approval of the feature's spec before it is built (`FactoryTuning.specApproval`);
+   * null when the spec needed none (approval off, a dark factory, or not a feature).
+   */
+  specApproval: SpecApproval.nullable().default(null),
   issue: GitHubIssueRef.nullable(),
   pr: GitHubPrRef.nullable(),
   builderSessionId: Id.nullable(),
@@ -382,6 +389,14 @@ export const FactoryTuning = z.object({
    * lesson is asked for, recorded or briefed; the ones kept stay for when it is on again.
    */
   learnFromReviews: z.boolean().default(true),
+  /**
+   * "Approve specs before building" (software factory only): a feature stops after Analyze until
+   * a person approves its spec or asks for changes, so a misunderstood request costs a short spec,
+   * not a build and a review. A dark factory never waits on a person, so it skips the step. Off
+   * (the default): the builder implements its spec at once. Turning it off releases the specs
+   * still waiting.
+   */
+  specApproval: z.boolean().default(false),
 });
 export type FactoryTuning = z.infer<typeof FactoryTuning>;
 
@@ -694,6 +709,8 @@ export const FactoryWorkItem = z.object({
   trust: WorkTrust.default("trusted"),
   author: z.string().nullable().default(null),
   source: FactoryItemSource,
+  /** Where its spec is in a person's approval (`FactoryItem.specApproval`); null when none. */
+  specApproval: SpecApprovalState.nullable().default(null),
   /** Revise rounds so far. */
   attempts: z.int().nonnegative().default(0),
   reason: z.string().nullable(),

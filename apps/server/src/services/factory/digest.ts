@@ -16,6 +16,7 @@ import { prInboxIds } from "./merge";
 import { localDay } from "./policy";
 import { ownedPr } from "./pr-status";
 import { recoverable } from "./recover";
+import { specInboxId, specPending } from "./spec-approval";
 import { lastMergeReverted } from "./stats";
 import { OWNED_STAGES } from "./store";
 import { DECISION_INBOX_PREFIX } from "./unattended";
@@ -66,18 +67,20 @@ export async function writeDigest(
 }
 
 /**
- * Finished work that waits on a person, whenever it happened, by the definition the Factory
- * view's "Needs you" uses (`factoryNeed`): escalations, and failures with an open PR or from the
- * last day that the factory doesn't recover by itself.
+ * Work that waits on a person, whenever it happened, by the definition the Factory view's "Needs
+ * you" uses (`factoryNeed`): escalations, failures with an open PR or from the last day that the
+ * factory doesn't recover by itself, and specs waiting for approval.
  */
 export function needsYouItems(ctx: FactoryContext, projectId: string): DigestNeed[] {
   const now = ctx.now().getTime();
-  return ctx.store.items(projectId, OWNED_STAGES).flatMap((item) => {
+  const specs = ctx.store.items(projectId, ["building"]).filter(specPending);
+  return [...ctx.store.items(projectId, OWNED_STAGES), ...specs].flatMap((item) => {
     const open = ownedPr(ctx, item);
     const kind = factoryNeed(item, {
       now,
       ownsOpenPr: open !== null,
       recovering: recoverable(item),
+      specPending: specPending(item),
     });
     if (!kind) return [];
     const need = factoryNeedLabel(kind, {
@@ -105,7 +108,7 @@ export function buildDigest(opts: {
   day: string;
   /** Items that changed during the day. */
   items: FactoryItem[];
-  /** Finished items still waiting on a person, whenever they happened (`needsYouItems`). */
+  /** Items still waiting on a person, whenever they happened (`needsYouItems`). */
   needsYou: DigestNeed[];
   /** The project's open inbox items. */
   inbox: InboxItem[];
@@ -129,8 +132,11 @@ export function buildDigest(opts: {
       stage: i.stage,
       reason: i.reason ?? (i.stage === "rejected" ? "Rejected by the PM" : "Merge checks failed"),
     }));
-  // The inbox items about those items (ready, protected area, stuck) are listed with them.
-  const listed = new Set(opts.needsYou.flatMap(({ item }) => prInboxIds(item.id)));
+  // The inbox items about those items (ready, protected area, stuck, a spec to approve) are
+  // listed with them.
+  const listed = new Set(
+    opts.needsYou.flatMap(({ item }) => [...prInboxIds(item.id), specInboxId(item.id)]),
+  );
   const waiting = [
     ...opts.needsYou.map(({ item, need }) => ({
       title: `${item.title}: ${need}${item.reason ? ` (${item.reason})` : ""}`,

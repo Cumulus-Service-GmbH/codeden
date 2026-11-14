@@ -187,6 +187,7 @@ export function needOf(
     recovering: w.recovering,
     prWaitsForYou: pr?.state === "waiting_for_you",
     agentWaiting: session?.status === "waiting",
+    specPending: w.specApproval === "pending",
   });
   if (!kind) return null;
   const prNumber = openPrNumber(w, pr);
@@ -238,6 +239,8 @@ export function stateOf(
 ): CardState {
   if (w.stage === "escalated" || isStuck(w, pr)) return "person";
   if (w.stage === "failed") return "failed";
+  // Its spec waits for a person's approval before it is built.
+  if (w.stage === "building" && w.specApproval === "pending") return "person";
   // Done: nothing left for anyone to do.
   if (w.stage === "merged") return "waiting";
   if (pr?.state === "waiting_for_you") return "person";

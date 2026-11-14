@@ -4,11 +4,16 @@ import {
   FactoryAnalysisReport,
   FactoryFileIssueRequest,
   FactoryLimits,
+  FactorySpecDecisionRequest,
   type Investigation,
   Project,
   pipelineStep,
   ScoutRound,
   ScoutState,
+  SPEC_FEEDBACK_MAX,
+  SpecApproval,
+  type SpecApprovalState,
+  specHeld,
 } from "../src";
 import { sampleProject, ts } from "./fixtures";
 
@@ -63,6 +68,57 @@ describe("factory pipelines (§10.1)", () => {
     expect(pipelineStep({ ...base, stage: "escalated" })).toBe("merge");
     expect(pipelineStep({ ...base, stage: "merged" })).toBe("done");
     expect(pipelineStep({ ...base, stage: "failed" })).toBe("stopped");
+  });
+
+  it("keeps a feature at Analyze while its spec waits for a person or is revised", () => {
+    const analyzed = { ...base, type: "feature" as const, investigation: reproduced };
+    const at = (state: SpecApprovalState) => pipelineStep({ ...analyzed, specApproval: { state } });
+    expect(at("pending")).toBe("analyze");
+    expect(at("changes_requested")).toBe("analyze");
+    expect(at("approved")).toBe("implement");
+    expect(pipelineStep({ ...analyzed, specApproval: null })).toBe("implement");
+    expect(specHeld({ specApproval: { state: "pending" } })).toBe(true);
+    expect(specHeld({ specApproval: null })).toBe(false);
+  });
+
+  it("round-trips a spec's approval and validates a person's decision", () => {
+    const pending = SpecApproval.parse({ state: "pending", requestedAt: ts });
+    expect(pending).toEqual({
+      state: "pending",
+      requestedAt: ts,
+      decidedAt: null,
+      by: null,
+      feedback: null,
+      rounds: 0,
+      sentAt: null,
+    });
+    const asked = {
+      ...pending,
+      state: "changes_requested" as const,
+      decidedAt: ts,
+      by: "user" as const,
+      feedback: "Export JSON too",
+      rounds: 1,
+    };
+    expect(SpecApproval.parse(JSON.parse(JSON.stringify(asked)))).toEqual(asked);
+    expect(SpecApproval.safeParse({ ...asked, state: "rejected" }).success).toBe(false);
+    expect(
+      SpecApproval.safeParse({ ...asked, feedback: "x".repeat(SPEC_FEEDBACK_MAX + 1) }).success,
+    ).toBe(false);
+    expect(FactorySpecDecisionRequest.parse({ decision: "approve" })).toEqual({
+      decision: "approve",
+    });
+    expect(
+      FactorySpecDecisionRequest.parse({ decision: "request_changes", feedback: "  Add JSON  " }),
+    ).toEqual({ decision: "request_changes", feedback: "Add JSON" });
+    // Asking for changes needs to say which.
+    for (const bad of [
+      { decision: "request_changes" },
+      { decision: "request_changes", feedback: "   " },
+      { decision: "reject" },
+    ]) {
+      expect(FactorySpecDecisionRequest.safeParse(bad).success).toBe(false);
+    }
   });
 
   it("validates the builder's and the scout's reports", () => {

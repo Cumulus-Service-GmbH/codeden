@@ -13,6 +13,7 @@ import { type FactoryContext, factoryNotice, raiseInbox } from "./context";
 import { stoppedLoop, stopWork } from "./controls";
 import { awaitedProvider } from "./provider-wait";
 import { recoverable } from "./recover";
+import { specPending } from "./spec-approval";
 import { mayAutoMerge } from "./trust";
 
 /**
@@ -55,7 +56,7 @@ function inFlightFacts(ctx: FactoryContext, projectId: string): InFlightFacts {
 
 /**
  * Whether an item is still in flight: moving through its pipeline (not waiting for a person to
- * merge it), or failed for a reason outside its code while the loop still puts it back by
+ * merge it or approve its spec), or failed for a reason outside its code while the loop still puts it back by
  * itself, unless that waits on a provider that can't take work (signed out, at its usage limit),
  * which never holds a drain, as it never holds the work-in-progress limit. `queued`: a drain's
  * item back in the queue (its builder gone, or rebuilt) is in flight too.
@@ -66,6 +67,8 @@ function stillInFlight(
   facts: InFlightFacts,
   queued: boolean,
 ): boolean {
+  // A spec waiting for a person's approval is theirs to move, like a PR only they merge.
+  if (item.stage === "building" && specPending(item)) return false;
   if (MOVING.includes(item.stage)) return !waitsForPersonsMerge(item, facts.limits);
   if (item.stage === "backlog") return queued;
   if (item.stage !== "failed" || !recoverable(item)) return false;

@@ -7,6 +7,7 @@ import {
   type WorkType,
 } from "@codeden/contracts";
 import { CODEDEN_HOME_RULE } from "../orchestration/prompts";
+import { specFeedback } from "./prompts-spec";
 
 /**
  * Prompts of the software factory's pipelines (§10.1): the builder's steps (reproduce and fix a
@@ -164,9 +165,16 @@ function reproduceStep(): string {
   ].join("\n");
 }
 
-function analyzeStep(): string {
+function analyzeStep(item: FactoryItem): string {
+  const asked = specFeedback(item);
   return [
     "**Analyze** (step 1): don't assume the request is valid, or still missing.",
+    ...(asked
+      ? [
+          `A person reviewed an earlier spec for this work and asked for changes: <feedback>${asked}</feedback>`,
+          "Write the spec to address them.",
+        ]
+      : []),
     "- Check whether it already exists or can already be done; write and run a small probe if that settles it.",
     "- Check that it fits the vision (and its out-of-scope list), the architecture, backward compatibility, and which docs would change.",
     "- Don't implement anything yet and don't open a pull request.",
@@ -193,9 +201,9 @@ export function builderPrompt(
         ? fixStep(item)
         : reproduceStep()
       : type === "feature"
-        ? item.investigation
+        ? item.investigation && !specFeedback(item)
           ? implementStep(item)
-          : analyzeStep()
+          : analyzeStep(item)
         : docsStep(item);
   const old = item.rebuiltFrom;
   const learned = lessonsBlock(lessons.lessons);

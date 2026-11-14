@@ -78,7 +78,13 @@ export function finishesOpenWork(ctx: FactoryContext, item: FactoryItem): boolea
   return repairsMain(item) || ownedPr(ctx, item) !== null;
 }
 
-/** Builds from the queue that haven't opened their PR yet: each will, so each takes room. */
+/**
+ * Builds from the queue that haven't opened their PR yet: each will, so each takes room. A spec
+ * waiting for a person's approval (`spec-approval.ts`) doesn't, so specs nobody looked at never
+ * stop the factory; once approved it takes room again before it is built.
+ */
 export function unopenedBuilds(ctx: FactoryContext, projectId: string): number {
-  return ctx.store.items(projectId, ["building"]).filter((i) => !finishesOpenWork(ctx, i)).length;
+  return ctx.store
+    .items(projectId, ["building"])
+    .filter((i) => i.specApproval?.state !== "pending" && !finishesOpenWork(ctx, i)).length;
 }

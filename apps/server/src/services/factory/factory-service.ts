@@ -19,6 +19,7 @@ import {
   type FactoryRetryMode,
   type FactoryScorecard,
   type FactorySetTypeRequest,
+  type FactorySpecDecisionRequest,
   type FactoryStatus,
   isFactoryMode,
   type KillSwitchMode,
@@ -71,6 +72,7 @@ import {
   SCOUT_WORK_KEY,
 } from "./sessions";
 import { SlotBoard } from "./slots";
+import { decideSpec } from "./spec-approval";
 import { buildStatus } from "./status";
 import { FactoryStore } from "./store";
 import { answerProviderQuestion, recordDecision, unattendedSession } from "./unattended";
@@ -549,6 +551,20 @@ export class FactoryService {
     by: decisions.DecidedBy,
   ): FactoryItem {
     const item = decisions.dismiss(this.ctx, projectId, itemId, req, by);
+    this.soon(projectId);
+    return item;
+  }
+
+  /**
+   * Approve a feature's spec that waits for approval, or ask for changes to it; the loop sends the
+   * decision to the builder (`spec-approval.ts`).
+   */
+  async decideSpec(
+    projectId: string,
+    itemId: string,
+    req: FactorySpecDecisionRequest,
+  ): Promise<FactoryItem> {
+    const item = await decideSpec(this.ctx, projectId, itemId, req);
     this.soon(projectId);
     return item;
   }

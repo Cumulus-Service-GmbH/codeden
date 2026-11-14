@@ -124,9 +124,63 @@ export const FactoryAnalysisReport = z
 export type FactoryAnalysisReport = z.infer<typeof FactoryAnalysisReport>;
 
 /**
+ * Where a feature's spec is in its approval (`FactoryTuning.specApproval`, software factory only):
+ * `pending` (a person approves it or asks for changes before it is built), `approved` (the
+ * builder implements it), `changes_requested` (the builder revises its analysis and submits it
+ * again, which makes it `pending` once more).
+ */
+export const SpecApprovalState = z.enum(["pending", "approved", "changes_requested"]);
+export type SpecApprovalState = z.infer<typeof SpecApprovalState>;
+
+/** Longest feedback a person can give with a request for changes to a spec. */
+export const SPEC_FEEDBACK_MAX = 4_000;
+
+/** A feature's spec waiting for, or past, a person's approval before it is built. */
+export const SpecApproval = z.object({
+  state: SpecApprovalState,
+  /** When the builder submitted the spec now on record (the latest version). */
+  requestedAt: Timestamp,
+  /** When it was decided; null while pending. */
+  decidedAt: Timestamp.nullable().default(null),
+  /**
+   * Who decided: `user` (you, in CodeDen), or `auto` when approval was turned off (or the project
+   * became a dark factory) while it waited. Null while pending.
+   */
+  by: z.enum(["user", "auto"]).nullable().default(null),
+  /** What the person asked to change (with `changes_requested`, kept with the next version). */
+  feedback: z.string().max(SPEC_FEEDBACK_MAX).nullable().default(null),
+  /** Requests for changes so far. */
+  rounds: z.int().nonnegative().default(0),
+  /**
+   * When the builder was sent the decision (the Implement step, or the changes asked for); null
+   * until the loop sends it, which waits for a free agent.
+   */
+  sentAt: Timestamp.nullable().default(null),
+});
+export type SpecApproval = z.infer<typeof SpecApproval>;
+
+/** Whether the item's spec stops it at Analyze: waiting for a person, or being revised. */
+export function specHeld(item: { specApproval?: { state: string } | null }): boolean {
+  const state = item.specApproval?.state;
+  return state === "pending" || state === "changes_requested";
+}
+
+/** A person's decision on a spec that waits for approval. */
+export const FactorySpecDecisionRequest = z.discriminatedUnion("decision", [
+  z.object({ decision: z.literal("approve") }),
+  z.object({
+    decision: z.literal("request_changes"),
+    /** What to change, for the builder (and posted on the issue). */
+    feedback: z.string().trim().min(1).max(SPEC_FEEDBACK_MAX),
+  }),
+]);
+export type FactorySpecDecisionRequest = z.infer<typeof FactorySpecDecisionRequest>;
+
+/**
  * Where a work item is in its pipeline (what the dashboard diagram shows):
  * `intake` (waiting to be classified), `ignored` (untrusted author), `queued` (waiting for a
- * free agent), `reproduce` / `analyze` (first step of bugs and features), `implement` (fix,
+ * free agent), `reproduce` / `analyze` (first step of bugs and features; a feature whose spec
+ * waits for a person's approval is still at `analyze`), `implement` (fix,
  * feature or docs change), `review` (merge checks and the independent review), `merge` (ready
  * for you, merging, or watching the default branch after it), `done`, `stopped`.
  */
@@ -151,6 +205,8 @@ export interface PipelineStepInput {
   investigation: Investigation | null;
   checks: Array<{ state: string }>;
   review: { verdict: string } | null;
+  /** The spec's approval; a feature waiting on it is still at Analyze. */
+  specApproval?: { state: string } | null;
 }
 
 /** Whether the item's merge checks all passed (none pending or failed). */
@@ -172,6 +228,8 @@ export function pipelineStep(item: PipelineStepInput): PipelineStep {
     case "building":
       if (!item.investigation && item.type === "bug") return "reproduce";
       if (!item.investigation && item.type === "feature") return "analyze";
+      // Its spec waits for a person, or is being revised at their request.
+      if (specHeld(item)) return "analyze";
       return "implement";
     case "verifying":
       return checksPassed(item) ? "merge" : "review";

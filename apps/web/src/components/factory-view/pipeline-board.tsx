@@ -203,7 +203,7 @@ function NeedsYou({
           {cards.length}
         </span>
         <span className="hidden truncate font-normal text-muted-foreground sm:inline">
-          Work only a person can move on: merge, retry or dismiss, or answer
+          Work only a person can move on: merge, retry or dismiss, answer, or approve a spec
         </span>
         <FactoryGuideLink
           section={GUIDE_ANCHOR.needsYou}

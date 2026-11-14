@@ -33,7 +33,7 @@ Issue ─► Identify type ┼─ Feature:  Analyze ───► Implement ─�
 4. **The pipeline runs.**
    - **Bug: Reproduce.** The agent writes a failing test (or a probe) that shows the bug and reports it with `factory_report_reproduction`. A bug that doesn't reproduce stops here, with a comment on the issue asking for what's missing.
    - **Bug: Create fix.** The same agent makes the failing test pass and keeps it as a regression test.
-   - **Feature: Analyze.** The agent checks whether the request already works, fits the vision and the architecture, and writes a spec with acceptance criteria (`factory_submit_analysis`). The spec is posted on the issue. A request that is already possible, unclear or out of scope stops here with a comment.
+   - **Feature: Analyze.** The agent checks whether the request already works, fits the vision and the architecture, and writes a spec with acceptance criteria (`factory_submit_analysis`). The spec is posted on the issue. A request that is already possible, unclear or out of scope stops here with a comment. With [Approve specs before building](#approve-specs-before-building) on, the spec waits for you here before anything is built.
    - **Feature: Implement.** The same agent builds it to the spec, with tests and docs.
    - **Docs: Implement docs change.** No reproduction, no analysis, and no agent review as long as the change touches only documentation.
 5. **Review.** An **independent reviewer session**, on a different provider from the author when one is available (or the one you pick under [Agents](#settings-and-limits)), checks the pull request against the issue, the spec and the vision. `request_changes`, or any failed merge check, sends the work back to the author: the **revise loop** (up to `maxFixAttempts` rounds, default 2). CI on the pull request's head is the authority for the full test suite. A reviewer whose own checkout can't run the tests (a broken install, timeouts under load) marks its verdict `blockers: "environment"`. That verdict never goes to the author: the reviewer gets the CI result and reviews again on the merits. If its environment stops it a second time, the item fails as an infrastructure failure, which the factory recovers by itself without using a revise round, and the next reviewer works in a clean worktree on the PR's head. A reviewer can also record [lessons](#lessons-the-factory-learns-from-its-reviews) for later builders and reviewers.
@@ -53,6 +53,18 @@ Without lessons, the same findings come back on item after item: a missing chang
 - **You stay in charge.** The factory panel lists the lessons in force under **Lessons**, each with the pull request it came from, how often reviewers recorded it, and when. **Forget** takes a lesson out of the briefs for good: the factory never learns it again. The item page shows the lessons its verdict recorded. **Learn from reviews** in the settings (on by default) turns it all off: reviewers aren't asked for lessons, none are kept, and briefs carry none. The lessons already kept stay listed for when you turn it on again.
 
 Lessons are the factory's own notes, kept in CodeDen. Rules you want every agent to follow, inside the factory or not, still belong in your memory files (`AGENTS.md`, `CLAUDE.md`).
+
+### Approve specs before building
+
+A misunderstood request is cheapest to correct before anything is built. Turn on **Approve specs before building** in the settings (off by default, software factory only) and every feature stops after Analyze until you have read its spec:
+
+- **Where it waits.** The agent's spec and acceptance criteria are posted on the issue as usual, and you get an inbox item **Approve the spec** with the spec in it. The item shows **Approve the spec** in the Factory view's **Needs you** lane, its page shows the spec with the decision buttons, and the daily digest lists it under **Waiting on you**.
+- **Approve spec**: the agent builds it to that spec, as soon as a free agent and room under **PRs open at most** allow it.
+- **Request changes**: say what to change. Your note goes to the agent, which revises its analysis and submits it again, and the new spec waits for you once more. Both decisions are also posted on the issue.
+- **Nothing runs while it waits.** The agent's session stays idle without holding an agent slot, it is never reminded or failed for waiting, the item doesn't count toward **PRs open at most**, and it doesn't hold up [Finish current work, then stop](#the-kill-switch). A spec you never look at never blocks other work.
+- **Off again.** Turning the setting off, or switching the project to a dark factory (which never waits on you), approves the specs still waiting, and their agents build them. A **Retry** that starts over asks for a fresh approval of the new spec; work picked up again after a failure outside its code keeps the approval it had.
+
+You approve in CodeDen (the item page, its inbox card or the Factory view). Approving with a comment on the issue isn't supported yet.
 
 ### Finish before starting
 
@@ -105,6 +117,7 @@ Open it with **Factory view** on the project page or the factory panel, or **Fac
   - **Retry: stopped after N review rounds** (or "stopped with PR #n open"): work that failed while its pull request is still open, stuck ones included, such as a rebuild that failed while the factory still owns its original pull request. **Retry** sends that pull request back to a fresh review (see [Stopped work with an open pull request](#stopped-work-with-an-open-pull-request)).
   - **Retry or dismiss: stopped without a pull request**: work that failed in the last day without a pull request, for example because its builder was stopped. **Retry** runs it again, and **Dismiss** marks it rejected with the reason ("Dismissed by you", and why it had stopped).
   - **Answer the agent's question**: its builder or reviewer asked you something or wants an approval. **Answer** opens the session.
+  - **Approve the spec**: a feature's spec waits for you, with [Approve specs before building](#approve-specs-before-building) on. **Review spec** opens the item, where you approve it or ask for changes.
 
   The same definition counts the header's **need you**, the pixel scene's repair bay and the daily digest's **Waiting on you**, so they always agree. What the factory settles or recovers by itself never shows here: a failure outside the work's code (a session that died, CI that never started) stays in its stage until the factory puts it back, and work whose issue is closed on GitHub settles on its own (see [Closed issues settle their work](#closed-issues-settle-their-work)). However much newer history there is, an old escalation or a failure with an open pull request stays until it's settled. The side sheet of a card shows the same buttons. On wide screens the lane takes at most about a third of the height and scrolls, so the pipeline stays in view. Cards waiting on a person are outlined in amber, failed ones in red.
 - **Click a card** to see its details in a side sheet without leaving the view: the steps of its pipeline with the current one marked (also "waiting for a free agent" and "watching CI on the default branch"), the issue and the pull request, the merge checks, the review, links to the builder's and reviewer's sessions, and what the item cost so far (with where it stands against the per-item cap, when one is set). The item page shows the same cost.
@@ -386,10 +399,11 @@ Settings are **enforced by the server**, never left to agent judgement. Open the
 | Protected paths | none | Added to the vision's protected areas |
 | Allow deploy and release changes (`allowDeploys`) | off | While off, deploy files (`.github/workflows/*deploy*`, `*release*`, `*publish*`, `Dockerfile`, `fly.toml`, `vercel.json`, `netlify.toml`) are protected |
 
-**Tuning.** **PRs open at most**, the **Merge checks**, **Agents** and (in a dark factory) **The scout** sections of the settings cover every knob below except `areas` and `idleGraceMin`, which are set through the API's `tuning` field. Saving changes only the knobs you send; the rest keep their saved values.
+**Tuning.** **Approve specs before building**, **PRs open at most**, the **Merge checks**, **Agents** and (in a dark factory) **The scout** sections of the settings cover every knob below except `areas` and `idleGraceMin`, which are set through the API's `tuning` field. Saving changes only the knobs you send; the rest keep their saved values.
 
 | Setting | In the settings | Default |
 |---|---|---|
+| `specApproval` | Approve specs before building (software factory only: a feature's spec [waits for you](#approve-specs-before-building) after Analyze) | `false` |
 | `maxOpenPrs` | PRs open at most (the [work-in-progress limit](#finish-before-starting); empty: the same as Agents at once) | `null` (Agents at once) |
 | `maxChangedLines` / `maxChangedFiles` | Merge checks: Largest change (lines) / Most files changed | `5000` / no limit (`null` turns either off) |
 | `maxFixAttempts` | Merge checks: Revise rounds (after a review asking for changes or a failed check; then the item fails) | `2` |
@@ -471,6 +485,7 @@ Everything in the UI is also available over the local API (with the install toke
 | `POST /api/projects/:id/factory/set-type` | `{ itemId, type, reason? }`: move an item that hasn't started to another pipeline |
 | `POST /api/projects/:id/factory/items/:itemId/retry` | `{ mode? }`: run a stopped item again. `rereview` (the default while its pull request is open) sends that pull request back to a fresh review; `rebuild` (the default without one) starts over from the first step. `409 no_open_pr` for a re-review without an open pull request |
 | `POST /api/projects/:id/factory/items/:itemId/dismiss` | `{ reason? }`: mark a failed item without an open pull request rejected, with the reason (409 `pr_open` while its pull request is open) |
+| `POST /api/projects/:id/factory/items/:itemId/spec` | `{ decision: "approve" }` or `{ decision: "request_changes", feedback }`: decide on a feature's spec that [waits for approval](#approve-specs-before-building). The agent builds it, or revises its analysis with your feedback. 409 `spec_not_pending` when its spec doesn't wait |
 | `POST /api/projects/:id/factory/items/:itemId/follow-ups/file` | `{ index }`: **File issue** for one review follow-up of a merged item (its position in `followUps`), or link it to the open issue with the same title. Filing it again changes nothing; 400 `no_follow_up` when there is no such follow-up |
 | `DELETE /api/projects/:id/factory/lessons/:lessonId` | Forget a lesson: it leaves the briefs and is never learned again (404 `lesson_not_found`). The panel status lists the lessons in force in `lessons` |
 | `POST /api/projects/:id/kill-switch`, `POST /api/factory/kill-switch` | `{ on: true }` |

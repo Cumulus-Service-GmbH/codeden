@@ -52,7 +52,8 @@ export function repairBay(pipeline: ViewPipeline): BayCrate[] {
     .filter((c) => c.pr?.state === "stuck");
   const groups = new Map<StoppedKind, BayEntry[]>();
   for (const card of [...pipeline.needsYou, ...stuckElsewhere]) {
-    if (card.need?.kind === "answer") continue;
+    // Agents waiting on an answer or on their spec's approval stay at their station.
+    if (card.need?.kind === "answer" || card.need?.kind === "approve_spec") continue;
     const kind = kindOf(card);
     if (!kind) continue;
     const entry: BayEntry = {

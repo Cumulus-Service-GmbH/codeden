@@ -142,12 +142,14 @@ function sessionIdOf(card: ViewCard, role: AgentRole, sessions: ReadonlyMap<stri
 }
 
 /**
- * The cards with an agent at a station: live work, and agents waiting on a person's answer. A
- * stuck pull request waits in the repair bay instead.
+ * The cards with an agent at a station: live work, and agents waiting on a person's answer or
+ * approval of their spec. A stuck pull request waits in the repair bay instead.
  */
 function cardsOnFloor(p: ViewPipeline): ViewCard[] {
   const watching = p.stages.merged.filter((c) => c.item.stage === "watching");
-  const asking = p.needsYou.filter((c) => c.need?.kind === "answer");
+  const asking = p.needsYou.filter(
+    (c) => c.need?.kind === "answer" || c.need?.kind === "approve_spec",
+  );
   return [
     ...p.stages.building,
     ...p.stages.reviewing,

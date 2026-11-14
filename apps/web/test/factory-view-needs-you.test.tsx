@@ -37,6 +37,7 @@ function w(id: string, n: number, patch: Partial<FactoryWorkItem>): FactoryWorkI
     trust: "trusted",
     author: "octocat",
     source: "issue",
+    specApproval: null,
     attempts: 0,
     reason: "The builder session stopped without a pull request",
     note: null,
@@ -107,6 +108,16 @@ const variants = status([
     finishedAt: null,
   }),
   w("recovering", 5, { failureKind: "infrastructure", recovering: true }),
+  // A feature whose spec waits for approval (#363).
+  w("spec", 6, {
+    stage: "building",
+    step: "analyze",
+    type: "feature",
+    specApproval: "pending",
+    failureKind: null,
+    reason: null,
+    finishedAt: null,
+  }),
 ]);
 const asking = new Map([["s4", { status: "waiting" as const, progress: null }]]);
 
@@ -118,8 +129,15 @@ describe("the Factory view's needs-you lane (#265)", () => {
     // With every kind of need, and a failure the factory puts back by itself.
     const all = viewPipeline(variants, asking, NOW);
     expect(all.needsPerson).toBe(all.needsYou.length);
-    expect(all.needsYou.map((c) => c.item.id)).toEqual(["escalated", "rounds", "no-pr", "asking"]);
+    expect(all.needsYou.map((c) => c.item.id)).toEqual([
+      "escalated",
+      "rounds",
+      "no-pr",
+      "asking",
+      "spec",
+    ]);
     expect(all.stages.building.map((c) => c.item.id)).toEqual(["recovering"]);
+    expect(all.needsYou.find((c) => c.item.id === "spec")?.state).toBe("person");
   });
 
   it("says what each card needs", () => {
@@ -129,6 +147,7 @@ describe("the Factory view's needs-you lane (#265)", () => {
       ["rounds", "retry", "Retry: stopped after 3 review rounds"],
       ["no-pr", "retry_or_dismiss", "Retry or dismiss: stopped without a pull request"],
       ["asking", "answer", "Answer the agent's question"],
+      ["spec", "approve_spec", "Approve the spec"],
     ]);
   });
 
@@ -163,6 +182,11 @@ describe("the Factory view's needs-you lane (#265)", () => {
         .getByRole("link", { name: /answer/i })
         .getAttribute("href"),
     ).toBe("/sessions/s4");
+    expect(
+      within(need("approve_spec"))
+        .getByRole("link", { name: /review the spec/i })
+        .getAttribute("href"),
+    ).toBe("/projects/p1/factory/spec");
     fireEvent.click(within(need("retry_or_dismiss")).getByRole("button", { name: "Dismiss #3" }));
     await waitFor(() => expect(dismiss).toHaveBeenCalledWith("p1", "no-pr"));
     fireEvent.click(within(need("retry")).getByRole("button", { name: "Retry #2" }));

@@ -51,6 +51,7 @@ export function workItem(
     trust: i.trust,
     author: i.author,
     source: i.source,
+    specApproval: i.specApproval?.state ?? null,
     attempts: i.attempts,
     reason: i.reason,
     note: i.note,

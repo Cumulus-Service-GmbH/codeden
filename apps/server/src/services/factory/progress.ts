@@ -10,6 +10,7 @@ import { baseBranchOf } from "./rebase";
 import { rebuildFailed, unreplacedOriginal } from "./rebuild";
 import { recordMainFailure, revertLanded } from "./revert";
 import { regressionInboxId, regressionPausePrefix, revertBlocked } from "./revert-blocked";
+import { advanceSpec } from "./spec-approval";
 import { REVERTED_AT, revertedAt } from "./stats";
 import { awaitTurnRaceResume, BUILDER_FAILED_REASON } from "./turn-race";
 
@@ -19,7 +20,8 @@ const BUSY = new Set(["created", "queued", "starting", "running", "waiting"]);
  * Building (§10.1): wait for the builder's turn to end with its first step reported (bugs and
  * features) and then an open PR; nudge it once when it ends without, fail the item when it ends
  * again without and stays idle past the grace period (`idleGraceMin`). A builder session that
- * dies or is gone fails it as an infrastructure failure, which the loop recovers by itself.
+ * dies or is gone fails it as an infrastructure failure, which the loop recovers by itself. A
+ * feature's spec that waits for a person's approval holds it at Analyze, with no nudge or failure.
  */
 export async function advanceBuilding(
   ctx: FactoryContext,
@@ -39,6 +41,9 @@ export async function advanceBuilding(
       return revertBlocked(ctx, project, loop, item, lowerFirst(reason));
     return failItem(ctx, loop, item, reason);
   };
+  // A spec waiting for a person, or their decision on its way to the builder (`spec-approval.ts`).
+  const held = await advanceSpec(ctx, project, loop, item, s);
+  if (held) return held;
   if (!s) return failItem(ctx, loop, item, "The builder session is gone", infra);
   if (BUSY.has(s.status)) return loop;
   const fixAt = item.attempts > 0 ? item.nudges[`fix_${item.attempts}`] : undefined;
@@ -69,7 +74,10 @@ export async function advanceBuilding(
     }
     return fail("The builder session stopped without a pull request");
   }
-  const investigating = !item.investigation && (item.type === "bug" || item.type === "feature");
+  // Its first step isn't reported yet, or a person asked for changes to the spec.
+  const revising = item.specApproval?.state === "changes_requested";
+  const investigating =
+    (!item.investigation || revising) && (item.type === "bug" || item.type === "feature");
   if (investigating) {
     const step = item.type === "bug" ? "reproduction" : "analysis";
     const asked = item.nudges.builder_investigate;

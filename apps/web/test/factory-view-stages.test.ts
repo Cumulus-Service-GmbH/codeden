@@ -48,6 +48,7 @@ function w(id: string, n: number, patch: Partial<FactoryWorkItem>): FactoryWorkI
     trust: "trusted",
     author: "octocat",
     source: "issue",
+    specApproval: null,
     attempts: 0,
     reason: null,
     note: null,

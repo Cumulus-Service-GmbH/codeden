@@ -8,13 +8,16 @@ import type {
 import { badRequest, errorMessage } from "../errors";
 import { type FactoryContext, raiseInbox } from "./context";
 import { fixStep, implementStep } from "./prompts";
+import { SPEC_AWAITS_APPROVAL } from "./prompts-spec";
+import { approvalOnSubmit, raiseSpecInbox, specGateOn, specPending } from "./spec-approval";
 
 /**
  * The first step of the bug and feature pipelines (§10.1). The builder reproduces the bug or
  * analyzes the feature request and reports it; the answer to that tool call is the next step
  * (Create fix, Implement feature), so the same session carries on in the same turn. A bug that
  * doesn't reproduce, or a request that is done already, unclear or out of scope, stops here
- * with a comment on the issue.
+ * with a comment on the issue. With spec approval on, a feature's spec waits for a person first
+ * (`spec-approval.ts`); the loop sends their decision.
  */
 
 function builderItem(ctx: FactoryContext, session: Session): FactoryItem {
@@ -147,7 +150,11 @@ export async function submitAnalysis(
   if (item.type !== "feature") {
     throw badRequest(`This is a ${item.type ?? "untyped"} item, not a feature`, "wrong_pipeline");
   }
-  if (item.investigation) {
+  // A person asked for changes to the spec on record: this analysis replaces it.
+  const revising = item.specApproval?.state === "changes_requested";
+  if (item.investigation && !revising) {
+    if (specPending(item))
+      return { recorded: false, next: `Already recorded. ${SPEC_AWAITS_APPROVAL}` };
     return { recorded: false, next: `Already recorded. Carry on:\n\n${implementStep(item)}` };
   }
   const investigation: Investigation = {
@@ -178,17 +185,23 @@ export async function submitAnalysis(
       next: "Recorded. The item stops here and the issue says why. Call `finish` now with outcome `blocked`.",
     };
   }
+  // With spec approval on (software factory), a person approves the spec before it is built.
+  const gated = specGateOn(
+    ctx.projects.get(item.projectId),
+    ctx.store.loopOrNew(item.projectId, ctx.now()),
+  );
   const updated = ctx.store.updateItem(item.id, (i) => ({
     ...i,
     investigation,
     acceptanceCriteria: report.acceptanceCriteria ?? i.acceptanceCriteria,
-    note: null,
+    specApproval: approvalOnSubmit(ctx, i, gated),
+    note: gated ? "Waiting for you to approve the spec" : null,
   }));
   await comment(
     ctx,
     item,
     [
-      `**CodeDen software factory**: analyzed. ${report.summary}`,
+      `**CodeDen software factory**: ${revising ? "revised the analysis" : "analyzed"}. ${report.summary}`,
       "",
       "<details><summary>Spec</summary>",
       "",
@@ -199,8 +212,12 @@ export async function submitAnalysis(
       "Acceptance criteria:",
       ...updated.acceptanceCriteria.map((c) => `- [ ] ${c}`),
       "",
-      "Next: Implement.",
+      gated
+        ? "Next: a maintainer approves the spec in CodeDen (or asks for changes) before it is built."
+        : "Next: Implement.",
     ].join("\n"),
   );
-  return { recorded: true, next: implementStep(updated) };
+  if (!gated) return { recorded: true, next: implementStep(updated) };
+  raiseSpecInbox(ctx, updated);
+  return { recorded: true, next: SPEC_AWAITS_APPROVAL };
 }

@@ -28,6 +28,15 @@ describe("what factory work needs from a person (#265)", () => {
     expect(factoryNeed(item({}), at)).toBe("retry_or_dismiss");
     expect(factoryNeed(item({ stage: "building" }), { ...at, agentWaiting: true })).toBe("answer");
     expect(factoryNeed(item({ stage: "verifying" }), { ...at, prWaitsForYou: true })).toBe("merge");
+    // A feature's spec waiting for approval (#363); a question to its agent comes first.
+    expect(factoryNeed(item({ stage: "building" }), { ...at, specPending: true })).toBe(
+      "approve_spec",
+    );
+    expect(
+      factoryNeed(item({ stage: "building" }), { ...at, specPending: true, agentWaiting: true }),
+    ).toBe("answer");
+    // A stopped item's old spec waits for nothing.
+    expect(factoryNeed(item({ stage: "rejected" }), { ...at, specPending: true })).toBeNull();
   });
 
   it("leaves out what the factory finishes or recovers by itself", () => {
@@ -57,6 +66,9 @@ describe("what factory work needs from a person (#265)", () => {
     );
     expect(factoryNeedLabel("answer", { attempts: 0, prNumber: null })).toBe(
       "Answer the agent's question",
+    );
+    expect(factoryNeedLabel("approve_spec", { attempts: 0, prNumber: null })).toBe(
+      "Approve the spec",
     );
   });
 
