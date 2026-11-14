@@ -1,5 +1,6 @@
-import { errorMessage } from "../errors";
+import { errorMessage, ServiceError } from "../errors";
 import type { GithubService } from "../github/github-service";
+import { prDiffKey } from "./diff-key";
 import type { MainSince } from "./github-port";
 
 /**
@@ -66,6 +67,67 @@ export async function mainSince(
     files: [...files],
     complete: listed.length < COMPARE_FILE_LIMIT,
   };
+}
+
+/** Fingerprints kept per port (a commit's own change never changes, so they never go stale). */
+const DIFF_KEYS_KEPT = 64;
+
+/**
+ * The fingerprint of what the PR at `headSha` itself changes (`prDiffKey`, §10.1 Review). It is
+ * read from a three-dot compare pinned to that commit (`<base>...<headSha>`): the PR's diff
+ * against its merge base, provably that head's, never a newer one's that came between two
+ * reads (the PR's file listing names no commit). Kept in `cache` per head. Null when it can't be
+ * told: GitHub doesn't know the commit (404, 422), lists 300 files or more, or sends a file
+ * without a patch; any other error is thrown, so the verify step reads the PR again later.
+ */
+export async function diffKeyAt(
+  github: GithubService,
+  projectId: string,
+  baseBranch: string,
+  headSha: string,
+  cache: Map<string, string | null>,
+): Promise<string | null> {
+  const { owner, repo } = github.githubRepo(projectId);
+  const key = `${owner}/${repo}@${headSha}:${baseBranch}`;
+  const hit = cache.get(key);
+  if (hit !== undefined) return hit;
+  let listed: Array<{
+    filename: string;
+    previous_filename?: string;
+    status: string;
+    patch?: string;
+  }>;
+  try {
+    listed = await github.client.run(
+      async (o) =>
+        (
+          await o.rest.repos.compareCommitsWithBasehead({
+            owner,
+            repo,
+            basehead: `${baseBranch}...${headSha}`,
+            per_page: 1,
+          })
+        ).data.files ?? [],
+    );
+  } catch (error) {
+    const code = error instanceof ServiceError ? error.code : null;
+    if (code !== "github_not_found" && code !== "github_validation") throw error;
+    return null;
+  }
+  const files = listed.map((f) => ({
+    path: f.filename,
+    ...(f.previous_filename ? { previousPath: f.previous_filename } : {}),
+    status: f.status,
+    patch: f.patch ?? null,
+  }));
+  const value = listed.length >= COMPARE_FILE_LIMIT ? null : prDiffKey(files, files.length);
+  cache.set(key, value);
+  while (cache.size > DIFF_KEYS_KEPT) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+  return value;
 }
 
 /**

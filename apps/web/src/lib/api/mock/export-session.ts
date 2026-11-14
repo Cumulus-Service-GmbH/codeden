@@ -1,8 +1,13 @@
-import type { SessionSnapshot, SessionTranscriptExport } from "@codeden/contracts";
+import {
+  redactAndCount,
+  type SessionSnapshot,
+  type SessionTranscriptExport,
+} from "@codeden/contracts";
 
 /**
- * The mock's "export as Markdown": the title and the root thread's messages. The real export
- * is written by the server (`GET /api/sessions/:id/export`), with tool calls, subagents and cost.
+ * The mock's "export as Markdown": the title and the root thread's messages, secrets redacted.
+ * The real export is written by the server (`GET /api/sessions/:id/export`), with tool calls,
+ * subagents and cost.
  */
 export function mockExportSession(snap: SessionSnapshot): SessionTranscriptExport {
   const { session } = snap;
@@ -23,5 +28,6 @@ export function mockExportSession(snap: SessionSnapshot): SessionTranscriptExpor
       .slice(0, 60)
       .replace(/-+$/, "") || "session";
   const date = new Date().toISOString().slice(0, 10);
-  return { fileName: `${slug}-${date}.md`, markdown: `${blocks.join("\n\n")}\n` };
+  const markdown = redactAndCount(`${blocks.join("\n\n")}\n`).text;
+  return { fileName: `${slug}-${date}.md`, markdown };
 }

@@ -28,6 +28,8 @@ import { cn } from "@/lib/utils";
 /** One action in a row menu. */
 export interface RowMenuAction {
   label: string;
+  /** A short second line under the label, e.g. "Secrets redacted". */
+  hint?: string;
   icon: ReactNode;
   onSelect: () => void;
   disabled?: boolean;
@@ -113,7 +115,14 @@ function Entries({
         }}
       >
         {entry.icon}
-        {entry.label}
+        {entry.hint ? (
+          <span className="flex min-w-0 flex-col">
+            {entry.label}
+            <span className="text-2xs text-muted-foreground">{entry.hint}</span>
+          </span>
+        ) : (
+          entry.label
+        )}
       </Item>
     ),
   );

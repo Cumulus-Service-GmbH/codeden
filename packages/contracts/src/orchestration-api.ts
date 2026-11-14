@@ -3,6 +3,7 @@ import { StartSessionRequest, StartSessionResponse } from "./api";
 import { AutonomyLevel, Id, ReasoningEffort } from "./common";
 import { InboxItemStatus } from "./entities/inbox";
 import { Session } from "./entities/session";
+import { UnpushedWork } from "./execution";
 import { UserInput } from "./input";
 import { ConflictRecord, NoticeTarget } from "./orchestration";
 import { ConflictDecision } from "./work";
@@ -107,13 +108,21 @@ export const ArchiveSessionRequest = z.object({
 export type ArchiveSessionRequest = z.infer<typeof ArchiveSessionRequest>;
 
 /**
- * What worktree cleanup did: `removed` (`message` notes discarded uncommitted changes);
- * `kept_changes` (uncommitted changes, not forced); `none` (no worktree,
- * or already removed); `failed` (runner unavailable, a file in use; `message` says why).
+ * What worktree cleanup did: `removed` (`message` notes discarded uncommitted changes, or what
+ * was deleted with a container); `kept_changes` (uncommitted changes, not forced; for a session
+ * in a container also unpushed commits or stashes, #337); `none` (no worktree, or already
+ * removed); `failed` (runner unavailable, a file in use, a container that couldn't be checked;
+ * `message` says why).
  */
 export const WorktreeCleanupOutcome = z.object({
   status: z.enum(["removed", "kept_changes", "none", "failed"]),
   message: z.string().nullable(),
+  /**
+   * For a session in a container: what exists only in its clone, as checked before archive
+   * kept or deleted the container (`kept_changes`, or `removed` when forced). Absent when it
+   * wasn't checked.
+   */
+  unpushed: UnpushedWork.optional(),
 });
 export type WorktreeCleanupOutcome = z.infer<typeof WorktreeCleanupOutcome>;
 

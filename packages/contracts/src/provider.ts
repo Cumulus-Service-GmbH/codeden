@@ -252,6 +252,12 @@ export const SessionOptions = z.object({
    * the agent's commands resolves to it.
    */
   codedenHome: z.string().min(1).optional(),
+  /**
+   * The session's own artifacts folder in CodeDen's home (`<home>/artifacts/<session id>`, §6):
+   * its screenshots and pasted images. Reading there runs freely, as in its own worktree; writing,
+   * deleting, and anything else in the home still ask at every level (§11.2).
+   */
+  artifactsDir: z.string().min(1).optional(),
 });
 export type SessionOptions = z.infer<typeof SessionOptions>;
 export type SessionOptionsInit = z.input<typeof SessionOptions>;

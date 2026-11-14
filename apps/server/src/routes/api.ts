@@ -80,7 +80,7 @@ export function createApi(ctx: ApiContext) {
     .route("/prs", prRoutes(s))
     .route("/github", githubRoutes(s))
     .route("/sessions", sessionGithubRoutes(s))
-    .route("/sessions", sessionRoutes(s))
+    .route("/sessions", sessionRoutes(s, ctx.network.token))
     .route("/sessions", workbenchRoutes(s))
     .route("/sessions", sessionBrowserRoutes(s))
     .route("/browser", browserRoutes(s))

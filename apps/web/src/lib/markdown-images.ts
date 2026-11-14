@@ -29,16 +29,12 @@ export function imageSource(src: unknown, origins: readonly string[]): ImageSour
   if (url.protocol !== "http:" && url.protocol !== "https:") return { kind: "blocked" };
   if (!origins.includes(url.origin)) return { kind: "remote", url: url.href, host: url.host };
   if (ARTIFACT_PATH.test(url.pathname) && !url.search) return { kind: "local" };
-  // A link to CodeDen's own image fetch is judged by the image it would fetch.
+  // A link to CodeDen's image fetch (the old `?url=` form) names the image it was for; it
+  // never loads as it is, but its placeholder can name and load the real image (#341).
   const inner = url.pathname === REMOTE_IMAGE_PATH ? url.searchParams.get("url") : null;
   if (inner) {
     const judged = imageSource(inner, origins);
     return judged.kind === "remote" ? judged : { kind: "blocked" };
   }
   return { kind: "blocked" };
-}
-
-/** The URL that loads a remote image through CodeDen's server (the CSP blocks it otherwise). */
-export function remoteImageUrl(serverOrigin: string, url: string): string {
-  return `${serverOrigin}${REMOTE_IMAGE_PATH}?url=${encodeURIComponent(url)}`;
 }

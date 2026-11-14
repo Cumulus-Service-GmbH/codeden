@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { Timestamp } from "./common";
 
 /**
  * How the UI keeps Markdown from contacting other hosts (§15): the Content-Security-Policy the
@@ -10,11 +11,29 @@ import { z } from "zod";
 /** Where the UI loads a remote image the user chose to see, through the server. */
 export const REMOTE_IMAGE_PATH = "/api/remote-image";
 
-/** `GET /api/remote-image?url=`: one image from an http or https URL, fetched by the server. */
-export const RemoteImageQuery = z.object({
+/**
+ * `POST /api/remote-image`: the user clicked **Load image** on this exact http or https URL.
+ * Only the app's own request (JSON, no `<img>` can send it) gets an image through the server.
+ */
+export const RemoteImageRequest = z.object({
   url: z.url({ protocol: /^https?$/ }).max(2_048),
 });
-export type RemoteImageQuery = z.infer<typeof RemoteImageQuery>;
+export type RemoteImageRequest = z.infer<typeof RemoteImageRequest>;
+
+/**
+ * The answer: `GET /api/remote-image/<id>` fetches the requested URL, once, until `expiresAt`
+ * (about a minute). Any other request to the image fetch, `?url=` included, is refused.
+ */
+export const RemoteImageGrant = z.object({
+  id: z.string().regex(/^[A-Za-z0-9_-]{16,64}$/),
+  expiresAt: Timestamp,
+});
+export type RemoteImageGrant = z.infer<typeof RemoteImageGrant>;
+
+/** The path an `<img>` loads a granted image from. */
+export function remoteImagePath(id: string): string {
+  return `${REMOTE_IMAGE_PATH}/${encodeURIComponent(id)}`;
+}
 
 /** A `Host` value (`127.0.0.1:4317`, `[::1]:80`, `my-pc.local`); nothing that could end a directive. */
 const HOST = /^[a-z0-9.\-[\]:]+$/i;

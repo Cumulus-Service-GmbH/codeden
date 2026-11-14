@@ -70,6 +70,7 @@ type WorkbenchApi = Pick<
   | "listProjectSlashCommands"
   | "openTerminal"
   | "artifactUrl"
+  | "remoteImageUrl"
 >;
 
 /** Setup, workbench and agent-configuration parts of the mock client. */
@@ -268,5 +269,7 @@ export function workbenchApi(world: MockWorld): WorkbenchApi {
     listProjectSlashCommands: () => delay(slashCommands, 20),
     openTerminal: (opts) => mockTerminal(opts),
     artifactUrl: (id) => artifacts[id]?.() ?? generatedIllustration(id.length),
+    // No server to fetch through in mock mode (dev only): the image loads directly.
+    remoteImageUrl: (url) => delay(url),
   };
 }

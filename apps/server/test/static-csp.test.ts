@@ -54,17 +54,24 @@ describe("web UI Content-Security-Policy (#317)", () => {
 
   it("serves remote images only through the guarded fetch, never from this machine", async () => {
     const s = await start();
-    const get = (url: string) =>
-      fetch(`${s.url}/api/remote-image?url=${encodeURIComponent(url)}`, {
-        headers: { authorization: `Bearer ${TOKEN}` },
+    const auth = { authorization: `Bearer ${TOKEN}` };
+    const click = (url: string, headers: Record<string, string> = auth) =>
+      fetch(`${s.url}/api/remote-image`, {
+        method: "POST",
+        headers: { ...headers, "content-type": "application/json" },
+        body: JSON.stringify({ url }),
       });
-    const local = await get(`${s.url}/api/health`);
+    const grant = (await (await click(`${s.url}/api/health`)).json()) as { id: string };
+    const local = await fetch(`${s.url}/api/remote-image/${grant.id}`, { headers: auth });
     expect(local.status).toBe(403);
     expect(((await local.json()) as { error: { code: string } }).error.code).toBe(
       "address_blocked",
     );
-    expect((await get("javascript:alert(1)")).status).toBe(400);
+    expect((await click("javascript:alert(1)")).status).toBe(400);
+    // Only the click's id fetches (#341): `?url=` fetches nothing, even with the token.
+    const direct = `${s.url}/api/remote-image?url=${encodeURIComponent("https://a.example/x.png")}`;
+    expect((await fetch(direct, { headers: auth })).status).toBe(404);
     // The install token is needed like everywhere else.
-    expect((await fetch(`${s.url}/api/remote-image?url=https://a.example/x.png`)).status).toBe(401);
+    expect((await click("https://a.example/x.png", {})).status).toBe(401);
   });
 });

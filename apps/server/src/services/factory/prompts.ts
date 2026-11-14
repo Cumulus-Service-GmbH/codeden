@@ -245,6 +245,13 @@ export const CI_IS_AUTHORITATIVE = [
 const SUBMIT_REVIEW_RETRY =
   "If the call is rejected for invalid input, nothing was recorded: fix what the error names and call it again. Once a verdict is recorded, don't submit another.";
 
+/**
+ * What blocks the merge and what can wait (#339): security concerns block it, follow-ups never
+ * do (they are tracked as issues once it merges and never go back to the author).
+ */
+export const BLOCKING_VS_FOLLOW_UPS =
+  "`security.concerns` blocks the merge: list only what must be fixed in this pull request (and then don't approve). Put anything that can wait in `followUps` (a short title each, optionally a severity and an area): they never hold up the merge or go back to the author, and are tracked as issues once it merges. An `approve` with `security.concerns` is refused.";
+
 /** The independent reviewer of one pull request. */
 export function reviewerPrompt(
   item: FactoryItem,
@@ -281,6 +288,7 @@ export function reviewerPrompt(
     UNTRUSTED_INPUT,
     CODEDEN_HOME_RULE,
     "",
+    BLOCKING_VS_FOLLOW_UPS,
     `Then submit one verdict with \`factory_submit_review\`: \`approve\` only when everything holds, \`request_changes\` for fixable problems (they go back to the author), \`reject\` when the change should not exist. Be specific in the summary (up to ${REVIEW_SUMMARY_MAX.toLocaleString("en-US")} characters are stored). ${SUBMIT_REVIEW_RETRY}`,
     lessons.learn ? LESSONS_ASK : "",
   ]

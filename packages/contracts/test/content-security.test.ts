@@ -1,11 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { RemoteImageQuery, uiContentSecurityPolicy } from "../src";
+import {
+  RemoteImageGrant,
+  RemoteImageRequest,
+  remoteImagePath,
+  uiContentSecurityPolicy,
+} from "../src";
 
 describe("content security contracts (#317)", () => {
-  it("round-trips a remote image query and accepts only http and https URLs", () => {
-    const query = { url: "https://user-images.githubusercontent.com/1/shot.png?x=1" };
-    expect(RemoteImageQuery.parse(JSON.parse(JSON.stringify(query)))).toEqual(query);
-    expect(RemoteImageQuery.safeParse({ url: "http://example.com/a.png" }).success).toBe(true);
+  it("round-trips a remote image request and accepts only http and https URLs", () => {
+    const request = { url: "https://user-images.githubusercontent.com/1/shot.png?x=1" };
+    expect(RemoteImageRequest.parse(JSON.parse(JSON.stringify(request)))).toEqual(request);
+    expect(RemoteImageRequest.safeParse({ url: "http://example.com/a.png" }).success).toBe(true);
     for (const url of [
       "javascript:alert(1)",
       "data:image/png;base64,AAAA",
@@ -14,8 +19,15 @@ describe("content security contracts (#317)", () => {
       "/api/artifacts/a1",
       `https://example.com/${"a".repeat(2_048)}`,
     ]) {
-      expect(RemoteImageQuery.safeParse({ url }).success, url).toBe(false);
+      expect(RemoteImageRequest.safeParse({ url }).success, url).toBe(false);
     }
+  });
+
+  it("round-trips a single-use image grant and names its path (#341)", () => {
+    const grant = { id: "x7Jq2_mN-4kPz9wQaB3c", expiresAt: "2026-11-14T10:00:00.000Z" };
+    expect(RemoteImageGrant.parse(JSON.parse(JSON.stringify(grant)))).toEqual(grant);
+    expect(RemoteImageGrant.safeParse({ ...grant, id: "../snapshot" }).success).toBe(false);
+    expect(remoteImagePath(grant.id)).toBe("/api/remote-image/x7Jq2_mN-4kPz9wQaB3c");
   });
 
   it("limits images to CodeDen, data: and blob:, scripts to CodeDen, and is never framed", () => {

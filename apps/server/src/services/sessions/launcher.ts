@@ -11,6 +11,7 @@ import {
 import type { SandboxService } from "../../execution/sandboxes";
 import { codedenSystemPrompt, MCP_SERVER_NAME } from "../../mcp/prompt";
 import type { McpTokenStore } from "../../mcp/tokens";
+import type { ArtifactService } from "../artifacts";
 import { errorMessage, ServiceError } from "../errors";
 import type { GitBroker } from "../git-broker";
 import type { InboxService } from "../inbox-service";
@@ -40,6 +41,11 @@ export interface LauncherDeps extends RunnerDeps {
    * credential files in it (`SessionOptions.codedenHome`, §15).
    */
   home: string;
+  /**
+   * Where each session's artifacts live: its folder is sent with it, so the agent may read its
+   * own screenshots without asking (`SessionOptions.artifactsDir`, §11.2).
+   */
+  artifacts?: Pick<ArtifactService, "sessionDir">;
   /** `<home>/wt`: worktrees live in `wt/<project>/<session>` (§6). */
   worktreesDir: string;
   /** `<home>/orchestrator`: the orchestrator's working directory (§8.1). */
@@ -345,6 +351,7 @@ export class SessionLauncher {
       // `read_only` level carry it in `autonomy`, so it can change live.
       readOnly: session.role !== "agent",
       codedenHome: this.deps.home,
+      artifactsDir: this.deps.artifacts?.sessionDir(session.id),
       mcpServers,
       ...(ownBranch(session) ? { ownBranch: ownBranch(session) } : {}),
       ...(project?.agentCiEnv === false ? { ciEnv: false } : {}),

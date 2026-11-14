@@ -38,6 +38,9 @@ export const WAITING_STAGES: FactoryItemStage[] = ["candidate", "backlog"];
 export const OWNED_STAGES: FactoryItemStage[] = ["failed", "escalated"];
 /** Stages after which an item's sessions have nothing left to do (see `cleanup.ts`). */
 export const FINISHED_STAGES: FactoryItemStage[] = ["merged", "reverted", "rejected", "failed"];
+/** Nudge a merge sets while the item's review follow-ups wait to be filed (`follow-ups.ts`). */
+export const FOLLOW_UPS_DUE = "follow_ups_due";
+
 /** Final stages. */
 export const DONE_STAGES: FactoryItemStage[] = [
   "merged",
@@ -165,6 +168,22 @@ export class FactoryStore {
       .select()
       .from(factoryItems)
       .where(and(eq(factoryItems.projectId, projectId), pending))
+      .orderBy(asc(factoryItems.updatedAt))
+      .all()
+      .map((r) => withItemDefaults(r.item));
+  }
+
+  /**
+   * Merged items whose review follow-ups wait to be filed (`follow-ups.ts`): the merge set the
+   * `follow_ups_due` nudge. Not capped like `items`.
+   */
+  itemsWithFollowUpsDue(projectId: string): FactoryItem[] {
+    const path = `$.nudges.${FOLLOW_UPS_DUE}`;
+    const due = sql`json_extract(${factoryItems.item}, ${path}) is not null`;
+    return this.db
+      .select()
+      .from(factoryItems)
+      .where(and(eq(factoryItems.projectId, projectId), due))
       .orderBy(asc(factoryItems.updatedAt))
       .all()
       .map((r) => withItemDefaults(r.item));
@@ -341,6 +360,7 @@ const ITEM_DEFAULTS = {
   rebuiltFrom: null,
   stepSince: null,
   mergePath: null,
+  followUps: [],
 } satisfies Partial<FactoryItem>;
 
 /** An item as read from the projection, with the fields newer versions added. */
