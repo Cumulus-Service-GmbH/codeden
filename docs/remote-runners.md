@@ -84,6 +84,8 @@ interface ExecutionBackend {
 
 `local` is today's lock file and loopback WebSocket wrapped in the same interface; `provision` starts the detached runner process as now.
 
+**Built in Phase 4a** (`apps/server/src/execution/backend.ts`, data shapes in `packages/contracts/src/execution.ts`): `detect`, `prepare` (the image), `provision`, `openLink` (an `ExecLinkConfig`, §6), `state`, `start`, `stop`, `remove` and `list`. Docker has no pause, so `stop`/`start` stand in for `pause`/`resume`; capabilities wait for a second backend. `local` stays the home runner as before, not an `ExecutionBackend`.
+
 ### 5.1 Comparison
 
 | | `local` (default) | `docker` | `upstash-box` | Docker Sandboxes (later) |
@@ -103,6 +105,36 @@ interface ExecutionBackend {
 - **One container per session**, `--init`, non-root, with CPU and memory limits from settings and labels `codeden.install=<id>`, `codeden.session=<id>`. Its runner home and clone live in a named volume per session, removed with the container.
 - **Image.** `codeden-runner:<version>` is built locally on first use from a Dockerfile shipped in the package: Node 24, git, build tools for node-pty, `codeden@<version>`, the Claude Code, Codex and OpenCode CLIs, and Chromium for the browser panel. The experiment image (full `node:24-bookworm`) was 1.94 GB. Publishing a ready image to a registry from the release workflow is faster for users but is an outward-facing release change, so it is an open question (§17).
 - **Network.** The default bridge with outbound internet. An allow-list network is a later hardening.
+
+**Built in Phase 4a** (#309, experimental; `apps/server/src/execution/`).
+- **The setting.** `Project.execution.backend` (`local` | `docker`), on the Project page → Settings → Where sessions run. `GET /api/execution/backends` says whether each backend can be used, and why not, for a given project. The PATCH refuses `docker` with that reason when Docker isn't available or the project isn't on GitHub. Disconnecting GitHub sets a project back to `local`.
+- **Detect.** `docker version --format '{{json .}}'`, kept for 30 s. It reports:
+  - "Docker not found" (`not_found`);
+  - "Docker is installed but its daemon isn't running" (`daemon_down`, also a timeout);
+  - "Docker <v> is too old; CodeDen needs 20.10 or newer" (`too_old`, Engine API older than 1.41).
+  Each comes with the fix.
+- **Image.** `codeden-runner:<version>` is built on first use from `apps/cli/docker/Dockerfile`, copied to `dist/docker` in the package.
+  - The context is a temp folder holding the package's JS bundle (`runner.js`, `cli.js` and their chunks; no web UI) and a `package.json` with only its runtime dependencies.
+  - Multi-stage: node-pty compiles with build tools in the first stage, and the image is `node:24-bookworm-slim` with git, `codeden` and `codeden-runner` on PATH, running as `node` (uid 1000). It has no provider CLIs and no Chromium yet.
+  - A `codeden.build` label holds the context's hash, so a changed bundle (a new build from a checkout) builds again under the same tag.
+  - A copy without the CLI bundle (a checkout before `pnpm build`, or the desktop app, which ships no `cli.js`) can't build it, and says so.
+- **Provision.**
+  - A volume `codeden-<record>-data` at `/data` holds the runner's home and its clone.
+  - The container runs `codeden-runner --home /data --backend docker --no-builtin` (plus `--fake` when the server has the Fake provider) with:
+    - `docker run --detach --init --user 1000:1000 --cpus 2 --memory 4096m --pids-limit 1024 --cap-drop ALL --security-opt no-new-privileges --restart unless-stopped`;
+    - the labels `codeden.install` (an id kept in `<home>/install-id`), `codeden.session`, `codeden.project`, `codeden.runner` (the record id) and `codeden.version`.
+  - It gets no `-e`, bind mount, published port or `--privileged`.
+  - The user's git name and email are set with `git config --global` in the container, for commits.
+  - A container that fails to start is removed with its volume.
+- **Link.** `docker exec --interactive --user 1000:1000 <container> codeden runner-link --home /data`. The runner record keeps the container's name as `sandboxRef`; the runner is untrusted (§8) and gets MCP over the link (§11).
+- **Placement** (`execution/sandboxes.ts`).
+  - **Before the launcher prepares the workspace.** A new agent session in a `docker` project gets its sandbox in this order: detect, the image, provision, a hub runner over the link, the handshake and the MCP proxy. Then `sessions.runnerId` is set, so the clone (§9.1) runs in the container.
+  - **What stays home.** The orchestrator, PMs and forks stay where they were.
+  - **Failures.** A failure marks the session failed with a `run_failed` inbox item, and removes what was made.
+  - **Providers.** At the start, a provider whose capabilities lack `credentialFree` is refused with "Provider sign-in in containers isn't available yet (phase 4b)". A provider the home runner hasn't loaded is checked against the sandbox runner's own list once it connects.
+- **Restart.** On start, the server links again to every `docker` runner record that isn't deleted, after `docker start` if the container exited. A container that is gone marks its record deleted.
+- **Archive.** Archiving a session, or its project, removes the container and the volume, and marks the runner deleted. Uncommitted changes in the clone keep them unless forced (`kept_changes`, as for worktrees). A session whose container is gone can't be messaged again until Phase 7 recreates sandboxes from the pushed branch.
+- **Tests.** Every argument list and parser has a test (`docker-args.test.ts`, `docker-backend.test.ts`), including that no token reaches any argument or the Dockerfile. `sandbox-placement.test.ts` and `execution-api.test.ts` run placement, restart, archive, failures and the setting with a scripted backend whose "container" is an in-process runner. `apps/server/scripts/docker-check.ts` is the manual check against real Docker.
 
 ### 5.3 Docker Sandboxes, checked
 
@@ -483,6 +515,10 @@ Each phase is one pull request well under 5,000 changed lines, written as an iss
 - **3b (built, #285):** MCP over the link. `LinkMcpUpstream` with `mcp.request`/`mcp.response` frames, SSE with backpressure and cancellation, and `DELETE`. Bad session tokens, and tokens of sessions not routed to the runner, are refused exactly as on `/mcp`. There are limits on body size and in-flight requests (§11).
 
 ### Phase 4: Docker backend
+
+**Split in two.**
+- **4a (built, #309):** the `ExecutionBackend` interface, the `docker` backend through the `docker` CLI, the `execution.backend` project setting and placement, restart and archive, proven with the Fake provider (§5.2). Providers that need credentials are refused in containers.
+- **4b (next):** provider credentials in containers (`runner.credentials`, §14) and a Sandboxes section in Setup. It waits for the user's decision on [agent-execution.md](agent-execution.md) (per-session provider homes and the login broker), which changes how delivery should work.
 
 **Title:** `feat: Docker execution backend (a container per session, runner inside)`
 
