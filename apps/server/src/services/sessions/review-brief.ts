@@ -1,5 +1,5 @@
 import type { ItemOf, Session } from "@codeden/contracts";
-import { FOREGROUND_COMMANDS, NON_INTERACTIVE_COMMANDS, UNTRUSTED_INPUT } from "../factory/prompts";
+import { UNTRUSTED_INPUT } from "../factory/prompts";
 import {
   BRIEF_MAX,
   clip,
@@ -13,6 +13,12 @@ import {
 import type { FileEditCall } from "./repo";
 
 const CLAIMS_MAX = 3_000;
+/**
+ * Read-only sessions run only commands that read, each on its own (§11.2): the allowlist
+ * refuses command substitution, redirection and variable expansion.
+ */
+const READ_ONLY_SHELL =
+  "Run plain commands, one at a time: this read-only session refuses command substitution (`$(…)`), redirection to files and variable expansion, and anything that edits, installs or commits.";
 
 /** What a review's brief is written from: the session under review and its transcript. */
 export interface ReviewSource {
@@ -97,12 +103,11 @@ function howToReview(src: ReviewSource): string {
   return [
     "## How to review",
     "",
-    `- Read the whole change since it left \`${base}\`: \`git diff $(git merge-base HEAD origin/${base})\` shows its commits and its uncommitted edits together, and \`git log --oneline origin/${base}..HEAD\` lists its commits (use \`${base}\` instead of \`origin/${base}\` when the repository has no \`origin\`). \`git status\` lists new files, which \`git diff\` leaves out: read those too.`,
+    `- Read the whole change since it left \`${base}\`: \`git log --oneline origin/${base}..HEAD\` lists its commits and \`git diff origin/${base}...HEAD\` shows them, \`git diff HEAD\` shows its uncommitted edits, and \`git status\` lists new files, which \`git diff\` leaves out: read those too. Use \`${base}\` instead of \`origin/${base}\` when the repository has no \`origin\`.`,
     "- Read the code around the change, not only the diff.",
     "- Judge: does it do what was asked, and nothing it shouldn't? Is it correct (edge cases, error handling, concurrency, data loss)? Are there tests that prove the behaviour, and do they pass? Does it follow the project's conventions (its AGENTS.md, CLAUDE.md or README)? Any security problems (injection, secrets, unsafe input, risky dependencies)?",
-    "- Run the project's checks (tests, lint, type-check) where you can. When a check can't run here, say so instead of guessing its result. You don't need the network.",
-    `- ${FOREGROUND_COMMANDS}`,
-    `- ${NON_INTERACTIVE_COMMANDS}`,
+    "- Run the project's checks (tests, lint, type-check) where you can, in the foreground, waiting for them in the same turn, and non-interactively: nothing can answer a prompt in your shell. When a check can't run here, say so instead of guessing its result. You don't need the network.",
+    `- ${READ_ONLY_SHELL}`,
   ].join("\n");
 }
 

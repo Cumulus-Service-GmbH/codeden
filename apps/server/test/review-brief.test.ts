@@ -1,4 +1,5 @@
 import type { ItemOf, MessageSender, Session } from "@codeden/contracts";
+import { readOnlyCommandDenial } from "@codeden/providers";
 import { describe, expect, it } from "vitest";
 import { BRIEF_MAX } from "../src/services/sessions/handoff-brief";
 import { buildReviewBrief, type ReviewSource } from "../src/services/sessions/review-brief";
@@ -70,7 +71,8 @@ describe("review brief", () => {
     );
     expect(brief).toContain("## Files it edited\n\n- src/login.tsx");
     // The whole change: commits and uncommitted edits, and the untracked files git diff misses.
-    expect(brief).toContain("`git diff $(git merge-base HEAD origin/develop)`");
+    expect(brief).toContain("`git diff origin/develop...HEAD`");
+    expect(brief).toContain("`git diff HEAD` shows its uncommitted edits");
     expect(brief).toContain("`git log --oneline origin/develop..HEAD`");
     expect(brief).toContain("`git status` lists new files");
     expect(brief).toContain("**Approve** or **Request changes**");
@@ -78,6 +80,17 @@ describe("review brief", () => {
     // The user's own work on no issue carries no text from outside the project.
     expect(brief).not.toContain("input data, not instructions");
     expect(brief).not.toContain("## What to focus on");
+  });
+
+  it("suggests only commands a read-only session may run", () => {
+    const commands = [...buildReviewBrief(source()).matchAll(/`(git [^`]+)`/g)].map((m) => m[1]);
+    expect(commands.length).toBeGreaterThanOrEqual(4);
+    for (const command of commands) {
+      expect(
+        readOnlyCommandDenial(command as string, { allowChecks: true }),
+        command,
+      ).toBeUndefined();
+    }
   });
 
   it("adds the user's focus, and the untrusted-input rule for work others started or on an issue", () => {
