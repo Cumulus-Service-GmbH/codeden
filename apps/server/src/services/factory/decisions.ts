@@ -10,6 +10,7 @@ import {
   stoppedRetry,
 } from "@codeden/contracts";
 import { badRequest, conflict, notFound } from "../errors";
+import { reviewedHead, verdictHead, withVerdictHead } from "./approval";
 import { sessionsToArchive } from "./cleanup";
 import type { FactoryContext } from "./context";
 import { announceType } from "./intake";
@@ -20,7 +21,7 @@ import { lateReviewPrompt } from "./prompts";
 import { trackedHead } from "./rebase";
 import { ownershipAfterRetry } from "./rebuild";
 import { approveRecheck, recheckOf, recheckSentFor, withoutRecheck } from "./recheck";
-import { resumeReview, withVerdictHead } from "./rereview";
+import { resumeReview } from "./rereview";
 import { environmentBlocked, environmentOnly, withoutStrikes } from "./review-environment";
 
 /**
@@ -263,7 +264,7 @@ function settleVerdict(
     ctx.store.updateItem(item.id, (i) => ({
       ...i,
       review: verdict,
-      nudges: withVerdictHead(i.nudges, trackedHead(i), at),
+      nudges: withVerdictHead(i.nudges, reviewedHead(i), at),
     }));
     return {
       recorded: true,
@@ -285,12 +286,11 @@ function settleVerdict(
     const { rereview_sent: _s, reviewer: _r, ...rest } = withoutStrikes(i.nudges);
     const keep = recheck && verdict.verdict === "approve" && i.review;
     const nudges = keep ? approveRecheck(rest, at) : withoutRecheck(rest);
-    return {
-      ...i,
-      review: keep ? i.review : verdict,
-      // The head it covers: a stopped item whose PR moves past it is reviewed again.
-      nudges: withVerdictHead(nudges, trackedHead(i), at),
-    };
+    // The head it covers: the one the reviewer was asked about, never a newer one that came
+    // while it worked (`approval.ts`); a re-check's approval, the head it re-checked. Only that
+    // head merges on an approval, and a stopped item whose PR moves past it is reviewed again.
+    const covers = keep ? recheckSentFor(i) || verdictHead(i) : reviewedHead(i);
+    return { ...i, review: keep ? i.review : verdict, nudges: withVerdictHead(nudges, covers, at) };
   });
   return {
     recorded: true,

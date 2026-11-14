@@ -10,6 +10,7 @@ import type {
 } from "@codeden/contracts";
 import type { FactoryPr } from "./github-port";
 import { isNonCodeFile, isTestFile, isUiFile, protectedHits } from "./policy";
+import { type RecheckCause, recheckWhy } from "./recheck";
 import { changeSize, overSizeLimit, sizeLimitText } from "./size";
 
 /** Everything the merge checks look at for one pull request. */
@@ -18,10 +19,16 @@ export interface CheckInputs {
   issueTitle: string | null;
   review: ReviewVerdict | null;
   /**
-   * An agent rebased the PR to resolve merge conflicts after the reviewer approved: the
-   * approval waits for the reviewer's re-check of the resolution.
+   * The head commit the review covers (`approval.ts`): an approval passes only while it is the
+   * PR's head. Null when unknown.
    */
-  recheck?: boolean;
+  approvedHead: string | null;
+  /**
+   * The PR's head moved after the reviewer approved: an agent resolved merge conflicts, or new
+   * commits came. The approval waits for the reviewer's re-check of what changed; null when no
+   * re-check is owed.
+   */
+  recheck?: RecheckCause | null;
   /** Provider of the reviewer, for the pending message. */
   reviewer: string | null;
   /** The item's pipeline; a docs change that touches no code needs no agent review. */
@@ -75,6 +82,11 @@ export const CONFLICTS_DETAIL =
 /** The `review` check's detail while the reviewer re-checks a conflict resolution. */
 export const RECHECK_DETAIL =
   "Rebased to resolve merge conflicts after the approval: the reviewer re-checks the resolution (git range-diff)";
+
+/** The `review` check's detail while the approval covers an older head than the PR's. */
+export function newCommitsDetail(approved: string | null, head: string | null): string {
+  return `${recheckWhy("commits", approved, head)}: the approval covers only the head it reviewed, so the reviewer re-reviews what changed (git range-diff)`;
+}
 
 const NEVER_STARTED = "CI never started on ";
 
@@ -169,7 +181,14 @@ export function evaluateChecks(i: CheckInputs): { checks: MergeCheck[]; outcome:
     set("review", "skipped", "Docs-only change: the docs pipeline has no agent review");
   else if (!i.review)
     set("review", "pending", `Waiting for the review${i.reviewer ? ` (${i.reviewer})` : ""}`);
-  else if (i.review.verdict === "approve" && i.recheck) set("review", "pending", RECHECK_DETAIL);
+  else if (i.review.verdict === "approve" && i.recheck === "conflicts")
+    set("review", "pending", RECHECK_DETAIL);
+  // An approval covers one head: commits since then wait for the reviewer.
+  else if (
+    i.review.verdict === "approve" &&
+    (i.recheck || !i.pr.headSha || i.approvedHead !== i.pr.headSha)
+  )
+    set("review", "pending", newCommitsDetail(i.approvedHead, i.pr.headSha));
   else if (i.review.verdict === "approve") set("review", "pass", i.review.summary);
   else set("review", "fail", `${i.review.verdict}: ${i.review.summary}`);
 

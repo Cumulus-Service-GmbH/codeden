@@ -12,6 +12,7 @@ import { errorMessage } from "../errors";
 import { EVIDENCE_HEADING } from "../github/evidence";
 import type { GithubService } from "../github/github-service";
 import { authorAssociation } from "../github/graphql";
+import { prDiffKey } from "./diff-key";
 import * as prOps from "./github-port-prs";
 
 /** A pull request as the merge checks read it. */
@@ -46,6 +47,12 @@ export interface FactoryPr {
   renamedFrom?: string[];
   /** Added + deleted lines per file, when GitHub reports them. */
   fileLines?: Array<{ path: string; lines: number }>;
+  /**
+   * Fingerprint of what the PR itself changes (`prDiffKey`): the same on a head that only
+   * brought the default branch in, so the approval carries over (`approval.ts`). Null when it
+   * can't be told (a file without a patch); absent when not read.
+   */
+  diffKey?: string | null;
 }
 
 /** What the default branch has that a PR's head doesn't (`FactoryGithub.mainSince`). */
@@ -237,8 +244,10 @@ export class GithubFactoryPort implements FactoryGithub {
   }
 
   async prDetails(projectId: string, number: number): Promise<FactoryPr> {
-    const pr = await this.github.getPrDetails(githubPrId(projectId, number));
+    const read = await this.github.getPrDetailsWithDiff(githubPrId(projectId, number));
+    const pr = read.details;
     return {
+      diffKey: prDiffKey(read.diff, pr.changedFiles),
       ref: { number: pr.number, url: pr.url, state: pr.state, title: pr.title },
       title: pr.title,
       body: pr.body,

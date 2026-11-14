@@ -61,6 +61,7 @@ function checks(patch: Partial<Parameters<typeof evaluateChecks>[0]> = {}) {
     pr: pr(),
     issueTitle: "Add a counter",
     review: approve,
+    approvedHead: patch.pr?.headSha ?? "abc",
     reviewer: "codex",
     type: "feature",
     evidence: null,

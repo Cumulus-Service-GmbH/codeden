@@ -65,7 +65,7 @@ export function worktreeSettled(builder: Session): boolean {
 }
 
 /** The head commit the factory last saw on the item's PR (`head_<sha>`), if any. */
-export function trackedHead(item: FactoryItem): string | null {
+export function trackedHead(item: Pick<FactoryItem, "nudges">): string | null {
   const key = Object.keys(item.nudges).find((k) => k.startsWith(HEAD));
   return key ? key.slice(HEAD.length) : null;
 }
