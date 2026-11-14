@@ -46,6 +46,7 @@ export function w(id: string, n: number, patch: Partial<FactoryWorkItem>): Facto
     checks: null,
     ownedPr: null,
     recovering: false,
+    cost: null,
     updatedAt: minutesAgo(1),
     ...patch,
   };

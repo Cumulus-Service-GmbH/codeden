@@ -35,12 +35,13 @@ One pass, in order:
 1. **Kill switch.** If one is on, the pass stops here: nothing moves and nothing merges.
 2. **A new day.** At midnight (local time) it writes the daily digest, resets today's merge count, and lifts a pause caused by the daily budget.
 3. **Tidy up.** Work whose issue was closed on GitHub is settled, and work that failed for a reason outside its code (a session that died, a provider that dropped out) is put back.
-4. **Move every item one step:** CI watched on the default branch after a merge, builds, reviews and merge checks, then **at most one step of the merge queue**.
-5. **Clean up.** Pull requests replaced by newer ones are closed, and finished work's sessions are archived.
-6. **Budget.** If today's spend reached the daily budget, the loop pauses.
-7. **Intake.** New issues become work items, and up to 3 per pass are sorted into a pipeline.
-8. **Free agents** get work (see [Agent slots and priority](#agent-slots-and-priority)).
-9. **The scout** (dark factory only) starts a round if one is due.
+4. **Per-item cap.** With a per-item cap set, work that has spent it stops: its running sessions are stopped and it waits for you (see [Spend per item](#spend-per-item)).
+5. **Move every item one step:** CI watched on the default branch after a merge, builds, reviews and merge checks, then **at most one step of the merge queue**.
+6. **Clean up.** Pull requests replaced by newer ones are closed, and finished work's sessions are archived.
+7. **Budget.** If today's spend reached the daily budget, the loop pauses.
+8. **Intake.** New issues become work items, and up to 3 per pass are sorted into a pipeline.
+9. **Free agents** get work (see [Agent slots and priority](#agent-slots-and-priority)).
+10. **The scout** (dark factory only) starts a round if one is due.
 
 ### What the header says
 
@@ -197,6 +198,18 @@ Failures outside the work's code never count toward the pause. The factory puts 
 - the builder's session is gone: a fresh builder picks the work up, or an integrator looks after its open pull request;
 - **CI never started** on the head commit within 10 minutes: the factory starts it again (updating the branch, or pushing an empty commit).
 
+### Spend per item
+
+Every item shows what it **cost so far** on its Factory view card, its side sheet and its page. The figure covers every session that worked on it (builders, reviewers, integrators, earlier attempts) since it started, from the same ledger and with the same labels as the [usage reports](usage-and-costs.md): "≈" for estimates, "API-equivalent" for a subscription login.
+
+The daily budget only stops new work: work in flight carries on even while the loop is paused. To stop one item from spending the day's budget by itself, set a **per-item cap** (USD and/or tokens) in the factory settings. Each pass, an item in the queue, building or verifying that has spent its cap:
+
+- has its running sessions stopped;
+- stops as **stuck** ("Spend cap reached: $5.10 of $5.00 for this item"), in your inbox (a recorded decision in a dark factory). It doesn't count toward the pause;
+- gets no more agent turns while it waits: no rebases, integrators or automatic re-reviews.
+
+**Retry** gives it a fresh allowance: the cap counts again from the retry, while its cost still shows everything it spent. The cap is checked each pass, so an item can go over it by what its sessions spend in one pass. The cards turn amber from 80% of the cap.
+
 ### What needs you
 
 The **Needs you** lane in the Factory view, and the header's **need you** count, list only what a person has to move:
@@ -206,7 +219,7 @@ The **Needs you** lane in the Factory view, and the header's **need you** count,
 - **Retry or dismiss: stopped without a pull request**: work that stopped in the last day without one.
 - **Answer the agent's question**: an agent asked you something or wants an approval.
 
-Your **inbox** also gets: pull requests ready for you, escalations, a paused loop (except for the budget), a regression, and work that's **stuck**: still conflicting after its one rebuild, refused by GitHub three times, or waiting on CI that can never run (GitHub Actions off, or no workflow).
+Your **inbox** also gets: pull requests ready for you, escalations, a paused loop (except for the budget), a regression, and work that's **stuck**: still conflicting after its one rebuild, refused by GitHub three times, waiting on CI that can never run (GitHub Actions off, or no workflow), or at its **per-item spend cap**.
 
 **The factory handles by itself:** merge conflicts and rebases, pull requests behind the default branch, infrastructure failures, re-reviews after new commits, CI that never started, issues closed on GitHub, and changes that are too large (the PM's call).
 
@@ -260,6 +273,7 @@ The limits that shape the loop:
 | Setting | Default |
 |---|---|
 | Daily budget (USD and/or tokens) | Required. The loop pauses until the next day when it's spent |
+| Per-item cap (USD and/or tokens) | Off. An item that spends it stops and waits for you |
 | Agents at once | 2 |
 | PRs open at most | Same as Agents at once |
 | Auto-merges per day | 5 |

@@ -401,6 +401,36 @@ describe("UsageService", () => {
     expect(report.averages.perMergedPrUsd).toBeCloseTo(2);
     expect(report.topSessions.find((t) => t.sessionId === "s2")?.pr).toMatchObject({ number: 9 });
   });
+
+  it("reads the priced turns of some sessions over all time, for factory item costs (#325)", async () => {
+    store.append([
+      {
+        type: "session.created",
+        sessionId: "s2",
+        payload: { session: session({ id: "s2", projectId: "p1" }) },
+      },
+    ]);
+    emit("s2", { type: "thread.started", thread: { id: "t" } });
+    // A turn of s1 weeks ago still counts toward what its item cost.
+    vi.setSystemTime(Date.parse("2026-10-01T09:00:00.000Z"));
+    turn("s1", "old", { inputTokens: 100, outputTokens: 50, costUsd: 2 });
+    vi.setSystemTime(NOW);
+    turn("s1", "u1", { inputTokens: 1_000, outputTokens: 500 });
+    turn("s2", "u1", { inputTokens: 10, outputTokens: 5, costUsd: 9 });
+
+    const turns = usage.turnsOf(new Set(["s1", "missing"]));
+    expect(turns.map((t) => t.turnId).sort()).toEqual(["old", "u1"]);
+    expect(turns.find((t) => t.turnId === "old")).toMatchObject({
+      costUsd: 2,
+      costSource: "reported",
+      ts: "2026-10-01T09:00:00.000Z",
+    });
+    // No reported cost: priced from the table, and labelled so.
+    expect(turns.find((t) => t.turnId === "u1")).toMatchObject({ costSource: "estimated" });
+    expect(turns.find((t) => t.turnId === "u1")?.costUsd).toBeGreaterThan(0);
+    expect(usage.turnsOf(new Set())).toEqual([]);
+    expect(await usage.providerBilling()).toEqual({ claude: "subscription" });
+  });
 });
 
 describe("backfill", () => {

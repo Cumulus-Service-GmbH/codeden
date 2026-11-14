@@ -1,6 +1,7 @@
 import {
   AutonomyMode,
   type FactoryItem,
+  type FactoryItemCost,
   type FactoryLesson,
   FactoryLimits,
   FactoryLoop,
@@ -47,7 +48,38 @@ const MOCK_APPROVAL: ReviewVerdict = {
 const FINISHED = ["merged", "reverted", "rejected", "failed", "escalated"];
 const OWNING = ["backlog", "building", "verifying", "escalated", "failed"];
 
-function work(w: FixtureWorkItem): FactoryWorkItem {
+/** No agent has worked on items in these stages yet. */
+const UNSTARTED = ["candidate", "ignored", "backlog"];
+
+/**
+ * A plausible cost for a demo item: a few dollars of API-equivalent spend, more for each revise
+ * round, nothing before an agent worked on it.
+ */
+function demoCost(
+  w: FixtureWorkItem,
+  cap: FactoryLimits["itemBudget"] = {},
+): FactoryItemCost | null {
+  if (UNSTARTED.includes(w.stage) && !w.sessionId) return null;
+  const seed = [...w.id].reduce((a, c) => a + c.charCodeAt(0), 0);
+  const usd = Math.round((0.4 + (seed % 120) / 100 + (w.attempts ?? 0) * 2.6) * 100) / 100;
+  const tokens = Math.round(usd * 310_000);
+  return {
+    usd,
+    tokens,
+    estimatedUsd: usd,
+    unpricedTurns: 0,
+    turns: 6 + (seed % 20) + (w.attempts ?? 0) * 8,
+    sessions: 1 + (w.stage === "building" ? 0 : 1) + (w.attempts ?? 0),
+    apiEquivalent: true,
+    // Never retried: everything counts toward the per-item cap, when one is set.
+    cap:
+      cap.usd !== undefined || cap.tokens !== undefined
+        ? { usd: cap.usd ?? null, tokens: cap.tokens ?? null, spentUsd: usd, spentTokens: tokens }
+        : null,
+  };
+}
+
+function work(w: FixtureWorkItem, limits?: Pick<FactoryLimits, "itemBudget">): FactoryWorkItem {
   const done = ["merged", "reverted", "rejected"].includes(w.stage);
   const since = minutesAgo(w.stepMinutesAgo ?? 4);
   return {
@@ -88,6 +120,7 @@ function work(w: FixtureWorkItem): FactoryWorkItem {
     stepSince: since,
     mergedAt: w.stage === "merged" || w.stage === "watching" ? since : null,
     finishedAt: FINISHED.includes(w.stage) ? since : null,
+    cost: demoCost(w, limits?.itemBudget),
     updatedAt: since,
   };
 }
@@ -107,6 +140,7 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       p?.autonomyMode ?? "assisted",
       p?.factoryLimits ?? defaultFactoryLimits,
     );
+    const toWork = (w: FixtureWorkItem) => work(w, f.limits);
     const s = FactoryStatus.parse({
       ...f,
       experimental: isFactoryMode(f.mode),
@@ -120,8 +154,8 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
         limit: f.limits.maxConcurrentSessions,
         holding: f.inProgress.filter((w) => w.pr).length >= f.limits.maxConcurrentSessions,
       },
-      backlog: f.backlog.map(work),
-      inProgress: f.inProgress.map(work).map((w) => {
+      backlog: f.backlog.map(toWork),
+      inProgress: f.inProgress.map(toWork).map((w) => {
         // Check counts from the fixture's merge checks of the same pull request.
         const c = f.mergeChecks.find((m) => m.prNumber === w.pr?.number)?.checks;
         if (!c) return w;
@@ -129,12 +163,12 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
         const failed = c.filter((x) => x.state === "fail").length;
         return { ...w, checks: { passed, failed, total: c.length } };
       }),
-      recent: f.recent.map(work),
+      recent: f.recent.map(toWork),
       // What a server keeps for the view beyond the capped recent list.
       viewRecent: f.recent
-        .map(work)
+        .map(toWork)
         .filter((w) => ["escalated", "failed", "merged"].includes(w.stage)),
-      ignored: f.ignored.map(work),
+      ignored: f.ignored.map(toWork),
       githubLogin: "hearth-co",
       scout:
         f.mode === "dark_factory"
@@ -170,12 +204,17 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
     world.factory.set(projectId, s);
     return s;
   };
-  const item = (projectId: string, itemId: string): FactoryItem => {
+  const find = (projectId: string, itemId: string): FactoryWorkItem => {
     const s = status(projectId);
     const w = [...s.backlog, ...s.inProgress, ...s.recent, ...s.ignored].find(
       (x) => x.id === itemId,
     );
     if (!w) throw new Error(`No factory item ${itemId}`);
+    return w;
+  };
+  const item = (projectId: string, itemId: string): FactoryItem => {
+    const { cost: _cost, ...w } = find(projectId, itemId);
+    const s = status(projectId);
     return {
       ...w,
       projectId,
@@ -216,6 +255,8 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       largeChange: null,
       sessionsArchivedAt: null,
       earlierSessionIds: [],
+      sessionIds: w.sessionId ? [w.sessionId] : [],
+      itemBudgetSince: null,
       stepSince: w.stepSince,
       createdAt: w.updatedAt,
       mergedAt: w.mergedAt,
@@ -241,7 +282,7 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
 
   return {
     status: (id) => delay(status(id), 140),
-    item: (id, itemId) => delay(item(id, itemId)),
+    item: (id, itemId) => delay({ item: item(id, itemId), cost: find(id, itemId).cost }),
     async setMode(projectId, req) {
       const p = project(projectId);
       if (!p) throw new Error(`No project ${projectId}`);

@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { GitHubIssueRef, GitHubPrRef, Id, ProviderId, Timestamp } from "./common";
 import { AutonomyMode, FactoryLimits, FactoryLoopState, MergePath } from "./factory";
+import { FactoryItemCost } from "./factory-cost";
 import { FactoryFollowUp, ReviewFollowUps } from "./factory-follow-ups";
 import {
   FactoryLesson,
@@ -269,6 +270,19 @@ export const FactoryItem = z.object({
    * once none of them is busy (a turn is never cut off), then empties the list.
    */
   earlierSessionIds: z.array(Id).default([]),
+  /**
+   * Every session that ever worked on the item (builders, reviewers, integrators, earlier
+   * attempts), for its cost (`FactoryItemCost`). The store adds the builder, reviewer and earlier
+   * sessions on every write, so a session cleared from those fields stays here; it only grows.
+   * Items saved before it existed have none (their cost also finds sessions by work key).
+   */
+  sessionIds: z.array(Id).default([]),
+  /**
+   * When spend toward the per-item cap (`FactoryLimits.itemBudget`) starts counting: null counts
+   * from the start. A retry sets it, so retried work gets a fresh allowance; the item's cost
+   * still shows everything it spent.
+   */
+  itemBudgetSince: Timestamp.nullable().default(null),
   /**
    * When the item entered its current pipeline step (`pipelineStep`), for "how long has it been
    * here" on the Factory view. Set on creation and whenever the step changes; null on items
@@ -713,6 +727,8 @@ export const FactoryWorkItem = z.object({
     })
     .nullable()
     .default(null),
+  /** What it cost so far (all its sessions, all time); null when not computed. */
+  cost: FactoryItemCost.nullable().default(null),
   updatedAt: Timestamp,
 });
 export type FactoryWorkItem = z.infer<typeof FactoryWorkItem>;
@@ -850,7 +866,11 @@ export const FactoryStatus = z.object({
 export type FactoryStatus = z.infer<typeof FactoryStatus>;
 
 /** `GET /api/projects/:id/factory/items/:itemId`. */
-export const FactoryItemResponse = z.object({ item: FactoryItem });
+export const FactoryItemResponse = z.object({
+  item: FactoryItem,
+  /** What the item cost so far (all its sessions, all time); null when not computed. */
+  cost: FactoryItemCost.nullable().default(null),
+});
 export type FactoryItemResponse = z.infer<typeof FactoryItemResponse>;
 
 /**

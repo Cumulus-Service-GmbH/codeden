@@ -1,5 +1,6 @@
 import {
   type FactoryItem,
+  type FactoryItemCost,
   type FactoryLoop,
   type FactoryMergeChecks,
   type FactoryStatus,
@@ -13,6 +14,7 @@ import {
 } from "@codeden/contracts";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { drainStatus } from "./drain";
+import { itemCosts } from "./item-cost";
 import { localDay, queueOrder } from "./policy";
 import { ownedPr, pullRequests } from "./pr-status";
 import { recoverable } from "./recover";
@@ -24,9 +26,13 @@ import { wipOf } from "./wip";
 
 /**
  * A work item for the panel and the pipeline diagram; `owned` is the open PR the factory still
- * owns for it (`ownedPr`).
+ * owns for it (`ownedPr`), `cost` what it cost so far (`item-cost.ts`).
  */
-export function workItem(i: FactoryItem, owned: GitHubPrRef | null = null): FactoryWorkItem {
+export function workItem(
+  i: FactoryItem,
+  owned: GitHubPrRef | null = null,
+  cost: FactoryItemCost | null = null,
+): FactoryWorkItem {
   const step = pipelineStep(i);
   return {
     id: i.id,
@@ -62,6 +68,7 @@ export function workItem(i: FactoryItem, owned: GitHubPrRef | null = null): Fact
             failed: i.checks.filter((c) => c.state === "fail").length,
             total: i.checks.length,
           },
+    cost,
     updatedAt: i.updatedAt,
   };
 }
@@ -90,11 +97,19 @@ export async function buildStatus(ctx: FactoryContext, projectId: string): Promi
   const done = all.filter((i) => DONE_STAGES.includes(i.stage)).slice(0, 30);
   const ignored = all.filter((i) => i.stage === "ignored").slice(0, 30);
   const owned = (i: FactoryItem) => ownedPr(ctx, i);
-  const toWork = (i: FactoryItem) => workItem(i, owned(i));
-  const viewCandidates = () => {
-    const { failedSince, mergedSince } = viewWindow(ctx.now());
-    return ctx.store.viewCandidates(projectId, failedSince, mergedSince);
-  };
+  const { failedSince, mergedSince } = viewWindow(ctx.now());
+  // Not capped like `recent` (nor by the history limit of `items`): an older escalation or
+  // open failure still reaches the view.
+  const viewRecent = viewRecentItems(
+    ctx.store.viewCandidates(projectId, failedSince, mergedSince),
+    ctx.now(),
+    (i) => owned(i) !== null,
+  );
+  // What each listed item cost so far, from one read of the ledger (ignored issues never ran).
+  const costs = await itemCosts(ctx, projectId, project.factoryLimits, [
+    ...new Map([...waiting, ...active, ...done, ...viewRecent].map((i) => [i.id, i])).values(),
+  ]);
+  const toWork = (i: FactoryItem) => workItem(i, owned(i), costs.get(i.id) ?? null);
   const spend = budgetSpend(ctx, projectId, localDay(ctx.now()), project.factoryLimits);
   const globalKill = ctx.settings.get().factory.killSwitch;
   const githubLogin = isFactoryMode(project.autonomyMode)
@@ -122,9 +137,7 @@ export async function buildStatus(ctx: FactoryContext, projectId: string): Promi
     mergeChecks: [...active, ...done].flatMap((i) => mergeChecks(i) ?? []).slice(0, 20),
     pullRequests: pullRequests(ctx, project, all),
     recent: done.map(toWork),
-    // Not capped like `recent` (nor by the history limit of `items`): an older escalation or
-    // open failure still reaches the view.
-    viewRecent: viewRecentItems(viewCandidates(), ctx.now(), (i) => owned(i) !== null).map(toWork),
+    viewRecent: viewRecent.map(toWork),
     ignored: ignored.map((i) => workItem(i)),
     githubLogin,
     scout: project.autonomyMode === "dark_factory" ? scoutStatus(ctx, project, loop, spend) : null,

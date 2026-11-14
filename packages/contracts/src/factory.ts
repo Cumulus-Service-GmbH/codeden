@@ -79,6 +79,19 @@ export const FactoryLimits = z.object({
     })
     .prefault({}),
   /**
+   * Optional spend cap per work item; either or both may be set, neither (the default) is no
+   * cap. It counts every session that worked on the item since it was last retried
+   * (`FactoryItem.itemBudgetSince`). An item that reaches it has its running sessions stopped and
+   * fails for a person to look at (`stuck`); a retry gives it a fresh allowance. Saved limits
+   * from before it existed read as no cap.
+   */
+  itemBudget: z
+    .object({
+      tokens: z.int().positive().optional(),
+      usd: z.number().positive().optional(),
+    })
+    .prefault({}),
+  /**
    * What counts against the daily budget: `factory` (default) is the factory's own sessions
    * (builders, reviewers, the scout, reverts); `project` is every session in the project.
    */

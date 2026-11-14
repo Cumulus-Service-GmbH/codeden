@@ -83,6 +83,8 @@ const item: FactoryItem = {
   largeChange: null,
   sessionsArchivedAt: null,
   earlierSessionIds: [],
+  sessionIds: ["s1", "s2"],
+  itemBudgetSince: null,
   stepSince: ts,
   createdAt: ts,
   updatedAt: ts,
@@ -188,10 +190,14 @@ describe("factory API contracts (§10.1)", () => {
       stepSince: _ss,
       mergePath: _mp,
       followUps: _fu,
+      sessionIds: _sid,
+      itemBudgetSince: _ibs,
       ...old
     } = item;
     expect(FactoryItem.parse(old)).toMatchObject({
       followUps: [],
+      sessionIds: [],
+      itemBudgetSince: null,
       mergePath: null,
       failureKind: null,
       rebuiltFrom: null,

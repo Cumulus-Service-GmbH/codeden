@@ -217,6 +217,31 @@ export class UsageService {
     };
   }
 
+  /**
+   * Priced ledger turns of these sessions, all time (a factory item's cost): indexed by the
+   * ledger's primary key, read in chunks so no query has too many parameters.
+   */
+  turnsOf(sessionIds: ReadonlySet<string>): PricedRow[] {
+    const ids = [...sessionIds];
+    const raw: Array<typeof usageLedger.$inferSelect> = [];
+    for (let i = 0; i < ids.length; i += SESSION_CHUNK) {
+      const chunk = ids.slice(i, i + SESSION_CHUNK);
+      raw.push(
+        ...this.opts.db
+          .select()
+          .from(usageLedger)
+          .where(inArray(usageLedger.sessionId, chunk))
+          .all(),
+      );
+    }
+    return priceRows(raw.map(toLedgerRow), this.settings().prices, this.timezone());
+  }
+
+  /** How each provider is paid for (login detection), for "API-equivalent" figures. */
+  providerBilling(): Promise<Record<string, BillingMode>> {
+    return this.billing();
+  }
+
   /** The latest reading of every provider's rate-limit windows (the factory's availability). */
   rateLimitWindows(): RateLimitWindow[] {
     const now = this.now();
@@ -428,6 +453,9 @@ function toLedgerRow(r: typeof usageLedger.$inferSelect): LedgerRow {
     ts: r.ts,
   };
 }
+
+/** Sessions per ledger query of `turnsOf`. */
+const SESSION_CHUNK = 500;
 
 function round(n: number): number {
   return Math.round(n * 1e6) / 1e6;

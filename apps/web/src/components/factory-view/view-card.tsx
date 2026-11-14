@@ -1,6 +1,7 @@
 import type { WorkType } from "@codeden/contracts";
-import { AlertTriangle, ListChecks, RotateCcw, ShieldAlert, UserRound } from "lucide-react";
+import { AlertTriangle, Coins, ListChecks, RotateCcw, ShieldAlert, UserRound } from "lucide-react";
 import type { ReactNode } from "react";
+import { capText, costText, costTitle, hasCost, nearCap } from "@/components/factory/item-cost";
 import { PR_STATE_LABEL, TYPE_LABEL } from "@/components/factory/meta";
 import { ageShort } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -77,19 +78,22 @@ export function StateMarker({ state, className }: { state: CardState; className?
   );
 }
 
-/** A small rounded label on a card: a revise round, the PR's state, the checks. */
+/** A small rounded label on a card: a revise round, the PR's state, the checks, the cost. */
 function Pill({
   tone,
   title,
+  testId,
   children,
 }: {
   tone?: "person" | "failed";
   title?: string;
+  testId?: string;
   children: ReactNode;
 }) {
   return (
     <span
       title={title}
+      data-testid={testId}
       className={cn(
         "inline-flex shrink-0 items-center gap-0.5 rounded-full border px-1.5 text-[10px] leading-4",
         tone === "person" && "border-status-waiting/40 text-status-waiting",
@@ -119,12 +123,13 @@ export function ViewCardButton({
   const pr = prLabel(card.pr, PR_LABELS);
   // The checks matter while it's reviewed and queued; elsewhere they're old news.
   const checks = card.place === "reviewing" || card.place === "merge" ? w.checks : null;
+  const cost = hasCost(w.cost) ? w.cost : null;
   const since = ageShort(card.since, now);
   return (
     <button
       type="button"
       onClick={() => onOpen(card)}
-      aria-label={`${number} ${w.title}, ${cardStateLabel(card)}`}
+      aria-label={`${number} ${w.title}, ${cardStateLabel(card)}${cost ? `, cost ${costText(cost)}` : ""}`}
       data-testid="factory-view-card"
       data-state={card.state}
       className={cn(
@@ -153,7 +158,7 @@ export function ViewCardButton({
         </span>
       </div>
       <div className="mt-1 line-clamp-2 text-[12.5px] leading-snug font-medium">{w.title}</div>
-      {(w.attempts > 0 || pr || checks) && (
+      {(w.attempts > 0 || pr || checks || cost) && (
         <div className="mt-1 flex flex-wrap items-center gap-1">
           {w.attempts > 0 && (
             <Pill tone="person" title={`Revise round ${w.attempts}`}>
@@ -177,6 +182,17 @@ export function ViewCardButton({
               title={`${checks.passed} of ${checks.total} merge checks passed${checks.failed ? `, ${checks.failed} failed` : ""}`}
             >
               <ListChecks className="size-2.5" aria-hidden /> {checks.passed}/{checks.total}
+            </Pill>
+          )}
+          {cost && (
+            <Pill
+              tone={nearCap(cost) ? "person" : undefined}
+              title={[costTitle(cost), capText(cost) && `Spend cap: ${capText(cost)}`]
+                .filter(Boolean)
+                .join(" · ")}
+              testId="factory-view-card-cost"
+            >
+              <Coins className="size-2.5" aria-hidden /> {costText(cost)}
             </Pill>
           )}
         </div>

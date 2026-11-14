@@ -1,4 +1,10 @@
-import { type FactoryItem, type MergeCheck, stoppedRetry, WorkType } from "@codeden/contracts";
+import {
+  type FactoryItem,
+  type FactoryItemCost,
+  type MergeCheck,
+  stoppedRetry,
+  WorkType,
+} from "@codeden/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { AlertTriangle, UserCheck } from "lucide-react";
@@ -10,12 +16,13 @@ import { factoryKeys } from "@/lib/factory";
 import { ago } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { CheckPill } from "./factory-columns";
+import { costFact, costTitle, hasCost } from "./item-cost";
 import { CHECK_HELP, TYPE_LABEL } from "./meta";
 import { RetryButton } from "./retry-button";
 
 /**
  * Parts of the factory item page and the Factory view's item sheet (§10.1): the first step's
- * result, the item's actions, its merge checks and its session links.
+ * result, the item's actions, its merge checks, its session links and its cost.
  */
 
 /** A link to the builder's or reviewer's session, or a dash when there is none. */
@@ -30,6 +37,19 @@ export function SessionLink({ id, label }: { id: string | null; label: string })
     >
       {label}
     </Link>
+  );
+}
+
+/**
+ * What the item cost so far, "≈ $12.40 · 4.1M tokens", with what kind of figure it is on hover;
+ * "No usage yet" before an agent worked on it.
+ */
+export function CostValue({ cost }: { cost: FactoryItemCost | null }) {
+  if (!hasCost(cost)) return <span className="text-muted-foreground">No usage yet</span>;
+  return (
+    <span className="tabular-nums" title={costTitle(cost)} data-testid="item-cost">
+      {costFact(cost)}
+    </span>
   );
 }
 

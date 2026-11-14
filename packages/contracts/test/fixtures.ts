@@ -202,6 +202,7 @@ export const sampleProject: Project = {
     maxConcurrentSessions: 2,
     maxMergesPerDay: 5,
     dailyBudget: { usd: 20 },
+    itemBudget: {},
     budgetScope: "factory",
     pauseAfterConsecutiveFailures: 3,
     protectedPaths: ["src/auth/**"],

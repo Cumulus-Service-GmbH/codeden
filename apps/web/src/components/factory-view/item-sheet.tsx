@@ -3,7 +3,8 @@ import { Link } from "@tanstack/react-router";
 import { Check, CircleDot, ExternalLink, GitPullRequest } from "lucide-react";
 import type { ReactNode } from "react";
 import { SectionLabel } from "@/components/common/bits";
-import { CheckRow, SessionLink } from "@/components/factory/item-parts";
+import { capText } from "@/components/factory/item-cost";
+import { CheckRow, CostValue, SessionLink } from "@/components/factory/item-parts";
 import { PR_STATE_LABEL, STAGE_LABEL, stepLabel } from "@/components/factory/meta";
 import {
   Sheet,
@@ -82,9 +83,13 @@ function ExternalButton({ url, children }: { url: string; children: ReactNode })
 }
 
 function Body({ projectId, card }: { projectId: string; card: ViewCard }) {
-  const { data: item, error } = useFactoryItem(projectId, card.item.id);
+  const { data, error } = useFactoryItem(projectId, card.item.id);
   if (error) return <p className="px-4 text-2xs text-muted-foreground">{error.message}</p>;
-  if (!item) return <Skeleton className="mx-4 h-48 rounded-xl" />;
+  if (!data) return <Skeleton className="mx-4 h-48 rounded-xl" />;
+  const { item } = data;
+  // The item's own figure; the card's (from the status) if the item came without one.
+  const cost = data.cost ?? card.item.cost;
+  const cap = capText(cost);
   const passed = item.checks.filter((c) => c.state === "pass").length;
   // A rebuild has no PR of its own until it opens one: the factory still owns the original.
   const pr = item.pr ?? card.pr?.pr ?? card.item.ownedPr;
@@ -145,6 +150,10 @@ function Body({ projectId, card }: { projectId: string; card: ViewCard }) {
         </Fact>
         <Fact label="Stage">{STAGE_LABEL[item.stage].label}</Fact>
         {item.attempts > 0 && <Fact label="Revise rounds">{item.attempts}</Fact>}
+        <Fact label="Cost">
+          <CostValue cost={cost} />
+        </Fact>
+        {cap && <Fact label="Spend cap">{cap}</Fact>}
         <Fact label="In this step">{ago(card.since)}</Fact>
       </section>
       <section>

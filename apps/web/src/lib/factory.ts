@@ -1,4 +1,4 @@
-import type { EventEnvelope, FactoryStatus } from "@codeden/contracts";
+import type { EventEnvelope, FactoryItemStage, FactoryStatus } from "@codeden/contracts";
 import { type QueryClient, useQuery } from "@tanstack/react-query";
 import { useClient } from "./api";
 import { ApiRequestError } from "./api/http";
@@ -61,11 +61,22 @@ export function useFactoryStatus(projectId: string, enabled = true) {
   });
 }
 
+/** Stages in which agents may be spending on an item, so its cost moves without events. */
+const SPENDING_STAGES = new Set<FactoryItemStage>(["backlog", "building", "verifying"]);
+
+/**
+ * One work item and what it cost so far (`data.item`, `data.cost`): refetched on every factory
+ * event, and polled while agents may be spending on it, since usage arrives without one.
+ */
 export function useFactoryItem(projectId: string, itemId: string) {
   const client = useClient();
   return useQuery({
     queryKey: factoryKeys.item(projectId, itemId),
     queryFn: () => client.factory.item(projectId, itemId),
+    refetchInterval: (query) => {
+      const stage = query.state.data?.item.stage;
+      return stage && SPENDING_STAGES.has(stage) ? BUSY_REFRESH_MS : false;
+    },
   });
 }
 
