@@ -1,5 +1,5 @@
-import { MultiFileDiff } from "@pierre/diffs/react";
 import { ShieldCheck } from "lucide-react";
+import { MultiFileDiff } from "@/components/on-demand";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,

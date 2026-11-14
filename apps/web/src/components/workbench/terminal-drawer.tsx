@@ -1,9 +1,9 @@
 import { Plus, SquareTerminal, X } from "lucide-react";
 import { useState } from "react";
+import { TerminalView } from "@/components/on-demand";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useLayoutStore } from "@/stores/layout";
-import { TerminalView } from "./terminal-view";
 
 /** Optional bottom terminal drawer with multiple tabs (§13). */
 export function TerminalDrawer({ sessionId }: { sessionId: string | null }) {

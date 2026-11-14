@@ -37,6 +37,25 @@ export default defineConfig({
   build: {
     outDir: "dist",
     emptyOutDir: true,
-    chunkSizeWarningLimit: 1000,
+    // Pages and heavy panels load on demand (apps/web/README.md), so every chunk a first load
+    // needs is well under Vite's 500 kB. The two that aren't are single syntax grammars (Emacs
+    // Lisp, C++, about 790 kB each) fetched only to highlight a code block in that language;
+    // they can't be split, so the limit sits just above them instead of warning on every build.
+    chunkSizeWarningLimit: 850,
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          // Icons in one chunk: split by page they'd be dozens of tiny requests on a first load,
+          // which costs a phone on plain http over the LAN or a VPN more than the bytes.
+          groups: [
+            {
+              name: "icons",
+              test: /[\\/]lucide-react[\\/]/,
+              includeDependenciesRecursively: false,
+            },
+          ],
+        },
+      },
+    },
   },
 });

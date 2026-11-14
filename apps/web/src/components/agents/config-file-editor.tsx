@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, RotateCcw, Save, Trash2 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { CodeEditor } from "@/components/editor/code-editor";
+import { CodeEditor } from "@/components/on-demand";
 import {
   AlertDialog,
   AlertDialogAction,

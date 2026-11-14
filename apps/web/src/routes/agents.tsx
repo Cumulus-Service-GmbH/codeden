@@ -1,4 +1,3 @@
-import { providersWith } from "@codeden/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { SlidersHorizontal } from "lucide-react";
 import { HooksList } from "@/components/agents/hooks-list";
@@ -13,19 +12,10 @@ import {
 } from "@/components/ui/select";
 import { useSnapshotData } from "@/lib/queries";
 import { cn } from "@/lib/utils";
+import { AGENT_TABS, type AgentTab } from "./agent-tabs";
 import { PageHeader } from "./page-header";
 
 const GLOBAL = "global";
-
-export type AgentTab = "memory" | "skills" | "subagents" | "mcp" | "hooks";
-/** The tabs on offer; Hooks only when some provider's native config has hooks. */
-export const AGENT_TABS: { id: AgentTab; label: string }[] = [
-  { id: "memory", label: "Memory" },
-  { id: "skills", label: "Skills" },
-  { id: "subagents", label: "Subagents" },
-  { id: "mcp", label: "MCP servers" },
-  ...(providersWith("hooks").length > 0 ? [{ id: "hooks" as const, label: "Hooks" }] : []),
-];
 
 /**
  * The tab strip scrolls sideways on phones: a tab that becomes the open one (e.g. from a link

@@ -1,34 +1,76 @@
 import { Role } from "@codeden/contracts";
 import {
+  type AsyncRouteComponent,
   createRootRoute,
   createRoute,
   createRouter,
+  ErrorComponent,
+  type ErrorComponentProps,
+  lazyRouteComponent,
   Outlet,
   redirect,
 } from "@tanstack/react-router";
+import type { ReactNode } from "react";
+import { PanelLoading, ReloadPrompt } from "@/components/common/lazy-component";
 import { FactoryGuideSheet } from "@/components/factory/factory-guide";
 import { AppShell } from "@/components/shell/app-shell";
 import { AppToaster } from "@/components/shell/app-toaster";
 import { SignInScreen } from "@/components/shell/sign-in";
 import { UnauthorizedScreen } from "@/components/shell/unauthorized";
-import { AGENT_TABS, AgentsPage, type AgentTab } from "@/routes/agents";
-import { AutomationPage } from "@/routes/automation";
-import { NewAutomationPage } from "@/routes/automation-new";
-import { AutomationsPage, type AutomationsTab } from "@/routes/automations";
-import { FactoryItemPage } from "@/routes/factory-item";
-import { FactoryViewPage } from "@/routes/factory-view";
-import { HomePage } from "@/routes/home";
-import { InboxPage } from "@/routes/inbox";
-import { NewSessionPage } from "@/routes/new-session";
-import { PmPage } from "@/routes/pm";
-import { ProjectPage, type ProjectTab } from "@/routes/project";
-import { ReportsPage } from "@/routes/reports";
-import { SearchPage } from "@/routes/search";
-import { SessionPage } from "@/routes/session";
-import { SettingsPage } from "@/routes/settings";
-import { SetupPage } from "@/routes/setup";
-import { VisionPage } from "@/routes/vision";
+import { isChunkLoadError } from "@/lib/chunk-error";
+import { AGENT_TABS, type AgentTab } from "@/routes/agent-tabs";
+import type { AutomationsTab } from "@/routes/automations";
+import type { ProjectTab } from "@/routes/project";
 import { useConnectionStore } from "@/stores/connection";
+
+/*
+ * Every page loads from its own chunk, so the first load downloads only the shell and the page
+ * it opens; heavy libraries go further, behind `@/components/on-demand` (see apps/web/README.md).
+ * A chunk that fails to load after an update reloads the app once, then shows a reload prompt.
+ */
+const AgentsPage = lazyRouteComponent(() => import("@/routes/agents"), "AgentsPage");
+const AutomationPage = lazyRouteComponent(() => import("@/routes/automation"), "AutomationPage");
+const NewAutomationPage = lazyRouteComponent(
+  () => import("@/routes/automation-new"),
+  "NewAutomationPage",
+);
+const AutomationsPage = lazyRouteComponent(() => import("@/routes/automations"), "AutomationsPage");
+const FactoryItemPage = lazyRouteComponent(
+  () => import("@/routes/factory-item"),
+  "FactoryItemPage",
+);
+const FactoryViewPage = lazyRouteComponent(
+  () => import("@/routes/factory-view"),
+  "FactoryViewPage",
+);
+const HomePage = lazyRouteComponent(() => import("@/routes/home"), "HomePage");
+const InboxPage = lazyRouteComponent(() => import("@/routes/inbox"), "InboxPage");
+const NewSessionPage = lazyRouteComponent(() => import("@/routes/new-session"), "NewSessionPage");
+const PmPage = lazyRouteComponent(() => import("@/routes/pm"), "PmPage");
+const ProjectPage = lazyRouteComponent(() => import("@/routes/project"), "ProjectPage");
+const ReportsPage = lazyRouteComponent(() => import("@/routes/reports"), "ReportsPage");
+const SearchPage = lazyRouteComponent(() => import("@/routes/search"), "SearchPage");
+const SessionPage = lazyRouteComponent(() => import("@/routes/session"), "SessionPage");
+const SettingsPage = lazyRouteComponent(() => import("@/routes/settings"), "SettingsPage");
+const SetupPage = lazyRouteComponent(() => import("@/routes/setup"), "SetupPage");
+const VisionPage = lazyRouteComponent(() => import("@/routes/vision"), "VisionPage");
+
+/**
+ * A route component that renders the lazy `page` with the route's params. Passing on the page's
+ * `preload` lets the router fetch its chunk before it shows the route (the current page stays up
+ * meanwhile) and when a link to it is hovered or focused (`defaultPreload: "intent"`).
+ */
+function withPage(
+  page: Pick<AsyncRouteComponent<never>, "preload">,
+  component: () => ReactNode,
+): AsyncRouteComponent<object> {
+  return Object.assign(component, { preload: async () => page.preload?.() });
+}
+
+/** A page that failed to render; a chunk that couldn't be fetched offers a reload. */
+function RouteError({ error }: ErrorComponentProps) {
+  return isChunkLoadError(error) ? <ReloadPrompt /> : <ErrorComponent error={error} />;
+}
 
 function Root() {
   const auth = useConnectionStore((s) => s.auth);
@@ -63,7 +105,7 @@ const sessionRoute = createRoute({
       ...(thread && threadItem ? { thread, threadItem } : {}),
     };
   },
-  component: function Session() {
+  component: withPage(SessionPage, function Session() {
     const { sessionId } = sessionRoute.useParams();
     const { item, thread, threadItem } = sessionRoute.useSearch();
     return (
@@ -73,7 +115,7 @@ const sessionRoute = createRoute({
         focusThread={thread && threadItem ? { threadId: thread, itemId: threadItem } : undefined}
       />
     );
-  },
+  }),
 });
 
 const searchRoute = createRoute({
@@ -91,7 +133,7 @@ const searchRoute = createRoute({
       ...(s.archived === false || s.archived === "false" ? { archived: false as const } : {}),
     };
   },
-  component: function Search() {
+  component: withPage(SearchPage, function Search() {
     const { q, project, role, archived } = searchRoute.useSearch();
     return (
       <SearchPage
@@ -99,7 +141,7 @@ const searchRoute = createRoute({
         filters={{ projectId: project, role, includeArchived: archived !== false }}
       />
     );
-  },
+  }),
 });
 
 const projectRoute = createRoute({
@@ -119,7 +161,7 @@ const projectRoute = createRoute({
       throw redirect({ to: "/projects/$projectId/new", params, replace: true });
     }
   },
-  component: function Project() {
+  component: withPage(ProjectPage, function Project() {
     const { projectId } = projectRoute.useParams();
     const { tab, archived } = projectRoute.useSearch();
     return (
@@ -130,25 +172,25 @@ const projectRoute = createRoute({
         sessionView={archived ? "archived" : "active"}
       />
     );
-  },
+  }),
 });
 
 const newSessionRoute = createRoute({
   getParentRoute: () => shell,
   path: "/projects/$projectId/new",
-  component: function NewSession() {
+  component: withPage(NewSessionPage, function NewSession() {
     const { projectId } = newSessionRoute.useParams();
     return <NewSessionPage key={projectId} projectId={projectId} />;
-  },
+  }),
 });
 
 const pmRoute = createRoute({
   getParentRoute: () => shell,
   path: "/projects/$projectId/pm",
-  component: function Pm() {
+  component: withPage(PmPage, function Pm() {
     const { projectId } = pmRoute.useParams();
     return <PmPage key={projectId} projectId={projectId} />;
-  },
+  }),
 });
 
 const AUTOMATION_TABS: AutomationsTab[] = ["automations", "runs", "templates"];
@@ -159,11 +201,11 @@ const automationsRoute = createRoute({
     AUTOMATION_TABS.includes(s.tab as AutomationsTab) && s.tab !== "automations"
       ? { tab: s.tab as AutomationsTab }
       : {},
-  component: function Automations() {
+  component: withPage(AutomationsPage, function Automations() {
     const { projectId } = automationsRoute.useParams();
     const { tab } = automationsRoute.useSearch();
     return <AutomationsPage key={projectId} projectId={projectId} tab={tab ?? "automations"} />;
-  },
+  }),
 });
 
 const newAutomationRoute = createRoute({
@@ -174,7 +216,7 @@ const newAutomationRoute = createRoute({
     ...(typeof s.template === "string" && s.template ? { template: s.template } : {}),
     ...(typeof s.session === "string" && s.session ? { session: s.session } : {}),
   }),
-  component: function NewAutomation() {
+  component: withPage(NewAutomationPage, function NewAutomation() {
     const { projectId } = newAutomationRoute.useParams();
     const { template, session } = newAutomationRoute.useSearch();
     return (
@@ -185,25 +227,25 @@ const newAutomationRoute = createRoute({
         sessionId={session}
       />
     );
-  },
+  }),
 });
 
 const automationRoute = createRoute({
   getParentRoute: () => shell,
   path: "/projects/$projectId/automations/$automationId",
-  component: function AutomationDetail() {
+  component: withPage(AutomationPage, function AutomationDetail() {
     const { projectId, automationId } = automationRoute.useParams();
     return <AutomationPage key={automationId} projectId={projectId} automationId={automationId} />;
-  },
+  }),
 });
 
 const factoryItemRoute = createRoute({
   getParentRoute: () => shell,
   path: "/projects/$projectId/factory/$itemId",
-  component: function FactoryItemDetail() {
+  component: withPage(FactoryItemPage, function FactoryItemDetail() {
     const { projectId, itemId } = factoryItemRoute.useParams();
     return <FactoryItemPage key={itemId} projectId={projectId} itemId={itemId} />;
-  },
+  }),
 });
 
 /**
@@ -213,28 +255,28 @@ const factoryItemRoute = createRoute({
 const factoryViewRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/projects/$projectId/factory/view",
-  component: function FactoryView() {
+  component: withPage(FactoryViewPage, function FactoryView() {
     const { projectId } = factoryViewRoute.useParams();
     return <FactoryViewPage key={projectId} projectId={projectId} />;
-  },
+  }),
 });
 
 const visionRoute = createRoute({
   getParentRoute: () => shell,
   path: "/projects/$projectId/vision",
-  component: function Vision() {
+  component: withPage(VisionPage, function Vision() {
     const { projectId } = visionRoute.useParams();
     return <VisionPage projectId={projectId} />;
-  },
+  }),
 });
 
 const settingsSectionRoute = createRoute({
   getParentRoute: () => shell,
   path: "/settings/$section",
-  component: function Settings() {
+  component: withPage(SettingsPage, function Settings() {
     const { section } = settingsSectionRoute.useParams();
     return <SettingsPage section={section} />;
-  },
+  }),
 });
 
 const agentsRoute = createRoute({
@@ -244,10 +286,10 @@ const agentsRoute = createRoute({
     tab: AGENT_TABS.some((t) => t.id === s.tab) ? (s.tab as AgentTab) : undefined,
     project: typeof s.project === "string" ? s.project : undefined,
   }),
-  component: function Agents() {
+  component: withPage(AgentsPage, function Agents() {
     const { tab, project } = agentsRoute.useSearch();
     return <AgentsPage tab={tab ?? "memory"} projectId={project ?? null} />;
-  },
+  }),
 });
 
 const inboxRoute = createRoute({
@@ -256,10 +298,10 @@ const inboxRoute = createRoute({
   // `?item=` scrolls that item into view (a toast's Open).
   validateSearch: (s: Record<string, unknown>): { item?: string } =>
     typeof s.item === "string" && s.item ? { item: s.item } : {},
-  component: function Inbox() {
+  component: withPage(InboxPage, function Inbox() {
     const { item } = inboxRoute.useSearch();
     return <InboxPage focusItemId={item} />;
-  },
+  }),
 });
 
 const reportsRoute = createRoute({
@@ -267,10 +309,10 @@ const reportsRoute = createRoute({
   path: "/reports",
   validateSearch: (s: Record<string, unknown>): { project?: string } =>
     typeof s.project === "string" ? { project: s.project } : {},
-  component: function Reports() {
+  component: withPage(ReportsPage, function Reports() {
     const { project } = reportsRoute.useSearch();
     return <ReportsPage key={project ?? "all"} projectId={project} />;
-  },
+  }),
 });
 
 const routeTree = rootRoute.addChildren([
@@ -302,7 +344,13 @@ const routeTree = rootRoute.addChildren([
   factoryViewRoute,
 ]);
 
-export const router = createRouter({ routeTree, defaultPreload: "intent" });
+export const router = createRouter({
+  routeTree,
+  defaultPreload: "intent",
+  // A page whose chunk takes longer than a second (a slow link) shows a spinner meanwhile.
+  defaultPendingComponent: PanelLoading,
+  defaultErrorComponent: RouteError,
+});
 
 declare module "@tanstack/react-router" {
   interface Register {

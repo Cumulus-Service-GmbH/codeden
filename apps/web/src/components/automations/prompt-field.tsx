@@ -1,7 +1,8 @@
 import type { AutomationTrigger } from "@codeden/contracts";
 import { Braces, ChevronDown } from "lucide-react";
 import { useRef } from "react";
-import { CodeEditor, type CodeEditorApi } from "@/components/editor/code-editor";
+import type { CodeEditorApi } from "@/components/editor/code-editor";
+import { CodeEditor } from "@/components/on-demand";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,

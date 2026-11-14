@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { Fragment, useState } from "react";
 import { toast } from "sonner";
+import { TerminalView } from "@/components/on-demand";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,7 +22,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { TerminalView } from "@/components/workbench/terminal-view";
 import { useClient } from "@/lib/api";
 import { copyWithFeedback } from "@/lib/copy";
 import { platform } from "@/lib/platform";

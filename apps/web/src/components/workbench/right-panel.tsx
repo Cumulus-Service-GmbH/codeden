@@ -9,6 +9,7 @@ import {
   SquareTerminal,
   X,
 } from "lucide-react";
+import { DiffPanel, FilesPanel, TerminalView } from "@/components/on-demand";
 import { Button } from "@/components/ui/button";
 import { useSession } from "@/lib/queries";
 import { cn } from "@/lib/utils";
@@ -16,10 +17,7 @@ import { type RightTab, useLayoutStore } from "@/stores/layout";
 import { BrowserPanel } from "./browser-panel";
 import { ChildThreadPanel } from "./child-thread-panel";
 import { DetailsPanel } from "./details-panel";
-import { DiffPanel } from "./diff-panel";
-import { FilesPanel } from "./files-panel";
 import { GitHubPanel } from "./github-panel";
-import { TerminalView } from "./terminal-view";
 
 const TABS: { id: RightTab; label: string; icon: LucideIcon }[] = [
   { id: "diff", label: "Diff", icon: FileDiff },

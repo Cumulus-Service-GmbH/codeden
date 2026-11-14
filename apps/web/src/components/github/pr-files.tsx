@@ -1,9 +1,9 @@
 import type { GithubPrDetails, GithubPrDiffFile, GithubPrFile } from "@codeden/contracts";
-import { PatchDiff } from "@pierre/diffs/react";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronRight, ExternalLink, FileCode2 } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { PatchDiff } from "@/components/on-demand";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useClient } from "@/lib/api";
