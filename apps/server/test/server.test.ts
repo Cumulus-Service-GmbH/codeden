@@ -154,6 +154,26 @@ describe("api", () => {
     expect(await missing.json()).toMatchObject({ error: { code: "session_not_found" } });
   });
 
+  it("redacts the install token from a session's Markdown export (#315)", async () => {
+    const events = sampleSessionEvent();
+    const done = events.pop() as NewEvent;
+    events.push(
+      agentEventToNewEvent("s1", {
+        type: "item.delta",
+        threadId: "t1",
+        turnId: "u1",
+        itemId: "i1",
+        delta: { type: "text", text: ` (signed in with ${TOKEN})` },
+      }),
+      done,
+    );
+    for (const e of events) server.store.append([e]);
+    const res = await fetch(`${server.url}/api/sessions/s1/export`, { headers: auth });
+    const file = SessionTranscriptExport.parse(await res.json());
+    expect(file.markdown).toContain("**Agent**\n\nHello world (signed in with [redacted])");
+    expect(file.markdown).not.toContain(TOKEN);
+  });
+
   it("returns a session's turns in the order they started, not by id", async () => {
     const [created, thread] = sampleSessionEvent();
     server.store.append([created as NewEvent, thread as NewEvent]);

@@ -2,8 +2,11 @@ import {
   type FactoryAdmitRequest,
   FactoryDigest,
   type FactoryDismissRequest,
+  type FactoryFileFollowUpRequest,
   type FactoryItem,
   FactoryItemResponse,
+  type FactoryLesson,
+  FactoryLessonResponse,
   FactoryLoop,
   type FactoryRetryOptions,
   type FactorySetTypeRequest,
@@ -71,6 +74,17 @@ export interface FactoryApi {
    * while its PR is open, `not_failed` for other stages.
    */
   dismiss(projectId: string, itemId: string, req?: FactoryDismissRequest): Promise<FactoryItem>;
+  /**
+   * Forget one of the lessons the factory's reviewers recorded: it leaves the briefs and is never
+   * learned again. 404 `lesson_not_found`.
+   */
+  forgetLesson(projectId: string, lessonId: string): Promise<FactoryLesson>;
+  /**
+   * "File issue": file one review follow-up of a merged item (by its position in `followUps`),
+   * or link it to the open issue with the same title. Filing it again changes nothing; 400
+   * `no_follow_up` when there is no such follow-up.
+   */
+  fileFollowUp(projectId: string, itemId: string, index: number): Promise<FactoryItem>;
 }
 
 const enc = encodeURIComponent;
@@ -103,5 +117,18 @@ export function httpFactoryApi(http: Fetcher): FactoryApi {
       post(`${p(id)}/factory/items/${enc(itemId)}/retry`, opts ?? {}, item),
     dismiss: (id, itemId, req = {}) =>
       post(`${p(id)}/factory/items/${enc(itemId)}/dismiss`, req, item),
+    forgetLesson: (id, lessonId) =>
+      call(
+        "DELETE",
+        `${p(id)}/factory/lessons/${enc(lessonId)}`,
+        undefined,
+        (v) => FactoryLessonResponse.parse(v).lesson,
+      ),
+    fileFollowUp: (id, itemId, index) =>
+      post(
+        `${p(id)}/factory/items/${enc(itemId)}/follow-ups/file`,
+        { index } satisfies FactoryFileFollowUpRequest,
+        item,
+      ),
   };
 }

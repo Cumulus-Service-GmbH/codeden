@@ -67,18 +67,25 @@ describe("the dark factory's scout (§10.1)", () => {
     });
     // Two per round, however many the scout asks for.
     expect(plan.lenses.map((l) => l.area)).toEqual(["ux", "security"]);
-    expect(env.starts.map((s) => s.workKey)).toEqual([
-      "factory:scout",
-      "factory:lens:ux",
-      "factory:lens:security",
-    ]);
     expect(
       await code(() =>
         env.factory.fileIssue(scout, { ...finding("Early"), summary: "x", priority: "normal" }),
       ),
     ).toBe("lenses_reviewing");
+    // The plan is recorded at once; the area reviewers start on the next tick.
+    expect(env.starts.map((s) => s.workKey)).toEqual(["factory:scout"]);
+    await tick();
+    expect(env.starts.map((s) => s.workKey)).toEqual([
+      "factory:scout",
+      "factory:lens:ux",
+      "factory:lens:security",
+    ]);
+    expect(loop().scout.round?.phase).toBe("reviewing");
 
-    const [ux, security] = plan.lenses.map((l) => session(l.sessionId)) as [Session, Session];
+    const [ux, security] = (loop().scout.round?.lenses ?? []).map((l) => session(l.sessionId)) as [
+      Session,
+      Session,
+    ];
     const reported = await env.factory.reportFindings(ux, [
       finding("Editor loses focus"),
       finding("Editor loses focus"),
@@ -130,8 +137,9 @@ describe("the dark factory's scout (§10.1)", () => {
     darkFactory();
     await tick();
     const scout = session(loop().scout.sessionId);
-    const first = await env.factory.planRound(scout, { lenses: [{ area: "ux", focus: "forms" }] });
-    const lens = session(first.lenses[0]?.sessionId);
+    await env.factory.planRound(scout, { lenses: [{ area: "ux", focus: "forms" }] });
+    await tick();
+    const lens = session(loop().scout.lensSessions.ux);
     await env.factory.reportFindings(lens, []);
     await tick();
     await env.setStatus(scout.id, "idle");
@@ -144,10 +152,9 @@ describe("the dark factory's scout (§10.1)", () => {
     expect(env.starts).toHaveLength(starts);
     expect(env.messages.at(-1)).toMatchObject({ sessionId: scout.id });
     expect(env.messages.at(-1)?.text).toMatch(/Round 2/);
-    const second = await env.factory.planRound(scout, {
-      lenses: [{ area: "ux", focus: "tables" }],
-    });
-    expect(second.lenses[0]?.sessionId).toBe(lens.id);
+    await env.factory.planRound(scout, { lenses: [{ area: "ux", focus: "tables" }] });
+    await tick();
+    expect(loop().scout.round?.lenses[0]?.sessionId).toBe(lens.id);
     expect(env.starts).toHaveLength(starts);
     expect(env.messages.at(-1)?.text).toMatch(/New round[\s\S]*tables/);
   });
@@ -169,9 +176,12 @@ describe("the dark factory's scout (§10.1)", () => {
       ],
     });
     expect(plan.lenses.map((l) => l.area)).toEqual(["ux"]);
-    expect(loop().scout.round?.phase).toBe("reviewing");
     expect(plan.next).toContain("`security`: no free agent slot (Agents at once is 2;");
     expect(plan.next).toContain("Raising Agents at once");
+    await env.setStatus(scout.id, "idle");
+    await tick();
+    expect(loop().scout.round?.phase).toBe("reviewing");
+    expect(env.starts.map((s) => s.workKey)).toEqual(["factory:scout", "factory:lens:ux"]);
   });
 
   it("lets the scout review by itself when no agent slot is free", async () => {
@@ -203,7 +213,6 @@ describe("the dark factory's scout (§10.1)", () => {
       duplicate: ["ux"],
       no_slot: ["security", "performance"],
       round_limit: ["bugs"],
-      failed: [],
     });
   });
 

@@ -1,13 +1,17 @@
 import {
   AutonomyMode,
   type FactoryItem,
+  type FactoryLesson,
   FactoryLimits,
   FactoryLoop,
   FactoryStatus,
   FactoryTuning,
   type FactoryWorkItem,
+  type GitHubIssueRef,
   isFactoryMode,
+  lessonKey,
   parseVision,
+  type ReviewVerdict,
 } from "@codeden/contracts";
 import type { FactoryApi } from "../factory-api";
 import type { FixtureWorkItem } from "./fixtures/factory-fixture-types";
@@ -20,6 +24,25 @@ const delay = <T>(value: T, ms = 120): Promise<T> =>
 const now = () => new Date().toISOString();
 
 const minutesAgo = (m: number) => new Date(Date.now() - m * 60_000).toISOString();
+
+/** The approval merged mock items carry, with its non-blocking follow-ups. */
+const MOCK_APPROVAL: ReviewVerdict = {
+  verdict: "approve",
+  summary: "Meets every criterion; the tests cover the new path. Two things can wait.",
+  criteria: [],
+  vision: { aligned: true },
+  tests: { adequate: true },
+  security: { concerns: [] },
+  lessons: [],
+  followUps: [
+    {
+      title: "Archiving a container session deletes its unpushed commits",
+      severity: "medium",
+      area: "runner",
+    },
+    { title: "Document the container backend's limits", severity: "low", area: "docs" },
+  ],
+};
 
 const FINISHED = ["merged", "reverted", "rejected", "failed", "escalated"];
 const OWNING = ["backlog", "building", "verifying", "escalated", "failed"];
@@ -72,6 +95,8 @@ function work(w: FixtureWorkItem): FactoryWorkItem {
 /** In-memory factory API over the mock world's fixtures (§10.1). */
 export function mockFactoryApi(world: MockWorld): FactoryApi {
   const visions = new Map<string, string>();
+  /** Follow-ups filed with "File issue", by `<itemId>:<index>`. */
+  const filedFollowUps = new Map<string, GitHubIssueRef>();
   const project = (id: string) => world.snapshot.projects.find((p) => p.id === id);
   const status = (projectId: string): FactoryStatus => {
     const cached = world.factory.get(projectId);
@@ -138,6 +163,7 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
         reviewerNote: null,
         verdict: null,
       })),
+      lessons: isFactoryMode(f.mode) ? demoLessons(projectId) : [],
       lastDigest: null,
       lastTickAt: now(),
     });
@@ -166,7 +192,18 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       reviewerSessionId: null,
       reviewerProvider: "codex",
       reviewerNote: null,
-      review: null,
+      review: w.mergedAt ? MOCK_APPROVAL : null,
+      // Merged: the first follow-up is filed already, the other waits for "File issue".
+      followUps: w.mergedAt
+        ? (MOCK_APPROVAL.followUps ?? []).map((f, n) => ({
+            ...f,
+            issue:
+              filedFollowUps.get(`${itemId}:${n}`) ??
+              (n === 0
+                ? { number: 412, url: "https://github.com/hearth-co/hearth/issues/412" }
+                : null),
+          }))
+        : [],
       checks: s.mergeChecks.find((c) => c.itemId === itemId)?.checks ?? [],
       attempts: w.attempts,
       failureKind: w.failureKind,
@@ -328,5 +365,58 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       stage: "rejected",
       reason: req?.reason ? `Dismissed by you: ${req.reason}` : "Dismissed by you",
     }),
+    forgetLesson: async (id, lessonId) => {
+      const s = status(id);
+      const lesson = s.lessons.find((l) => l.id === lessonId);
+      if (!lesson) throw new Error(`No lesson ${lessonId}`);
+      world.factory.set(id, { ...s, lessons: s.lessons.filter((l) => l.id !== lessonId) });
+      return delay({ ...lesson, removedAt: now() });
+    },
+    async fileFollowUp(id, itemId, index) {
+      const it = item(id, itemId);
+      if (!it.followUps[index]) throw new Error(`No follow-up ${index}`);
+      const key = `${itemId}:${index}`;
+      if (!filedFollowUps.has(key)) {
+        const number = 500 + filedFollowUps.size;
+        filedFollowUps.set(key, {
+          number,
+          url: `https://github.com/hearth-co/hearth/issues/${number}`,
+        });
+      }
+      return delay(item(id, itemId));
+    },
   };
+}
+
+/** Lessons the demo factory's reviewers recorded. */
+function demoLessons(projectId: string): FactoryLesson[] {
+  const lesson = (n: number, text: string, prNumber: number, times: number, ago: number) => ({
+    id: `lesson-${n}`,
+    projectId,
+    text,
+    key: lessonKey(text),
+    itemId: `fw-l${n}`,
+    prNumber,
+    reviewerProvider: "codex",
+    times,
+    createdAt: minutesAgo(ago * 3),
+    lastSeenAt: minutesAgo(ago),
+    removedAt: null,
+  });
+  return [
+    lesson(
+      1,
+      "Every user-facing change adds a changelog fragment in changes/<issue>-<slug>.md; never edit CHANGELOG.md.",
+      214,
+      3,
+      40,
+    ),
+    lesson(
+      2,
+      "Put unit tests next to their package in test/, not beside the source file.",
+      209,
+      1,
+      180,
+    ),
+  ];
 }

@@ -16,6 +16,7 @@ import { FactoryRunButtons, OpenFactoryViewButton } from "./factory-actions";
 import { ChecksColumn, IgnoredColumn, RecentColumn } from "./factory-columns";
 import { FactoryGuideButton } from "./factory-guide";
 import { KillSwitchButton } from "./kill-switch";
+import { LessonsCard } from "./lessons-card";
 import { LOOP_LABEL, MODE_LABEL } from "./meta";
 import { PipelineDiagram } from "./pipeline-diagram";
 import { PullRequestsCard } from "./pull-requests-card";
@@ -250,6 +251,11 @@ export function FactoryPanel({ project }: { project: Project }) {
           <RecentColumn projectId={projectId} recent={f.recent} />
           <IgnoredColumn projectId={projectId} ignored={f.ignored} />
         </div>
+        <LessonsCard
+          projectId={projectId}
+          lessons={f.lessons}
+          learning={f.tuning.learnFromReviews}
+        />
         {f.lastDigest && (
           <details className="rounded-lg border border-border bg-surface px-3 py-2 text-2xs">
             <summary className="cursor-pointer text-muted-foreground">

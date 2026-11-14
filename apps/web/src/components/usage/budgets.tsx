@@ -2,8 +2,8 @@ import type { BudgetStatus, UsageBudget, UsageSettings } from "@codeden/contract
 import { BellRing, Plus, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { NumberField } from "@/components/common/number-field";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -83,8 +83,8 @@ export function BudgetsPanel() {
   const [adding, setAdding] = useState(false);
   const [projectId, setProjectId] = useState("all");
   const [period, setPeriod] = useState<UsageBudget["period"]>("daily");
-  const [limit, setLimit] = useState("25");
-  const [warn, setWarn] = useState("80");
+  const [limit, setLimit] = useState(25);
+  const [warnAtPercent, setWarn] = useState(80);
 
   const current: UsageSettings | undefined = settings.data?.settings;
   const projectName = (id: string | null) =>
@@ -98,17 +98,15 @@ export function BudgetsPanel() {
 
   const add = () => {
     if (!current) return;
-    const limitUsd = Number(limit);
-    const warnAtPercent = Math.round(Number(warn));
-    if (!(limitUsd > 0) || !(warnAtPercent >= 1 && warnAtPercent <= 100)) {
-      toast.error("Enter a limit above $0 and an alert level between 1 and 100%");
+    if (!(limit > 0)) {
+      toast.error("Enter a limit above $0");
       return;
     }
     const budget: UsageBudget = {
       id: `budget-${Date.now().toString(36)}`,
       projectId: projectId === "all" ? null : projectId,
       period,
-      limitUsd,
+      limitUsd: limit,
       warnAtPercent,
       enabled: true,
     };
@@ -181,20 +179,22 @@ export function BudgetsPanel() {
               <SelectItem value="monthly">Per month</SelectItem>
             </SelectContent>
           </Select>
-          <Input
+          <NumberField
             aria-label="Limit in USD"
-            inputMode="decimal"
+            decimal
+            min={0}
             className="h-7"
             value={limit}
-            onChange={(e) => setLimit(e.target.value)}
+            onChange={setLimit}
             placeholder="Limit $"
           />
-          <Input
+          <NumberField
             aria-label="Alert at percent"
-            inputMode="numeric"
+            min={1}
+            max={100}
             className="h-7"
-            value={warn}
-            onChange={(e) => setWarn(e.target.value)}
+            value={warnAtPercent}
+            onChange={setWarn}
             placeholder="Alert %"
           />
           <div className="col-span-2 flex justify-end gap-1 md:col-span-1">

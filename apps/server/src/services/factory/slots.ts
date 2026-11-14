@@ -21,6 +21,9 @@ import { isBusy } from "./sessions";
  * of its own (`ordered`: the queue, which is sorted by who asked and priority).
  */
 export const SLOT_TIERS = ["review", "repair", "review_early", "resume", "build", "scout"] as const;
+
+/** The scout's claim on an agent slot: its rounds and their area reviewers. */
+export const SCOUT_SLOT = "scout";
 export type SlotTier = (typeof SLOT_TIERS)[number];
 
 const rank = (tier: SlotTier) => SLOT_TIERS.indexOf(tier);

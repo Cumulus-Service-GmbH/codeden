@@ -4,6 +4,7 @@ import {
   codedenCredentialCopies,
   codedenCredentialFiles,
   codedenSecretFolders,
+  forReading,
   resolvePattern,
   slashes,
   touchesCodedenCredentials,
@@ -241,9 +242,12 @@ export function searchReaches(
   return ctx.codedenHome ? walkReaches({ roots, recursive: true, names }, ctx) : undefined;
 }
 
-/** A recursive search from `roots` (Claude's Grep): the root it reaches CodeDen's home from. */
+/**
+ * A recursive search from `roots` (Claude's Grep): the root it reaches CodeDen's home from. A
+ * search only reads, so the session's own artifacts folder is not part of the home here.
+ */
 export function searchReachesHome(roots: string[], ctx: PathContext): string | undefined {
-  return walkReachesHome({ roots, recursive: true, names: [] }, ctx);
+  return walkReachesHome({ roots, recursive: true, names: [] }, forReading(ctx));
 }
 
 /** How a walk reaches what is guarded, and how a single path does. */

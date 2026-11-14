@@ -4,17 +4,24 @@ import {
   type FactoryDigest,
   type FactoryItem,
   type FactoryItemStage,
+  type FactoryLesson,
   type FactoryLoop,
   FactoryTuning,
   LEGACY_SIZE_LIMITS,
   pipelineStep,
   ScoutState,
 } from "@codeden/contracts";
-import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "../../db/client";
-import { factoryDigests, factoryItems, factoryLoops } from "../../db/schema-factory";
+import {
+  factoryDigests,
+  factoryItems,
+  factoryLessons,
+  factoryLoops,
+} from "../../db/schema-factory";
 import type { EventStore } from "../../events/store";
 import { localDay } from "./policy";
+import { keepScoutReports } from "./scout-merge";
 
 /** A new item: the identifying fields, plus anything else to set. */
 export type NewFactoryItem = Pick<
@@ -31,6 +38,9 @@ export const WAITING_STAGES: FactoryItemStage[] = ["candidate", "backlog"];
 export const OWNED_STAGES: FactoryItemStage[] = ["failed", "escalated"];
 /** Stages after which an item's sessions have nothing left to do (see `cleanup.ts`). */
 export const FINISHED_STAGES: FactoryItemStage[] = ["merged", "reverted", "rejected", "failed"];
+/** Nudge a merge sets while the item's review follow-ups wait to be filed (`follow-ups.ts`). */
+export const FOLLOW_UPS_DUE = "follow_ups_due";
+
 /** Final stages. */
 export const DONE_STAGES: FactoryItemStage[] = [
   "merged",
@@ -91,10 +101,14 @@ export class FactoryStore {
   /**
    * Save the loop; writes only when something besides its stamps (`lastTickAt`, `updatedAt`)
    * changed. The log is never pruned (§6) and every loop event refreshes the open factory
-   * panels, while an idle factory ticks every 30 s.
+   * panels, while an idle factory ticks every 30 s. What the scout and its area reviewers
+   * reported in the round since the caller read the loop is kept (`keepScoutReports`).
    */
-  saveLoop(loop: FactoryLoop): FactoryLoop {
-    const current = this.loop(loop.projectId);
+  saveLoop(changed: FactoryLoop): FactoryLoop {
+    const current = this.loop(changed.projectId);
+    const loop = current
+      ? { ...changed, scout: keepScoutReports(changed.scout, current.scout) }
+      : changed;
     if (current && sameLoop(current, loop)) return { ...loop, updatedAt: current.updatedAt };
     const next = { ...loop, updatedAt: new Date().toISOString() };
     this.events.append([
@@ -154,6 +168,22 @@ export class FactoryStore {
       .select()
       .from(factoryItems)
       .where(and(eq(factoryItems.projectId, projectId), pending))
+      .orderBy(asc(factoryItems.updatedAt))
+      .all()
+      .map((r) => withItemDefaults(r.item));
+  }
+
+  /**
+   * Merged items whose review follow-ups wait to be filed (`follow-ups.ts`): the merge set the
+   * `follow_ups_due` nudge. Not capped like `items`.
+   */
+  itemsWithFollowUpsDue(projectId: string): FactoryItem[] {
+    const path = `$.nudges.${FOLLOW_UPS_DUE}`;
+    const due = sql`json_extract(${factoryItems.item}, ${path}) is not null`;
+    return this.db
+      .select()
+      .from(factoryItems)
+      .where(and(eq(factoryItems.projectId, projectId), due))
       .orderBy(asc(factoryItems.updatedAt))
       .all()
       .map((r) => withItemDefaults(r.item));
@@ -276,6 +306,42 @@ export class FactoryStore {
   saveDigest(digest: FactoryDigest): void {
     this.events.append([{ type: "factory.digest.created", sessionId: null, payload: { digest } }]);
   }
+
+  /** The project's lessons in force (not forgotten), last recorded first. */
+  lessons(projectId: string, limit: number): FactoryLesson[] {
+    return this.db
+      .select()
+      .from(factoryLessons)
+      .where(and(eq(factoryLessons.projectId, projectId), isNull(factoryLessons.removedAt)))
+      .orderBy(desc(factoryLessons.lastSeenAt), desc(factoryLessons.id))
+      .limit(limit)
+      .all()
+      .map((r) => r.lesson);
+  }
+
+  /** One lesson of the project, forgotten or not. */
+  lesson(projectId: string, id: string): FactoryLesson | undefined {
+    return this.db
+      .select()
+      .from(factoryLessons)
+      .where(and(eq(factoryLessons.projectId, projectId), eq(factoryLessons.id, id)))
+      .get()?.lesson;
+  }
+
+  /** The project's lesson with this `lessonKey`, forgotten or not. */
+  lessonByKey(projectId: string, key: string): FactoryLesson | undefined {
+    return this.db
+      .select()
+      .from(factoryLessons)
+      .where(and(eq(factoryLessons.projectId, projectId), eq(factoryLessons.key, key)))
+      .get()?.lesson;
+  }
+
+  /** Record a new lesson or a change to one (an upsert). */
+  saveLesson(lesson: FactoryLesson): FactoryLesson {
+    this.events.append([{ type: "factory.lesson.updated", sessionId: null, payload: { lesson } }]);
+    return lesson;
+  }
 }
 
 /** Fields items saved before 0.6 lack (the projection keeps the JSON as it was written). */
@@ -294,6 +360,7 @@ const ITEM_DEFAULTS = {
   rebuiltFrom: null,
   stepSince: null,
   mergePath: null,
+  followUps: [],
 } satisfies Partial<FactoryItem>;
 
 /** An item as read from the projection, with the fields newer versions added. */

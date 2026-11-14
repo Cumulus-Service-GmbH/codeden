@@ -11,7 +11,9 @@ import { archiveFinished } from "./cleanup";
 import { settleClosedIssues } from "./closed-issues";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { advanceDrain } from "./drain";
+import { fileDueFollowUps } from "./follow-ups";
 import { classifyPending, intakeFailedChecks, intakeIssues } from "./intake";
+import { briefLessons } from "./lessons";
 import { openPrFiles, scheduleOrder } from "./overlap";
 import { advanceOwned } from "./owned";
 import { budgetExceeded, localDay, mayBuild, queueOrder } from "./policy";
@@ -107,6 +109,10 @@ export async function runTick(
   // PRs a rebuild or an integrator replaced are closed, whatever their item's stage by now.
   await closeReplacedPrs(ctx, project).catch((error: unknown) =>
     ctx.log?.(`factory: closing replaced PRs: ${errorMessage(error)}`),
+  );
+  // Merged work's review follow-ups become issues (dark factory), also while paused.
+  await fileDueFollowUps(ctx, project).catch((error: unknown) =>
+    ctx.log?.(`factory: filing follow-ups: ${errorMessage(error)}`),
   );
   // Finished work gives back its sessions and worktrees, also while paused.
   archiveFinished(ctx, projectId);
@@ -301,7 +307,8 @@ async function startBuilder(
   }
   const { provider, model } = choice;
   try {
-    const res = await ctx.sessions.startBuilder(item, vision, provider, model);
+    const lessons = briefLessons(ctx, project.id);
+    const res = await ctx.sessions.startBuilder(item, vision, provider, model, lessons);
     if (res.status === "conflict") {
       const other = res.existing.map((w) => w.workKey).join(", ");
       ctx.store.updateItem(item.id, (i) => ({

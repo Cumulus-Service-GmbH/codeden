@@ -1,6 +1,7 @@
 import type { FactoryItem, FactoryLoop, GitHubPrRef, MergePath, Project } from "@codeden/contracts";
 import { errorMessage, ServiceError } from "../errors";
 import { type FactoryContext, factoryNotice, raiseInbox } from "./context";
+import { followUpsAtMerge } from "./follow-ups";
 import type { FactoryPr } from "./github-port";
 import { stuckDecisionId, stuckInboxId } from "./stuck";
 
@@ -56,6 +57,7 @@ export function prDecidedOutside(
   const merged = ref.state === "merged";
   ctx.store.updateItem(item.id, (i) => ({
     ...i,
+    ...(merged ? followUpsAtMerge(i, at) : {}),
     pr: ref,
     stage: merged ? "merged" : "rejected",
     // A protected area stays the reason it was a person's to merge.
@@ -190,16 +192,20 @@ export async function autoMerge(
     .items(project.id, ["watching"])
     .filter((i) => i.id !== current.id)
     .map((i) => [`${MERGED_AFTER}${i.id}`, at]);
-  ctx.store.updateItem(current.id, (i) => ({
-    ...i,
-    stage: "watching",
-    pr: { ...pr.ref, state: "merged" },
-    mergeSha: res.sha,
-    mergePath: how.path,
-    mergedAt: at,
-    note: how.note ?? "Merged; watching CI on the default branch",
-    nudges: { ...i.nudges, ...Object.fromEntries(unverified) },
-  }));
+  ctx.store.updateItem(current.id, (i) => {
+    const kept = followUpsAtMerge(i, at);
+    return {
+      ...i,
+      stage: "watching",
+      pr: { ...pr.ref, state: "merged" },
+      mergeSha: res.sha,
+      mergePath: how.path,
+      mergedAt: at,
+      note: how.note ?? "Merged; watching CI on the default branch",
+      followUps: kept.followUps,
+      nudges: { ...kept.nudges, ...Object.fromEntries(unverified) },
+    };
+  });
   const ready = ctx.inbox.find(readyInboxId(current.id));
   if (ready?.status === "open") ctx.inbox.close(ready, "resolved", { note: "merged" });
   if (current.issue && current.source !== "revert") {

@@ -64,18 +64,29 @@ export function InboxActions({ item }: { item: InboxItem }) {
     },
   });
   // Archiving again retries the worktree removal; the server resolves the item when it works.
+  // A container kept for work it hasn't pushed (#337) can be deleted anyway from here.
   const removeAgain = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (force: boolean) => {
       if (!item.sessionId) throw new Error("This item has no session");
-      return client.archiveSession(item.sessionId);
+      return client.archiveSession(item.sessionId, { force });
     },
     onError: fail,
     onSuccess: (res) => {
-      if (res.worktree.status === "removed") toast.success("Worktree removed");
-      else {
-        toast.error("Couldn't remove the worktree", {
-          description: res.worktree.message ?? undefined,
+      const { status, message, unpushed } = res.worktree;
+      if (status === "removed") {
+        toast.success(unpushed ? "Container deleted" : "Worktree removed", {
+          description: message ?? undefined,
         });
+      } else if (status === "kept_changes" && unpushed) {
+        toast.warning("The container was kept: it holds work that isn't pushed", {
+          description: [message, "Delete anyway deletes this work for good."]
+            .filter(Boolean)
+            .join(". "),
+          action: { label: "Delete anyway", onClick: () => removeAgain.mutate(true) },
+          duration: 20_000,
+        });
+      } else {
+        toast.error("Couldn't remove the worktree", { description: message ?? undefined });
       }
     },
   });
@@ -125,7 +136,7 @@ export function InboxActions({ item }: { item: InboxItem }) {
     case "cleanup_failed":
       return (
         <>
-          <Button size="sm" onClick={() => removeAgain.mutate()} disabled={busy}>
+          <Button size="sm" onClick={() => removeAgain.mutate(false)} disabled={busy}>
             <RotateCcw /> {removeAgain.isPending ? "Removing…" : "Try again"}
           </Button>
           {dismissButton}

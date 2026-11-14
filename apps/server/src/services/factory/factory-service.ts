@@ -10,6 +10,7 @@ import {
   type FactoryFileIssueRequest,
   type FactoryFinding,
   type FactoryItem,
+  type FactoryLesson,
   type FactoryLoop,
   type FactoryLoopState,
   type FactoryPlanRoundRequest,
@@ -47,8 +48,10 @@ import { assertCanEnter, haltProject } from "./controls";
 import * as decisions from "./decisions";
 import { writeDigest } from "./digest";
 import { advanceDrain, drainInboxId, drainStatus, startDrain } from "./drain";
+import { fileFollowUp } from "./follow-ups";
 import type { FactoryGithub } from "./github-port";
 import { allowLargeChange } from "./large-change";
+import { forgetLesson } from "./lessons";
 import { runTick } from "./loop";
 import { PrFiles } from "./overlap";
 import { reportReproduction, submitAnalysis } from "./pipeline";
@@ -108,6 +111,10 @@ export class FactoryService {
   readonly data: FactoryStore;
   readonly ctx: FactoryContext;
   private readonly chains = new Map<string, Promise<unknown>>();
+  /** Per project, the scout's and its area reviewers' reports, one at a time (`serializeReport`). */
+  private readonly reportChains = new Map<string, Promise<unknown>>();
+  /** Per project, the tick waiting for its turn on the chain (`tick`). */
+  private readonly queuedTicks = new Map<string, Promise<FactoryLoop>>();
   private readonly timers = new Map<string, NodeJS.Timeout>();
   /** Archives finished work's sessions, one at a time, outside the tick chains. */
   readonly archiver: SessionArchiver;
@@ -180,27 +187,54 @@ export class FactoryService {
     this.timers.clear();
   }
 
-  /** Run one loop step for a project (serialized per project). */
+  /**
+   * Run one loop step for a project (serialized per project). Calls made while a tick waits for
+   * its turn share that tick, which reads the state when it starts: however often a busy factory
+   * asks, at most one tick waits, so the agents' reports never queue behind a backlog of ticks.
+   */
   tick(projectId: string): Promise<FactoryLoop> {
-    return this.serialize(projectId, "tick", () =>
-      runTick(this.ctx, projectId, { digest: (p, l, day) => this.writeDigest(p, l, day) }),
-    );
+    const queued = this.queuedTicks.get(projectId);
+    if (queued) return queued;
+    const next = this.serialize(projectId, "tick", () => {
+      this.queuedTicks.delete(projectId);
+      return runTick(this.ctx, projectId, { digest: (p, l, day) => this.writeDigest(p, l, day) });
+    });
+    this.queuedTicks.set(projectId, next);
+    return next;
   }
 
   /**
-   * Run something that changes a project's loop record after the ticks and reports already
-   * queued for it, so two writers never overwrite each other's changes.
+   * Run something that changes a project's loop record after the ticks and other changes
+   * already queued for it, so two writers never overwrite each other's changes.
    */
   private serialize<T>(projectId: string, what: string, run: () => Promise<T> | T): Promise<T> {
-    const prev = this.chains.get(projectId) ?? Promise.resolve(undefined);
+    return this.enqueue(this.chains, projectId, what, run);
+  }
+
+  /**
+   * Run one of the scout's or its area reviewers' reports after those already queued for the
+   * project, never behind a tick: a tool call answers at once however long a tick takes, and a
+   * tick that read the loop before keeps what it recorded (`keepScoutReports`).
+   */
+  private serializeReport<T>(projectId: string, what: string, run: () => Promise<T> | T) {
+    return this.enqueue(this.reportChains, projectId, what, run);
+  }
+
+  private enqueue<T>(
+    chains: Map<string, Promise<unknown>>,
+    projectId: string,
+    what: string,
+    run: () => Promise<T> | T,
+  ): Promise<T> {
+    const prev = chains.get(projectId) ?? Promise.resolve(undefined);
     const next = prev.catch(() => undefined).then(run);
-    this.chains.set(projectId, next);
+    chains.set(projectId, next);
     void next
       .catch((error: unknown) =>
         this.deps.log?.(`factory: ${what} ${projectId}: ${errorMessage(error)}`),
       )
       .finally(() => {
-        if (this.chains.get(projectId) === next) this.chains.delete(projectId);
+        if (chains.get(projectId) === next) chains.delete(projectId);
       });
     return next;
   }
@@ -457,6 +491,21 @@ export class FactoryService {
     return item;
   }
 
+  /**
+   * "File issue": file one review follow-up of a merged item as an issue, labelled and linked to
+   * its PR (or link it to the open issue with the same title). Filing it again changes nothing.
+   */
+  fileFollowUp(projectId: string, itemId: string, index: number): Promise<FactoryItem> {
+    return this.serialize(projectId, "file follow-up", () =>
+      fileFollowUp(
+        this.ctx,
+        this.deps.projects.get(projectId),
+        this.item(projectId, itemId),
+        index,
+      ),
+    );
+  }
+
   /** Dismiss a failed item without an open PR: it is rejected with the reason. */
   dismiss(
     projectId: string,
@@ -467,6 +516,12 @@ export class FactoryService {
     const item = decisions.dismiss(this.ctx, projectId, itemId, req, by);
     this.soon(projectId);
     return item;
+  }
+
+  /** Forget one of the project's lessons: it leaves the briefs and is never learned again. */
+  forgetLesson(projectId: string, lessonId: string): FactoryLesson {
+    this.deps.projects.get(projectId);
+    return forgetLesson(this.ctx, projectId, lessonId);
   }
 
   // ------------------------------------------------------------ agents' reports (tools)
@@ -485,16 +540,20 @@ export class FactoryService {
     return res;
   }
 
-  /** `factory_plan_round`: the scout's review areas for this round. */
-  planRound(session: Session, req: FactoryPlanRoundRequest) {
+  /** `factory_plan_round`: the scout's review areas for this round; the next tick starts them. */
+  async planRound(session: Session, req: FactoryPlanRoundRequest) {
     const projectId = session.projectId ?? "";
-    return this.serialize(projectId, "plan round", () => planRound(this.ctx, session, req));
+    const res = await this.serializeReport(projectId, "plan round", () =>
+      planRound(this.ctx, session, req),
+    );
+    this.soon(projectId);
+    return res;
   }
 
   /** `factory_report_findings`: an area reviewer's findings. */
   async reportFindings(session: Session, findings: FactoryFinding[]) {
     const projectId = session.projectId ?? "";
-    const res = await this.serialize(projectId, "findings", () =>
+    const res = await this.serializeReport(projectId, "findings", () =>
       reportFindings(this.ctx, session, findings),
     );
     this.soon(projectId);
@@ -504,7 +563,7 @@ export class FactoryService {
   /** `factory_file_issue`: the scout files one piece of work. */
   async fileIssue(session: Session, req: FactoryFileIssueRequest) {
     const projectId = session.projectId ?? "";
-    const res = await this.serialize(projectId, "file issue", () =>
+    const res = await this.serializeReport(projectId, "file issue", () =>
       fileIssue(this.ctx, session, req),
     );
     this.soon(projectId);

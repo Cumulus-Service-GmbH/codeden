@@ -168,6 +168,17 @@ function isCheck(name: string, args: string[]): boolean {
   return positional[0] !== undefined && subs.includes(positional[0]);
 }
 
+/**
+ * True when `name args` only reads or lists the files it names: a program on the read-only
+ * allowlist, without the options that make it write or run something (`sort -o`, `find -exec`,
+ * `rg --pre`). `git`, `gh` and `sed` have rules of their own and never count. `args` keep their
+ * case. The risk classifier lets such a command read the session's own artifacts (#338).
+ */
+export function onlyReads(name: string, args: string[]): boolean {
+  if (name === "git" || name === "gh" || name === "sed") return false;
+  return READ_ONLY_BINS.has(name) && !writingOptionDenial(name, args);
+}
+
 /** Options of `readOnlyCommandDenial`. */
 export interface ReadOnlyCommandOptions {
   /**

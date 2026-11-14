@@ -6,6 +6,7 @@ import {
   FactoryAllowLargeChangeRequest,
   FactoryDecisionRequest,
   FactoryDigest,
+  FactoryFileFollowUpRequest,
   FactoryItem,
   FactoryLimits,
   FactoryLoop,
@@ -16,6 +17,7 @@ import {
   KillSwitchRequest,
   KillSwitchResponse,
   Notice,
+  REVIEW_FOLLOW_UPS_MAX,
   REVIEW_SUMMARY_MAX,
   REVIEW_SUMMARY_TRUNCATED,
   ReviewVerdict,
@@ -23,6 +25,7 @@ import {
   SCOUT_UNAVAILABLE,
   ScoutStatus,
   SetAutonomyModeRequest,
+  sameFollowUpTitle,
   truncateReviewSummary,
 } from "../src";
 import { ts } from "./fixtures";
@@ -65,6 +68,7 @@ const item: FactoryItem = {
   reviewerProvider: "codex",
   reviewerNote: null,
   review: null,
+  followUps: [],
   checks: [{ name: "ci", state: "pass", detail: null, escalate: false, at: ts }],
   attempts: 0,
   reason: null,
@@ -164,6 +168,7 @@ describe("factory API contracts (§10.1)", () => {
       lensSessions: {},
       round: null,
       lastRoundAt: null,
+      lastRoundNote: null,
       rounds: 0,
     });
     // Items stored before `largeChange`, the pipelines and session cleanup existed still parse,
@@ -182,9 +187,11 @@ describe("factory API contracts (§10.1)", () => {
       rebuiltFrom: _rf,
       stepSince: _ss,
       mergePath: _mp,
+      followUps: _fu,
       ...old
     } = item;
     expect(FactoryItem.parse(old)).toMatchObject({
+      followUps: [],
       mergePath: null,
       failureKind: null,
       rebuiltFrom: null,
@@ -337,6 +344,58 @@ describe("factory API contracts (§10.1)", () => {
     expect(FactoryLoop.parse(JSON.parse(JSON.stringify(draining)))).toEqual(draining);
     expect(drainText(1)).toBe("Draining: 1 item in flight");
     expect(drainText(2)).toBe("Draining: 2 items in flight");
+  });
+
+  it("round-trips review follow-ups on verdicts and merged items (#339)", () => {
+    const base = {
+      verdict: "approve",
+      summary: "ok",
+      vision: { aligned: true },
+      tests: { adequate: true },
+      security: { concerns: [] },
+    };
+    const verdict = ReviewVerdict.parse({
+      ...base,
+      followUps: [
+        { title: "  Archiving deletes unpushed commits  ", severity: "medium", area: "runner" },
+        { title: "Document the limits" },
+      ],
+    });
+    // Titles are trimmed; severity and area are optional.
+    expect(verdict.followUps).toEqual([
+      { title: "Archiving deletes unpushed commits", severity: "medium", area: "runner" },
+      { title: "Document the limits" },
+    ]);
+    expect(ReviewVerdict.parse(JSON.parse(JSON.stringify(verdict)))).toEqual(verdict);
+    expect(ReviewVerdictSubmission.parse(verdict).followUps).toEqual(verdict.followUps);
+    // Verdicts stored before follow-ups existed still parse, without any.
+    expect(ReviewVerdict.parse(base).followUps).toBeUndefined();
+    // A short list: capped, and every entry needs a title and a known severity.
+    const many = Array.from({ length: REVIEW_FOLLOW_UPS_MAX + 1 }, (_, n) => ({ title: `F${n}` }));
+    expect(ReviewVerdict.safeParse({ ...base, followUps: many }).success).toBe(false);
+    expect(ReviewVerdict.safeParse({ ...base, followUps: [{ title: "  " }] }).success).toBe(false);
+    expect(
+      ReviewVerdict.safeParse({ ...base, followUps: [{ title: "x", severity: "urgent" }] }).success,
+    ).toBe(false);
+    // A merged item keeps them, each with its issue once filed.
+    const merged = FactoryItem.parse({
+      ...item,
+      stage: "merged",
+      review: verdict,
+      followUps: [
+        {
+          ...verdict.followUps?.[0],
+          issue: { number: 12, url: "https://github.com/acme/app/issues/12" },
+        },
+        { title: "Document the limits" },
+      ],
+    });
+    expect(merged.followUps[1]).toEqual({ title: "Document the limits", issue: null });
+    expect(FactoryItem.parse(JSON.parse(JSON.stringify(merged)))).toEqual(merged);
+    expect(FactoryFileFollowUpRequest.parse({ index: 1 })).toEqual({ index: 1 });
+    expect(FactoryFileFollowUpRequest.safeParse({ index: -1 }).success).toBe(false);
+    expect(sameFollowUpTitle(" Fix  the Runner ", "fix the runner")).toBe(true);
+    expect(sameFollowUpTitle("Fix the runner", "Fix the web")).toBe(false);
   });
 
   it("validates verdicts, reports and mode requests", () => {

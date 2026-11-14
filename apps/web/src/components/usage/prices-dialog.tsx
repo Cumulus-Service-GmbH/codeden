@@ -2,6 +2,7 @@ import type { ModelPrice } from "@codeden/contracts";
 import { Pencil, Tag, Trash2 } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { NumberField } from "@/components/common/number-field";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -30,15 +31,19 @@ const FIELDS = [
   ["cacheWritePerMTok", "Cache write"],
 ] as const;
 
-type Draft = { provider: string; model: string } & Record<(typeof FIELDS)[number][0], string>;
+/** A price being typed: an empty price box counts as $0. */
+type Draft = { provider: string; model: string } & Record<
+  (typeof FIELDS)[number][0],
+  number | null
+>;
 
 const emptyDraft: Draft = {
   provider: "claude",
   model: "",
-  inputPerMTok: "",
-  outputPerMTok: "",
-  cacheReadPerMTok: "",
-  cacheWritePerMTok: "",
+  inputPerMTok: null,
+  outputPerMTok: null,
+  cacheReadPerMTok: null,
+  cacheWritePerMTok: null,
 };
 
 /** The price table behind estimated costs: bundled list prices plus your overrides. */
@@ -60,18 +65,17 @@ export function PricesDialog() {
   };
 
   const add = () => {
-    const values = FIELDS.map(([k]) => Number(draft[k] || 0));
-    if (!draft.model.trim() || values.some((v) => !(v >= 0))) {
-      toast.error("Enter a model id and non-negative prices");
+    if (!draft.model.trim()) {
+      toast.error("Enter a model id");
       return;
     }
     const price: ModelPrice = {
       provider: draft.provider.trim(),
       model: draft.model.trim(),
-      inputPerMTok: values[0] ?? 0,
-      outputPerMTok: values[1] ?? 0,
-      cacheReadPerMTok: values[2] ?? 0,
-      cacheWritePerMTok: values[3] ?? 0,
+      inputPerMTok: draft.inputPerMTok ?? 0,
+      outputPerMTok: draft.outputPerMTok ?? 0,
+      cacheReadPerMTok: draft.cacheReadPerMTok ?? 0,
+      cacheWritePerMTok: draft.cacheWritePerMTok ?? 0,
       asOf: localToday(),
     };
     const rest = overrides.filter(
@@ -85,10 +89,10 @@ export function PricesDialog() {
     setDraft({
       provider: p.provider,
       model: p.model,
-      inputPerMTok: String(p.inputPerMTok),
-      outputPerMTok: String(p.outputPerMTok),
-      cacheReadPerMTok: String(p.cacheReadPerMTok),
-      cacheWritePerMTok: String(p.cacheWritePerMTok),
+      inputPerMTok: p.inputPerMTok,
+      outputPerMTok: p.outputPerMTok,
+      cacheReadPerMTok: p.cacheReadPerMTok,
+      cacheWritePerMTok: p.cacheWritePerMTok,
     });
 
   const row = (p: ModelPrice, override: boolean) => (
@@ -169,13 +173,15 @@ export function PricesDialog() {
             placeholder="model id"
           />
           {FIELDS.map(([k, label]) => (
-            <Input
+            <NumberField
               key={k}
               aria-label={`${label} per million tokens`}
-              inputMode="decimal"
+              decimal
+              optional
+              min={0}
               className="h-7"
               value={draft[k]}
-              onChange={(e) => setDraft({ ...draft, [k]: e.target.value })}
+              onChange={(v) => setDraft((d) => ({ ...d, [k]: v }))}
               placeholder={label}
             />
           ))}

@@ -6,12 +6,14 @@ import {
   CircleDot,
   Factory,
   GitPullRequest,
+  Lightbulb,
   ShieldAlert,
   X,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import { SectionLabel } from "@/components/common/bits";
 import { StatusDot } from "@/components/common/status-dot";
+import { FollowUps } from "@/components/factory/follow-ups";
 import {
   CheckRow,
   InvestigationCard,
@@ -88,6 +90,18 @@ function Verdict({ review, item }: { review: ReviewVerdict; item: FactoryItem })
             <li key={c}>{c}</li>
           ))}
         </ul>
+      )}
+      {review.lessons.length > 0 && (
+        <div className="mt-3 text-2xs" data-testid="review-lessons">
+          <p className="flex items-center gap-1.5 font-medium text-muted-foreground">
+            <Lightbulb className="size-3.5" aria-hidden /> Lessons recorded
+          </p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-foreground/85">
+            {review.lessons.map((l) => (
+              <li key={l}>{l}</li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );
@@ -216,6 +230,7 @@ export function FactoryItemPage({ projectId, itemId }: { projectId: string; item
                 <Verdict review={item.review} item={item} />
               </section>
             )}
+            <FollowUps item={item} projectId={projectId} mode={project.autonomyMode} />
           </div>
           <aside className="space-y-3 rounded-xl border border-border bg-card p-4 self-start">
             <ItemActions item={item} projectId={projectId} />

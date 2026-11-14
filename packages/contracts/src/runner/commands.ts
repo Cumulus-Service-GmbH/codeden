@@ -6,6 +6,7 @@ import {
   McpStdioEnv,
 } from "../agent-config-mcp-test";
 import { AutonomyLevel, Id, ProviderId, ReasoningEffort } from "../common";
+import { UnpushedWork } from "../execution";
 import { UserInput } from "../input";
 import { ProjectConfigFile } from "../project-config";
 import { ProviderInfo, ProviderStatus, RuntimeResponse, SessionOptions } from "../provider";
@@ -245,6 +246,11 @@ export const RunnerCommand = z.discriminatedUnion("name", [
     index: z.int().nonnegative(),
   }),
   z.object({ name: z.literal("git.status"), cwd: z.string() }),
+  /**
+   * What exists only in this clone (`UnpushedWork`): uncommitted changes, commits no remote has
+   * and stashes. Asked before a container's clone is deleted (#337).
+   */
+  z.object({ name: z.literal("git.unpushed"), cwd: z.string() }),
   /** Unified diff `fromRef..toRef`; without `toRef`, against the working tree incl. untracked files. */
   z.object({
     name: z.literal("git.diff"),
@@ -419,6 +425,7 @@ export const RunnerCommandResults = {
     behind: z.int().nonnegative(),
     files: z.array(z.object({ path: z.string(), status: z.string() })),
   }),
+  "git.unpushed": UnpushedWork,
   "git.diff": z.object({ diff: z.string(), files: z.array(DiffFileStat).optional() }),
   "git.branches": z.object({
     current: z.string().nullable(),
