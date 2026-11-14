@@ -458,7 +458,7 @@ While the factory drains, the header, the factory panel, the Factory view and th
 
 Either way, the loop stays stopped until you release the switch (**Release kill switch**). After a drain there's nothing half done to recover. A kill switch never hands work back to automations.
 
-When the loop **pauses** by itself (budget, repeated failures, a revert), resume it from the panel once you've looked at the reason; that also clears the failure count. A pause for a revert ends by itself once the revert merged and CI on the default branch is green again.
+When the loop **pauses** by itself (budget, repeated failures, a revert), resume it from the panel once you've looked at the reason; that also clears the failure count. A pause for a revert ends by itself once the revert merged and CI on the default branch is green again. If CI doesn't report on the revert's merge commit, or is still red there, you get one inbox item saying so. Resume once the branch is green, and the reverted work goes back to its builder.
 
 ## How the factory and automations share work
 

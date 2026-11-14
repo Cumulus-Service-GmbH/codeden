@@ -62,6 +62,7 @@ import { PrFiles } from "./overlap";
 import { reportReproduction, submitAnalysis } from "./pipeline";
 import { localDay } from "./policy";
 import { ProviderBackoffStore } from "./provider-backoffs";
+import { revertsOnResume } from "./revert";
 import { buildScorecard } from "./scorecard";
 import { runScoutNow } from "./scout";
 import { fileIssue, planRound, reportFindings } from "./scout-reports";
@@ -432,6 +433,8 @@ export class FactoryService {
   resume(projectId: string): Promise<FactoryLoop> {
     const next = this.serialize(projectId, "resume", () => {
       const loop = this.data.loopOrNew(projectId, this.ctx.now());
+      // Work whose revert merged goes back to its builder, also when CI never said green.
+      revertsOnResume(this.ctx, projectId);
       return this.data.saveLoop({
         ...loop,
         state: "idle",
