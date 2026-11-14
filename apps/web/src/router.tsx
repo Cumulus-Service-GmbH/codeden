@@ -6,6 +6,7 @@ import {
   Outlet,
   redirect,
 } from "@tanstack/react-router";
+import { FactoryGuideSheet } from "@/components/factory/factory-guide";
 import { AppShell } from "@/components/shell/app-shell";
 import { AppToaster } from "@/components/shell/app-toaster";
 import { SignInScreen } from "@/components/shell/sign-in";
@@ -37,6 +38,7 @@ function Root() {
     <>
       <Outlet />
       <AppToaster />
+      <FactoryGuideSheet />
     </>
   );
 }

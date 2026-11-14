@@ -245,6 +245,20 @@
 .markdown [data-streamdown="strong"] {
   @apply font-semibold text-foreground;
 }
+/* The factory guide (docs/factory-loop.md): cells read from the top, and narrower padding on
+   phones keeps its three-column tables within a 360 px screen. */
+.factory-guide [data-streamdown="table-cell"] {
+  @apply align-top max-sm:px-2;
+}
+.factory-guide [data-streamdown="table-header-cell"] {
+  @apply max-sm:px-2;
+}
+.factory-guide [data-streamdown="table"] {
+  @apply max-sm:text-[12.5px];
+}
+.factory-guide [data-streamdown="table-wrapper"] {
+  @apply max-sm:p-0;
+}
 
 @utility scroll-thin {
   scrollbar-width: thin;

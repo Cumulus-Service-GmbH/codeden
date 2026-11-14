@@ -2,6 +2,8 @@ import type { FactoryStatus } from "@codeden/contracts";
 import { ChevronDown, ChevronRight, UserRound } from "lucide-react";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { InfoHint } from "@/components/common/info-hint";
+import { FactoryGuideLink } from "@/components/factory/factory-guide";
+import { GUIDE_ANCHOR } from "@/lib/factory-guide";
 import { cn } from "@/lib/utils";
 import { useWide } from "./hooks";
 import { NeedsYouCard } from "./need-actions";
@@ -49,10 +51,18 @@ function Cards({
   cards: ViewCard[];
   now: number;
   onOpen: (card: ViewCard) => void;
-  empty?: string;
+  /** "Nothing here", with a link to the guide's section about this stage. */
+  empty?: { text: string; guide: string };
 }) {
   if (cards.length === 0)
-    return empty ? <p className="px-1 py-2 text-2xs text-muted-foreground/70">{empty}</p> : null;
+    return empty ? (
+      <p className="px-1 py-2 text-2xs text-muted-foreground/70">
+        {empty.text} ·{" "}
+        <FactoryGuideLink section={empty.guide} className="text-muted-foreground">
+          how it works
+        </FactoryGuideLink>
+      </p>
+    ) : null;
   return (
     <ul className="flex flex-col gap-1.5">
       {cards.map((c) => (
@@ -167,6 +177,9 @@ function NeedsYou({
     return (
       <p className="flex items-center gap-1.5 px-1 text-2xs text-muted-foreground">
         <UserRound className="size-3" aria-hidden /> Nothing waits on you.
+        <FactoryGuideLink section={GUIDE_ANCHOR.needsYou} className="text-muted-foreground">
+          What lands here?
+        </FactoryGuideLink>
       </p>
     );
   return (
@@ -192,6 +205,12 @@ function NeedsYou({
         <span className="hidden truncate font-normal text-muted-foreground sm:inline">
           Work only a person can move on: merge, retry or dismiss, or answer
         </span>
+        <FactoryGuideLink
+          section={GUIDE_ANCHOR.needsYou}
+          className="ml-auto shrink-0 font-normal whitespace-nowrap"
+        >
+          Why is this here?
+        </FactoryGuideLink>
       </h2>
       <ul
         className={cn(
@@ -271,7 +290,11 @@ export function PipelineBoard({
                   cards={cards}
                   now={now}
                   onOpen={onOpen}
-                  empty={stage.id === "intake" && scout ? undefined : "Nothing here"}
+                  empty={
+                    stage.id === "intake" && scout
+                      ? undefined
+                      : { text: "Nothing here", guide: GUIDE_ANCHOR[stage.id] }
+                  }
                 />
                 {stage.id === "intake" && ignored > 0 && (
                   <p

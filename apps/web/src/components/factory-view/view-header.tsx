@@ -15,6 +15,7 @@ import { type ReactNode, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ExperimentalBadge } from "@/components/factory/autonomy-dialog";
 import { FactoryRunButtons } from "@/components/factory/factory-actions";
+import { FactoryGuideButton } from "@/components/factory/factory-guide";
 import { KillSwitchButton } from "@/components/factory/kill-switch";
 import { LOOP_LABEL, MODE_LABEL } from "@/components/factory/meta";
 import { WipChip } from "@/components/factory/wip-chip";
@@ -168,6 +169,7 @@ export function ViewHeader({
         )}
         <FactoryRunButtons f={f} stopped={stopped} />
         <KillSwitchButton scope={{ projectId: f.projectId }} on={f.killSwitch} />
+        <FactoryGuideButton />
         {pixel.available && (
           <Button
             size="sm"

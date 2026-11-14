@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { AutonomyDialog, ExperimentalBadge } from "./autonomy-dialog";
 import { FactoryRunButtons, OpenFactoryViewButton } from "./factory-actions";
 import { ChecksColumn, IgnoredColumn, RecentColumn } from "./factory-columns";
+import { FactoryGuideButton } from "./factory-guide";
 import { KillSwitchButton } from "./kill-switch";
 import { LOOP_LABEL, MODE_LABEL } from "./meta";
 import { PipelineDiagram } from "./pipeline-diagram";
@@ -152,6 +153,7 @@ export function FactoryPanel({ project }: { project: Project }) {
               <FileText /> Vision
             </Link>
           </Button>
+          <FactoryGuideButton />
           <KillSwitchButton scope={{ projectId }} on={f.killSwitch} />
         </div>
       </div>
