@@ -4,15 +4,21 @@ import {
   type FactoryDigest,
   type FactoryItem,
   type FactoryItemStage,
+  type FactoryLesson,
   type FactoryLoop,
   FactoryTuning,
   LEGACY_SIZE_LIMITS,
   pipelineStep,
   ScoutState,
 } from "@codeden/contracts";
-import { and, asc, desc, eq, inArray, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "../../db/client";
-import { factoryDigests, factoryItems, factoryLoops } from "../../db/schema-factory";
+import {
+  factoryDigests,
+  factoryItems,
+  factoryLessons,
+  factoryLoops,
+} from "../../db/schema-factory";
 import type { EventStore } from "../../events/store";
 import { localDay } from "./policy";
 import { keepScoutReports } from "./scout-merge";
@@ -280,6 +286,42 @@ export class FactoryStore {
 
   saveDigest(digest: FactoryDigest): void {
     this.events.append([{ type: "factory.digest.created", sessionId: null, payload: { digest } }]);
+  }
+
+  /** The project's lessons in force (not forgotten), last recorded first. */
+  lessons(projectId: string, limit: number): FactoryLesson[] {
+    return this.db
+      .select()
+      .from(factoryLessons)
+      .where(and(eq(factoryLessons.projectId, projectId), isNull(factoryLessons.removedAt)))
+      .orderBy(desc(factoryLessons.lastSeenAt), desc(factoryLessons.id))
+      .limit(limit)
+      .all()
+      .map((r) => r.lesson);
+  }
+
+  /** One lesson of the project, forgotten or not. */
+  lesson(projectId: string, id: string): FactoryLesson | undefined {
+    return this.db
+      .select()
+      .from(factoryLessons)
+      .where(and(eq(factoryLessons.projectId, projectId), eq(factoryLessons.id, id)))
+      .get()?.lesson;
+  }
+
+  /** The project's lesson with this `lessonKey`, forgotten or not. */
+  lessonByKey(projectId: string, key: string): FactoryLesson | undefined {
+    return this.db
+      .select()
+      .from(factoryLessons)
+      .where(and(eq(factoryLessons.projectId, projectId), eq(factoryLessons.key, key)))
+      .get()?.lesson;
+  }
+
+  /** Record a new lesson or a change to one (an upsert). */
+  saveLesson(lesson: FactoryLesson): FactoryLesson {
+    this.events.append([{ type: "factory.lesson.updated", sessionId: null, payload: { lesson } }]);
+    return lesson;
   }
 }
 

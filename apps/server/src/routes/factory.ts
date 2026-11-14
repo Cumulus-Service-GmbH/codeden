@@ -2,6 +2,7 @@ import {
   FactoryAdmitRequest,
   FactoryDismissRequest,
   type FactoryItemResponse,
+  type FactoryLessonResponse,
   FactoryRetryOptions,
   FactorySetTypeRequest,
   KillSwitchRequest,
@@ -17,6 +18,7 @@ import { jsonBody } from "./validate";
  * Mounted under `/projects`. `factory/scout` is "Run scout now": 409 `scout_unavailable` with
  * the reason when no round can start. `kill-switch` takes `mode` (`now`, the default, or
  * `drain`: finish the work in flight, then stop); `factory/resume` also cancels a drain.
+ * `DELETE factory/lessons/:lessonId` forgets a lesson (404 `lesson_not_found`).
  */
 export function projectFactoryRoutes(s: AppServices) {
   const f = s.factory;
@@ -64,6 +66,11 @@ export function projectFactoryRoutes(s: AppServices) {
     .post("/:id/factory/items/:itemId/dismiss", jsonBody(FactoryDismissRequest), (c) =>
       c.json<FactoryItemResponse>({
         item: f.dismiss(c.req.param("id"), c.req.param("itemId"), c.req.valid("json"), "user"),
+      }),
+    )
+    .delete("/:id/factory/lessons/:lessonId", (c) =>
+      c.json<FactoryLessonResponse>({
+        lesson: f.forgetLesson(c.req.param("id"), c.req.param("lessonId")),
       }),
     );
 }

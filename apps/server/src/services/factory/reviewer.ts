@@ -4,6 +4,7 @@ import type { FactoryContext } from "./context";
 import { failReview } from "./failures";
 import type { FactoryPr } from "./github-port";
 import { stoppedSinceNudge } from "./idle";
+import { briefLessons } from "./lessons";
 import { failItem } from "./outcomes";
 import { REVIEWER_NUDGE, reReviewPrompt } from "./prompts";
 import { recheckPrompt } from "./prompts-integration";
@@ -100,6 +101,7 @@ async function startReviewer(
     reviewHead(ctx, project, item, pr),
     mayAutoMerge(item, project.factoryLimits),
     text,
+    text ? undefined : briefLessons(ctx, project.id),
   );
   if (res.status !== "started") return { status: res.status };
   return { sessionId: res.sessionId, provider: choice.provider, note: choice.note };

@@ -36,10 +36,23 @@ Issue ─► Identify type ┼─ Feature:  Analyze ───► Implement ─�
    - **Feature: Analyze.** The agent checks whether the request already works, fits the vision and the architecture, and writes a spec with acceptance criteria (`factory_submit_analysis`). The spec is posted on the issue. A request that is already possible, unclear or out of scope stops here with a comment.
    - **Feature: Implement.** The same agent builds it to the spec, with tests and docs.
    - **Docs: Implement docs change.** No reproduction, no analysis, and no agent review as long as the change touches only documentation.
-5. **Review.** An **independent reviewer session**, on a different provider from the author when one is available (or the one you pick under [Agents](#settings-and-limits)), checks the pull request against the issue, the spec and the vision. `request_changes`, or any failed merge check, sends the work back to the author: the **revise loop** (up to `maxFixAttempts` rounds, default 2). CI on the pull request's head is the authority for the full test suite. A reviewer whose own checkout can't run the tests (a broken install, timeouts under load) marks its verdict `blockers: "environment"`. That verdict never goes to the author: the reviewer gets the CI result and reviews again on the merits. If its environment stops it a second time, the item fails as an infrastructure failure, which the factory recovers by itself without using a revise round, and the next reviewer works in a clean worktree on the PR's head.
+5. **Review.** An **independent reviewer session**, on a different provider from the author when one is available (or the one you pick under [Agents](#settings-and-limits)), checks the pull request against the issue, the spec and the vision. `request_changes`, or any failed merge check, sends the work back to the author: the **revise loop** (up to `maxFixAttempts` rounds, default 2). CI on the pull request's head is the authority for the full test suite. A reviewer whose own checkout can't run the tests (a broken install, timeouts under load) marks its verdict `blockers: "environment"`. That verdict never goes to the author: the reviewer gets the CI result and reviews again on the merits. If its environment stops it a second time, the item fails as an infrastructure failure, which the factory recovers by itself without using a revise round, and the next reviewer works in a clean worktree on the PR's head. A reviewer can also record [lessons](#lessons-the-factory-learns-from-its-reviews) for later builders and reviewers.
 6. **Merge.** With every check green the pull request is **ready for you**: an inbox item, a comment on the PR, and the item waits at Merge until you merge it on GitHub. With **auto-merge** on, CodeDen squash-merges trusted work itself, one pull request at a time through [the merge queue](#the-factory-looks-after-its-pull-requests). It watches CI on the default branch afterwards: a regression opens an automatic revert PR, pauses the loop and holds fast merges until the default branch is green again.
 
 Every pull request carries its **test results** (a `## Test results` section in the description, or the raw output attached with `attach_evidence`) and, when UI files changed, **screenshots**. Both are merge checks.
+
+### Lessons: the factory learns from its reviews
+
+Without lessons, the same findings come back on item after item: a missing changelog note, tests in the wrong folder, a convention from `AGENTS.md` overlooked. Each costs a revise round. Reviewers can now record what they learn with their verdict, so the next agents know it from the start:
+
+- **What a lesson is.** A reviewer can add up to three **lessons** to a verdict: general rules for the repository, one short sentence each, such as "Every user-facing change adds a changelog fragment in `changes/`". A finding about this one pull request belongs in the review, not in a lesson. Each lesson is cut to 300 characters, and anything that looks like a secret is masked.
+- **Who gets them.** Every new builder (whatever its first step) and every new reviewer gets the project's 20 most recent lessons in its brief, after the vision. They are marked as notes, never instructions: the vision, the issue and the factory's rules come first. Messages to agents already at work (revise rounds, rebases, re-checks) don't repeat them.
+- **Repeats count up.** A lesson recorded again, ignoring case, spacing and a final period, counts up and moves to the top instead of appearing twice.
+- **Only from trusted work.** Reviews of work let in from an untrusted author record no lessons, because a stranger's issue steered that review and a lesson reaches every later brief.
+- **Kept whatever the verdict.** Lessons are about the repository, not one pull request, so the factory keeps them even when the verdict itself isn't recorded, such as one blocked only by the reviewer's own environment.
+- **You stay in charge.** The factory panel lists the lessons in force under **Lessons**, each with the pull request it came from, how often reviewers recorded it, and when. **Forget** takes a lesson out of the briefs for good: the factory never learns it again. The item page shows the lessons its verdict recorded. **Learn from reviews** in the settings (on by default) turns it all off: reviewers aren't asked for lessons, none are kept, and briefs carry none. The lessons already kept stay listed for when you turn it on again.
+
+Lessons are the factory's own notes, kept in CodeDen. Rules you want every agent to follow, inside the factory or not, still belong in your memory files (`AGENTS.md`, `CLAUDE.md`).
 
 ### Finish before starting
 
@@ -363,6 +376,7 @@ Settings are **enforced by the server**, never left to agent judgement. Open the
 | `maxFixAttempts` | Merge checks: Revise rounds (after a review asking for changes or a failed check; then the item fails) | `2` |
 | `watchTimeoutMin` | Merge checks: Watch main CI (minutes) (after an automatic merge; a failure while watched reverts it) | `120` |
 | `requireCi` | Merge checks: Require CI | `true` |
+| `learnFromReviews` | Merge checks: Learn from reviews (reviewers record [lessons](#lessons-the-factory-learns-from-its-reviews), and new builders and reviewers get them) | `true` |
 | `auditCommand` | Merge checks: Audit command | none |
 | `minBacklog` | The scout: Review when fewer than (issues waiting; `0` turns scheduled rounds off) | `2` |
 | `discoveryIntervalMin` | The scout: Every (hours) | `360` (minutes) |
@@ -437,6 +451,7 @@ Everything in the UI is also available over the local API (with the install toke
 | `POST /api/projects/:id/factory/set-type` | `{ itemId, type, reason? }`: move an item that hasn't started to another pipeline |
 | `POST /api/projects/:id/factory/items/:itemId/retry` | `{ mode? }`: run a stopped item again. `rereview` (the default while its pull request is open) sends that pull request back to a fresh review; `rebuild` (the default without one) starts over from the first step. `409 no_open_pr` for a re-review without an open pull request |
 | `POST /api/projects/:id/factory/items/:itemId/dismiss` | `{ reason? }`: mark a failed item without an open pull request rejected, with the reason (409 `pr_open` while its pull request is open) |
+| `DELETE /api/projects/:id/factory/lessons/:lessonId` | Forget a lesson: it leaves the briefs and is never learned again (404 `lesson_not_found`). The panel status lists the lessons in force in `lessons` |
 | `POST /api/projects/:id/kill-switch`, `POST /api/factory/kill-switch` | `{ on: true }` |
 | `POST /api/projects/:id/factory/resume` | Clear a pause |
 | `POST /api/projects/:id/factory/tick` | Run the regular check now (**Check now**) |

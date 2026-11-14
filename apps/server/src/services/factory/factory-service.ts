@@ -10,6 +10,7 @@ import {
   type FactoryFileIssueRequest,
   type FactoryFinding,
   type FactoryItem,
+  type FactoryLesson,
   type FactoryLoop,
   type FactoryLoopState,
   type FactoryPlanRoundRequest,
@@ -49,6 +50,7 @@ import { writeDigest } from "./digest";
 import { advanceDrain, drainInboxId, drainStatus, startDrain } from "./drain";
 import type { FactoryGithub } from "./github-port";
 import { allowLargeChange } from "./large-change";
+import { forgetLesson } from "./lessons";
 import { runTick } from "./loop";
 import { PrFiles } from "./overlap";
 import { reportReproduction, submitAnalysis } from "./pipeline";
@@ -498,6 +500,12 @@ export class FactoryService {
     const item = decisions.dismiss(this.ctx, projectId, itemId, req, by);
     this.soon(projectId);
     return item;
+  }
+
+  /** Forget one of the project's lessons: it leaves the briefs and is never learned again. */
+  forgetLesson(projectId: string, lessonId: string): FactoryLesson {
+    this.deps.projects.get(projectId);
+    return forgetLesson(this.ctx, projectId, lessonId);
   }
 
   // ------------------------------------------------------------ agents' reports (tools)

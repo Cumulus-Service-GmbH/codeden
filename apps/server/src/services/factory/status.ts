@@ -6,6 +6,7 @@ import {
   type FactoryWorkItem,
   type GitHubPrRef,
   isFactoryMode,
+  LESSONS_IN_BRIEF,
   type Project,
   pipelineStep,
   type ScoutStatus,
@@ -128,6 +129,7 @@ export async function buildStatus(ctx: FactoryContext, projectId: string): Promi
     githubLogin,
     scout: project.autonomyMode === "dark_factory" ? scoutStatus(ctx, project, loop, spend) : null,
     visionExists: visionOf(project).exists,
+    lessons: ctx.store.lessons(projectId, LESSONS_IN_BRIEF),
     lastDigest: ctx.store.digests(projectId, 1)[0] ?? null,
     // Kept in memory: an idle tick saves nothing (`FactoryStore.saveTick`).
     lastTickAt: ctx.store.lastTick(projectId) ?? loop.lastTickAt,

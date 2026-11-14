@@ -24,6 +24,7 @@ export type TuningDraft = AgentsDraft &
     | "maxFixAttempts"
     | "watchTimeoutMin"
     | "maxOpenPrs"
+    | "learnFromReviews"
   >;
 
 /** The editable tuning knobs of a saved tuning. */
@@ -36,6 +37,7 @@ export function tuningDraft(t: FactoryTuning): TuningDraft {
     auditCommand: t.auditCommand,
     maxFixAttempts: t.maxFixAttempts,
     watchTimeoutMin: t.watchTimeoutMin,
+    learnFromReviews: t.learnFromReviews,
     minBacklog: t.minBacklog,
     discoveryIntervalMin: t.discoveryIntervalMin,
     discoveryPerRound: t.discoveryPerRound,
@@ -388,6 +390,22 @@ export function LimitsEditor({
               Require CI
               <span className="block text-3xs text-muted-foreground">
                 Off: a repository without CI can still merge automatically.
+              </span>
+            </span>
+          </div>
+          <div className="flex items-start gap-2.5 text-xs">
+            <Switch
+              checked={tuning.learnFromReviews}
+              aria-label="Learn from reviews"
+              onCheckedChange={(learnFromReviews) =>
+                onTuningChange({ ...tuning, learnFromReviews })
+              }
+            />
+            <span>
+              Learn from reviews
+              <span className="block text-3xs text-muted-foreground">
+                Reviewers record general lessons, and new builders and reviewers get them in their
+                briefs. Off: none are asked for, kept or briefed.
               </span>
             </span>
           </div>

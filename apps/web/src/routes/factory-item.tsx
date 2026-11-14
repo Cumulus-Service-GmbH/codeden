@@ -6,6 +6,7 @@ import {
   CircleDot,
   Factory,
   GitPullRequest,
+  Lightbulb,
   ShieldAlert,
   X,
 } from "lucide-react";
@@ -88,6 +89,18 @@ function Verdict({ review, item }: { review: ReviewVerdict; item: FactoryItem })
             <li key={c}>{c}</li>
           ))}
         </ul>
+      )}
+      {review.lessons.length > 0 && (
+        <div className="mt-3 text-2xs" data-testid="review-lessons">
+          <p className="flex items-center gap-1.5 font-medium text-muted-foreground">
+            <Lightbulb className="size-3.5" aria-hidden /> Lessons recorded
+          </p>
+          <ul className="mt-1 list-disc space-y-0.5 pl-5 text-foreground/85">
+            {review.lessons.map((l) => (
+              <li key={l}>{l}</li>
+            ))}
+          </ul>
+        </div>
       )}
     </div>
   );
