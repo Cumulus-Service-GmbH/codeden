@@ -68,7 +68,8 @@ export async function exportSessionTranscript(
     version: CODEDEN_VERSION,
     knownSecrets: opts.knownSecrets,
   });
-  return { fileName: transcriptFileName(session, now, projectName), markdown };
+  const fileName = transcriptFileName(session, now, projectName, opts.knownSecrets);
+  return { fileName, markdown };
 }
 
 function projectNameOf(deps: TranscriptExportDeps, projectId: string): string | null {

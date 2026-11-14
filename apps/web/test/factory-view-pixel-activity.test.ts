@@ -131,6 +131,13 @@ describe("bubble text (#264)", () => {
         text: "Use sk-ant-api03-abcdefghijklmnop0123 here",
       }),
       activityOf(tool({ toolKind: "web", title: "GET https://bot:hunter2@example.com" })),
+      // A password glued into a variable's name (#315 review): the bubble used to show it.
+      activityOf({
+        ...base,
+        kind: "assistant_message",
+        text: "Run it with PGPASSWORD=hunter2-correct psql",
+      }),
+      activityOf({ ...base, kind: "reasoning", text: "MYSQL_PWD=hunter22 mysql -u app" }),
     ].map((a) => a?.text ?? "");
     for (const t of leaks) {
       expect(t).not.toMatch(/ghp_|sk-ant|hunter2/);
@@ -152,6 +159,8 @@ describe("secret redaction (#264)", () => {
         `jwt ${jwt}`,
         "sha 3f786850e387550fdab836ed7e6dc881de23001b",
         "xoxb-1234567890-abcdefghij and AKIAABCDEFGHIJKLMNOP",
+        "PGPASSWORD=hunter2-correct psql -h db",
+        "NGROK_AUTHTOKEN=2abcDEF34ghi ngrok http 80",
       ].map(redactSecrets),
     ).toEqual([
       "https://***@github.com/acme/shop.git",
@@ -161,6 +170,8 @@ describe("secret redaction (#264)", () => {
       "jwt ***",
       "sha ***",
       "*** and ***",
+      "PGPASSWORD=*** psql -h db",
+      "NGROK_AUTHTOKEN=*** ngrok http 80",
     ]);
   });
 

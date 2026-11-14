@@ -73,14 +73,19 @@ export function transcriptTitle(session: Session, projectName: string | null): s
   return oneLine(session.title ?? session.purpose) || "Session";
 }
 
-/** `<slug of the title>-<YYYY-MM-DD>.md`, or `session-<id8>-<date>.md` for a title with no slug. */
+/**
+ * `<slug of the title>-<YYYY-MM-DD>.md`, or `session-<id8>-<date>.md` for a title with no slug.
+ * The title is redacted first, so a secret in it can't reach the file name.
+ */
 export function transcriptFileName(
   session: Session,
   exportedAt: Date,
   projectName: string | null = null,
+  knownSecrets: readonly string[] = [],
 ): string {
   const date = exportedAt.toISOString().slice(0, 10);
-  const stem = slug(transcriptTitle(session, projectName)) || `session-${slug(session.id, 8)}`;
+  const title = redactAndCount(transcriptTitle(session, projectName), { known: knownSecrets }).text;
+  const stem = slug(title) || `session-${slug(session.id, 8)}`;
   return `${stem}-${date}.md`;
 }
 

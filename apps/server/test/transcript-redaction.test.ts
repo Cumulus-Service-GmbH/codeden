@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   sessionTranscriptMarkdown,
   type TranscriptSource,
+  transcriptFileName,
 } from "../src/services/sessions/transcript-markdown";
 import { sampleSession } from "./helpers";
 
@@ -175,6 +176,36 @@ describe("transcript export: secrets (#315)", () => {
       knownSecrets: [install],
     });
     expect(md).toContain("**Agent**\n\nUsing [redacted]");
+  });
+
+  it("hides a password glued into a variable's name, as agents run psql and mysql", () => {
+    const md = sessionTranscriptMarkdown(
+      source([
+        rec(command("c6", "PGPASSWORD=hunter2-correct psql -h db -c 'select 1'")),
+        rec(command("c7", "MYSQL_PWD=hunter22 mysql -u app")),
+      ]),
+    );
+    expect(md).toContain("* Ran `PGPASSWORD=[redacted] psql -h db -c 'select 1'`");
+    expect(md).toContain("* Ran `MYSQL_PWD=[redacted] mysql -u app`");
+    expect(md).not.toContain("hunter2");
+  });
+
+  it("names the file after the redacted title", () => {
+    const install = "f00d".repeat(16);
+    const titled = { ...session, title: `Rotate ${install}` };
+    expect(transcriptFileName(titled, new Date(AT), null, [install])).toBe(
+      "rotate-redacted-2026-11-14.md",
+    );
+  });
+
+  it("exports a huge transcript quickly (the redaction stays linear)", () => {
+    const blob = "a-".repeat(100_000);
+    const started = performance.now();
+    sessionTranscriptMarkdown(
+      source([rec({ id: "r6", status: "completed", kind: "assistant_message", text: blob })]),
+    );
+    // Seconds to a minute before the redactor's rules were bounded; milliseconds now.
+    expect(performance.now() - started).toBeLessThan(2_000);
   });
 
   it("adds no note when there is nothing to hide", () => {

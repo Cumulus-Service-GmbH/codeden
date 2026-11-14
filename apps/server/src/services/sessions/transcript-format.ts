@@ -75,8 +75,9 @@ export function escapeFolds(text: string): string {
         fence = marker;
         return line;
       }
-      // An inline code span runs from a run of backticks to the next run of the same length.
-      return line.replace(/(`+).*?\1|<(\/?(?:details|summary))\b/gi, (match, ticks, tag) =>
+      // An inline code span runs from a run of backticks to the next run of the same length
+      // (at most 16, so a long run of backticks is read in steps, not again from each one).
+      return line.replace(/(`{1,16}).*?\1|<(\/?(?:details|summary))\b/gi, (match, ticks, tag) =>
         ticks ? match : `&lt;${tag}`,
       );
     })

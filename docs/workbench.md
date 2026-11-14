@@ -123,7 +123,7 @@ It leaves out the agent's reasoning, tool output and diffs, so it stays readable
 
 - **Known token formats:** GitHub (`ghp_`, `gho_`, `github_pat_` and the rest), OpenAI and Anthropic (`sk-`, `sk-ant-`), Stripe, Slack (`xox…`), GitLab, npm, AWS access keys, Google API keys, Hugging Face, JSON Web Tokens, and CodeDen's own MCP and remote-access tokens.
 - **Bearer tokens and credentials:** `Authorization` headers, `Bearer …`, passwords in URLs (`https://user:password@host`) and private key blocks.
-- **Values of secret-named settings:** `GITHUB_TOKEN=…`, `DB_PASSWORD=…`, `"api_key": "…"`, `--token …`. References such as `$GITHUB_TOKEN` or `${{ secrets.X }}` stay as they are.
+- **Values of secret-named settings:** `GITHUB_TOKEN=…`, `DB_PASSWORD=…`, `PGPASSWORD=…`, `MYSQL_PWD=…`, `"api_key": "…"`, `--token …`. References such as `$GITHUB_TOKEN` or `${{ secrets.X }}` stay as they are.
 - **Your install token,** wherever it appears.
 
 Ordinary words, file paths and hashes such as commit SHAs are left alone. Redaction goes by pattern, so it can't catch everything (a password typed with no name next to it, say). Skim the file before posting it somewhere public all the same: the agent's messages and commands are otherwise included as written.

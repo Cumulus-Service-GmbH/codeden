@@ -87,6 +87,20 @@ describe("redactAndCount: KEY=value", () => {
     for (const [input, output] of lines) expect(hide(input as string), input).toBe(output);
   });
 
+  it("hides glued and short secret names: PGPASSWORD, MYSQL_PWD, *_AUTHTOKEN, AUTH", () => {
+    const lines = [
+      ["PGPASSWORD=hunter2-correct psql -h db", `PGPASSWORD=${REDACTED} psql -h db`],
+      ["MYSQL_PWD=hunter22 mysql", `MYSQL_PWD=${REDACTED} mysql`],
+      ["NGROK_AUTHTOKEN=2abcDEF34ghi ngrok http 80", `NGROK_AUTHTOKEN=${REDACTED} ngrok http 80`],
+      ["ACCESSTOKEN=abc123def", `ACCESSTOKEN=${REDACTED}`],
+      ["AUTH=abc123def", `AUTH=${REDACTED}`],
+      ["CREDENTIALS=abc123def", `CREDENTIALS=${REDACTED}`],
+      ["clientsecret: 'abc'", `clientsecret: ${REDACTED}`],
+      ["Server=db;Uid=app;Pwd=hunter22;", `Server=db;Uid=app;Pwd=${REDACTED};`],
+    ];
+    for (const [input, output] of lines) expect(hide(input as string), input).toBe(output);
+  });
+
   it("counts each hidden value once, and a second pass changes nothing", () => {
     const text = `GITHUB_TOKEN=ghp_${rep("A1b2C3d4", 5)} API_KEY=abc123`;
     const once = redactAndCount(text);
@@ -115,6 +129,12 @@ describe("redactAndCount: KEY=value", () => {
       "TOKEN_URL=https://auth.example.com/token",
       "AWS_ACCESS_KEY_ID=fromenv",
       "secrets: inherit",
+      "PWD=/home/dev/app OLDPWD=/home/dev",
+      "PGPASSWORD_FILE=/run/secrets/pg",
+      "NEXTAUTH_URL=http://localhost:3000 AUTH_MODE=strict",
+      "auth: required",
+      'fetch(url, { credentials: "include" })',
+      "BYPASS_CACHE=1",
     ]) {
       expect(redactAndCount(plain), plain).toEqual({ text: plain, count: 0 });
     }
@@ -146,5 +166,29 @@ describe("redactAndCount: no false positives", () => {
     const sha = "3f786850e387550fdab836ed7e6dc881de23001b";
     expect(redactAndCount(`sha ${sha}`).text).toBe(`sha ${sha}`);
     expect(redactAndCount(`sha ${sha}`, { opaque: true, mask: "***" }).text).toBe("sha ***");
+  });
+});
+
+describe("redactAndCount: large input", () => {
+  // The text is an agent's and the export runs on the server's event loop: every rule must stay
+  // linear. Each of these took seconds to minutes when a rule re-read a run from each character;
+  // all of them together take a few milliseconds now, so the bound below is very loose.
+  const size = 200_000;
+  const inputs: [string, string][] = [
+    ["a kebab-case run", "a-".repeat(size / 2)],
+    ["a base64url blob", Array.from({ length: size }, (_, i) => "Ab9_-"[i % 5]).join("")],
+    ["a run of letters", "abcdefgh".repeat(size / 8)],
+    ["colons", "a:".repeat(size / 2)],
+    ["scheme-like text", "ab+".repeat(size / 3)],
+    ["sk- prefixes", "sk-".repeat(size / 3)],
+    ["JWT-like starts", "-eyJabcdefghij".repeat(size / 14)],
+    ["unfinished private keys", "-----BEGIN RSA PRIVATE KEY-----\n".repeat(size / 32)],
+    ["secret keys without values", "token: token: ".repeat(size / 14)],
+  ];
+
+  it.each(inputs)("redacts %s of 200 KB in well under a second", (_name, text) => {
+    const started = performance.now();
+    redactAndCount(text, { opaque: true, known: ["f00d".repeat(16)] });
+    expect(performance.now() - started).toBeLessThan(1_000);
   });
 });
