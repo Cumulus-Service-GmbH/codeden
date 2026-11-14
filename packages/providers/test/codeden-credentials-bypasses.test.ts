@@ -157,13 +157,21 @@ describe("PowerShell path lists", () => {
       const ctx = { ...win, shell };
       for (const cmd of [
         "Get-Content README.md,CHANGELOG.md",
-        "Get-Content 'C:\\Users\\me\\.codeden\\install-token,x'",
-        'Get-Content "C:\\Users\\me\\.codeden\\runner\\runner.json,bak"',
         "Get-Content install-token,runner\\runner.json",
         "Select-String -Pattern 'a,b' -Path src\\*.ts",
         "Write-Output a,b",
       ]) {
         expect(action(cmd, ctx), `${shell}: ${cmd}`).toBeNull();
+      }
+      // Other files in the home ask as the home (#320), never as CodeDen's credentials.
+      for (const cmd of [
+        "Get-Content 'C:\\Users\\me\\.codeden\\install-token,x'",
+        'Get-Content "C:\\Users\\me\\.codeden\\runner\\runner.json,bak"',
+      ]) {
+        expect(classifyCommand(cmd, ctx), `${shell}: ${cmd}`).toMatchObject({
+          codeden: true,
+          reason: expect.stringMatching(/own home/),
+        });
       }
     }
   });
@@ -238,30 +246,40 @@ describe("a CodeDen home with glob characters in its name", () => {
     ]) {
       expect(guarded(cmd, ctx), cmd).toBe(true);
     }
-    expect(action("cat ~/.code*/settings.json", ctx)).toBeNull();
+    // Another file in the home asks as the home, not as CodeDen's credentials (#320).
+    expect(classifyCommand("cat ~/.code*/settings.json", ctx)).toMatchObject({
+      codeden: true,
+      reason: expect.stringMatching(/own home/),
+    });
+    expect(action("cat ~/src/*/settings.json", ctx)).toBeNull();
   });
 
-  it("other files in and next to that home stay safe", () => {
+  it("files next to that home stay safe; other files in it ask as the home (#320)", () => {
     const ctx: RiskContext = { ...posix, codedenHome: "/tmp/CodeDen [dev]" };
-    for (const target of [
-      "/tmp/CodeDen d/install-token",
-      "/tmp/CodeDen [dev]/logs/server.log",
-      "/tmp/CodeDen [dev]/settings.json",
-      "install-token",
-    ]) {
+    for (const target of ["/tmp/CodeDen d/install-token", "/tmp/CodeDen d/x", "install-token"]) {
       expect(classifyRead(target, ctx), target).toEqual({ risky: false });
     }
+    const asHome = { risky: true, codeden: true, reason: expect.stringMatching(/own home/) };
+    for (const target of [
+      "/tmp/CodeDen [dev]/logs/server.log",
+      "/tmp/CodeDen [dev]/settings.json",
+    ]) {
+      expect(classifyRead(target, ctx), target).toMatchObject(asHome);
+    }
     const onWindows: RiskContext = { ...win, codedenHome: "C:\\Users\\me\\CodeDen [dev]" };
-    expect(classifyRead("C:\\Users\\me\\CodeDen [dev]\\settings.json", onWindows)).toEqual({
+    expect(classifyRead("C:\\Users\\me\\CodeDen d\\settings.json", onWindows)).toEqual({
       risky: false,
     });
+    expect(classifyRead("C:\\Users\\me\\CodeDen [dev]\\settings.json", onWindows)).toMatchObject(
+      asHome,
+    );
     expect(
       assessClaudeTool(
         "Glob",
         { path: "C:\\Users\\me\\CodeDen [dev]", pattern: "logs/*" },
         onWindows,
       ),
-    ).toEqual({ risky: false });
+    ).toMatchObject(asHome);
   });
 });
 

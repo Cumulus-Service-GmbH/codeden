@@ -1,7 +1,7 @@
 /**
  * Shell wildcards over `/`-separated paths: `*`, `?`, `[...]`, and `**`, which before a slash
  * stands for zero or more folders. The policy uses them to tell whether a path pattern or a
- * search's name filter reaches CodeDen's own credential files (§11.2).
+ * search's name filter reaches CodeDen's own home or its credential files (§11.2).
  */
 
 /** True when a path holds a wildcard. */
@@ -87,6 +87,16 @@ export function wildcardPattern(
 
 const DIGITS = [..."0123456789"];
 
+/** A pattern run as a small automaton over its input, one character at a time. */
+interface Automaton {
+  /** The states before any input. */
+  start: Set<number>;
+  /** The states after `ch`, from `states`. */
+  step: (states: Iterable<number>, ch: string) => Set<number>;
+  /** True when one of `states` is the whole pattern matched. */
+  accepts: (states: Set<number>) => boolean;
+}
+
 /**
  * True when `pattern` matches `prefix` followed by some run of digits: whether a wildcard reaches
  * any of a numbered family of files, such as the copies CodeDen keeps of a damaged file
@@ -100,6 +110,54 @@ export function wildcardMatchesNumbered(
   ignoreCase: boolean,
   literal = 0,
 ): boolean | undefined {
+  const run = automaton(pattern, ignoreCase, literal);
+  if (!run) return undefined;
+  let states = run.start;
+  for (const ch of prefix) {
+    states = run.step(states, ch);
+    if (states.size === 0) return false;
+  }
+  // Every state some run of one or more digits leads to.
+  const seen = new Set<number>();
+  let frontier: Set<number> = states;
+  while (frontier.size > 0) {
+    const found = new Set<number>();
+    for (const d of DIGITS) {
+      for (const s of run.step(frontier, d)) {
+        if (!seen.has(s)) found.add(s);
+      }
+    }
+    for (const s of found) seen.add(s);
+    frontier = found;
+  }
+  return run.accepts(seen);
+}
+
+/**
+ * True when `pattern` matches the folder `folder` itself or some path inside it (`folder/…`):
+ * whether a wildcard over `/`-separated paths reaches into CodeDen's home from a folder above it
+ * (`~/.c?deden/codeden.db`, `~/.codeden*`). Every token can match some text, so a pattern still
+ * alive after `folder/` matches something inside. The pattern's first `literal` characters match
+ * as themselves. Undefined when it is malformed.
+ */
+export function wildcardReaches(
+  pattern: string,
+  folder: string,
+  ignoreCase: boolean,
+  literal = 0,
+): boolean | undefined {
+  const run = automaton(pattern, ignoreCase, literal);
+  if (!run) return undefined;
+  let states = run.start;
+  for (const ch of folder.replace(/\/+$/, "")) {
+    states = run.step(states, ch);
+    if (states.size === 0) return false;
+  }
+  return run.accepts(states) || run.step(states, "/").size > 0;
+}
+
+/** `pattern`'s automaton, or undefined when it is malformed. */
+function automaton(pattern: string, ignoreCase: boolean, literal: number): Automaton | undefined {
   const toks = tokens(pattern, literal);
   const classes = new Map<number, RegExp>();
   try {
@@ -155,23 +213,6 @@ export function wildcardMatchesNumbered(
     }
     return closure(next);
   };
-  let states = closure(new Set([0]));
-  for (const ch of prefix) {
-    states = step(states, ch);
-    if (states.size === 0) return false;
-  }
-  // Every state some run of one or more digits leads to.
-  const seen = new Set<number>();
-  let frontier: Set<number> = states;
-  while (frontier.size > 0) {
-    const found = new Set<number>();
-    for (const d of DIGITS) {
-      for (const s of step(frontier, d)) {
-        if (!seen.has(s)) found.add(s);
-      }
-    }
-    for (const s of found) seen.add(s);
-    frontier = found;
-  }
-  return seen.has(2 * toks.length);
+  const end = 2 * toks.length;
+  return { start: closure(new Set([0])), step, accepts: (states) => states.has(end) };
 }
