@@ -13,6 +13,8 @@ Each project has an **autonomy mode**, a ladder you climb one step at a time. (T
 
 Change the mode from the mode picker in the project header.
 
+For a shorter walk-through of what the loop does between events (its states, the merge queue, agent slots, recovery and both modes side by side), read [How the factory loop works](factory-loop.md). It's also in the app: **How it works** in the header of the factory panel and the Factory view.
+
 ## How the software factory works
 
 Issues are created outside CodeDen: by you, a teammate, or anything that files GitHub issues. The factory takes them from there:
@@ -355,7 +357,7 @@ Spend comes from the same ledger as the [usage reports](usage-and-costs.md).
 - **Per project:** **Kill switch** on the factory panel.
 - **Global:** **Settings → General → Global factory kill switch** stops every project's loop.
 
-One click stops the loop and **every factory session** (builders, reviewers, the scout, its area reviewers); items that were building go back to the queue. The loop stays stopped until you turn the switch off. A kill switch never hands work back to automations.
+One click stops the loop and **every factory session** (builders, reviewers, the scout, its area reviewers); items that were building without a pull request go back to the queue, and work with a pull request keeps its place. The loop stays stopped until you turn the switch off. A kill switch never hands work back to automations.
 
 When the loop **pauses** by itself (budget, repeated failures, a revert), resume it from the panel once you've looked at the reason; that also clears the failure count.
 

@@ -309,6 +309,7 @@ It's experimental. Read [The software factory and the dark factory](docs/softwar
 | [GitHub](docs/github.md) | Issues, PRs, checks, reviews and the evidence branch |
 | [Automations](docs/automations.md) | Triggers, guards, templates and writing your own |
 | [The software factory and the dark factory](docs/software-factory.md) | Modes, pipelines, trusted authors, the scout, the vision file, merge checks, limits and the kill switch |
+| [How the factory loop works](docs/factory-loop.md) | The factory's loop, merge queue, agent slots and recovery, step by step (also in the app: **How it works** on the factory panel) |
 | [Workbench](docs/workbench.md) | Diffs, diff comments, checkpoints, forks, files, terminal, browser, composer, shortcuts, transcript search |
 | [Agent configuration](docs/agent-config.md) | Memory, skills and skill switches, subagents, MCP servers and hooks |
 | [Voice and images](docs/voice-and-images.md) | Dictation, read-aloud and image generation |
