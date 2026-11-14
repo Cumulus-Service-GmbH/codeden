@@ -6,12 +6,11 @@ import {
   BrowserManager,
   createBrowserCommandHandlers,
   findInstalledChannels,
-  type LaunchedBrowser,
-  launchChromium,
 } from "../src/browser";
 import { toPlaywrightCookies } from "../src/browser/relay";
 import { isAlive, killTree } from "../src/process/tree";
 import { StreamRecorder, TestSite } from "./browser-helpers";
+import { launchStandInApp, type StandInApp } from "./browser-stand-in";
 
 const hasBrowser = findInstalledChannels().length > 0;
 
@@ -35,7 +34,7 @@ const relay: BrowserRelayEndpoint = {
  */
 describe.skipIf(!hasBrowser)("native engine (installed Edge/Chrome)", { timeout: 60_000 }, () => {
   let site: TestSite;
-  let app: LaunchedBrowser;
+  let app: StandInApp;
   let recorder: StreamRecorder;
   let manager: BrowserManager;
   let handlers: BrowserCommandHandlers;
@@ -52,7 +51,7 @@ describe.skipIf(!hasBrowser)("native engine (installed Edge/Chrome)", { timeout:
 
   beforeAll(async () => {
     site = await TestSite.start();
-    app = await launchChromium();
+    app = await launchStandInApp();
     recorder = new StreamRecorder();
     manager = new BrowserManager({ stream: recorder.push, connect });
     handlers = createBrowserCommandHandlers({ manager });
@@ -75,7 +74,7 @@ describe.skipIf(!hasBrowser)("native engine (installed Edge/Chrome)", { timeout:
     });
     expect(opened).toMatchObject({ engine: "native", cdpUrl: null });
     // The runner launched no Chromium of its own.
-    expect(manager.cdpUrl).toBeNull();
+    expect(manager.channel).toBeNull();
     const tabs = recorder.items.filter((i) => i.kind === "browser.tabs" && i.sessionId === "s1");
     expect(tabs.at(-1)).toMatchObject({ engine: "native" });
 
@@ -197,7 +196,7 @@ describe.skipIf(!hasBrowser)("native engine (installed Edge/Chrome)", { timeout:
     });
     const session = manager.get("s1");
     expect(session.engine).toBe("runner");
-    expect(manager.cdpUrl).toMatch(/^ws:\/\/127\.0\.0\.1/);
+    expect(["msedge", "chrome"]).toContain(manager.channel);
     expect(await session.page().textContent("#c")).toBe("who=native");
     expect(recorder.items.filter((i) => i.kind === "browser.tabs").at(-1)).toMatchObject({
       engine: "runner",

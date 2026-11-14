@@ -1,5 +1,6 @@
 import { writeFileSync } from "node:fs";
 import { app, BrowserWindow, nativeTheme, type Rectangle, screen, shell } from "electron";
+import { applyContentSecurityPolicy } from "./content-security";
 import { allowPermission, externalUrl, isServerUrl, redactToken } from "./security";
 import { readWindowState, restoreBounds, type WindowState } from "./window-state";
 import { WindowZoom, type ZoomCommand } from "./zoom";
@@ -119,6 +120,7 @@ export class MainWindow {
     });
     contents.on("will-attach-webview", (event) => event.preventDefault());
     const session = contents.session;
+    applyContentSecurityPolicy(session, () => this.origin);
     session.setPermissionRequestHandler((wc, permission, callback, details) => {
       const media = "mediaTypes" in details ? (details.mediaTypes ?? []) : [];
       const ok =

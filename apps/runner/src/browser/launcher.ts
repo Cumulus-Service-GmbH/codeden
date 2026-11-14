@@ -1,7 +1,6 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
-import { createServer } from "node:net";
 import { dirname, join } from "node:path";
 import { ownNodeEnv } from "@codeden/providers";
 import { type Browser, chromium } from "playwright-core";
@@ -30,9 +29,6 @@ export interface LaunchedBrowser {
   browser: Browser;
   /** `msedge`, `chrome`, `executable` or `chromium` (downloaded). */
   channel: string;
-  /** Browser-level CDP WebSocket endpoint on 127.0.0.1. */
-  cdpUrl: string;
-  cdpPort: number;
   /** Browser process id (for process-tree cleanup); null if it could not be determined. */
   pid: number | null;
 }
@@ -72,31 +68,6 @@ export function findInstalledChannels(): BrowserChannel[] {
   return defaultChannels().filter((channel) => knownPaths(channel).some((p) => existsSync(p)));
 }
 
-/** A free TCP port on 127.0.0.1 (released before returning; callers retry on a race). */
-export function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const server = createServer();
-    server.once("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      const port = typeof address === "object" && address ? address.port : 0;
-      server.close(() => resolve(port));
-    });
-  });
-}
-
-async function cdpEndpoint(port: number): Promise<string | null> {
-  try {
-    const response = await fetch(`http://127.0.0.1:${port}/json/version`, {
-      signal: AbortSignal.timeout(3_000),
-    });
-    const body = (await response.json()) as { webSocketDebuggerUrl?: string };
-    return body.webSocketDebuggerUrl ?? null;
-  } catch {
-    return null;
-  }
-}
-
 async function browserPid(browser: Browser): Promise<number | null> {
   try {
     const cdp = await browser.newBrowserCDPSession();
@@ -112,43 +83,33 @@ async function browserPid(browser: Browser): Promise<number | null> {
 
 type Target = { channel?: BrowserChannel; executablePath?: string; label: string };
 
+/**
+ * Arguments for the runner's Chromium. Deliberately no `--remote-debugging-port`: this one
+ * browser holds every session's context, and anyone who can reach loopback (another session's
+ * agent, another OS user, a container) could attach to a CDP port and read or drive all of them
+ * (§12.2, §15). Playwright drives the browser over its own `--remote-debugging-pipe`, which only
+ * this process holds, so keep Playwright's default arguments (never `ignoreDefaultArgs`).
+ */
+const CHROMIUM_ARGS = [
+  "--no-first-run",
+  "--no-default-browser-check",
+  // Screencast frames are captured at the browser's real scale, not the emulated one, so
+  // render at the highest scale we emulate; frames are scaled down to each viewport's
+  // device pixels (see viewport.ts).
+  `--force-device-scale-factor=${VIEWPORT_LIMITS.maxDeviceScaleFactor}`,
+];
+
 async function launchTarget(target: Target, headless: boolean): Promise<LaunchedBrowser> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const port = await freePort();
-    const browser = await chromium.launch({
-      ...(target.channel ? { channel: target.channel } : {}),
-      ...(target.executablePath ? { executablePath: target.executablePath } : {}),
-      headless,
-      handleSIGINT: false,
-      handleSIGTERM: false,
-      handleSIGHUP: false,
-      args: [
-        `--remote-debugging-port=${port}`,
-        "--remote-debugging-address=127.0.0.1",
-        "--no-first-run",
-        "--no-default-browser-check",
-        // Screencast frames are captured at the browser's real scale, not the emulated one, so
-        // render at the highest scale we emulate; frames are scaled down to each viewport's
-        // device pixels (see viewport.ts).
-        `--force-device-scale-factor=${VIEWPORT_LIMITS.maxDeviceScaleFactor}`,
-      ],
-    });
-    const cdpUrl = await cdpEndpoint(port);
-    if (cdpUrl) {
-      return {
-        browser,
-        channel: target.label,
-        cdpUrl,
-        cdpPort: port,
-        pid: await browserPid(browser),
-      };
-    }
-    // Port taken between probe and launch: try again on a new one.
-    lastError = new Error(`CDP endpoint on port ${port} did not answer`);
-    await browser.close().catch(() => undefined);
-  }
-  throw lastError;
+  const browser = await chromium.launch({
+    ...(target.channel ? { channel: target.channel } : {}),
+    ...(target.executablePath ? { executablePath: target.executablePath } : {}),
+    headless,
+    handleSIGINT: false,
+    handleSIGTERM: false,
+    handleSIGHUP: false,
+    args: [...CHROMIUM_ARGS],
+  });
+  return { browser, channel: target.label, pid: await browserPid(browser) };
 }
 
 /** Download Playwright's Chromium build with the bundled playwright-core CLI. */
@@ -168,7 +129,8 @@ export function installChromium(log?: (message: string) => void): Promise<void> 
 
 /**
  * Launch one Chromium for the runner (§12.2): the installed Edge or Chrome first, then
- * (only when allowed) Playwright's downloaded Chromium. Exposes a CDP endpoint on 127.0.0.1.
+ * (only when allowed) Playwright's downloaded Chromium. It is driven over a pipe only and opens
+ * no TCP debugging port (see `CHROMIUM_ARGS`).
  */
 export async function launchChromium(opts: LaunchOptions = {}): Promise<LaunchedBrowser> {
   const headless = opts.headless ?? true;
@@ -180,9 +142,7 @@ export async function launchChromium(opts: LaunchOptions = {}): Promise<Launched
   for (const target of targets) {
     try {
       const launched = await launchTarget(target, headless);
-      opts.log?.(
-        `browser: launched ${launched.channel} (pid ${launched.pid}) at ${launched.cdpUrl}`,
-      );
+      opts.log?.(`browser: launched ${launched.channel} (pid ${launched.pid})`);
       return launched;
     } catch (error) {
       failures.push(`${target.label}: ${firstLine(error)}`);

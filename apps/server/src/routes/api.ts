@@ -20,6 +20,7 @@ import { clientItemRecord } from "../services/sessions/client-items";
 import { agentConfigRoutes, sessionAgentConfigRoutes } from "./agent-config";
 import { automationRoutes, projectAutomationRoutes } from "./automations";
 import { browserRoutes, sessionBrowserRoutes } from "./browser";
+import { executionRoutes } from "./execution";
 import { factoryRoutes, projectFactoryRoutes } from "./factory";
 import { githubRoutes, projectGithubRoutes, prRoutes, sessionGithubRoutes } from "./github";
 import { imageRoutes } from "./images";
@@ -27,6 +28,7 @@ import { inboxRoutes } from "./inbox";
 import { authRoutes, type NetworkRouteContext, networkRoutes } from "./network";
 import { conflictRoutes, orchestrationRoutes } from "./orchestration";
 import { projectRoutes } from "./projects";
+import { remoteImageRoutes } from "./remote-image";
 import { searchRoutes } from "./search";
 import { sessionFileRoutes } from "./session-files";
 import { sessionRoutes } from "./sessions";
@@ -71,6 +73,7 @@ export function createApi(ctx: ApiContext) {
     .get("/activity", (c) => c.json(buildActivity(s)))
     .get("/sessions/:id/snapshot", (c) => c.json(buildSessionSnapshot(s, c.req.param("id"))))
     .route("/projects", projectRoutes(s))
+    .route("/execution", executionRoutes(s))
     .route("/projects", projectGithubRoutes(s))
     .route("/projects", projectFactoryRoutes(s))
     .route("/factory", factoryRoutes(s))
@@ -99,6 +102,7 @@ export function createApi(ctx: ApiContext) {
     .route("/providers", providerRoutes(s))
     .route("/updates", updateRoutes(s))
     .route("/artifacts", artifactRoutes(s))
+    .route("/remote-image", remoteImageRoutes())
     .route("/secrets", secretRoutes(s))
     .route("/network", networkRoutes(ctx.network))
     .route("/auth", authRoutes(ctx.network))

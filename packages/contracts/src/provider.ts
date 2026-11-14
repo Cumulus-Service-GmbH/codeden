@@ -51,6 +51,13 @@ export const ProviderCapabilities = z.object({
    * False or absent: the provider's apps don't list them, or CodeDen can't hide them.
    */
   vendorHistory: z.boolean().optional(),
+  /**
+   * The provider runs with no sign-in, API key or file from this machine, so a sandbox's runner
+   * can host it (the Fake provider). Until provider credentials can be delivered into sandboxes
+   * (`docs/remote-runners.md` §14), only such providers run in a `docker` project's sessions.
+   * False or absent: it needs credentials.
+   */
+  credentialFree: z.boolean().optional(),
 });
 export type ProviderCapabilities = z.infer<typeof ProviderCapabilities>;
 
@@ -183,6 +190,16 @@ export const CODEDEN_CREDENTIAL_FILES = [
  * same secrets, so `<credential file>.invalid-*` is guarded like the file itself (§11.2).
  */
 export const INVALID_COPY_SUFFIX = ".invalid-";
+
+/**
+ * Where the runner keeps each session's private MCP config, relative to CodeDen's data directory
+ * (§15): one owner-only folder per session (`<dir>/session-<id>-<random>/`) with its MCP servers,
+ * bearer token included, for providers that read them from a file instead of a command line
+ * (Claude Code's `--mcp-config <file>`). Removed when the session ends. Another session's token
+ * would let an agent call CodeDen as that session's role, so everything in this folder is guarded
+ * like `CODEDEN_CREDENTIAL_FILES` (§11.2).
+ */
+export const CODEDEN_MCP_CONFIG_DIR = "runner/mcp";
 
 /** Options for `ProviderAdapter.openSession`. */
 export const SessionOptions = z.object({

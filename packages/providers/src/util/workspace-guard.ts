@@ -2,6 +2,7 @@ import { existsSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
 import {
   CODEDEN_CREDENTIAL_FILES,
+  CODEDEN_MCP_CONFIG_DIR,
   INVALID_COPY_SUFFIX,
   type WorkspaceFsErrorCode,
 } from "@codeden/contracts";
@@ -137,11 +138,13 @@ export function workspaceRelative(realRoot: string, real: string): string {
 }
 
 /**
- * True when `file` is one of CodeDen's own credential files in `home` (§15), or a copy CodeDen
- * kept of one it found damaged (`<file>.invalid-<timestamp>` next to it, with the same secrets).
+ * True when `file` is one of CodeDen's own credential files in `home` (§15), a copy CodeDen
+ * kept of one it found damaged (`<file>.invalid-<timestamp>` next to it, with the same secrets),
+ * or anything in the sessions' private MCP config folder (`CODEDEN_MCP_CONFIG_DIR`).
  */
 export function isCodedenCredentialFile(file: string, home: string): boolean {
   const target = canonical(file);
+  if (isInsidePath(canonical(path.join(home, CODEDEN_MCP_CONFIG_DIR)), target)) return true;
   const fold = (s: string) => (caseInsensitive(process.platform) ? s.toLowerCase() : s);
   return CODEDEN_CREDENTIAL_FILES.some((name) => {
     const credential = path.join(home, name);

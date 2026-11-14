@@ -15,7 +15,7 @@ through CDP, and `BrowserSession` doesn't care which engine is underneath.
 
 | File | Concern |
 |---|---|
-| `launcher.ts` | Finds and launches installed Edge/Chrome via playwright-core `channel` (Edge first on Windows, Chrome first elsewhere), optional consented fallback to a downloaded Chromium, CDP endpoint on `127.0.0.1:<free port>`, browser pid via `SystemInfo.getProcessInfo` |
+| `launcher.ts` | Finds and launches installed Edge/Chrome via playwright-core `channel` (Edge first on Windows, Chrome first elsewhere), optional consented fallback to a downloaded Chromium, browser pid via `SystemInfo.getProcessInfo`. Driven over Playwright's pipe only: no `--remote-debugging-port`, so no other process can attach to the browser that holds every session's context (`test/browser-listeners.test.ts`) |
 | `manager.ts` | `BrowserManager`: lazy launch, one browser per session on either engine, `handoff` to the runner's Chromium, reopening tabs when a relay drops, `openDevServer(port)`, shutdown that kills the browser process tree (native sessions only disconnect) |
 | `relay.ts` | `connectRelay`: playwright-core `connectOverCDP` to the desktop app's relay (secret in a header); hand-off cookies for playwright |
 | `session.ts` | `BrowserSession`: tabs (`t1`, `t2`, ...; popups are adopted), active tab, navigate/back/forward/reload, viewport emulation on every tab (runner engine only), input forwarding, `browser.tabs` stream updates with the engine |
@@ -187,8 +187,9 @@ browser.
   connection as every page closing first, so native tab closes settle for 100 ms before they
   count; a disconnect in that window keeps the tab list.
 
-Tests: `test/browser-native.test.ts` uses a second Chromium's CDP endpoint as a stand-in for
-the relay (the relay itself is tested in `apps/desktop/test`).
+Tests: `test/browser-native.test.ts` uses a second, empty Chromium's CDP endpoint as a
+stand-in for the relay (`test/browser-stand-in.ts`; the runner's own Chromium has no such
+endpoint, and the relay itself is tested in `apps/desktop/test`).
 
 ## Spike: Playwright MCP over CDP vs our own primitives (DESIGN §20, spike 4)
 
@@ -197,8 +198,8 @@ the relay (the relay itself is tested in `apps/desktop/test`).
 ### What was tested
 
 On Windows 11 with Edge 156, `@playwright/mcp@0.0.84`, playwright-core 1.64.1. The runner
-launched Edge with a remote-debugging port, created two session contexts (A and B, one
-tab each, different cookies), then:
+launched Edge with a remote-debugging port (it no longer opens one: see `launcher.ts`), created
+two session contexts (A and B, one tab each, different cookies), then:
 
 1. Started two Playwright MCP servers with `--cdp-endpoint <our endpoint>` (stdio), one
    per "session".

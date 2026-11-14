@@ -5,11 +5,10 @@ import {
   BrowserManager,
   createBrowserCommandHandlers,
   findInstalledChannels,
-  type LaunchedBrowser,
-  launchChromium,
 } from "../src/browser";
 import { isAlive, killTree } from "../src/process/tree";
 import { StreamRecorder, TestSite } from "./browser-helpers";
+import { launchStandInApp, type StandInApp } from "./browser-stand-in";
 
 const hasBrowser = findInstalledChannels().length > 0;
 
@@ -62,7 +61,7 @@ async function answerNextDialog(page: Page, reply: { accept: boolean; promptText
  */
 function dialogSuite(engine: "runner" | "native") {
   let site: TestSite;
-  let app: LaunchedBrowser | undefined;
+  let app: StandInApp | undefined;
   let manager: BrowserManager;
   let browser: BrowserCommandHandlers;
   const recorder = new StreamRecorder();
@@ -73,7 +72,7 @@ function dialogSuite(engine: "runner" | "native") {
     site = await TestSite.start();
     if (engine === "native") {
       // A second Chromium's CDP endpoint stands in for the desktop app's relay.
-      const launched = await launchChromium();
+      const launched = await launchStandInApp();
       app = launched;
       const connect = async () => {
         const client = await chromium.connectOverCDP(launched.cdpUrl);
