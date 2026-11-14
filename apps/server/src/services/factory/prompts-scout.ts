@@ -1,4 +1,5 @@
 import type { DiscoveryArea, ScoutFinding } from "@codeden/contracts";
+import { CODEDEN_HOME_RULE } from "../orchestration/prompts";
 import { UNTRUSTED_INPUT, visionBlock } from "./prompts";
 
 /**
@@ -73,6 +74,7 @@ export function scoutPlanPrompt(opts: {
     "",
     `**Step 2, file** (after the area reviewers report, or straight away if you review by yourself): file at most ${opts.maxIssues} issue${opts.maxIssues === 1 ? "" : "s"} with \`factory_file_issue\`: the type (bug, feature or docs), a clear title, the body, testable acceptance criteria and a priority. Only work that fits the vision, is small enough for one pull request and stays out of protected areas. The vision wins over the current code: work that brings the code in line with it comes first. Then end your turn with a one-line summary.`,
     "Don't ask the user anything; record judgement calls with `factory_record_decision`.",
+    CODEDEN_HOME_RULE,
   ]
     .filter((l) => l !== "")
     .join("\n");
@@ -141,6 +143,7 @@ export function lensPrompt(opts: {
     "Read the code (don't modify files, commit or open pull requests). Find at most 5 concrete, independently shippable problems or improvements in your area, grounded in the vision. Each must be small enough for one pull request, respect the out-of-scope list and stay out of protected areas. Classify each as `bug`, `feature` or `docs`.",
     knownList(opts.known),
     UNTRUSTED_INPUT,
+    CODEDEN_HOME_RULE,
     "Call `factory_report_findings` once with your findings (an empty list when nothing is worth doing), then end your turn. Don't ask the user anything.",
   ]
     .filter((l) => l !== "")

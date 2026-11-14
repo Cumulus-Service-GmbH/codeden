@@ -5,6 +5,7 @@ import {
   type ReviewVerdict,
   type WorkType,
 } from "@codeden/contracts";
+import { CODEDEN_HOME_RULE } from "../orchestration/prompts";
 
 /**
  * Prompts of the software factory's pipelines (§10.1): the builder's steps (reproduce and fix a
@@ -71,6 +72,7 @@ const WORK_RULES = [
   FOREGROUND_COMMANDS,
   NON_INTERACTIVE_COMMANDS,
   UNTRUSTED_INPUT,
+  CODEDEN_HOME_RULE,
 ];
 
 /** Step 2 of a bug: the fix, after the reproduction. */
@@ -237,6 +239,7 @@ export function reviewerPrompt(
     `Judge: ${REVIEW_FOCUS[type]} Does it fit the vision and stay out of its out-of-scope list and protected areas? Are there tests that prove the behaviour (or are none needed)? Any security problems (injection, secrets, unsafe input, risky dependencies)?`,
     CI_IS_AUTHORITATIVE,
     UNTRUSTED_INPUT,
+    CODEDEN_HOME_RULE,
     "",
     `Then submit one verdict with \`factory_submit_review\`: \`approve\` only when everything holds, \`request_changes\` for fixable problems (they go back to the author), \`reject\` when the change should not exist. Be specific in the summary (up to ${REVIEW_SUMMARY_MAX.toLocaleString("en-US")} characters are stored). ${SUBMIT_REVIEW_RETRY}`,
   ]
