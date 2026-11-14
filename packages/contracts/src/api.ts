@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { Usage } from "./agent-events";
+import { CheckRounds } from "./checks";
 import {
   AutonomyLevel,
   ErrorInfo,
@@ -160,6 +161,14 @@ export const StartSessionRequest = z.object({
    * plan is approved. Agent sessions on a provider with `capabilities.planMode` only.
    */
   planMode: z.boolean().optional(),
+  /**
+   * Keep going until checks pass (§9 Project checks): after each turn CodeDen runs the project's
+   * checks and sends failures back to the agent. Agent sessions in a project with checks only;
+   * ignored otherwise. The checks themselves come from the project, never from the request.
+   */
+  untilChecksPass: z.boolean().optional(),
+  /** Automatic rounds for `untilChecksPass`; default `DEFAULT_CHECK_ROUNDS`. */
+  checkRounds: CheckRounds.optional(),
   workspace: WorkspaceRequest.prefault({}),
   /** One line describing the work; defaults to the first line of the input. */
   purpose: z.string().trim().min(1).max(300).optional(),

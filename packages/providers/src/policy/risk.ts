@@ -21,6 +21,7 @@ import {
   type PathContext,
   resolveAgainst,
 } from "./paths";
+import { projectConfigCommand, projectConfigWrite } from "./project-config";
 import { loginRisk, providerLoginCommand, touchesProviderLogin } from "./provider-logins";
 import { pipesDownloadIntoInterpreter } from "./remote-scripts";
 import { braceAlternatives, dumpsEnvironment, secretArgument, toolOutputs } from "./secrets";
@@ -211,11 +212,13 @@ function classifySimple(cmd: SimpleCommand, ctx: RiskContext, depth: number): Ri
   }
 
   if (bin === "git") {
-    return classifyGit(args, {
+    const verdict = classifyGit(args, {
       ownBranch: ctx.ownBranch,
       currentBranch: ctx.currentBranch ?? (() => currentGitBranch(ctx.cwd)),
       inWorktree: isInside(resolveAgainst(".", ctx), ctx.cwd, ctx),
     });
+    // `git checkout <ref> -- .codeden/project.json` writes CodeDen's project config.
+    return verdict.risky ? verdict : (projectConfigCommand(cmd, ctx) ?? SAFE);
   }
 
   const install = classifyInstall(bin, lower);
@@ -247,7 +250,8 @@ function classifySimple(cmd: SimpleCommand, ctx: RiskContext, depth: number): Ri
   if (secret) return risky("secrets", `Accesses the secrets file ${secret}`);
 
   if (dumpsEnvironment(bin, args)) return risky("secrets", "Dumps environment variables");
-  return SAFE;
+  // CodeDen's project config: `sed -i`, `git checkout --` and inline code reach it too.
+  return projectConfigCommand(cmd, ctx) ?? SAFE;
 }
 
 const COPIES = ["cp", "mv", "copy", "move", "copy-item", "move-item", "xcopy", "robocopy"];
@@ -298,7 +302,7 @@ function copyTargets(bin: string, args: string[], dest: string, ctx: RiskContext
  * temp counts as outside the worktree, so Full autonomy (which only asks for writes outside the
  * worktree) still asks for it. CodeDen's own home (its credential files, and anything else
  * outside the session's own worktree there) and agents' own allow-lists (`./agent-permissions`)
- * ask at every level.
+ * ask at every level. CodeDen's project config (`./project-config`) asks at Auto.
  */
 export function classifyWrite(target: string, ctx: RiskContext): RiskAssessment {
   const access = codedenAccess(target, ctx);
@@ -310,7 +314,7 @@ export function classifyWrite(target: string, ctx: RiskContext): RiskAssessment 
   if (isSecretPath(target) && !isInWorkspace(target, ctx)) {
     return risky("outside_worktree", `Writes the secrets file ${target}, outside the worktree`);
   }
-  return SAFE;
+  return projectConfigWrite(target, ctx) ?? SAFE;
 }
 
 /**

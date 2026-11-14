@@ -17,11 +17,15 @@ export interface RunShellOptions {
   timeoutMs?: number;
   onOutput?: (chunk: string) => void;
   label?: string;
+  /** Kill the process tree when this aborts; the result says `cancelled`. */
+  signal?: AbortSignal;
 }
 
 export interface RunShellResult {
   exitCode: number | null;
   timedOut: boolean;
+  /** Killed because `signal` aborted. */
+  cancelled?: boolean;
 }
 
 /**
@@ -75,6 +79,7 @@ export class ProcessSupervisor {
         label: opts.label ?? command,
       });
       let timedOut = false;
+      let cancelled = false;
       const timer = setTimeout(
         () => {
           timedOut = true;
@@ -82,17 +87,27 @@ export class ProcessSupervisor {
         },
         opts.timeoutMs ?? 30 * 60_000,
       );
+      const onAbort = () => {
+        cancelled = true;
+        if (child.pid !== undefined) void killTree(child.pid);
+      };
+      if (opts.signal?.aborted) onAbort();
+      else opts.signal?.addEventListener("abort", onAbort, { once: true });
+      const done = () => {
+        clearTimeout(timer);
+        opts.signal?.removeEventListener("abort", onAbort);
+      };
       const onData = (data: Buffer) => opts.onOutput?.(data.toString("utf8"));
       child.stdout?.on("data", onData);
       child.stderr?.on("data", onData);
       child.once("error", (error) => {
-        clearTimeout(timer);
+        done();
         opts.onOutput?.(`${error.message}\n`);
-        resolveResult({ exitCode: null, timedOut });
+        resolveResult({ exitCode: null, timedOut, ...(cancelled ? { cancelled } : {}) });
       });
       child.once("close", (code) => {
-        clearTimeout(timer);
-        resolveResult({ exitCode: code, timedOut });
+        done();
+        resolveResult({ exitCode: code, timedOut, ...(cancelled ? { cancelled } : {}) });
       });
     });
   }

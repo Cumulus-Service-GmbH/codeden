@@ -36,6 +36,7 @@ import { HttpMcpUpstream, handleMcpRequest, type McpUpstream } from "./mcp/proxy
 import { ProcessSupervisor } from "./process/supervisor";
 import { TerminalHost } from "./pty/terminal-host";
 import { SessionHost } from "./session-host";
+import { CheckRunner } from "./workspace/checks";
 import { WorkspaceFsHost } from "./workspace/fs";
 import { emptyTrash } from "./workspace/trash";
 
@@ -189,6 +190,7 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
     registry,
     browser,
     files,
+    checks: new CheckRunner(supervisor),
     startedAt: new Date().toISOString(),
     emit,
     log,

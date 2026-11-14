@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ProjectDetection } from "./api";
 import { Project } from "./entities/project";
+import { ProjectCheck } from "./project-config";
 
 /**
  * Re-detecting a project's git checkout and GitHub remote (§9). A project's kind is first
@@ -53,3 +54,12 @@ export type RefreshProjectResponse = z.infer<typeof RefreshProjectResponse>;
  */
 export const DisconnectGithubResponse = z.object({ project: Project });
 export type DisconnectGithubResponse = z.infer<typeof DisconnectGithubResponse>;
+
+/**
+ * `GET /api/projects/:id/checks` response: the project's checks (§9 Project checks) as a new
+ * session would freeze them now, read from `.codeden/project.json` in the project's own folder.
+ * Empty when the file is missing, invalid or has none, so the UI offers "Keep going until
+ * checks pass" only when there is something to run.
+ */
+export const ProjectChecksResponse = z.object({ checks: z.array(ProjectCheck) });
+export type ProjectChecksResponse = z.infer<typeof ProjectChecksResponse>;

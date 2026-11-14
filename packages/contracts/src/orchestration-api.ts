@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { StartSessionRequest, StartSessionResponse } from "./api";
+import { CheckRounds } from "./checks";
 import { AutonomyLevel, Id, ReasoningEffort } from "./common";
 import { InboxItemStatus } from "./entities/inbox";
 import { Session } from "./entities/session";
@@ -64,8 +65,8 @@ export const ResolveConflictResponse = z.object({
 export type ResolveConflictResponse = z.infer<typeof ResolveConflictResponse>;
 
 /**
- * `PATCH /api/sessions/:id`: change the model, effort, autonomy, plan mode or title
- * mid-session. Model and effort apply on the next turn (a running turn keeps its settings);
+ * `PATCH /api/sessions/:id`: change the model, effort, autonomy, plan mode, the checks loop or
+ * title mid-session. Model and effort apply on the next turn (a running turn keeps its settings);
  * `null` returns to the role default.
  */
 export const UpdateSessionRequest = z
@@ -84,6 +85,13 @@ export const UpdateSessionRequest = z
      * returns the agent to the session's permission level.
      */
     planMode: z.boolean().optional(),
+    /**
+     * Keep going until checks pass (§9 Project checks), from the next turn's end. Only for a
+     * session with frozen checks (`Session.checks`); the commands themselves never change.
+     */
+    untilChecksPass: z.boolean().optional(),
+    /** Automatic rounds for `untilChecksPass`. */
+    checkRounds: CheckRounds.optional(),
     title: z.string().trim().min(1).max(200).optional(),
   })
   .refine(
@@ -92,6 +100,8 @@ export const UpdateSessionRequest = z
       r.effort !== undefined ||
       r.autonomy !== undefined ||
       r.planMode !== undefined ||
+      r.untilChecksPass !== undefined ||
+      r.checkRounds !== undefined ||
       r.title !== undefined,
     { message: "Nothing to change" },
   );

@@ -1,9 +1,7 @@
 import type { RiskAssessment } from "./assessment";
-import { binName, unwrap } from "./command-words";
+import { commandWrite } from "./command-writes";
 import { type PathContext, resolveAgainst } from "./paths";
-import { SEARCHES } from "./search-words";
-import { asPath, braceAlternatives, DATA, LISTS, runsOnFound } from "./secrets";
-import { type SimpleCommand, wordPaths } from "./shell";
+import type { SimpleCommand } from "./shell";
 
 /**
  * Agents' own permission files (§11.2). Cursor and Gemini CLI run what their allow-lists permit
@@ -79,75 +77,9 @@ export function agentPermissionsWrite(
   return found ? agentPermissionsRisk(found.owner, target) : undefined;
 }
 
-/** Interpreters whose inline code may write a file (`node -e "fs.writeFileSync(…)"`). */
-const INTERPRETERS = new Set([
-  "node",
-  "nodejs",
-  "deno",
-  "bun",
-  "python",
-  "python3",
-  "py",
-  "perl",
-  "ruby",
-  "php",
-]);
-
 /** A permission file named in code (`'.cursor/cli.json'`, `".gemini\\settings.json"`). */
 const MENTION =
   /\.(cursor)[\\/]+cli(-config)?\.json|\.(gemini)[\\/]+(settings\.json|trustedfolders\.json|policies)/i;
-
-/** Commands that only read, list, search, delete or move between folders: none writes one. */
-const NO_WRITE = new Set([
-  ...DATA,
-  ...SEARCHES,
-  "cat",
-  "type",
-  "get-content",
-  "gc",
-  "head",
-  "tail",
-  "less",
-  "more",
-  "bat",
-  "wc",
-  "diff",
-  "cmp",
-  "file",
-  "jq",
-  "cd",
-  "pushd",
-  "chdir",
-  "set-location",
-  "sl",
-  "push-location",
-  "mkdir",
-  "md",
-  "rm",
-  "rmdir",
-  "del",
-  "erase",
-  "rd",
-  "remove-item",
-  "ri",
-  "unlink",
-]);
-
-/** Git commands that write files named in their arguments. */
-const GIT_WRITES = new Set(["checkout", "restore", "mv"]);
-
-/** Whether the command may write the paths its arguments name. */
-function writesArguments(bin: string, args: readonly string[]): boolean {
-  if (LISTS.has(bin)) return runsOnFound(bin, args);
-  if (NO_WRITE.has(bin)) return false;
-  if (bin !== "git") return true;
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = args[i] as string;
-    if (arg === "-C" || arg === "-c") i += 1;
-    else if (!arg.startsWith("-")) return GIT_WRITES.has(arg);
-  }
-  return false;
-}
 
 /**
  * One simple command's write of an agent's permissions: a redirect onto one, inline code that
@@ -160,27 +92,11 @@ export function agentPermissionsCommand(
   cmd: SimpleCommand,
   ctx: PathContext,
 ): RiskAssessment | undefined {
-  for (const target of cmd.writes) {
-    const found = agentPermissionsWrite(target, ctx);
-    if (found) return found;
-  }
-  const { tokens } = unwrap(cmd.words);
-  const bin = binName(tokens[0]);
-  const args = tokens.slice(1);
-  if (INTERPRETERS.has(bin) || tokens[0]?.startsWith("[")) {
-    const named = MENTION.exec(tokens.join(" "));
-    if (named) return agentPermissionsRisk(named[1] ? "Cursor" : "Gemini CLI", named[0]);
-  }
-  if (!writesArguments(bin, args)) return undefined;
-  for (const arg of args) {
-    for (const word of wordPaths(cmd, arg)) {
-      for (const alt of braceAlternatives(word)) {
-        // `dd`'s operands are `name=value`: `of=` names the file it writes.
-        const path = bin === "dd" && /^of=./i.test(alt) ? alt.slice(3) : asPath(alt);
-        const found = path === undefined ? undefined : agentPermissionsWrite(path, ctx);
-        if (found) return found;
-      }
-    }
-  }
-  return undefined;
+  return commandWrite(cmd, {
+    write: (path) => agentPermissionsWrite(path, ctx),
+    mention: (code) => {
+      const named = MENTION.exec(code);
+      return named ? agentPermissionsRisk(named[1] ? "Cursor" : "Gemini CLI", named[0]) : undefined;
+    },
+  });
 }
