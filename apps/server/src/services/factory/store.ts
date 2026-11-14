@@ -15,6 +15,7 @@ import type { Db } from "../../db/client";
 import { factoryDigests, factoryItems, factoryLoops } from "../../db/schema-factory";
 import type { EventStore } from "../../events/store";
 import { localDay } from "./policy";
+import { keepScoutReports } from "./scout-merge";
 
 /** A new item: the identifying fields, plus anything else to set. */
 export type NewFactoryItem = Pick<
@@ -91,10 +92,14 @@ export class FactoryStore {
   /**
    * Save the loop; writes only when something besides its stamps (`lastTickAt`, `updatedAt`)
    * changed. The log is never pruned (§6) and every loop event refreshes the open factory
-   * panels, while an idle factory ticks every 30 s.
+   * panels, while an idle factory ticks every 30 s. What the scout and its area reviewers
+   * reported in the round since the caller read the loop is kept (`keepScoutReports`).
    */
-  saveLoop(loop: FactoryLoop): FactoryLoop {
-    const current = this.loop(loop.projectId);
+  saveLoop(changed: FactoryLoop): FactoryLoop {
+    const current = this.loop(changed.projectId);
+    const loop = current
+      ? { ...changed, scout: keepScoutReports(changed.scout, current.scout) }
+      : changed;
     if (current && sameLoop(current, loop)) return { ...loop, updatedAt: current.updatedAt };
     const next = { ...loop, updatedAt: new Date().toISOString() };
     this.events.append([

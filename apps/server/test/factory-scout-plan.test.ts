@@ -144,10 +144,16 @@ describe("factory_plan_round under load (#311)", () => {
     await tick();
     const scout = session(loop().scout.sessionId);
     const req = { lenses: [{ area: "ux" as const, focus: "forms" }] };
-    const first = await env.factory.planRound(scout, req);
+    // Two calls in flight at once (a client that gave up and asked again): one plan.
+    const [first, second] = await Promise.all([
+      env.factory.planRound(scout, req),
+      env.factory.planRound(scout, { lenses: [{ area: "bugs", focus: "saving" }] }),
+    ]);
+    expect(second).toEqual(first);
     expect(await env.factory.planRound(scout, req)).toEqual(first);
     await tick();
     expect(loop().scout.round?.phase).toBe("reviewing");
+    expect(env.starts.map((s) => s.workKey)).toEqual(["factory:scout", "factory:lens:ux"]);
     const starts = env.starts.length;
     // A call whose answer the scout never got, repeated later (even with other areas).
     const again = await env.factory.planRound(scout, {

@@ -20,6 +20,7 @@ import {
   scoutSelfReviewPrompt,
 } from "./prompts-scout";
 import { LENS_START_TIMEOUT_MS, type LensBrief, startPlannedLenses } from "./scout-lenses";
+import { keepScoutReports } from "./scout-merge";
 import { isBusy } from "./sessions";
 import { busySlots, claimSlot, SCOUT_SLOT } from "./slots";
 import { ACTIVE_STAGES, WAITING_STAGES } from "./store";
@@ -78,9 +79,12 @@ export function scoutDue(loop: FactoryLoop, waiting: number, now: number): boole
 export async function advanceScout(
   ctx: FactoryContext,
   project: Project,
-  loop: FactoryLoop,
+  current: FactoryLoop,
 ): Promise<FactoryLoop> {
   const now = ctx.now();
+  // With what the scout and its area reviewers reported while this tick's earlier steps ran.
+  const stored = ctx.store.loop(project.id)?.scout;
+  const loop = { ...current, scout: keepScoutReports(current.scout, stored) };
   if (loop.scout.round) return { ...loop, scout: await advanceRound(ctx, project, loop, now) };
   const waiting = ctx.store.items(project.id, WAITING_STAGES).length;
   if (!scoutDue(loop, waiting, now.getTime())) return loop;

@@ -23,8 +23,10 @@ import { wipOf, wipText } from "./wip";
 
 /**
  * What the scout and its area reviewers (`lenses` in the code) report (§10.1): the scout's plan
- * for the round, the area reviewers' findings and the issues the scout files. Each changes the loop record, so the service runs
- * them one at a time with the loop's ticks.
+ * for the round, the area reviewers' findings and the issues the scout files. Each is recorded
+ * in the loop record at once: the service runs them one at a time, but never behind a tick, and
+ * a tick that read the loop before keeps what they recorded (`keepScoutReports`). Each is safe to
+ * repeat after a call timed out: the plan, "already reported", the issue filed.
  */
 
 const PRIORITY_SCORE = { high: 0.9, normal: 0.6, low: 0.3 } as const;
@@ -254,6 +256,14 @@ export async function fileIssue(
   const { loop, projectId } = scoutRound(ctx, session);
   const round = loop.scout.round;
   if (!round) throw conflict("No scout round is running", "no_round");
+  const slug = slugify(req.title);
+  const duplicate = ctx.store
+    .items(projectId, [...WAITING_STAGES, ...ACTIVE_STAGES, "escalated"])
+    .find((i) => slugify(i.title) === slug);
+  // A retry of a call whose answer the scout never got: the issue that call filed.
+  if (duplicate?.source === "discovery" && duplicate.createdAt >= round.startedAt) {
+    return { itemId: duplicate.id, issue: duplicate.issue, filedThisRound: round.filed };
+  }
   // At the work-in-progress limit the factory finishes open work before it takes on more.
   const wip = wipOf(ctx, ctx.projects.get(projectId), loop);
   if (wip.holding) {
@@ -275,10 +285,6 @@ export async function fileIssue(
       "round_limit",
     );
   }
-  const slug = slugify(req.title);
-  const duplicate = ctx.store
-    .items(projectId, [...WAITING_STAGES, ...ACTIVE_STAGES, "escalated"])
-    .find((i) => slugify(i.title) === slug);
   if (duplicate) {
     throw conflict(`Already open as "${duplicate.title}"`, "duplicate");
   }
@@ -316,7 +322,12 @@ export async function fileIssue(
     score: PRIORITY_SCORE[req.priority],
     issue,
   });
-  const filed = round.filed + 1;
-  ctx.store.saveLoop({ ...loop, scout: { ...loop.scout, round: { ...round, filed } } });
+  // Counted on the loop as it is now: ticks may have saved it while GitHub answered.
+  const latest = ctx.store.loopOrNew(projectId, ctx.now());
+  const current = latest.scout.round?.id === round.id ? latest.scout.round : null;
+  const filed = (current?.filed ?? round.filed) + 1;
+  if (current) {
+    ctx.store.saveLoop({ ...latest, scout: { ...latest.scout, round: { ...current, filed } } });
+  }
   return { itemId: item.id, issue: item.issue, filedThisRound: filed };
 }
