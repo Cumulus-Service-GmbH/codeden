@@ -1,4 +1,4 @@
-import type { LoginToolId, SetupCheck, SetupCommand } from "@codeden/contracts";
+import { LoginToolId, type SetupCheck, type SetupCommand } from "@codeden/contracts";
 import {
   brokenInstallMessage,
   type ExecutableLookup,
@@ -41,6 +41,12 @@ export const LOGIN_COMMANDS = {
 } as const satisfies Record<LoginToolId, readonly string[]>;
 
 export type LoginTool = LoginToolId;
+
+/** The plain command that signs an agent provider in ("opencode auth login"), when known. */
+export function providerLoginCommand(provider: string): string | null {
+  const tool = LoginToolId.safeParse(provider);
+  return tool.success && tool.data !== "gh" ? LOGIN_COMMANDS[tool.data].join(" ") : null;
+}
 
 /**
  * The sign-in command typed into the setup terminal (§14 step 3). With a resolved `program`

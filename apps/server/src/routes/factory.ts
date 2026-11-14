@@ -37,7 +37,7 @@ export function projectFactoryRoutes(s: AppServices) {
     })
     .post("/:id/factory/resume", async (c) => c.json(await f.resume(c.req.param("id"))))
     .post("/:id/factory/tick", async (c) => {
-      await f.tick(c.req.param("id"));
+      await f.checkNow(c.req.param("id"));
       return c.json(await f.status(c.req.param("id")));
     })
     .post("/:id/factory/scout", async (c) => {

@@ -56,9 +56,7 @@ export async function advanceBuilding(
     // old, signed out) also keeps new work off the provider, so the retry starts elsewhere.
     if (s.status === "failed") {
       const cause = providerFailure(ctx.repo, ctx.inbox, s);
-      if (cause && providerWide(cause)) {
-        ctx.sessions.providerFailed(s.provider, cause.reason, cause.until);
-      }
+      if (cause && providerWide(cause)) ctx.sessions.providerFailed(s.provider, cause);
       return failItem(ctx, loop, item, BUILDER_FAILED_REASON, infra);
     }
     return fail("The builder session stopped without a pull request");

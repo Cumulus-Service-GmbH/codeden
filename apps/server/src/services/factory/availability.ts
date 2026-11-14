@@ -1,15 +1,23 @@
 import type { ProviderIssue, ProviderStatus, RateLimitWindow } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import type { RunnerPort } from "../runner-port";
+import { providerLoginCommand } from "../setup/tool-lookup";
+import type { ProviderBackoff, ProviderBackoffStore } from "./provider-backoffs";
 
 /**
  * Which providers can take new factory work (§10.1, Provider availability). A provider is
  * available unless the runner's `detect()` says it isn't installed, is older than CodeDen runs
  * at all (a `version_unsupported` issue with a `minVersion`) or isn't signed in, its usage
- * service window is `limited` until a reset still ahead, or a factory session on it just failed
- * because of the provider (usage limit, sign-in, a CLI too old, start failure). Detection is
- * cached and refreshed in the background every few minutes; a tick never waits for it, and a
- * provider not detected yet counts as available.
+ * service window is `limited` until a reset still ahead, or a factory session on it failed
+ * because of the provider. Detection is cached and refreshed in the background every few
+ * minutes; a tick never waits for it, and a provider not detected yet counts as available.
+ *
+ * After such a failure the provider is backed off, and the back-off survives a restart
+ * (`provider_backoffs`). A usage limit lasts until its reset, a CLI too old or a failed start a
+ * fixed while. A sign-in failure doesn't fix itself on a timer: it lasts until detection reports
+ * a different login (signed out and in again, another account or method, a new expiry), until
+ * a person asks to try again (Check now, Retry), or the safety re-try every few hours in case
+ * detection can't see the change.
  */
 
 /** Why a provider can't take new work, and until when (null: not known). */
@@ -49,7 +57,15 @@ export interface ProviderAvailabilityDeps {
   now: () => Date;
   /** How often detection runs again (default 5 minutes). */
   detectEveryMs?: number;
+  /** Where back-offs are kept across restarts (none: in memory only). */
+  backoffs?: ProviderBackoffStore;
   log?: (message: string) => void;
+}
+
+/** A factory session's failure because of its provider (`providerFailure`). */
+export interface ProviderCause extends Unavailable {
+  /** Its login needs the user (error kind `auth`): backed off until the login changes. */
+  signin?: boolean;
 }
 
 /** Why a provider can't take new work, with the detection issue that explains it. */
@@ -60,17 +76,36 @@ interface Blocked {
 
 /** A `limited` reading without a reset time counts for this long after it was seen. */
 const LIMITED_WITHOUT_RESET_MS = 60 * 60_000;
-/** A provider that failed to start or sign in is skipped for this long (then tried again). */
+/** A provider that failed to start (or is too old) is skipped for this long, then tried again. */
 export const PROVIDER_FAILURE_BACKOFF_MS = 30 * 60_000;
+/**
+ * A provider that failed to sign in is tried again after this long even when detection sees no
+ * new login (some logins, such as an expired token in a credentials file, look the same).
+ */
+export const SIGNIN_RETRY_MS = 6 * 60 * 60_000;
+
+/** The login detection reports, to tell a new one: signed in, method, account, expiry. */
+function loginOf(status: ProviderStatus | undefined): string | null {
+  // A detection that couldn't tell says nothing about the login.
+  if (!status || status.loggedIn === null) return null;
+  return JSON.stringify([
+    status.loggedIn,
+    status.authMethod,
+    status.account,
+    status.loginExpiresAt,
+  ]);
+}
 
 export class ProviderAvailability {
   private statuses = new Map<string, ProviderStatus>();
   private checkedAt = 0;
   private running: Promise<void> | undefined;
-  /** Providers a factory session just failed on, until when. */
-  private readonly failures = new Map<string, Unavailable>();
+  /** Providers a factory session failed on, and until when (persisted through `backoffs`). */
+  private readonly failures: Map<string, ProviderBackoff>;
 
-  constructor(private readonly deps: ProviderAvailabilityDeps) {}
+  constructor(private readonly deps: ProviderAvailabilityDeps) {
+    this.failures = deps.backoffs?.all() ?? new Map();
+  }
 
   /**
    * Start detecting again in the background when the last detection is older than the interval.
@@ -108,17 +143,79 @@ export class ProviderAvailability {
         60_000,
       );
       this.statuses = new Map(res.statuses.map((s) => [s.providerId, s]));
+      this.noticeLogins();
     } catch (error) {
       // Tried again next interval; what was known stays.
       this.deps.log?.(`factory: provider detection failed: ${errorMessage(error)}`);
     }
   }
 
-  /** A factory session failed because of its provider: skip it for new work until `until`. */
-  markFailed(provider: string, reason: string, until: string | null): void {
-    const at =
-      until ?? new Date(this.deps.now().getTime() + PROVIDER_FAILURE_BACKOFF_MS).toISOString();
-    this.failures.set(provider, { reason, until: at });
+  /**
+   * After a detection: a provider backed off for its sign-in whose login is now different (it
+   * was signed out and in again, another account, a new expiry) can take new work again. The
+   * first login seen after a failure detection hadn't seen yet is the one to compare with.
+   */
+  private noticeLogins(): void {
+    for (const [provider, backoff] of this.failures) {
+      if (!backoff.signin) continue;
+      const login = loginOf(this.statuses.get(provider));
+      if (login === null || login === backoff.login) continue;
+      if (backoff.login === null) {
+        this.setFailure(provider, { ...backoff, login });
+      } else {
+        this.deps.log?.(`factory: ${provider} has a new login; new work can use it again`);
+        this.clearFailure(provider);
+      }
+    }
+  }
+
+  /**
+   * A factory session failed because of its provider: skip it for new work until `until` (a
+   * usage limit's reset), a fixed while when that isn't known, or, for a sign-in failure, until
+   * its login changes (see the class).
+   */
+  markFailed(provider: string, reason: string, until: string | null, signin = false): void {
+    const now = this.deps.now();
+    if (signin) {
+      this.setFailure(provider, {
+        reason,
+        until: new Date(now.getTime() + SIGNIN_RETRY_MS).toISOString(),
+        signin: true,
+        login: loginOf(this.statuses.get(provider)),
+        failedAt: now.toISOString(),
+      });
+      return;
+    }
+    this.setFailure(provider, {
+      reason,
+      until: until ?? new Date(now.getTime() + PROVIDER_FAILURE_BACKOFF_MS).toISOString(),
+      signin: false,
+      login: null,
+      failedAt: now.toISOString(),
+    });
+  }
+
+  /**
+   * A person asks to try again (Check now, Retry): the sign-in back-off of `provider` (or of
+   * every provider) ends, and providers are detected again in the background. The next failure
+   * backs it off again.
+   */
+  recheck(provider?: string): void {
+    for (const [id, backoff] of this.failures) {
+      if (backoff.signin && (provider === undefined || id === provider)) this.clearFailure(id);
+    }
+    this.checkedAt = 0;
+    this.refresh();
+  }
+
+  private setFailure(provider: string, backoff: ProviderBackoff): void {
+    this.failures.set(provider, backoff);
+    this.deps.backoffs?.put(provider, backoff);
+  }
+
+  private clearFailure(provider: string): void {
+    this.failures.delete(provider);
+    this.deps.backoffs?.remove(provider);
   }
 
   /** Why `provider` can't take new work now, or null when it can. */
@@ -178,10 +275,22 @@ export class ProviderAvailability {
     if (limited !== undefined) return because("at its usage limit", null, limited);
     if (ignoreFailures) return null;
     const failed = this.failures.get(provider);
-    if (failed?.until && Date.parse(failed.until) > now) {
-      return { unavailable: failed, issue: null };
+    if (failed && Date.parse(failed.until) > now) {
+      if (!failed.signin) return because(failed.reason, null, failed.until);
+      // Until its login changes: no time to show, and signing in is the fix.
+      const command = providerLoginCommand(provider);
+      return because(
+        failed.reason,
+        command
+          ? {
+              code: "not_logged_in",
+              message: "A factory session failed to sign in. Sign in again.",
+              fix: { kind: "login", command },
+            }
+          : null,
+      );
     }
-    if (failed) this.failures.delete(provider);
+    if (failed) this.clearFailure(provider);
     return null;
   }
 

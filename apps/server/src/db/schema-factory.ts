@@ -1,5 +1,5 @@
 import type { FactoryDigest, FactoryItem, FactoryLesson, FactoryLoop } from "@codeden/contracts";
-import { index, sqliteTable, text } from "drizzle-orm/sqlite-core";
+import { index, integer, sqliteTable, text } from "drizzle-orm/sqlite-core";
 
 /**
  * Factory loop projections (§10.1), written in the same transaction as their events
@@ -64,3 +64,21 @@ export const factoryLessons = sqliteTable(
     index("factory_lessons_project_seen").on(t.projectId, t.lastSeenAt),
   ],
 );
+
+/**
+ * Providers new factory work skips after a factory session failed because of them (§10.1,
+ * Provider availability), kept across restarts. Operational state like `github_sync_state`,
+ * written directly rather than through events.
+ */
+export const providerBackoffs = sqliteTable("provider_backoffs", {
+  provider: text("provider").primaryKey(),
+  /** Why, as a phrase after the provider's name: "not signed in", "at its usage limit". */
+  reason: text("reason").notNull(),
+  /** A sign-in failure: skipped until the login changes, not for a fixed time. */
+  signin: integer("signin", { mode: "boolean" }).notNull().default(false),
+  /** Until when; for a sign-in failure, the safety re-try. */
+  until: text("until").notNull(),
+  /** For a sign-in failure: the login detection reported when it failed (null: not yet seen). */
+  login: text("login"),
+  failedAt: text("failed_at").notNull(),
+});

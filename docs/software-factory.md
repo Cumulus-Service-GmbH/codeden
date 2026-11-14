@@ -70,7 +70,7 @@ The project page shows the factory panel with the pipelines drawn as a live diag
 
 Under the diagram: spend against the daily budget, agents working out of the limit, pull requests ready for you (or merges today with auto-merge), the failure streak, merge checks per PR, recent results, and the issues ignored because of their author.
 
-The loop runs its regular check every 30 seconds: it moves work in progress, picks up new issues, starts free agents and, in a dark factory, starts the scout if it's due. **Check now** on the panel runs that check immediately. In a dark factory, **Run scout now** starts a [scout round](#the-dark-factory) right away.
+The loop runs its regular check every 30 seconds: it moves work in progress, picks up new issues, starts free agents and, in a dark factory, starts the scout if it's due. **Check now** on the panel runs that check immediately, and tries again providers it skipped because they [weren't signed in](factory-loop.md#reviewers-and-providers). In a dark factory, **Run scout now** starts a [scout round](#the-dark-factory) right away.
 
 ### The Factory view
 
@@ -454,7 +454,7 @@ Everything in the UI is also available over the local API (with the install toke
 | `DELETE /api/projects/:id/factory/lessons/:lessonId` | Forget a lesson: it leaves the briefs and is never learned again (404 `lesson_not_found`). The panel status lists the lessons in force in `lessons` |
 | `POST /api/projects/:id/kill-switch`, `POST /api/factory/kill-switch` | `{ on: true }` |
 | `POST /api/projects/:id/factory/resume` | Clear a pause |
-| `POST /api/projects/:id/factory/tick` | Run the regular check now (**Check now**) |
+| `POST /api/projects/:id/factory/tick` | Run the regular check now (**Check now**); providers skipped after a sign-in failure are tried again |
 | `POST /api/projects/:id/factory/scout` | Dark factory: start a scout round now (**Run scout now**); `409 scout_unavailable` with the reason when it can't |
 | `POST /api/projects/:id/factory/digest` | Today's digest now |
 

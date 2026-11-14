@@ -1,6 +1,7 @@
 import type { RunnerEvent, SessionStatus } from "@codeden/contracts";
 import { Draft } from "./draft";
 import { closeInbox, openRunFailed, runFailedAgain, runFailedInbox } from "./items";
+import { isFactorySigninFailure, signinFailed } from "./signin";
 import type { Mutation, ProjectionReader } from "./types";
 
 type ProcessEvent = Extract<RunnerEvent, { kind: "session.process" }>;
@@ -60,7 +61,9 @@ export function reduceProcessEvent(
     const message = event.error?.message ?? "The agent process crashed";
     // One item per run: a session that fails again (a Retry refused at open) updates its open one.
     const open = openRunFailed(d.openInboxForSession(session.id));
-    if (open) d.putInbox(runFailedAgain(open, message, ts));
+    // A factory session refused as signed out: the user gets the provider's one item instead.
+    if (isFactorySigninFailure(session, event.error)) signinFailed(d, session, message, ts);
+    else if (open) d.putInbox(runFailedAgain(open, message, ts));
     else {
       const id = `inbox:${session.id}:process:${runnerSeq}`;
       d.putInbox(runFailedInbox(session, id, message, session.rootThreadId, ts));

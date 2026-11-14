@@ -22,6 +22,7 @@ import {
   runFailedInbox,
 } from "./items";
 import { awaitsRetryDecision } from "./retry";
+import { isFactorySigninFailure, signinFailed, signinWorks } from "./signin";
 import type { Mutation, ProjectionReader } from "./types";
 import { accumulateUsage, hasTokenCounts, mergeLatestUsage } from "./usage";
 
@@ -153,6 +154,8 @@ function onTurnEnded(
   if (!isRootThread(d, sessionId, event.threadId)) return;
   if (event.type === "turn.completed") {
     setStatus(d, sessionId, "idle", ts);
+    const session = d.getSession(sessionId)?.session;
+    if (session) signinWorks(d, session, ts);
   } else if (event.type === "turn.interrupted") {
     setStatus(d, sessionId, event.reason === "runner_restart" ? "interrupted" : "idle", ts);
   } else {
@@ -163,7 +166,10 @@ function onTurnEnded(
     }
     setStatus(d, sessionId, "failed", ts);
     const session = d.getSession(sessionId)?.session;
-    if (session) {
+    if (session && isFactorySigninFailure(session, event.error)) {
+      // The factory moves the work elsewhere; the user gets the provider's one item.
+      signinFailed(d, session, event.error.message, ts);
+    } else if (session) {
       const id = `inbox:${sessionId}:${event.turnId}:failed`;
       // One item per run: a session whose earlier failure is still open updates that item.
       const open = openRunFailed(d.openInboxForSession(sessionId));

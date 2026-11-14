@@ -255,7 +255,7 @@ Opt-in proxies next to the browser's speech APIs (which stay the default). Keys 
 | `GET\|PUT /api/projects/:id/vision` | `PutVisionRequest` -> `VisionResponse` |
 | `POST /api/projects/:id/kill-switch`, `POST /api/factory/kill-switch` | `KillSwitchRequest` -> `KillSwitchResponse` |
 | `POST /api/projects/:id/factory/resume` | -> `FactoryLoop` (clears a pause and the failure count) |
-| `POST /api/projects/:id/factory/tick` | -> `FactoryStatus` (run the regular check now: "Check now") |
+| `POST /api/projects/:id/factory/tick` | -> `FactoryStatus` (run the regular check now: "Check now"; providers backed off after a sign-in failure are tried again) |
 | `POST /api/projects/:id/factory/scout` | -> `FactoryStatus` (dark factory: start a scout round now, skipping the interval and `minBacklog`; `409 scout_unavailable` with the reason, as `scout.runNowBlockedBy`) |
 | `POST /api/projects/:id/factory/digest` | -> `FactoryDigest` (today's digest now) |
 | `POST /api/projects/:id/factory/admit` | `FactoryAdmitRequest` -> `FactoryItemResponse` |

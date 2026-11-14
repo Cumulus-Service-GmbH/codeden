@@ -1,6 +1,6 @@
 import type { FactoryItem, FactoryLoop, Project, Session } from "@codeden/contracts";
 import { withAskedHead } from "./approval";
-import { type Unavailable, unavailableText } from "./availability";
+import { type ProviderCause, unavailableText } from "./availability";
 import type { FactoryContext } from "./context";
 import { failReview } from "./failures";
 import type { FactoryPr } from "./github-port";
@@ -342,9 +342,9 @@ async function reviewerProviderFailed(
   loop: FactoryLoop,
   item: FactoryItem,
   s: Session,
-  cause: Unavailable,
+  cause: ProviderCause,
 ): Promise<FactoryLoop> {
-  if (providerWide(cause)) ctx.sessions.providerFailed(s.provider, cause.reason, cause.until);
+  if (providerWide(cause)) ctx.sessions.providerFailed(s.provider, cause);
   if (s.status === "idle") await ctx.sessions.stop(s.id);
   const name = ctx.sessions.displayName(s.provider);
   ctx.log?.(`factory: ${item.id}: reviewer on ${s.provider} failed (${cause.reason})`);

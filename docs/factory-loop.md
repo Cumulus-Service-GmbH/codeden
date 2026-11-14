@@ -150,9 +150,13 @@ Within each, what waited longest goes first. **Reviews, fixes and rebases come b
 - its CLI is older than CodeDen needs;
 - it's signed out;
 - it's at its usage limit (until the reset, or an hour when the reset time isn't known);
-- a factory session just failed on it because of the provider (it couldn't start or sign in): it's skipped for 30 minutes, then tried again.
+- a factory session failed on it because of the provider:
+  - **it couldn't sign in** (an expired or revoked login, such as OpenCode's `Request failed: 401`): it's skipped until its login changes. That's when a later check sees a different login (it was signed out and in again, another account, a new expiry), when you press **Check now** on the factory panel or **Retry** a failed run on that provider, or after 6 hours, in case the change can't be seen (an expired token can look the same as a fresh one);
+  - its CLI is too old, or the session couldn't start: it's skipped for 30 minutes, then tried again.
 
-Providers are checked again every few minutes.
+Providers are checked again every few minutes. These skips are kept across a restart.
+
+**A provider that isn't signed in** gets one inbox item, such as "OpenCode isn't signed in (openai/gpt-5.5): run `opencode auth login`", instead of a "Run failed" item for each failed session. Later failures update that item (counting the attempts), and it closes by itself once a factory session on that provider completes a turn. After signing in, press **Check now** to use the provider again at once.
 
 **When the reviewer's provider isn't available,** the **When the reviewer's provider is unavailable** setting decides:
 
@@ -241,7 +245,7 @@ A round that runs over 3 hours is closed. No round starts at the open pull reque
 | **Kill switch** (factory panel or Factory view) | Stops the project's loop and every factory session: builders, reviewers, the scout and its area reviewers. Builds without a pull request go back to the queue; work with one keeps its place. Nothing moves or merges until you turn it off. |
 | **Global factory kill switch** (Settings → General) | The same for every project. |
 | **Resume** | Shown while the loop is paused. Clears the pause and the failure count. There is no manual pause: use the kill switch. |
-| **Check now** | Runs a pass right away instead of waiting up to 30 seconds. |
+| **Check now** | Runs a pass right away instead of waiting up to 30 seconds. Providers skipped because they [weren't signed in](#reviewers-and-providers) are tried again, and checked again in the background. |
 | **Run scout now** | Dark factory: starts a scout round now, skipping the interval and the backlog threshold. Not while a round runs, the loop is paused or over budget, at the open pull request limit, without a free agent, or with a kill switch on. |
 | **Digest** | Today's digest, now, in your inbox. |
 | **Settings** | The limits below, the merge checks, the agents and the scout. |
