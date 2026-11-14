@@ -11,6 +11,8 @@ export interface StatTile {
   value: string;
   /** A second line in smaller print. */
   detail?: string;
+  /** A third line under the figure, for a breakdown over a longer window. */
+  note?: string;
   /** A small bar: `value` of `max`; `warn` colours it as it fills up. */
   bar?: { value: number; max: number; warn: boolean };
   /** Draws the value in the failed colour. */
@@ -34,6 +36,15 @@ export function openPrs(f: FactoryStatus) {
   return f.pullRequests.filter((p) => p.state !== "merged" && p.state !== "superseded");
 }
 
+/**
+ * How the merge queue merged over 7 days ("3 fast · 1 re-tested, 7 days"), so the user sees
+ * whether fast merges pay off; undefined before any went either way.
+ */
+export function mergePathNote(stats: FactoryStatus["stats"]): string | undefined {
+  if (stats.fastMerges7d + stats.retestedMerges7d === 0) return undefined;
+  return `${stats.fastMerges7d} fast · ${stats.retestedMerges7d} re-tested, 7 days`;
+}
+
 export function viewStats(f: FactoryStatus): StatTile[] {
   const budgetUsd = f.limits.dailyBudget.usd;
   const budgetTokens = f.limits.dailyBudget.tokens;
@@ -41,6 +52,7 @@ export function viewStats(f: FactoryStatus): StatTile[] {
   const queued = open.filter((p) => p.queuePosition !== null).length;
   const forYou = open.filter((p) => p.state === "waiting_for_you" || p.state === "stuck").length;
   const { stats } = f;
+  const paths = mergePathNote(stats);
   return [
     {
       id: "spend",
@@ -64,12 +76,14 @@ export function viewStats(f: FactoryStatus): StatTile[] {
           value: String(f.mergesToday),
           detail: `of ${f.limits.maxMergesPerDay} a day`,
           bar: { value: f.mergesToday, max: f.limits.maxMergesPerDay, warn: false },
+          ...(paths ? { note: paths } : {}),
         }
       : {
           id: "merges",
           label: "Merges today",
           value: String(stats.mergedToday),
           detail: "auto-merge off",
+          ...(paths ? { note: paths } : {}),
         },
     {
       id: "agents",
@@ -90,6 +104,9 @@ export function viewStats(f: FactoryStatus): StatTile[] {
       value: `${stats.failedToday} · ${stats.revertedToday}`,
       detail: `today · ${f.consecutiveFailures} in a row`,
       alert: stats.failedToday + stats.revertedToday > 0,
+      ...(stats.fastReverts7d > 0
+        ? { note: `${plural(stats.fastReverts7d, "fast merge")} reverted, 7 days` }
+        : {}),
     },
     {
       id: "median",

@@ -41,6 +41,28 @@ const GithubLogin = z
   .pipe(z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$/, "Not a GitHub login"));
 
 /**
+ * How the merge queue (§10.1) handles a PR at its head that is behind the default branch:
+ * - `fast` (default): merge it on its own green CI when the commits it is missing from the
+ *   default branch touch none of its files and no dependency-sensitive file (lockfiles, the root
+ *   `package.json`, workspace, CI, TypeScript and build config, migrations, shared barrels)
+ *   changed on either side. Otherwise, or while CI on the default branch is red, it takes the
+ *   strict path.
+ * - `strict`: always bring it up to date with the default branch (GitHub's update-branch), wait
+ *   for CI on the new head, then merge.
+ */
+export const MergePolicy = z.enum(["fast", "strict"]);
+export type MergePolicy = z.infer<typeof MergePolicy>;
+
+/**
+ * How the merge queue merged a PR (`FactoryItem.mergePath`):
+ * - `current`: it was already up to date with the default branch when its turn came;
+ * - `fast`: it was behind and merged on its own CI (no overlap with the new commits);
+ * - `retested`: the queue brought it up to date and it merged once CI passed on the new head.
+ */
+export const MergePath = z.enum(["current", "fast", "retested"]);
+export type MergePath = z.infer<typeof MergePath>;
+
+/**
  * Limits and policy of the software and dark factory, enforced by the server (never left to
  * agent judgement).
  */
@@ -73,6 +95,11 @@ export const FactoryLimits = z.object({
    * that was let in by hand is never merged automatically, whatever this says.
    */
   autoMerge: z.boolean().default(false),
+  /**
+   * With auto-merge on, how a queued PR that is behind the default branch merges (see
+   * `MergePolicy`). Saved limits from before it existed read as `fast`.
+   */
+  mergePolicy: MergePolicy.default("fast"),
   /**
    * GitHub logins whose issues the factory takes on by itself. The account CodeDen uses on
    * GitHub is always trusted. Issues from anyone else (on a public repository: anyone at all)

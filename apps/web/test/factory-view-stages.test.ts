@@ -252,14 +252,39 @@ describe("the Factory view's figures (#181)", () => {
           revertedToday: 0,
           medianMergeMs7d: 2.5 * 3_600_000,
           merged7d: 6,
+          fastMerges7d: 0,
+          retestedMerges7d: 0,
+          fastReverts7d: 0,
         },
       }),
     );
     expect(t.merges).toMatchObject({ value: "4", detail: "auto-merge off" });
     expect(t.merges?.bar).toBeUndefined();
+    // No merge went through the queue's fast or strict path yet: no breakdown.
+    expect(t.merges?.note).toBeUndefined();
+    expect(t.failures?.note).toBeUndefined();
     expect(t.spend).toMatchObject({ value: "900K", detail: "of 2M tokens" });
     expect(t.failures).toMatchObject({ value: "1 · 0", alert: true });
     expect(t.median).toMatchObject({ value: "2h 30m", detail: "median of 6 merges, 7 days" });
+  });
+
+  it("shows how the merge queue merged over 7 days and fast merges reverted (#301)", () => {
+    const t = byId(
+      status({
+        stats: {
+          mergedToday: 2,
+          failedToday: 0,
+          revertedToday: 1,
+          medianMergeMs7d: 3_600_000,
+          merged7d: 7,
+          fastMerges7d: 5,
+          retestedMerges7d: 2,
+          fastReverts7d: 1,
+        },
+      }),
+    );
+    expect(t.merges?.note).toBe("5 fast · 2 re-tested, 7 days");
+    expect(t.failures?.note).toBe("1 fast merge reverted, 7 days");
   });
 
   it("shows no median without merges", () => {

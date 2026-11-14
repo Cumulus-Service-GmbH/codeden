@@ -1,4 +1,4 @@
-import type { FactoryItem, FactoryLoop, GitHubPrRef, Project } from "@codeden/contracts";
+import type { FactoryItem, FactoryLoop, GitHubPrRef, MergePath, Project } from "@codeden/contracts";
 import { errorMessage, ServiceError } from "../errors";
 import { type FactoryContext, factoryNotice, raiseInbox } from "./context";
 import type { FactoryPr } from "./github-port";
@@ -144,6 +144,12 @@ export function githubRefused(error: unknown): boolean {
   return error instanceof ServiceError && REFUSAL_CODES.has(error.code);
 }
 
+/**
+ * `merged_after_<itemId>`: that item's merge was still being watched (CI on the default branch
+ * not finished) when this one merged, so this one stacked on an unverified main (`progress.ts`).
+ */
+export const MERGED_AFTER = "merged_after_";
+
 /** What GitHub said when it didn't merge the queue's head; `refusal` when it refused it. */
 export interface MergeFailed {
   failed: string;
@@ -151,8 +157,9 @@ export interface MergeFailed {
 }
 
 /**
- * Squash-merge the head of the merge queue. When GitHub doesn't merge it, nothing changes
- * here: what it said comes back, and the queue counts the refusals (`queue.ts`).
+ * Squash-merge the head of the merge queue, recording how it got there (`path`). When GitHub
+ * doesn't merge it, nothing changes here: what it said comes back, and the queue counts the
+ * refusals (`queue.ts`).
  */
 export async function autoMerge(
   ctx: FactoryContext,
@@ -161,6 +168,7 @@ export async function autoMerge(
   current: FactoryItem,
   pr: FactoryPr,
   checks: FactoryItem["checks"],
+  how: { path: MergePath; note?: string },
 ): Promise<FactoryLoop | MergeFailed> {
   const title = `${current.title} (#${pr.ref.number})`;
   const res = await ctx.github
@@ -177,13 +185,20 @@ export async function autoMerge(
     return { failed: res.error, refusal: res.refusal };
   }
   const at = ctx.now().toISOString();
+  // Merges whose CI on main is still running: a failure is theirs to answer first.
+  const unverified = ctx.store
+    .items(project.id, ["watching"])
+    .filter((i) => i.id !== current.id)
+    .map((i) => [`${MERGED_AFTER}${i.id}`, at]);
   ctx.store.updateItem(current.id, (i) => ({
     ...i,
     stage: "watching",
     pr: { ...pr.ref, state: "merged" },
     mergeSha: res.sha,
+    mergePath: how.path,
     mergedAt: at,
-    note: "Merged; watching CI on the default branch",
+    note: how.note ?? "Merged; watching CI on the default branch",
+    nudges: { ...i.nudges, ...Object.fromEntries(unverified) },
   }));
   const ready = ctx.inbox.find(readyInboxId(current.id));
   if (ready?.status === "open") ctx.inbox.close(ready, "resolved", { note: "merged" });

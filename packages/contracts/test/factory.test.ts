@@ -29,6 +29,19 @@ describe("autonomy modes and dark factory (§10.1)", () => {
     expect(Project.safeParse({ ...sampleProject, autonomyMode: "yolo" }).success).toBe(false);
   });
 
+  it("defaults the merge policy to fast and round-trips strict (#301)", () => {
+    // Limits saved before the policy existed merge fast.
+    expect(FactoryLimits.parse({}).mergePolicy).toBe("fast");
+    const { mergePolicy: _p, ...saved } = sampleProject.factoryLimits;
+    expect(
+      Project.parse({ ...sampleProject, factoryLimits: saved }).factoryLimits.mergePolicy,
+    ).toBe("fast");
+    const strict = FactoryLimits.parse({ autoMerge: true, mergePolicy: "strict" });
+    expect(FactoryLimits.parse(JSON.parse(JSON.stringify(strict)))).toEqual(strict);
+    expect(strict.mergePolicy).toBe("strict");
+    expect(FactoryLimits.safeParse({ mergePolicy: "yolo" }).success).toBe(false);
+  });
+
   it("has a global kill switch in settings, off by default", () => {
     expect(Settings.parse({}).factory.killSwitch).toBe(false);
   });

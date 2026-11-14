@@ -55,6 +55,8 @@ export interface PrInfo {
   changedFiles: number;
   headSha: string;
   baseBranch: string;
+  /** GitHub's `mergeable_state`, raw (`PrMergeState` reads it). */
+  mergeableState: string;
 }
 
 export function readPrInfo(client: GithubClient, repo: GitHubRepo, number: number) {
@@ -71,6 +73,7 @@ export function readPrInfo(client: GithubClient, repo: GitHubRepo, number: numbe
       changedFiles: data.changed_files,
       headSha: data.head.sha,
       baseBranch: data.base.ref,
+      mergeableState: data.mergeable_state,
     };
   });
 }

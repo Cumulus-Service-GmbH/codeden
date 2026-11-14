@@ -16,25 +16,34 @@ export function median(values: number[]): number | null {
 
 /**
  * The Factory view's throughput figures (`FactoryStatus.stats`): today's merges, failures and
- * reverts by the server's local day, and the median time from intake to merge over the last
- * 7 days.
+ * reverts by the server's local day; over the last 7 days, the median time from intake to
+ * merge, how the merge queue merged (on their own CI or re-tested against the default branch)
+ * and how many fast merges were reverted, so the user can see whether fast merges pay off.
  */
 export function factoryStats(items: FactoryItem[], now: Date): FactoryStats {
   const today = localDay(now);
   const on = (at: string | null) => at !== null && localDay(new Date(at)) === today;
   const since = now.getTime() - WEEK_MS;
-  const durations = items.flatMap((i) => {
-    if (!i.mergedAt) return [];
-    const merged = Date.parse(i.mergedAt);
-    if (merged < since || merged > now.getTime()) return [];
-    return [Math.max(0, merged - Date.parse(i.createdAt))];
-  });
+  const inWeek = (at: string | null) => {
+    if (!at) return false;
+    const t = Date.parse(at);
+    return t >= since && t <= now.getTime();
+  };
+  const merged7d = items.filter((i) => inWeek(i.mergedAt));
+  const durations = merged7d.map((i) =>
+    Math.max(0, Date.parse(i.mergedAt as string) - Date.parse(i.createdAt)),
+  );
   return {
     mergedToday: items.filter((i) => on(i.mergedAt)).length,
     failedToday: items.filter((i) => i.stage === "failed" && on(i.finishedAt)).length,
     revertedToday: items.filter((i) => i.stage === "reverted" && on(i.finishedAt)).length,
     medianMergeMs7d: median(durations),
     merged7d: durations.length,
+    fastMerges7d: merged7d.filter((i) => i.mergePath === "fast").length,
+    retestedMerges7d: merged7d.filter((i) => i.mergePath === "retested").length,
+    fastReverts7d: items.filter(
+      (i) => i.stage === "reverted" && i.mergePath === "fast" && inWeek(i.finishedAt),
+    ).length,
   };
 }
 

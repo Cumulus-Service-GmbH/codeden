@@ -1,9 +1,11 @@
 import { errorMessage } from "../errors";
 import type { GithubService } from "../github/github-service";
+import type { MainSince } from "./github-port";
 
 /**
  * The GitHub calls behind the factory's merge queue and PR ownership (§10.1): how far a PR is
- * behind the default branch, bringing it up to date without an agent, closing a PR a rebuild
+ * behind the default branch and what changed there since, bringing it up to date without an
+ * agent, closing a PR a rebuild
  * replaced, and whether CI can run on the repository at all.
  */
 
@@ -25,6 +27,45 @@ export async function behindBy(
         })
       ).data.behind_by,
   );
+}
+
+/** GitHub's compare lists at most this many files for the whole comparison. */
+export const COMPARE_FILE_LIMIT = 300;
+
+/**
+ * What the default branch has that `headSha` doesn't: one three-dot compare from the PR's head
+ * to the default branch, so `ahead_by` counts the commits the PR is missing and `files` are what
+ * they changed since the merge base. With pagination GitHub lists the files on the first page
+ * only (up to 300), so one page of one commit is enough.
+ */
+export async function mainSince(
+  github: GithubService,
+  projectId: string,
+  headSha: string,
+): Promise<MainSince> {
+  const { owner, repo, defaultBranch } = github.githubRepo(projectId);
+  const data = await github.client.run(
+    async (o) =>
+      (
+        await o.rest.repos.compareCommitsWithBasehead({
+          owner,
+          repo,
+          basehead: `${headSha}...${defaultBranch}`,
+          per_page: 1,
+        })
+      ).data,
+  );
+  const listed = data.files ?? [];
+  const files = new Set<string>();
+  for (const f of listed) {
+    files.add(f.filename);
+    if (f.previous_filename) files.add(f.previous_filename);
+  }
+  return {
+    behind: data.ahead_by,
+    files: [...files],
+    complete: listed.length < COMPARE_FILE_LIMIT,
+  };
 }
 
 /**

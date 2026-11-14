@@ -2,9 +2,11 @@ import type { FactoryItem, FactoryLoop, Project } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import { type FactoryContext, factoryNotice, pauseLoop, raiseInbox } from "./context";
 import { stoppedSinceNudge } from "./idle";
+import { MERGED_AFTER } from "./merge";
 import { failItem } from "./outcomes";
 import { ANALYZE_NUDGE, BUILDER_NUDGE, REPRODUCE_NUDGE } from "./prompts";
 import { providerFailure, providerWide } from "./provider-failure";
+import { baseBranchOf } from "./rebase";
 import { rebuildFailed, unreplacedOriginal } from "./rebuild";
 import { awaitTurnRaceResume, BUILDER_FAILED_REASON } from "./turn-race";
 
@@ -95,7 +97,10 @@ export async function advanceBuilding(
 
 /**
  * Watching (§10.1 step 6): after a merge, CI on the default branch decides. A regression opens
- * an automatic revert PR (through the same merge checks), pauses the loop and asks the user.
+ * an automatic revert PR (through the same merge checks), pauses the loop, holds fast merges
+ * until CI on the default branch is green again, and asks the user. Merges that stacked on an
+ * unverified main (fast merges while CI still ran) are judged in order: a failure waits for the
+ * verdict on the merges before it, and isn't blamed on this one when one of those was reverted.
  */
 export async function advanceWatching(
   ctx: FactoryContext,
@@ -134,6 +139,22 @@ export async function advanceWatching(
     return timedOut
       ? done(`Main CI did not finish within ${loop.tuning.watchTimeoutMin} minutes`)
       : loop;
+  // A merge that landed while earlier merges were still being watched is judged after them.
+  const earlier = Object.keys(item.nudges)
+    .filter((k) => k.startsWith(MERGED_AFTER))
+    .flatMap((k) => ctx.store.item(k.slice(MERGED_AFTER.length)) ?? []);
+  const branch = baseBranchOf(project);
+  const open = earlier.find((i) => i.stage === "watching");
+  if (open) {
+    const text = `CI on ${branch} failed; waiting for the verdict on #${open.pr?.number ?? "?"}, merged before it`;
+    if (item.note !== text) ctx.store.updateItem(item.id, (i) => ({ ...i, note: text }));
+    return loop;
+  }
+  const culprit = earlier.find((i) => i.stage === "reverted");
+  if (culprit)
+    return done(
+      `CI on ${branch} failed, but #${culprit.pr?.number ?? "?"} merged before it, broke it and is being reverted, so this one is not`,
+    );
   return regression(ctx, project, loop, item);
 }
 
@@ -145,10 +166,14 @@ async function regression(
 ): Promise<FactoryLoop> {
   const sha = item.mergeSha ?? "";
   const prNumber = item.pr?.number ?? 0;
-  const branch =
-    project.kind === "github" ? project.github.defaultBranch : (project.defaultBranch ?? "main");
+  const branch = baseBranchOf(project);
   const at = ctx.now().toISOString();
-  let next = { ...loop, consecutiveFailures: loop.consecutiveFailures + 1 };
+  // Fast merges wait until CI on the default branch is green again (`fast-merge.ts`).
+  let next: FactoryLoop = {
+    ...loop,
+    consecutiveFailures: loop.consecutiveFailures + 1,
+    fastMergeHold: `CI on ${branch} failed after #${prNumber} merged`,
+  };
   if (item.source === "revert") {
     ctx.store.updateItem(item.id, (i) => ({
       ...i,

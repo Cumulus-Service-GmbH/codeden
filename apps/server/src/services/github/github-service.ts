@@ -12,6 +12,7 @@ import {
   type GithubPrsResponse,
   type MergePrRequest,
   type MergePrResponse,
+  PrMergeState,
   type Project,
   parseGithubPrId,
   type RawEventEnvelope,
@@ -265,6 +266,7 @@ export class GithubService {
       additions: info.additions,
       deletions: info.deletions,
       changedFiles: info.changedFiles,
+      mergeState: PrMergeState.parse(info.mergeableState),
       files: files.map(withoutPatch),
     };
   }

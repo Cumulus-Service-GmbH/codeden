@@ -118,6 +118,11 @@ describe("github contracts", () => {
       ],
     };
     expect(GithubPrDetails.parse(JSON.parse(JSON.stringify(details)))).toEqual(details);
+    // GitHub's merge state (#301): round-trips, and a state this build doesn't know is unknown.
+    const behind: GithubPrDetails = { ...details, mergeState: "behind" };
+    expect(GithubPrDetails.parse(JSON.parse(JSON.stringify(behind)))).toEqual(behind);
+    expect(GithubPrDetails.parse(details).mergeState).toBeUndefined();
+    expect(GithubPrDetails.parse({ ...details, mergeState: "queued" }).mergeState).toBe("unknown");
     const diff: GithubPrDiff = {
       headSha: "abc",
       changedFiles: 2,

@@ -6,6 +6,7 @@ import {
   type GithubIssue,
   githubPrId,
   type Mergeable,
+  type PrMergeState,
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import { EVIDENCE_HEADING } from "../github/evidence";
@@ -28,11 +29,33 @@ export interface FactoryPr {
    * is `conflicting`, so no CI reports until the author resolves the conflicts.
    */
   mergeable: Mergeable;
+  /**
+   * GitHub's detailed merge state (`PrMergeState`): `behind` means branch protection requires
+   * the PR to be up to date before it merges. Absent: unknown.
+   */
+  mergeState?: PrMergeState;
   additions: number;
   deletions: number;
   files: string[];
+  /**
+   * How many files GitHub counts as changed; more than `files.length` past its 3000-file list.
+   * Absent: `files` is the whole list.
+   */
+  changedFiles?: number;
+  /** The paths renamed files had before the PR (they count as changed for the merge queue). */
+  renamedFrom?: string[];
   /** Added + deleted lines per file, when GitHub reports them. */
   fileLines?: Array<{ path: string; lines: number }>;
+}
+
+/** What the default branch has that a PR's head doesn't (`FactoryGithub.mainSince`). */
+export interface MainSince {
+  /** Commits on the default branch since the PR's merge base (0: up to date). */
+  behind: number;
+  /** Files those commits changed (old paths of renames included). */
+  files: string[];
+  /** False when GitHub's list stops short (it lists at most 300 files), so `files` may miss some. */
+  complete: boolean;
 }
 
 /** Commit-level CI state, for watching main after a merge. */
@@ -95,6 +118,11 @@ export interface FactoryGithub {
   mainHead(projectId: string): Promise<{ sha: string; checks: CommitChecks; failed: string[] }>;
   /** Commits the default branch has that the PR's head (`headSha`) doesn't; 0 when up to date. */
   behindBy(projectId: string, number: number, headSha: string): Promise<number>;
+  /**
+   * The commits the default branch has that the PR's head doesn't, and the files they changed
+   * (one compare from the merge base), for the merge queue's fast path.
+   */
+  mainSince(projectId: string, number: number, headSha: string): Promise<MainSince>;
   /**
    * Bring a PR up to date with the default branch on GitHub (`update-branch`, no agent). Throws
    * when the head is no longer `expectedHeadSha` or the merge would conflict.
@@ -221,9 +249,12 @@ export class GithubFactoryPort implements FactoryGithub {
         .filter((c) => c.conclusion && !["success", "neutral", "skipped"].includes(c.conclusion))
         .map((c) => c.name),
       mergeable: pr.mergeable,
+      mergeState: pr.mergeState ?? "unknown",
       additions: pr.additions,
       deletions: pr.deletions,
       files: pr.files.map((f) => f.path),
+      changedFiles: pr.changedFiles,
+      renamedFrom: pr.files.flatMap((f) => (f.previousPath ? [f.previousPath] : [])),
       fileLines: pr.files.map((f) => ({ path: f.path, lines: f.additions + f.deletions })),
     };
   }
@@ -288,6 +319,10 @@ export class GithubFactoryPort implements FactoryGithub {
 
   behindBy(projectId: string, _number: number, headSha: string): Promise<number> {
     return prOps.behindBy(this.github, projectId, headSha);
+  }
+
+  mainSince(projectId: string, _number: number, headSha: string): Promise<MainSince> {
+    return prOps.mainSince(this.github, projectId, headSha);
   }
 
   updateBranch(projectId: string, number: number, expectedHeadSha: string): Promise<void> {

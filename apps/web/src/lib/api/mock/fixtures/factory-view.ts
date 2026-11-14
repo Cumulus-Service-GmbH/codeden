@@ -127,4 +127,7 @@ export const factoryViewStats: Partial<FactoryStats> = {
   revertedToday: 1,
   medianMergeMs7d: 3.4 * 60 * 60 * 1000,
   merged7d: 11,
+  fastMerges7d: 7,
+  retestedMerges7d: 3,
+  fastReverts7d: 1,
 };

@@ -68,6 +68,7 @@ const item: FactoryItem = {
   rebuiltFrom: null,
   note: null,
   mergeSha: null,
+  mergePath: null,
   revertOf: null,
   triageRequestedAt: ts,
   nudges: { verifying: ts },
@@ -176,9 +177,11 @@ describe("factory API contracts (§10.1)", () => {
       failureKind: _fk,
       rebuiltFrom: _rf,
       stepSince: _ss,
+      mergePath: _mp,
       ...old
     } = item;
     expect(FactoryItem.parse(old)).toMatchObject({
+      mergePath: null,
       failureKind: null,
       rebuiltFrom: null,
       stepSince: null,
@@ -245,6 +248,31 @@ describe("factory API contracts (§10.1)", () => {
       payload: { item },
     });
     expect(event.type).toBe("factory.item.updated");
+  });
+
+  it("round-trips how the merge queue merged an item and the fast-merge hold (#301)", () => {
+    for (const mergePath of ["current", "fast", "retested"] as const) {
+      const merged = { ...item, stage: "watching" as const, mergeSha: "abc1234", mergePath };
+      expect(FactoryItem.parse(JSON.parse(JSON.stringify(merged)))).toEqual(merged);
+    }
+    expect(FactoryItem.safeParse({ ...item, mergePath: "rebased" }).success).toBe(false);
+    const base = {
+      projectId: "p1",
+      state: "idle",
+      pausedReason: null,
+      consecutiveFailures: 0,
+      day: "2026-11-14",
+      mergesToday: 0,
+      lastDigestDay: null,
+      enabledAt: ts,
+      lastTickAt: null,
+      updatedAt: ts,
+    };
+    // Loops saved before the hold existed may merge fast.
+    expect(FactoryLoop.parse(base).fastMergeHold).toBeNull();
+    const held = FactoryLoop.parse({ ...base, fastMergeHold: "CI on main failed after #12" });
+    expect(FactoryLoop.parse(JSON.parse(JSON.stringify(held)))).toEqual(held);
+    expect(held.fastMergeHold).toBe("CI on main failed after #12");
   });
 
   it("validates verdicts, reports and mode requests", () => {
@@ -344,7 +372,22 @@ describe("factory API contracts (§10.1)", () => {
       revertedToday: 0,
       medianMergeMs7d: null,
       merged7d: 0,
+      fastMerges7d: 0,
+      retestedMerges7d: 0,
+      fastReverts7d: 0,
     });
+    const paths = FactoryStatus.parse({
+      ...status,
+      stats: {
+        mergedToday: 2,
+        merged7d: 5,
+        fastMerges7d: 3,
+        retestedMerges7d: 1,
+        fastReverts7d: 1,
+      },
+    });
+    expect(FactoryStatus.parse(JSON.parse(JSON.stringify(paths)))).toEqual(paths);
+    expect(FactoryStatus.safeParse({ ...status, stats: { fastMerges7d: -1 } }).success).toBe(false);
     // A status from before the WIP limit reads as not holding anything back.
     expect(status.wip).toEqual({
       openPrs: 0,

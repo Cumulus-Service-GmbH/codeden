@@ -207,6 +207,7 @@ export const sampleProject: Project = {
     protectedPaths: ["src/auth/**"],
     allowDeploys: false,
     autoMerge: false,
+    mergePolicy: "fast",
     trustedAuthors: [],
   },
   killSwitch: false,

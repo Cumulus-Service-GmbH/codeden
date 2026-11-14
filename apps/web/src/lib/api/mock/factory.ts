@@ -172,6 +172,7 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       failureKind: w.failureKind,
       rebuiltFrom: null,
       mergeSha: null,
+      mergePath: w.mergedAt ? "fast" : null,
       revertOf: null,
       triageRequestedAt: null,
       nudges: {},

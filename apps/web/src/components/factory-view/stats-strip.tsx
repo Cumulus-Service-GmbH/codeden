@@ -51,6 +51,11 @@ export function StatsStrip({ f }: { f: FactoryStatus }) {
               </span>
             )}
           </dd>
+          {t.note && (
+            <p className="truncate text-3xs text-muted-foreground" title={t.note}>
+              {t.note}
+            </p>
+          )}
           {t.bar && <Bar bar={t.bar} />}
         </div>
       ))}

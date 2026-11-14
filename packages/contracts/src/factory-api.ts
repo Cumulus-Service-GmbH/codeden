@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { GitHubIssueRef, GitHubPrRef, Id, ProviderId, Timestamp } from "./common";
-import { AutonomyMode, FactoryLimits, FactoryLoopState } from "./factory";
+import { AutonomyMode, FactoryLimits, FactoryLoopState, MergePath } from "./factory";
 import {
   Classification,
   DiscoveryArea,
@@ -201,6 +201,11 @@ export const FactoryItem = z.object({
   /** Last thing the loop noted about it (waiting on a conflict, merge budget, ...). */
   note: z.string().nullable(),
   mergeSha: z.string().nullable(),
+  /**
+   * How the merge queue merged it (see `MergePath`); null until the factory merges it, and for
+   * a merge a person made on GitHub.
+   */
+  mergePath: MergePath.nullable().default(null),
   /** For revert items: the item whose merge is reverted. */
   revertOf: Id.nullable(),
   /** When the PM was asked to triage it. */
@@ -364,6 +369,12 @@ export const FactoryLoop = z.object({
   enabledAt: Timestamp.nullable(),
   /** Main-branch commits whose failed checks already became items. */
   seenFailedShas: z.array(z.string()).default([]),
+  /**
+   * Why fast merges are held (`MergePolicy`): CI on the default branch went red, on its head or
+   * after a factory merge. Until CI on the default branch's head is green again, every queued
+   * PR that is behind takes the strict path. Null when fast merges may go ahead.
+   */
+  fastMergeHold: z.string().nullable().default(null),
   tuning: FactoryTuning.prefault({}),
   /**
    * The last tick that changed the loop. A tick that changes nothing else saves nothing, so
@@ -589,6 +600,12 @@ export const FactoryStats = z.object({
   medianMergeMs7d: z.number().nonnegative().nullable().default(null),
   /** How many merges the median is over. */
   merged7d: z.int().nonnegative().default(0),
+  /** Merges in the last 7 days that went in on their own CI while behind (`mergePath: fast`). */
+  fastMerges7d: z.int().nonnegative().default(0),
+  /** Merges in the last 7 days the queue re-tested against the default branch first. */
+  retestedMerges7d: z.int().nonnegative().default(0),
+  /** Fast merges reverted in the last 7 days (CI on the default branch failed after them). */
+  fastReverts7d: z.int().nonnegative().default(0),
 });
 export type FactoryStats = z.infer<typeof FactoryStats>;
 

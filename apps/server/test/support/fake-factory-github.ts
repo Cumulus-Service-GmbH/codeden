@@ -11,8 +11,12 @@ import type {
   FactoryGithub,
   FactoryPr,
   IssueAuthor,
+  MainSince,
   PrEvidence,
 } from "../../src/services/factory/github-port";
+
+/** Main's head before anything merged. */
+const MAIN_START = "main0000000";
 
 /** A pull request in the scripted GitHub. */
 export interface FakePr extends FactoryPr {
@@ -39,7 +43,20 @@ export class FakeFactoryGithub implements FactoryGithub {
   reverts: Array<{ sha: string; prNumber: number }> = [];
   /** CI state per commit sha (default success). */
   commitState = new Map<string, CommitChecks>();
-  main = { sha: "main0000000", checks: "success" as ChecksState, failed: [] as string[] };
+  main = { sha: MAIN_START, checks: "success" as ChecksState, failed: [] as string[] };
+  /**
+   * Commits on main after `MAIN_START`, oldest first, with the files each changed: merges and
+   * `pushMain`. Setting `main.sha` by hand leaves the history unknown (`mainSince` can't list
+   * the files, so the merge queue takes the strict path).
+   */
+  mainCommits: Array<{ sha: string; files: string[] }> = [];
+  /**
+   * Branch protection requires PRs to be up to date: a PR behind main reports the merge state
+   * `behind` (unless the test pins `pr.mergeState`) and GitHub refuses to merge it (405).
+   */
+  requireUpToDate = false;
+  /** `mainSince` calls, in order. */
+  compares: number[] = [];
   githubProjects = new Set<string>();
   /** When false, `revertMerge` returns null (main moved on). */
   canRevertViaApi = true;
@@ -222,6 +239,30 @@ export class FakeFactoryGithub implements FactoryGithub {
     return pr.baseSha === this.main.sha ? 0 : 1;
   }
 
+  /** Someone else's commit on main that changed `files`. */
+  pushMain(files: string[], sha = `push${this.mainCommits.length + 1}`): string {
+    this.mainCommits.push({ sha, files });
+    this.main.sha = sha;
+    return sha;
+  }
+
+  async mainSince(_projectId: string, number: number): Promise<MainSince> {
+    const pr = this.prs.get(number);
+    if (!pr) throw new Error(`no PR ${number}`);
+    this.compares.push(number);
+    if (pr.baseSha === this.main.sha) return { behind: 0, files: [], complete: true };
+    const shas = [MAIN_START, ...this.mainCommits.map((c) => c.sha)];
+    const from = shas.indexOf(pr.baseSha);
+    const to = shas.indexOf(this.main.sha);
+    if (from < 0 || to <= from) return { behind: 1, files: [], complete: false };
+    const commits = this.mainCommits.slice(from, to);
+    return {
+      behind: commits.length,
+      files: [...new Set(commits.flatMap((c) => c.files))],
+      complete: true,
+    };
+  }
+
   async updateBranch(_projectId: string, number: number, expectedHeadSha: string): Promise<void> {
     const pr = this.prs.get(number);
     if (!pr) throw new Error(`no PR ${number}`);
@@ -270,7 +311,15 @@ export class FakeFactoryGithub implements FactoryGithub {
   async prDetails(_projectId: string, number: number): Promise<FactoryPr> {
     const pr = this.prs.get(number);
     if (!pr) throw new Error(`no PR ${number}`);
-    return { ...pr, ref: { ...pr.ref }, files: [...pr.files] };
+    const behind = pr.baseSha !== this.main.sha;
+    const mergeState =
+      pr.mergeState ??
+      (pr.mergeable === "conflicting"
+        ? "dirty"
+        : this.requireUpToDate && behind
+          ? "behind"
+          : "clean");
+    return { ...pr, ref: { ...pr.ref }, files: [...pr.files], mergeState };
   }
 
   async evidence(_projectId: string, prNumber: number): Promise<PrEvidence> {
@@ -284,9 +333,13 @@ export class FakeFactoryGithub implements FactoryGithub {
     // Like GitHub: a merge pinned to a head that moved is refused (a 409).
     if (opts.sha && opts.sha !== pr.headSha)
       throw new ServiceError(409, "github_conflict", "Head branch was modified");
+    if (this.requireUpToDate && pr.baseSha !== this.main.sha)
+      // Like GitHub through `toGithubError`: a 405 becomes `github_not_allowed`.
+      throw new ServiceError(409, "github_not_allowed", "Head branch is out of date");
     pr.ref = { ...pr.ref, state: "merged" };
     const sha = `merge${number}`;
     this.merges.push({ number, sha, title: opts.title });
+    this.mainCommits.push({ sha, files: [...pr.files] });
     this.main.sha = sha;
     return { merged: true, sha };
   }

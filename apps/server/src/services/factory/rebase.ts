@@ -34,6 +34,10 @@ const CONFLICT_FROM = "conflict_from_";
 export const UPDATE = "update_";
 /** `refused_<sha>_<n>`: the n-th time GitHub refused to merge or update that head (`queue.ts`). */
 export const REFUSED = "refused_";
+/** `strict_<sha>`: GitHub refused to merge that head on its own CI; it takes the strict path. */
+export const STRICT = "strict_";
+/** When the merge queue last brought the PR up to date (any head): it merges as `retested`. */
+export const QUEUE_UPDATED = "queue_updated";
 
 /** The branch factory PRs target. */
 export function baseBranchOf(project: Project): string {
@@ -74,8 +78,8 @@ export function headSeenAt(item: Pick<FactoryItem, "nudges">, sha: string): stri
 /**
  * The item's nudges for this verification pass: when the head was first seen (`head_<sha>`,
  * the start of its CI clock), its worktree restore request (`restore_<sha>`), the merge
- * queue's update request (`update_<sha>`) and GitHub's refusals to merge or update it
- * (`refused_<sha>_<n>`), with older heads' dropped; and the rebase requests,
+ * queue's update request (`update_<sha>`), a refused fast merge (`strict_<sha>`) and GitHub's
+ * refusals to merge or update it (`refused_<sha>_<n>`), with older heads' dropped; and the rebase requests,
  * which end once GitHub reports the PR mergeable (not while it is still working that out), so
  * the next conflict starts afresh.
  */
@@ -92,6 +96,7 @@ export function trackHead(
     (k.startsWith(HEAD) && k !== key) ||
     (k.startsWith(RESTORE) && k !== `${RESTORE}${sha}`) ||
     (k.startsWith(UPDATE) && k !== `${UPDATE}${sha}`) ||
+    (k.startsWith(STRICT) && k !== `${STRICT}${sha}`) ||
     (k.startsWith(REFUSED) && !k.startsWith(`${REFUSED}${sha}_`));
   // Keeps the order of what stays, so an unchanged item isn't written again.
   const next: FactoryItem["nudges"] = {};

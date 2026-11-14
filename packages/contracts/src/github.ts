@@ -180,6 +180,20 @@ export const GithubPrFile = z.object({
 });
 export type GithubPrFile = z.infer<typeof GithubPrFile>;
 
+/**
+ * GitHub's detailed merge state of a PR (REST `mergeable_state`, GraphQL `MergeStateStatus`):
+ * - `clean`: mergeable, with its commit status passing; `has_hooks`: the same, with pre-receive
+ *   hooks;
+ * - `behind`: the base branch requires branches to be up to date and this one isn't;
+ * - `blocked`: a required check or review is missing; `unstable`: mergeable, with checks that
+ *   aren't passing; `dirty`: the merge commit can't be made (conflicts); `draft`;
+ * - `unknown`: GitHub hasn't worked it out yet. A value this build doesn't know reads as this.
+ */
+export const PrMergeState = z
+  .enum(["clean", "has_hooks", "behind", "blocked", "unstable", "dirty", "draft", "unknown"])
+  .catch("unknown");
+export type PrMergeState = z.infer<typeof PrMergeState>;
+
 /** `/api/prs/:id`: the projection plus live details. */
 export const GithubPrDetails = GithubPr.extend({
   body: z.string(),
@@ -187,6 +201,8 @@ export const GithubPrDetails = GithubPr.extend({
   deletions: z.int().nonnegative(),
   /** How many files GitHub counts as changed: more than `files.length` past GitHub's 3000-file list. */
   changedFiles: z.int().nonnegative(),
+  /** GitHub's merge state when it was read (see `PrMergeState`); absent from older servers. */
+  mergeState: PrMergeState.optional(),
   /** Every changed file GitHub lists (up to 3000), without patches (see `/api/prs/:id/diff`). */
   files: z.array(GithubPrFile),
 });

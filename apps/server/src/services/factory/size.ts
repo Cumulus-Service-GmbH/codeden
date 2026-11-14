@@ -48,6 +48,12 @@ const GENERATED_DIRS = [
 /** File names that mark generated output. */
 const GENERATED_NAME = /\.(min\.(js|css)|map|snap|lock)$|\.(gen|generated)\.[a-z]+$/i;
 
+/** True for a package manager's lockfile, in any folder. */
+export function isLockfile(path: string): boolean {
+  const name = (path.replace(/\\/g, "/").split("/").at(-1) ?? "").toLowerCase();
+  return LOCKFILES.has(name);
+}
+
 /** True for files the size check doesn't count (lockfiles, generated or vendored files). */
 export function isUncountedFile(path: string): boolean {
   const parts = path.replace(/\\/g, "/").split("/");

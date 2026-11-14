@@ -1,4 +1,4 @@
-import type { FactoryLimits, FactoryTuning } from "@codeden/contracts";
+import type { FactoryLimits, FactoryTuning, MergePolicy } from "@codeden/contracts";
 import { useId, useState } from "react";
 import { Field } from "@/components/automations/form-bits";
 import { Input } from "@/components/ui/input";
@@ -59,6 +59,19 @@ export function parseLogins(text: string): string[] {
   ];
 }
 
+const SELECT =
+  "h-9 w-full rounded-md border border-border bg-background px-2.5 text-[13px] disabled:opacity-60";
+
+/** What each merge policy does with a queued pull request that is behind the default branch. */
+const MERGE_POLICY_HELP: Record<MergePolicy, string> = {
+  fast: "A pull request behind the default branch merges on its own green CI when the new commits there touch none of its files. Overlaps, dependency, build and migration files, and a red default branch re-test first.",
+  strict:
+    "A pull request behind the default branch is always brought up to date and waits for CI to pass again before it merges.",
+};
+
+const MERGE_POLICY_HINT =
+  "Re-testing every pull request after each merge costs a full CI run per merge. Fast skips it when nothing the pull request changed moved; CI on the default branch is still watched after every merge, and a merge that breaks it is reverted.";
+
 const int = (s: string, min = 0): number | undefined => {
   const n = Number.parseInt(s, 10);
   return Number.isFinite(n) && n >= min ? n : undefined;
@@ -117,6 +130,24 @@ export function LimitsEditor({
           </span>
         </span>
       </div>
+      {limits.autoMerge && (
+        <Field
+          label="Merge policy"
+          htmlFor={`${id}-policy`}
+          hint={MERGE_POLICY_HINT}
+          help={MERGE_POLICY_HELP[limits.mergePolicy]}
+        >
+          <select
+            id={`${id}-policy`}
+            className={SELECT}
+            value={limits.mergePolicy}
+            onChange={(e) => onChange({ ...limits, mergePolicy: e.target.value as MergePolicy })}
+          >
+            <option value="fast">Fast: merge on its own CI when nothing it changed moved</option>
+            <option value="strict">Strict: always re-test against the default branch</option>
+          </select>
+        </Field>
+      )}
       <Field
         label="Trusted authors"
         htmlFor={`${id}-authors`}

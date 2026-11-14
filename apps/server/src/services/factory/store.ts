@@ -79,6 +79,7 @@ export class FactoryStore {
         lastDigestDay: null,
         enabledAt: null,
         seenFailedShas: [],
+        fastMergeHold: null,
         tuning: FactoryTuning.parse({}),
         lastTickAt: null,
         updatedAt: now.toISOString(),
@@ -291,6 +292,7 @@ const ITEM_DEFAULTS = {
   failureKind: null,
   rebuiltFrom: null,
   stepSince: null,
+  mergePath: null,
 } satisfies Partial<FactoryItem>;
 
 /** An item as read from the projection, with the fields newer versions added. */
@@ -312,6 +314,7 @@ export function upgradeLoop(loop: FactoryLoop): FactoryLoop {
   return upgradeSizeLimits({
     ...loop,
     discovery: loop.discovery ?? [],
+    fastMergeHold: loop.fastMergeHold ?? null,
     scout: ScoutState.parse(loop.scout ?? {}),
     tuning: { ...TUNING_DEFAULTS, ...loop.tuning },
   });

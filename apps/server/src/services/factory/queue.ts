@@ -8,22 +8,34 @@ import {
 import { errorMessage } from "../errors";
 import { CONFLICTS_DETAIL } from "./checks";
 import type { FactoryContext } from "./context";
-import type { FactoryPr } from "./github-port";
+import { fastMergeVerdict, noteProtectionForcesStrict, withMainCi } from "./fast-merge";
+import type { FactoryPr, MainSince } from "./github-port";
 import { autoMerge, githubRefused, prDecidedOutside } from "./merge";
 import { markStuck } from "./outcomes";
 import { mayMerge } from "./policy";
-import { baseBranchOf, REFUSED, rebaseAsks, trackedHead, UPDATE } from "./rebase";
+import {
+  baseBranchOf,
+  QUEUE_UPDATED,
+  REFUSED,
+  rebaseAsks,
+  STRICT,
+  trackedHead,
+  UPDATE,
+} from "./rebase";
 import { mayAutoMerge } from "./trust";
 
 /**
  * The merge queue (§10.1, Merge). With auto-merge on, work whose checks all passed doesn't merge
  * at once: it joins the queue, and the factory merges one PR at a time, oldest approved first
  * (reverts ahead of everything). Only the head of the queue acts, so CI never runs on every
- * queued PR at once. A head that is behind the default branch is brought up to date on GitHub
+ * queued PR at once. A head that is behind the default branch merges on its own CI when the
+ * commits it is missing touch none of its files (the `fast` merge policy, `fast-merge.ts`);
+ * otherwise, and always under the `strict` policy, it is brought up to date on GitHub
  * (`update-branch`, no agent), CI is awaited on the new head, and then it merges. Main moved,
  * so the next head is checked against the new main in turn. A PR GitHub keeps refusing to
  * merge or update leaves the queue for a person after `MAX_REFUSALS` refusals of the same
- * head, so it never holds up the PRs behind it; GitHub being down or rate-limited never counts.
+ * head, so it never holds up the PRs behind it; GitHub being down or rate-limited never counts,
+ * and neither does a refused fast merge (that head takes the strict path instead).
  */
 
 /** When the item's checks first all passed (its place in the queue). */
@@ -107,7 +119,8 @@ export async function advanceQueue(
   });
   if (!head?.pr) return loop;
   if (!checksPassed(head)) {
-    if (isUpdating(head))
+    // The note from the update request (and why it re-tests) stands until the new head comes.
+    if (isUpdating(head) && !head.note?.startsWith("Next to merge"))
       note(ctx, head, `Next to merge: updating it with ${baseBranchOf(project)}`);
     return loop;
   }
@@ -144,33 +157,117 @@ async function mergeOrUpdate(
   pr: FactoryPr,
   sha: string,
 ): Promise<FactoryLoop> {
-  let behind: number;
+  let main: MainSince;
   try {
-    behind = await ctx.github.behindBy(project.id, pr.ref.number, sha);
+    main = await ctx.github.mainSince(project.id, pr.ref.number, sha);
   } catch (error) {
     note(ctx, head, `Could not compare it with ${baseBranchOf(project)}: ${errorMessage(error)}`);
     return loop;
   }
-  if (behind === 0) {
-    const merged = await autoMerge(ctx, project, loop, head, pr, head.checks);
+  if (main.behind === 0) {
+    const path = head.nudges[QUEUE_UPDATED] ? "retested" : "current";
+    const merged = await autoMerge(ctx, project, loop, head, pr, head.checks, { path });
     if (!("failed" in merged)) return merged;
     return failed(ctx, loop, head, sha, "Merge failed", merged.failed, merged.refusal);
   }
+  // An update already asked for this head commits it to the strict path.
+  let why: string | null = null;
+  if (project.factoryLimits.mergePolicy !== "strict" && !head.nudges[`${UPDATE}${sha}`]) {
+    const fast = await tryFast(ctx, project, loop, head, pr, sha, main);
+    if ("done" in fast) return fast.done;
+    loop = fast.loop;
+    why = fast.strict;
+  }
+  return updateWithMain(ctx, project, loop, head, pr.ref.number, sha, main.behind, why);
+}
+
+/** GitHub's answer when branch protection wants the PR up to date before it merges. */
+const NOT_UP_TO_DATE = /up.to.date|out of date|behind/i;
+
+/**
+ * The fast path (`fast-merge.ts`): merge the head on its own CI when nothing the default branch
+ * gained since its merge base touches its files and CI on the default branch isn't red. `done`
+ * when it merged (or GitHub didn't answer: tried again next tick); otherwise why it re-tests.
+ * A fast merge GitHub refuses isn't counted as a refusal: that head takes the strict path.
+ */
+async function tryFast(
+  ctx: FactoryContext,
+  project: Project,
+  loop: FactoryLoop,
+  head: FactoryItem,
+  pr: FactoryPr,
+  sha: string,
+  main: MainSince,
+): Promise<{ done: FactoryLoop } | { strict: string; loop: FactoryLoop }> {
+  const branch = baseBranchOf(project);
+  if (head.nudges[`${STRICT}${sha}`])
+    return { strict: "GitHub refused to merge it on its own CI", loop };
+  const read = await withMainCi(ctx, project, loop, branch);
+  if (!read) {
+    note(
+      ctx,
+      head,
+      `Next to merge: could not read CI on ${branch}; trying again on the next check`,
+    );
+    return { done: loop };
+  }
+  const verdict = fastMergeVerdict({ branch, hold: read.fastMergeHold, pr, main });
+  if (!verdict.fast) {
+    if (verdict.protection) noteProtectionForcesStrict(ctx, project, branch);
+    return { strict: verdict.reason, loop: read };
+  }
+  const commits = `${main.behind} new commit${main.behind === 1 ? "" : "s"}`;
+  const merged = await autoMerge(ctx, project, read, head, pr, head.checks, {
+    path: "fast",
+    note: `Merged on its own CI (no overlap with the ${commits} on ${branch}); watching CI on ${branch}`,
+  });
+  if (!("failed" in merged)) return { done: merged };
+  if (!merged.refusal)
+    return { done: failed(ctx, read, head, sha, "Merge failed", merged.failed, false) };
+  const at = ctx.now().toISOString();
+  ctx.store.updateItem(head.id, (i) => ({
+    ...i,
+    nudges: { ...i.nudges, [`${STRICT}${sha}`]: at },
+  }));
+  const said = merged.failed.replace(/[.\s]+$/, "");
+  if (NOT_UP_TO_DATE.test(said)) noteProtectionForcesStrict(ctx, project, branch);
+  return { strict: `GitHub didn't merge it on its own CI: ${said}`, loop: read };
+}
+
+/**
+ * The strict path: bring the head up to date on GitHub (update-branch, head pinned, no agent);
+ * CI then runs on the new head and it merges once that passes. `why` says why the fast path
+ * didn't apply (null under the strict policy).
+ */
+async function updateWithMain(
+  ctx: FactoryContext,
+  project: Project,
+  loop: FactoryLoop,
+  head: FactoryItem,
+  prNumber: number,
+  sha: string,
+  behind: number,
+  why: string | null,
+): Promise<FactoryLoop> {
+  const branch = baseBranchOf(project);
   const key = `${UPDATE}${sha}`;
   const asked = head.nudges[key];
   // GitHub makes the new head in the background; ask again if none came within the CI grace.
   if (asked && ctx.now().getTime() - Date.parse(asked) < ctx.ciGraceMs) return loop;
   try {
-    await ctx.github.updateBranch(project.id, pr.ref.number, sha);
+    await ctx.github.updateBranch(project.id, prNumber, sha);
   } catch (error) {
-    const doing = `Could not update it with ${baseBranchOf(project)}`;
+    const doing = `Could not update it with ${branch}`;
     return failed(ctx, loop, head, sha, doing, errorMessage(error), githubRefused(error));
   }
   const at = ctx.now().toISOString();
+  const commits = `${behind} commit${behind === 1 ? "" : "s"} behind`;
   ctx.store.updateItem(head.id, (i) => ({
     ...i,
-    note: `Next to merge: updating it with ${baseBranchOf(project)} (${behind} commit${behind === 1 ? "" : "s"} behind), then CI runs on the new head`,
-    nudges: { ...i.nudges, [key]: at },
+    note: why
+      ? `Next to merge: re-testing against ${branch} (${why}): updating it (${commits}), then CI runs on the new head`
+      : `Next to merge: updating it with ${branch} (${commits}), then CI runs on the new head`,
+    nudges: { ...i.nudges, [key]: at, [QUEUE_UPDATED]: at },
   }));
   return loop;
 }

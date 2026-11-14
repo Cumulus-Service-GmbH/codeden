@@ -40,6 +40,7 @@ const base: FactoryItem = {
   rebuiltFrom: null,
   note: null,
   mergeSha: null,
+  mergePath: null,
   revertOf: null,
   triageRequestedAt: null,
   nudges: {},
@@ -105,6 +106,45 @@ describe("the Factory view's stats (§10.1)", () => {
       revertedToday: 0,
       medianMergeMs7d: null,
       merged7d: 0,
+      fastMerges7d: 0,
+      retestedMerges7d: 0,
+      fastReverts7d: 0,
+    });
+  });
+
+  it("counts how the merge queue merged over 7 days, and fast merges reverted (#301)", () => {
+    const stats = factoryStats(
+      [
+        item("f1", { mergePath: "fast", mergedAt: at(2) }),
+        item("f2", { mergePath: "fast", stage: "watching", mergedAt: at(1) }),
+        // A fast merge reverted: a merge on its own CI, and a revert of one.
+        item("f3", { mergePath: "fast", stage: "reverted", mergedAt: at(5), finishedAt: at(4) }),
+        item("t1", { mergePath: "retested", mergedAt: at(30) }),
+        item("t2", {
+          mergePath: "retested",
+          stage: "reverted",
+          mergedAt: at(6),
+          finishedAt: at(5),
+        }),
+        item("c1", { mergePath: "current", mergedAt: at(3) }),
+        // Merged by a person on GitHub: no path.
+        item("p1", { mergedAt: at(3) }),
+        // Outside the window.
+        item("f4", { mergePath: "fast", mergedAt: at(8 * 24) }),
+        item("f5", {
+          mergePath: "fast",
+          stage: "reverted",
+          mergedAt: at(9 * 24),
+          finishedAt: at(8 * 24),
+        }),
+      ],
+      NOW,
+    );
+    expect(stats).toMatchObject({
+      merged7d: 7,
+      fastMerges7d: 3,
+      retestedMerges7d: 2,
+      fastReverts7d: 1,
     });
   });
 });
