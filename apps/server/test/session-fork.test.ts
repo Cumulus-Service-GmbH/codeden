@@ -163,6 +163,15 @@ const call = <N extends RunnerCommandName>(name: N): RunnerCommandOf<N> => {
   return found;
 };
 
+/** Every `sessionId` a runner command names, at any depth. */
+function namedSessionIds(value: unknown): string[] {
+  if (Array.isArray(value)) return value.flatMap(namedSessionIds);
+  if (!value || typeof value !== "object") return [];
+  return Object.entries(value).flatMap(([key, v]) =>
+    key === "sessionId" && typeof v === "string" ? [v] : namedSessionIds(v),
+  );
+}
+
 async function settle(sessions: SessionService): Promise<void> {
   await Promise.all(sessions.launching.values());
 }
@@ -244,14 +253,18 @@ describe("forking a session", () => {
     script.checkpoints[src.id] = [0, 1];
     const row = env.repo.get(src.id);
     const before = env.events.filter((e) => e.sessionId === src.id).length;
-    await sessions.fork(src.id, { title: "Try OAuth instead" });
+    const { sessionId } = await sessions.fork(src.id, { title: "Try OAuth instead" });
     await settle(sessions);
     expect(env.repo.get(src.id)).toEqual(row);
     expect(env.events.filter((e) => e.sessionId === src.id)).toHaveLength(before);
-    // Read only: the checkpoint list and the conversation copy.
-    const touching = calls.filter((c) => JSON.stringify(c).includes(src.id));
+    // Read only: the runner is asked about the source for its checkpoint list and the
+    // checkpoint to restore, and nothing else names it. Compare whole ids, not substrings: every
+    // command carries a temp-dir path, which can contain "s1".
+    const touching = calls.filter((c) => namedSessionIds(c).includes(src.id));
     expect(touching.map((c) => c.name)).toEqual(["checkpoint.list", "workspace.prepare"]);
     expect(call("workspace.prepare").sessionId).not.toBe(src.id);
+    // The fork's own commands name the fork, so the check above sees every session id.
+    expect(new Set(namedSessionIds(call("session.start")))).toEqual(new Set([sessionId]));
   });
 
   it("uses the given title, and forks from the branch alone when there is no checkpoint", async () => {
