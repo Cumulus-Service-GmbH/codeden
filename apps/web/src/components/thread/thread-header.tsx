@@ -242,7 +242,7 @@ export function ThreadHeader({ session, running }: { session: Session; running: 
               <MoreHorizontal />
             </Button>
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuContent align="end" className="w-60">
             {session.branch && (
               <DropdownMenuItem
                 onSelect={() => void copyWithFeedback(session.branch ?? "", "Branch copied")}
