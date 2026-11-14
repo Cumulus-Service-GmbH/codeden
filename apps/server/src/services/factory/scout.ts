@@ -63,7 +63,7 @@ function turnEnded(s: Session, since: string): boolean {
 /** Titles of work open or done recently, so the scout and lenses don't repeat it. */
 export function knownTitles(ctx: FactoryContext, projectId: string): string[] {
   const open = ctx.store.items(projectId, [...WAITING_STAGES, ...ACTIVE_STAGES, "escalated"]);
-  const done = ctx.store.items(projectId, ["merged", "rejected", "failed"]).slice(0, 20);
+  const done = ctx.store.items(projectId, ["merged", "rejected", "failed"], { limit: 20 });
   return [...open, ...done].map((i) => i.title).slice(0, 60);
 }
 

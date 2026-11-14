@@ -20,6 +20,7 @@ import {
   factoryLoops,
 } from "../../db/schema-factory";
 import type { EventStore } from "../../events/store";
+import { ItemReads } from "./item-reads";
 import { localDay } from "./policy";
 import { keepScoutReports } from "./scout-merge";
 
@@ -40,6 +41,8 @@ export const OWNED_STAGES: FactoryItemStage[] = ["failed", "escalated"];
 export const FINISHED_STAGES: FactoryItemStage[] = ["merged", "reverted", "rejected", "failed"];
 /** Nudge a merge sets while the item's review follow-ups wait to be filed (`follow-ups.ts`). */
 export const FOLLOW_UPS_DUE = "follow_ups_due";
+/** The newest items the Factory view lists (`status.ts`); the loop itself reads them all. */
+export const VIEW_ITEMS = 500;
 
 /** Final stages. */
 export const DONE_STAGES: FactoryItemStage[] = [
@@ -57,11 +60,22 @@ export const DONE_STAGES: FactoryItemStage[] = [
 export class FactoryStore {
   /** When each project's loop last ticked (see `saveTick`); not persisted. */
   private readonly lastTicks = new Map<string, string>();
+  /** Per project, the items a running tick read once (`readOnce`). */
+  private readonly reads: ItemReads;
 
   constructor(
     private readonly db: Db,
     private readonly events: EventStore,
-  ) {}
+  ) {
+    this.reads = new ItemReads((projectId) =>
+      this.db
+        .select()
+        .from(factoryItems)
+        .where(eq(factoryItems.projectId, projectId))
+        .all()
+        .map((r) => withItemDefaults(r.item)),
+    );
+  }
 
   loop(projectId: string): FactoryLoop | undefined {
     const loop = this.db
@@ -131,31 +145,64 @@ export class FactoryStore {
     return this.lastTicks.get(projectId);
   }
 
+  /**
+   * Run `run` (a tick) reading the project's items from the database at most once: its reads
+   * share one copy, kept current by this store's writes (`createItem`, `updateItem`, the only
+   * writers of `factory_items`). See `ItemReads`.
+   */
+  readOnce<T>(projectId: string, run: () => Promise<T>): Promise<T> {
+    return this.reads.during(projectId, run);
+  }
+
   item(id: string): FactoryItem | undefined {
+    const read = this.reads.find(id);
+    if (read) return read;
     const item = this.db.select().from(factoryItems).where(eq(factoryItems.id, id)).get()?.item;
     return item ? withItemDefaults(item) : undefined;
   }
 
-  items(projectId: string, stages?: FactoryItemStage[]): FactoryItem[] {
+  /**
+   * The project's items in `stages` (every stage without), last updated first. All of them:
+   * intake, recovery and the other steps that dedupe or reconcile must see old items too. Only
+   * a list for display passes a `limit` (`VIEW_ITEMS`).
+   */
+  items(
+    projectId: string,
+    stages?: FactoryItemStage[],
+    opts: { limit?: number } = {},
+  ): FactoryItem[] {
+    const read = this.reads.list(projectId);
+    if (read) {
+      const list = stages ? read.filter((i) => stages.includes(i.stage)) : read;
+      return opts.limit === undefined ? list : list.slice(0, opts.limit);
+    }
     const where = stages
       ? and(eq(factoryItems.projectId, projectId), inArray(factoryItems.stage, stages))
       : eq(factoryItems.projectId, projectId);
-    return this.db
+    const query = this.db
       .select()
       .from(factoryItems)
       .where(where)
       .orderBy(desc(factoryItems.updatedAt))
-      .limit(500)
-      .all()
-      .map((r) => withItemDefaults(r.item));
+      .$dynamic();
+    const rows = opts.limit === undefined ? query.all() : query.limit(opts.limit).all();
+    return rows.map((r) => withItemDefaults(r.item));
   }
 
   /**
    * Items with sessions still to archive (`cleanup.ts`): finished ones not cleaned up yet, and
-   * any holding an earlier attempt's sessions. Not capped like `items` (the newest only), so an
-   * old item is reached however much work came after it.
+   * any holding an earlier attempt's sessions. Every one, so an old item is reached however
+   * much work came after it.
    */
   itemsToClean(projectId: string): FactoryItem[] {
+    const read = this.reads.list(projectId);
+    if (read) {
+      // The query's test, on the copy the tick read.
+      const pending = (i: FactoryItem) =>
+        (FINISHED_STAGES.includes(i.stage) && i.sessionsArchivedAt == null) ||
+        (i.earlierSessionIds?.length ?? 0) > 0;
+      return read.filter(pending).reverse();
+    }
     const field = (path: string) => sql`json_extract(${factoryItems.item}, ${path})`;
     const pending = or(
       and(
@@ -175,9 +222,11 @@ export class FactoryStore {
 
   /**
    * Merged items whose review follow-ups wait to be filed (`follow-ups.ts`): the merge set the
-   * `follow_ups_due` nudge. Not capped like `items`.
+   * `follow_ups_due` nudge. Oldest first.
    */
   itemsWithFollowUpsDue(projectId: string): FactoryItem[] {
+    const read = this.reads.list(projectId);
+    if (read) return read.filter((i) => i.nudges?.[FOLLOW_UPS_DUE] != null).reverse();
     const path = `$.nudges.${FOLLOW_UPS_DUE}`;
     const due = sql`json_extract(${factoryItems.item}, ${path}) is not null`;
     return this.db
@@ -193,8 +242,8 @@ export class FactoryStore {
    * Finished items the Factory view may still show (`status.ts` narrows them with
    * `viewRecentItems`): every escalated item; failed items that failed since `failedSince`, still
    * have an open PR, or are rebuilds without a PR of their own (whose original may still be
-   * open); and items merged since `mergedSince`. Not capped like `items`, so no amount of newer
-   * history hides an unresolved one.
+   * open); and items merged since `mergedSince`. Not capped like the view's item list
+   * (`VIEW_ITEMS`), so no amount of newer history hides an unresolved one.
    */
   viewCandidates(projectId: string, failedSince: string, mergedSince: string): FactoryItem[] {
     const field = (path: string) => sql`json_extract(${factoryItems.item}, ${path})`;
@@ -268,6 +317,7 @@ export class FactoryStore {
     this.events.append([
       { type: "factory.item.updated", sessionId: null, payload: { item: tracked } },
     ]);
+    this.reads.remember(tracked);
     return tracked;
   }
 
@@ -296,6 +346,7 @@ export class FactoryStore {
     this.events.append([
       { type: "factory.item.updated", sessionId: null, payload: { item: next } },
     ]);
+    this.reads.remember(next);
     return next;
   }
 

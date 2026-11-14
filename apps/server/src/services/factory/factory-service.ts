@@ -201,7 +201,10 @@ export class FactoryService {
     if (queued) return queued;
     const next = this.serialize(projectId, "tick", () => {
       this.queuedTicks.delete(projectId);
-      return runTick(this.ctx, projectId, { digest: (p, l, day) => this.writeDigest(p, l, day) });
+      // Its steps share one read of the project's items.
+      return this.data.readOnce(projectId, () =>
+        runTick(this.ctx, projectId, { digest: (p, l, day) => this.writeDigest(p, l, day) }),
+      );
     });
     this.queuedTicks.set(projectId, next);
     return next;

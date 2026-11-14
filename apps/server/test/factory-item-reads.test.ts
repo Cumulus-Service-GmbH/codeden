@@ -13,7 +13,7 @@ const enable = () =>
 const tick = () => env.factory.tick(env.project.id);
 const later = () => new Promise((r) => setTimeout(r, 5));
 
-/** Items of the project for an issue, counted in the database (not through the capped list). */
+/** Items of the project for an issue, counted in the database. */
 function itemsForIssue(number: number): number {
   const row = env.db.client
     .prepare(
@@ -114,16 +114,17 @@ describe("factory work items past the newest 500 (#359)", () => {
     await tick();
     expect(perIssue()).toEqual({ untrusted: 1, rejected: 1 });
 
-    await newerHistory(500);
+    await newerHistory(600);
     await tick();
 
     expect(perIssue()).toEqual({ untrusted: 1, rejected: 1 });
+    expect(env.factory.data.items(env.project.id)).toHaveLength(602);
   });
 
-  it("reads each work item at most once a tick", async () => {
+  it("reads the work items once in an idle tick", async () => {
     env = createFactoryEnv();
     enable();
-    await newerHistory(200);
+    await newerHistory(500);
     await tick();
     const total = (
       env.db.client
@@ -133,7 +134,7 @@ describe("factory work items past the newest 500 (#359)", () => {
 
     const reads = await itemRowsReadBy(tick);
 
-    const what = `${reads.queries} queries read ${reads.rows} item rows for ${total} items`;
-    expect(reads.rows, what).toBeLessThanOrEqual(total);
+    expect(total).toBe(500);
+    expect(reads).toEqual({ queries: 1, rows: total });
   });
 });

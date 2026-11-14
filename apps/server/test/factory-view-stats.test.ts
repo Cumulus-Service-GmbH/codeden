@@ -2,6 +2,7 @@ import type { FactoryItem } from "@codeden/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { localDay } from "../src/services/factory/policy";
 import { factoryStats, median, viewRecentItems } from "../src/services/factory/stats";
+import { VIEW_ITEMS } from "../src/services/factory/store";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
 
 const NOW = new Date(2026, 10, 13, 15, 0, 0);
@@ -292,7 +293,7 @@ describe("finished work the Factory view keeps (§10.1)", () => {
       rebuiltFrom: { number: 5, url: "https://github.com/acme/app/pull/5", state: "open" },
       finishedAt: daysAgo(2),
     });
-    // More newer finished history than the item list reads (500), all of it old news.
+    // More newer finished history than the view lists (`VIEW_ITEMS`), all of it old news.
     for (let n = 0; n < 501; n++) {
       tick();
       store.createItem({
@@ -311,7 +312,7 @@ describe("finished work the Factory view keeps (§10.1)", () => {
       stage: "merged",
       mergedAt: new Date(clock).toISOString(),
     });
-    expect(store.items(env.project.id)).toHaveLength(500);
+    expect(store.items(env.project.id).length).toBeGreaterThan(VIEW_ITEMS);
 
     const status = await env.factory.status(env.project.id);
     const ids = (list: { id: string }[]) => list.map((w) => w.id);

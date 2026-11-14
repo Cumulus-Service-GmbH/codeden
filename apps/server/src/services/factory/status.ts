@@ -21,7 +21,7 @@ import { recoverable } from "./recover";
 import { scoutNowBlocker, scoutNowFacts } from "./scout";
 import { isBusy } from "./sessions";
 import { factoryStats, viewRecentItems, viewWindow } from "./stats";
-import { ACTIVE_STAGES, DONE_STAGES, WAITING_STAGES } from "./store";
+import { ACTIVE_STAGES, DONE_STAGES, VIEW_ITEMS, WAITING_STAGES } from "./store";
 import { wipOf } from "./wip";
 
 /**
@@ -90,7 +90,7 @@ function mergeChecks(i: FactoryItem): FactoryMergeChecks | null {
 export async function buildStatus(ctx: FactoryContext, projectId: string): Promise<FactoryStatus> {
   const project = ctx.projects.get(projectId);
   const loop = ctx.store.loopOrNew(projectId, ctx.now());
-  const all = ctx.store.items(projectId);
+  const all = ctx.store.items(projectId, undefined, { limit: VIEW_ITEMS });
   // In the order free agents take them.
   const waiting = all.filter((i) => WAITING_STAGES.includes(i.stage)).sort(queueOrder);
   const active = all.filter((i) => ACTIVE_STAGES.includes(i.stage));
@@ -98,7 +98,7 @@ export async function buildStatus(ctx: FactoryContext, projectId: string): Promi
   const ignored = all.filter((i) => i.stage === "ignored").slice(0, 30);
   const owned = (i: FactoryItem) => ownedPr(ctx, i);
   const { failedSince, mergedSince } = viewWindow(ctx.now());
-  // Not capped like `recent` (nor by the history limit of `items`): an older escalation or
+  // Not capped like `recent` (nor by the view's item limit): an older escalation or
   // open failure still reaches the view.
   const viewRecent = viewRecentItems(
     ctx.store.viewCandidates(projectId, failedSince, mergedSince),

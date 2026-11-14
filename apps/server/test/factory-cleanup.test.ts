@@ -4,6 +4,7 @@ import { ReviewVerdict } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { SessionArchiver, type SessionArchiverDeps } from "../src/services/factory/cleanup";
 import { FACTORY_STARTER } from "../src/services/factory/sessions";
+import { VIEW_ITEMS } from "../src/services/factory/store";
 import { sampleSession } from "./helpers";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
 
@@ -330,7 +331,8 @@ describe("archiving finished factory work (§10.1)", () => {
         },
       })),
     );
-    expect(env.factory.data.items(env.project.id).map((i) => i.id)).not.toContain(oldItem.id);
+    const viewed = env.factory.data.items(env.project.id, undefined, { limit: VIEW_ITEMS });
+    expect(viewed.map((i) => i.id)).not.toContain(oldItem.id);
 
     await tick();
     expect(env.archived).toEqual(["old-reviewer", "old-builder"]);
