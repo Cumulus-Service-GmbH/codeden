@@ -1,9 +1,9 @@
-import { basename, dirname, join, resolve } from "node:path";
-import { CODEDEN_CREDENTIAL_FILES, INVALID_COPY_SUFFIX } from "@codeden/contracts";
-import { isSecretPath } from "@codeden/providers";
+import { basename } from "node:path";
+import { isCodedenCredentialFile, isProviderLoginFile, isSecretPath } from "@codeden/providers";
 import { forbidden } from "./errors";
-import { realPathOf } from "./files/path-guard";
 import { safeFileName } from "./github/evidence";
+
+export { isCodedenCredentialFile };
 
 /** A file on its way out of the machine, by every name it goes by. */
 export interface OutgoingFile {
@@ -18,34 +18,14 @@ export interface OutgoingFile {
   names: ReadonlyArray<string | undefined>;
 }
 
-const caseInsensitive = process.platform === "win32" || process.platform === "darwin";
-const fold = (s: string) => (caseInsensitive ? s.toLowerCase() : s);
-const comparable = (p: string) => fold(resolve(p));
-/** Both sides resolve the same way: symlinks, junctions and short names (`LEON~1`). */
-const canonical = (p: string) => comparable(realPathOf(p) ?? p);
-
-/**
- * True when `file` is one of CodeDen's own credential files in `home` (§15), or a copy CodeDen
- * kept of one it found damaged (`<file>.invalid-<timestamp>` next to it, with the same secrets).
- */
-export function isCodedenCredentialFile(file: string, home: string): boolean {
-  const target = canonical(file);
-  return CODEDEN_CREDENTIAL_FILES.some((name) => {
-    const credential = join(home, name);
-    if (canonical(credential) === target) return true;
-    const copyPrefix = fold(`${basename(credential)}${INVALID_COPY_SUFFIX}`);
-    return (
-      dirname(target) === canonical(dirname(credential)) && basename(target).startsWith(copyPrefix)
-    );
-  });
-}
-
 /**
  * Refuse secrets on their way out (§9 Evidence, §15). `attach_evidence` publishes files to
  * GitHub, and `share_to_chat` stores artifacts `attach_evidence` can publish by id. Calls to
  * CodeDen's own tools skip the risk classifier, so these tools check here: a file `isSecretPath`
- * matches by any of its names (`.env`, SSH keys, `.npmrc`, `*.pem`, ...), or one of CodeDen's
- * own credential files in `home`, is refused with `403 secret_file` at every permission level.
+ * matches by any of its names (`.env`, SSH keys, `.npmrc`, `*.pem`, the agent CLIs' login files
+ * such as `~/.codex/auth.json`, ...), one of CodeDen's own credential files in `home`, or an agent
+ * CLI's login in a home this machine's environment moved (`CODEX_HOME`, ...) is refused with
+ * `403 secret_file` at every permission level.
  * Names are also checked as evidence publishes them (`safeFileName`, which turns anything but
  * `[A-Za-z0-9._-]`, separators included, into `-`), so `-id_rsa`, `notes.p!em` and
  * `service/account.json` can't go out as `id_rsa`, `notes.pem` and `service-account.json`;
@@ -77,6 +57,12 @@ export function assertNotSecret(file: OutgoingFile, home: string | undefined): v
   if (file.realPath && home && isCodedenCredentialFile(file.realPath, home)) {
     throw forbidden(
       `${basename(file.realPath)} is one of CodeDen's own credential files, which are never attached or shared.`,
+      "secret_file",
+    );
+  }
+  if (file.realPath && isProviderLoginFile(file.realPath)) {
+    throw forbidden(
+      `${basename(file.realPath)} is an agent CLI's login, which is never attached or shared.`,
       "secret_file",
     );
   }

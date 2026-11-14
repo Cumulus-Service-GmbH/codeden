@@ -1,6 +1,10 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, extname, isAbsolute } from "node:path";
-import { type BrowserDialog, MAX_FOCUS_TYPE_CHARS } from "@codeden/contracts";
+import {
+  type BrowserDialog,
+  MAX_FOCUS_TYPE_CHARS,
+  SCREENSHOT_INLINE_MAX_BYTES,
+} from "@codeden/contracts";
 import type { Locator, Page } from "playwright-core";
 import { CommandError } from "../errors";
 import { pngSize } from "./images";
@@ -74,9 +78,10 @@ export async function snapshot(session: BrowserSession, tabId?: string): Promise
 
 /**
  * Run an action on the element behind a snapshot ref. Fails fast when the ref is not in the
- * latest snapshot instead of waiting for the action timeout.
+ * latest snapshot instead of waiting for the action timeout. A `CommandError` the action throws
+ * (its own checks) is passed on as it is.
  */
-async function withRef<T>(
+export async function withRef<T>(
   page: Page,
   ref: string,
   action: (locator: Locator) => Promise<T>,
@@ -87,6 +92,7 @@ async function withRef<T>(
     if ((await locator.count()) === 0) throw new Error("no such element");
     return await action(locator);
   } catch (error) {
+    if (error instanceof CommandError) throw error;
     const message = error instanceof Error ? error.message.split("\n")[0] : String(error);
     throw new CommandError(
       "action_failed",
@@ -175,24 +181,30 @@ export function answerDialog(
 }
 
 export interface ScreenshotResult {
-  path: string;
+  /** Where it was written, when a path was given. */
+  path?: string;
+  /** The PNG as base64, when no path was given. */
+  data?: string;
   width: number;
   height: number;
   bytes: number;
 }
 
 /**
- * PNG of the viewport, the full page, or one element (`ref`), written to an absolute path.
- * The viewport is whatever the panel sized it to; images are in CSS pixels (`scale: "css"`),
- * so a HiDPI viewer doesn't double what the agent gets back.
+ * PNG of the viewport, the full page, or one element (`ref`): written to an absolute `path`, or
+ * without one returned as base64 `data` (a server that doesn't share this disk, at most
+ * `SCREENSHOT_INLINE_MAX_BYTES`). The viewport is whatever the panel sized it to; images are in
+ * CSS pixels (`scale: "css"`), so a HiDPI viewer doesn't double what the agent gets back.
  */
 export async function screenshot(
   session: BrowserSession,
-  path: string,
+  path: string | undefined,
   opts: { tabId?: string; fullPage?: boolean; ref?: string } = {},
 ): Promise<ScreenshotResult> {
-  if (!isAbsolute(path)) throw new CommandError("invalid_path", "Screenshot path must be absolute");
-  if (extname(path).toLowerCase() !== ".png") {
+  if (path !== undefined && !isAbsolute(path)) {
+    throw new CommandError("invalid_path", "Screenshot path must be absolute");
+  }
+  if (path !== undefined && extname(path).toLowerCase() !== ".png") {
     throw new CommandError("invalid_path", "Screenshot path must end in .png");
   }
   const { page } = target(session, opts.tabId);
@@ -200,10 +212,19 @@ export async function screenshot(
   const buffer = ref
     ? await withRef(page, ref, (locator) => locator.screenshot({ type: "png", scale: "css" }))
     : await page.screenshot({ type: "png", scale: "css", fullPage: opts.fullPage ?? false });
-  await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, buffer);
   const size = pngSize(buffer);
   if (!size) throw new CommandError("action_failed", "Screenshot is not a valid PNG");
+  if (path === undefined) {
+    if (buffer.length > SCREENSHOT_INLINE_MAX_BYTES) {
+      throw new CommandError(
+        "too_large",
+        "The screenshot is too large to send; take a viewport or element screenshot instead",
+      );
+    }
+    return { data: buffer.toString("base64"), ...size, bytes: buffer.length };
+  }
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, buffer);
   return { path, ...size, bytes: buffer.length };
 }
 

@@ -29,6 +29,8 @@ The long-lived CodeDen server (design §4.1): Hono HTTP API and UI WebSocket, th
 | `browser_snapshot` | agent | Aria snapshot (YAML) with element refs |
 | `browser_click` / `browser_type` / `browser_press` | agent | Act on a ref / press a key or chord; `browser_type` without a ref types at the focused element (at most 2,000 characters) |
 | `browser_mouse` | agent | `click` / `hover` / `drag` / `scroll` at viewport CSS pixels (the pixels of a viewport screenshot); flat input checked per action by the contracts' `checkBrowserMouse` |
+| `browser_select` | agent | Choose options of a `<select>` by ref, by label or value (`values`; several for a multiple select); returns the selected options |
+| `browser_upload` | agent | Set `paths` on a file input by ref, or click a button / drop zone and answer the file chooser it opens. Paths are checked by `services/outgoing-paths.ts` (the rule `share_to_chat` uses: working folder, temp folder or own artifacts, or the workspace on a remote runner; never a secrets file) and sent to the runner as real paths |
 | `browser_dialog` | agent | Answer the page's open alert / confirm / prompt / "Leave this page?" by its `dialogId` (`accept`, `promptText`). Actions that open one return it, `browser_snapshot` shows it, and other actions on that tab fail with `dialog_open` until it is answered. An answer for a dialog that already closed fails with `no_dialog`, so it never answers the next one |
 | `browser_screenshot` | agent | PNG -> `screenshot` artifact, returned as MCP image content; `share: true` posts it to the chat. Viewport shots name their size as the `browser_mouse` coordinate space |
 | `browser_logs` | agent | Console and network entries (`since` paging) |
@@ -211,7 +213,8 @@ Opt-in proxies next to the browser's speech APIs (which stay the default). Keys 
 | `POST /api/projects/:id/github/issues/:number/comments` | `GithubCommentRequest` -> `GithubCommentResponse` (201) |
 | `POST /api/projects/:id/github/issues/:number/labels` | `GithubLabelRequest` -> `GithubIssue` |
 | `POST /api/projects/:id/github/issues/:number/triage` | `TriageIssueRequest` -> `TriageIssueResult` |
-| `GET /api/prs/:id` (`<projectId>:<number>`) | -> `GithubPrDetails` (live status, body, files) |
+| `GET /api/prs/:id` (`<projectId>:<number>`) | -> `GithubPrDetails` (live status, body, every changed file up to GitHub's 3000) |
+| `GET /api/prs/:id/diff` | -> `GithubPrDiff` (each changed file with its unified patch; `patch: null` for binary or too-large files) |
 | `POST /api/prs/:id/merge` | `MergePrRequest` (squash by default) -> `MergePrResponse` |
 | `GET /api/sessions/:id/github` | -> `SessionGithubResponse` |
 

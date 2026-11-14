@@ -8,6 +8,7 @@ import {
   type GithubLabelRequest,
   type GithubPr,
   type GithubPrDetails,
+  type GithubPrDiff,
   type GithubPrsResponse,
   type MergePrRequest,
   type MergePrResponse,
@@ -24,16 +25,19 @@ import type { EventStore } from "../../events/store";
 import type { ArtifactService } from "../artifacts";
 import { badRequest, conflict, errorMessage, ServiceError } from "../errors";
 import type { Exec } from "../exec";
+import type { GitBroker } from "../git-broker";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
 import type { RunnerDeps } from "../runner-port";
 import type { SecretStore } from "../secrets";
 import type { SessionRepo } from "../sessions/repo";
+import { remoteWorkspaceFs } from "../workspace-fs/workspace-fs";
 import { type AttachEvidenceInput, type AttachEvidenceResult, attachEvidence } from "./attach";
 import { GithubAuth } from "./auth";
 import { GithubClient } from "./client";
 import { PrFollowUp } from "./follow-up";
 import * as issues from "./issues";
+import { PrFilesCache, readPrInfo, withoutPatch } from "./pr-files";
 import {
   type CreatePullRequestInput,
   type CreatePullRequestResult,
@@ -55,6 +59,8 @@ export interface GithubServiceDeps extends RunnerDeps {
   secrets: SecretStore;
   /** CodeDen's data directory: its credential files are never attached as evidence (§15). */
   home?: string;
+  /** Brokers push credentials for runners that don't share this disk (§9.2). */
+  git?: GitBroker;
   /** `fetch` for Octokit and the API base URL (tests point them at a fake GitHub). */
   fetch?: typeof fetch;
   baseUrl?: string;
@@ -77,6 +83,7 @@ export class GithubService {
   readonly sync: GithubSync;
   private readonly followUp: PrFollowUp;
   private readonly reviewInbox: PrReviewInbox;
+  private readonly prFiles: PrFilesCache;
   private unsubscribe: (() => void) | undefined;
   private login: { value: string; token: string } | null = null;
 
@@ -103,6 +110,7 @@ export class GithubService {
       log: deps.log,
     });
     this.reviewInbox = new PrReviewInbox({ inbox: deps.inbox, repo: deps.repo });
+    this.prFiles = new PrFilesCache(this.client);
   }
 
   /**
@@ -242,34 +250,32 @@ export class GithubService {
     return refreshPr(this.prDeps(), projectId, repo, number);
   }
 
-  /** `/api/prs/:id`: status plus body, size and changed files. */
+  /** `/api/prs/:id`: status plus body, size and every changed file (without patches). */
   async getPrDetails(prId: string): Promise<GithubPrDetails> {
     const { projectId, number } = this.parsePrId(prId);
     const repo = this.githubRepo(projectId);
     const pr = await refreshPr(this.prDeps(), projectId, repo, number);
-    return this.client.run(async (octokit) => {
-      const [info, files] = await Promise.all([
-        octokit.rest.pulls.get({ owner: repo.owner, repo: repo.repo, pull_number: number }),
-        octokit.rest.pulls.listFiles({
-          owner: repo.owner,
-          repo: repo.repo,
-          pull_number: number,
-          per_page: 100,
-        }),
-      ]);
-      return {
-        ...pr,
-        body: info.data.body ?? "",
-        additions: info.data.additions,
-        deletions: info.data.deletions,
-        files: files.data.map((f) => ({
-          path: f.filename,
-          status: f.status,
-          additions: f.additions,
-          deletions: f.deletions,
-        })),
-      };
-    });
+    const [info, files] = await Promise.all([
+      readPrInfo(this.client, repo, number),
+      this.prFiles.get(repo, number, pr),
+    ]);
+    return {
+      ...pr,
+      body: info.body,
+      additions: info.additions,
+      deletions: info.deletions,
+      changedFiles: info.changedFiles,
+      files: files.map(withoutPatch),
+    };
+  }
+
+  /** `/api/prs/:id/diff`: every changed file with its patch, at the PR's current head. */
+  async getPrDiff(prId: string): Promise<GithubPrDiff> {
+    const { projectId, number } = this.parsePrId(prId);
+    const repo = this.githubRepo(projectId);
+    const info = await readPrInfo(this.client, repo, number);
+    const files = await this.prFiles.get(repo, number, info);
+    return { headSha: info.headSha, changedFiles: info.changedFiles, files };
   }
 
   /** Merge a PR (squash by default); the merge follow-up runs from the `pr.merged` event. */
@@ -323,6 +329,7 @@ export class GithubService {
       this.githubRepo(session.projectId),
       input,
       this.deps.home,
+      remoteWorkspaceFs(this.deps, session),
     );
   }
 
@@ -419,8 +426,8 @@ export class GithubService {
   }
 
   private prDeps() {
-    const { runner, runners, repo } = this.deps;
-    return { ...this.issueDeps(), runner, runners, repo };
+    const { runner, runners, repo, git } = this.deps;
+    return { ...this.issueDeps(), runner, runners, repo, git };
   }
 }
 

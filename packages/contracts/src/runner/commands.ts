@@ -11,6 +11,8 @@ import { ProjectConfigFile } from "../project-config";
 import { ProviderInfo, ProviderStatus, RuntimeResponse, SessionOptions } from "../provider";
 import { ProviderHistoryCommandResults, ProviderHistoryCommands } from "../provider-history";
 import { BrowserCommandResults, BrowserCommands } from "./browser";
+import { BrowserFormCommandResults, BrowserFormCommands } from "./browser-forms";
+import { GitCredential, WorkspaceFsCommandResults, WorkspaceFsCommands } from "./workspace-fs";
 
 /** Terminal (node-pty) id, unique per runner. */
 export const PtyId = z.string().min(1).max(100);
@@ -54,6 +56,11 @@ export const RunnerCommand = z.discriminatedUnion("name", [
     name: z.literal("runner.configure"),
     /** Where the local MCP proxy forwards to (the server's `/mcp`); `null` disables it. */
     mcpUpstreamUrl: z.url().nullable(),
+    /**
+     * Forward the proxy's requests over this connection instead (`mcp.request` frames, for a
+     * runner that can't reach the server's loopback); `mcpUpstreamUrl` is then `null`.
+     */
+    mcpLink: z.boolean().optional(),
   }),
   /** Exit the runner process after closing sessions and terminals. */
   z.object({ name: z.literal("runner.shutdown") }),
@@ -101,33 +108,56 @@ export const RunnerCommand = z.discriminatedUnion("name", [
   }),
   /** `provider.history.*` (`capabilities.vendorHistory`), defined in `../provider-history`. */
   ...ProviderHistoryCommands,
-  /** Create or reuse the working directory for a session (worktree + setup commands). */
-  z.object({
-    name: z.literal("workspace.prepare"),
-    sessionId: Id,
-    repoPath: z.string().min(1),
-    strategy: z.enum(["worktree", "repo_root", "existing"]),
-    /** Target directory for `worktree` / `existing`. */
-    path: z.string().optional(),
-    branch: z.string().optional(),
-    baseRef: z.string().optional(),
-    setupCommands: z.array(z.string()).default([]),
-    /** Used for the default worktree path `<home>/wt/<projectSlug>/<sessionShort>`. */
-    projectSlug: z
-      .string()
-      .regex(/^[a-z0-9][a-z0-9-]{0,39}$/)
-      .optional(),
-    /** `git fetch origin` before branching (when an `origin` remote exists). */
-    fetch: z.boolean().optional(),
-    /** Run `.codeden/project.json` `setup` commands before `setupCommands`. Default true. */
-    runProjectSetup: z.boolean().optional(),
-    /**
-     * A forked session's starting point: once a new worktree is created, its files are made to
-     * match this checkpoint of another session (as uncommitted changes on top of the branch)
-     * before setup commands run. Ignored when the worktree already existed.
-     */
-    restoreCheckpoint: z.object({ sessionId: Id, index: CheckpointIndex }).optional(),
-  }),
+  /**
+   * Create or reuse the working directory for a session (worktree or clone, then setup
+   * commands). `clone` is for a runner that doesn't share the server's disk (a sandbox,
+   * `docs/remote-runners.md` §9.1): the runner clones `remoteUrl` into a folder it chooses,
+   * `<runnerHome>/ws/<sessionShort>`, and returns it as `cwd`; no `repoPath` or `path` is sent.
+   */
+  z
+    .object({
+      name: z.literal("workspace.prepare"),
+      sessionId: Id,
+      /** The project's folder on the runner's machine; required except for `clone`. */
+      repoPath: z.string().min(1).optional(),
+      strategy: z.enum(["worktree", "repo_root", "existing", "clone"]),
+      /** Target directory for `worktree` / `existing`. */
+      path: z.string().optional(),
+      branch: z.string().optional(),
+      baseRef: z.string().optional(),
+      setupCommands: z.array(z.string()).default([]),
+      /** Used for the default worktree path `<home>/wt/<projectSlug>/<sessionShort>`. */
+      projectSlug: z
+        .string()
+        .regex(/^[a-z0-9][a-z0-9-]{0,39}$/)
+        .optional(),
+      /** `git fetch origin` before branching (when an `origin` remote exists). */
+      fetch: z.boolean().optional(),
+      /** Run `.codeden/project.json` `setup` commands before `setupCommands`. Default true. */
+      runProjectSetup: z.boolean().optional(),
+      /**
+       * A forked session's starting point: once a new worktree is created, its files are made to
+       * match this checkpoint of another session (as uncommitted changes on top of the branch)
+       * before setup commands run. Ignored when the worktree already existed. Not supported
+       * with `clone` (`unsupported`).
+       */
+      restoreCheckpoint: z.object({ sessionId: Id, index: CheckpointIndex }).optional(),
+      /** `clone`: the repository to clone (the project's `origin`). */
+      remoteUrl: z.string().min(1).max(2048).optional(),
+      /** `clone`: a shallow clone of this many commits. */
+      depth: z.int().positive().optional(),
+      /** `clone` and `fetch`: the credential for that git operation only (§9.2). */
+      credential: GitCredential.optional(),
+    })
+    .superRefine((cmd, ctx) => {
+      if (cmd.strategy === "clone" ? !cmd.remoteUrl : !cmd.repoPath) {
+        ctx.addIssue({
+          code: "custom",
+          path: [cmd.strategy === "clone" ? "remoteUrl" : "repoPath"],
+          message: cmd.strategy === "clone" ? "clone needs remoteUrl" : "repoPath is required",
+        });
+      }
+    }),
   /**
    * Remove a session worktree (and optionally its branch). Idempotent: a missing path, or a
    * half-deleted folder under `<home>/wt/<project>/<session>` that is no longer a git worktree,
@@ -204,8 +234,9 @@ export const RunnerCommand = z.discriminatedUnion("name", [
   z.object({ name: z.literal("pty.close"), ptyId: PtyId }),
   /** Scrollback and state of a terminal, for (re)attaching a view. */
   z.object({ name: z.literal("pty.attach"), ptyId: PtyId }),
-  /** `browser.*` (§12.2), defined in `./browser`. */
+  /** `browser.*` (§12.2), defined in `./browser`; `<select>` menus and file inputs in `./browser-forms`. */
   ...BrowserCommands,
+  ...BrowserFormCommands,
   /** Snapshot the worktree into `refs/codeden/checkpoints/<session>/<n>` (§9). */
   z.object({
     name: z.literal("git.checkpoint"),
@@ -243,6 +274,8 @@ export const RunnerCommand = z.discriminatedUnion("name", [
     /** Set the upstream (`-u`). Default true. */
     setUpstream: z.boolean().optional(),
     forceWithLease: z.boolean().optional(),
+    /** The credential for this push only (§9.2); a local runner uses the user's own git setup. */
+    credential: GitCredential.optional(),
   }),
   z.object({
     name: z.literal("checkpoint.list"),
@@ -291,6 +324,8 @@ export const RunnerCommand = z.discriminatedUnion("name", [
     /** Default `MCP_TEST_DEFAULT_TIMEOUT_MS`. */
     timeoutMs: z.int().positive().max(MCP_TEST_MAX_TIMEOUT_MS).optional(),
   }),
+  /** `fs.*` and `transfer.*` (`docs/remote-runners.md` §10), defined in `./workspace-fs`. */
+  ...WorkspaceFsCommands,
 ]);
 export type RunnerCommand = z.infer<typeof RunnerCommand>;
 export type RunnerCommandName = RunnerCommand["name"];
@@ -376,6 +411,7 @@ export const RunnerCommandResults = {
     exitCode: z.int().nullable(),
   }),
   ...BrowserCommandResults,
+  ...BrowserFormCommandResults,
   "git.checkpoint": z.object({ ref: z.string(), commit: z.string() }),
   "git.status": z.object({
     branch: z.string().nullable(),
@@ -424,6 +460,7 @@ export const RunnerCommandResults = {
     ),
   }),
   "mcp.test": McpServerTestResult,
+  ...WorkspaceFsCommandResults,
 } satisfies Record<RunnerCommandName, z.ZodType>;
 
 /** Result type of a command: `RunnerCommandResult<"session.start">`. */

@@ -1,4 +1,5 @@
 import type {
+  McpLinkResponse,
   RunnerBackendId,
   RunnerCommand,
   RunnerCommandResult,
@@ -15,10 +16,12 @@ import {
 } from "./git/checkpoints";
 import * as gitOps from "./git/ops";
 import type { Journal } from "./journal";
+import type { McpLinkChannel } from "./mcp/link-upstream";
 import { listPorts } from "./ports";
 import type { ProcessSupervisor } from "./process/supervisor";
 import type { TerminalHost } from "./pty/terminal-host";
 import type { SessionHost } from "./session-host";
+import type { WorkspaceFsHost } from "./workspace/fs";
 import { removeWithLeftovers, stopWithLeftovers } from "./workspace/leftover-processes";
 import { prepareWorkspace } from "./workspace/worktree";
 
@@ -35,6 +38,8 @@ export interface RunnerCore {
   registry: ProviderRegistry;
   /** `browser.*` handlers over the runner's `BrowserManager` (§12.2). */
   browser: BrowserCommandHandlers;
+  /** `fs.*` and `transfer.*`: workspace files for a server that doesn't share this disk. */
+  files: WorkspaceFsHost;
   startedAt: string;
   emit: (event: RunnerEvent) => void;
   /** The runner's log (background work such as emptying the worktree trash). */
@@ -42,7 +47,9 @@ export interface RunnerCore {
   isDraining: () => boolean;
   drain: (opts: { reason: string; timeoutMs?: number; exitWhenDrained?: boolean }) => void;
   /** Point the MCP proxy at an upstream; returns the agent-facing proxy URL. */
-  configureMcp: (upstreamUrl: string | null) => string | null;
+  configureMcp: (upstream: { url: string | null; link: boolean }) => string | null;
+  /** An `mcp.response` frame from a server connection, for the proxy's link upstream. */
+  mcpResponse: (from: McpLinkChannel, frame: McpLinkResponse) => void;
   /** Exit the process shortly after the current result is sent. */
   shutdown: () => void;
 }
@@ -64,7 +71,12 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
       core.drain(command);
       return {};
     case "runner.configure":
-      return { mcpProxyUrl: core.configureMcp(command.mcpUpstreamUrl) };
+      return {
+        mcpProxyUrl: core.configureMcp({
+          url: command.mcpUpstreamUrl,
+          link: command.mcpLink ?? false,
+        }),
+      };
     case "runner.shutdown":
       core.shutdown();
       return {};
@@ -239,6 +251,16 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
         supervisor: core.supervisor,
       });
     }
+
+    case "fs.list":
+    case "fs.stat":
+    case "fs.read":
+    case "fs.write":
+    case "transfer.open":
+    case "transfer.read":
+    case "transfer.write":
+    case "transfer.close":
+      return core.files.execute(command);
 
     default: {
       // Only `browser.*` commands reach here (checked by the type below).

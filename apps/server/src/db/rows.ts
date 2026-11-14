@@ -40,6 +40,8 @@ export function projectToRow(p: Project): ProjectRow {
     path: p.path,
     defaultBranch: p.defaultBranch,
     defaultProvider: p.defaultProvider,
+    defaultModel: p.defaultModel,
+    defaultEffort: p.defaultEffort,
     autonomy: p.autonomy,
     autonomyMode: p.autonomyMode,
     visionPath: p.visionPath,

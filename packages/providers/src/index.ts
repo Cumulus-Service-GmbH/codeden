@@ -13,6 +13,7 @@ export * from "./image";
 export { ModelCatalog } from "./models";
 export * from "./opencode";
 export { isInWorkspace, isSecretPath, type PathContext } from "./policy/paths";
+export { isProviderLoginFile } from "./policy/provider-logins";
 export {
   classifyCommand,
   classifyFetch,
@@ -25,6 +26,7 @@ export * from "./registry";
 export * from "./replay";
 export { agentEnv } from "./util/agent-env";
 export { brokenInstallMessage } from "./util/detect-exe";
+export { type DiskStat, DiskWorkspace, tempPathFor } from "./util/disk-workspace";
 export {
   isElectronRuntime,
   ownNodeEnv,
@@ -60,4 +62,17 @@ export {
   type RegistryPathReader,
   refreshProcessPath,
 } from "./util/system-path";
+export {
+  assertWorkspaceReadable,
+  assertWorkspaceWritable,
+  isCodedenCredentialFile,
+  isInsidePath,
+  isRunnerState,
+  lexicalTarget,
+  platformPath,
+  WorkspaceFsError,
+  workspaceRelative,
+  workspaceRoot,
+  workspaceTarget,
+} from "./util/workspace-guard";
 export type { OneShotRequest, UtilityModel } from "./utility";

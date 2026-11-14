@@ -10,6 +10,7 @@ import { ApiRequestError } from "../http";
 import { startAmbient } from "./ambient";
 import { mockAutomationsApi } from "./automations";
 import { mockFactoryApi } from "./factory";
+import { startFactoryDemo } from "./factory-demo";
 import { mockFeatureApis } from "./feature-apis";
 import { makeSession } from "./fixtures/helpers";
 import { setupChecks } from "./fixtures/ops";
@@ -42,7 +43,10 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
   const world = new MockWorld();
   const running = new Map<string, Script>();
   const queue = new MockQueue(world);
-  if (opts.ambient) startAmbient(world);
+  if (opts.ambient) {
+    startAmbient(world);
+    startFactoryDemo(world);
+  }
 
   const runTurn = (sessionId: string, text: string, from?: MessageSender) => {
     const script = scriptedTurn(world, sessionId, { text, ...(from ? { from } : {}) }, () => {
