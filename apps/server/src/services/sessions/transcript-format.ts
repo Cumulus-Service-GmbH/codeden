@@ -52,6 +52,37 @@ export function quote(text: string): string {
   return prefixLines(text, "> ");
 }
 
+/** A fence line (after indentation or quote markers): its run of backticks or tildes. */
+const FENCE = /^[ \t>]*(`{3,}|~{3,})/;
+
+/**
+ * `text` with literal `<details>` and `<summary>` tags (opening or closing) escaped as `&lt;…`,
+ * so a message can't open or close the export's folded blocks. Code shows tags as written, so
+ * fenced blocks and inline code are left alone.
+ */
+export function escapeFolds(text: string): string {
+  if (!/<\/?(?:details|summary)\b/i.test(text)) return text;
+  let fence: string | null = null;
+  return text
+    .split("\n")
+    .map((line) => {
+      const marker = FENCE.exec(line)?.[1];
+      if (fence) {
+        if (marker && marker[0] === fence[0] && marker.length >= fence.length) fence = null;
+        return line;
+      }
+      if (marker) {
+        fence = marker;
+        return line;
+      }
+      // An inline code span runs from a run of backticks to the next run of the same length.
+      return line.replace(/(`+).*?\1|<(\/?(?:details|summary))\b/gi, (match, ticks, tag) =>
+        ticks ? match : `&lt;${tag}`,
+      );
+    })
+    .join("\n");
+}
+
 /** "$3.20", "$0.042", "$1,284"; estimates read "≈ $3.20" (as the app shows them). */
 export function usd(n: number, estimated = false): string {
   const digits = n === 0 ? 2 : n < 0.1 ? 3 : n < 1000 ? 2 : 0;

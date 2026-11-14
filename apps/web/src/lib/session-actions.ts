@@ -187,6 +187,9 @@ export function useForkSession(session: Session) {
   };
 }
 
+/** The second line under Copy and Download as Markdown: the export hides secrets (§13). */
+export const MARKDOWN_HINT = "Secrets redacted";
+
 /**
  * What you can do to a session from its row menu, the thread header's ⋯ menu or the command
  * palette: open, rename, copy its link, copy or download it as Markdown, make an automation from

@@ -21,14 +21,17 @@ export interface TranscriptExportDeps {
 
 /**
  * `GET /api/sessions/:id/export` (§13): the session's transcript as Markdown, every thread
- * included, with its cost from the ledger. Only reads; works for archived sessions (no worktree
- * needed) and while a turn runs (what exists so far). 404 `session_not_found` for an unknown id.
+ * included, with its cost from the ledger and its secrets redacted (`knownSecrets` adds exact
+ * values to hide, such as the install token). Only reads; works for archived sessions (no
+ * worktree needed) and while a turn runs (what exists so far). 404 `session_not_found` for an
+ * unknown id.
  */
 export async function exportSessionTranscript(
   deps: TranscriptExportDeps,
   sessionId: string,
-  now: Date = new Date(),
+  opts: { knownSecrets?: readonly string[]; now?: Date } = {},
 ): Promise<SessionTranscriptExport> {
+  const now = opts.now ?? new Date();
   const session = deps.sessionRepo.get(sessionId);
   const projectName = session.projectId ? projectNameOf(deps, session.projectId) : null;
   const forkedFrom = session.forkedFrom
@@ -63,6 +66,7 @@ export async function exportSessionTranscript(
     usage,
     exportedAt: now,
     version: CODEDEN_VERSION,
+    knownSecrets: opts.knownSecrets,
   });
   return { fileName: transcriptFileName(session, now, projectName), markdown };
 }

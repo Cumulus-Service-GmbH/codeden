@@ -1,16 +1,18 @@
-import type {
-  ItemOf,
-  ItemRecord,
-  Role,
-  Session,
-  SessionStatus,
-  SessionUsage,
-  Thread,
-  Turn,
-  TurnUsage,
+import {
+  type ItemOf,
+  type ItemRecord,
+  type Role,
+  redactAndCount,
+  type Session,
+  type SessionStatus,
+  type SessionUsage,
+  type Thread,
+  type Turn,
+  type TurnUsage,
 } from "@codeden/contracts";
 import {
   duration,
+  escapeFolds,
   inlineCode,
   oneLine,
   quote,
@@ -38,6 +40,8 @@ export interface TranscriptSource {
   exportedAt: Date;
   /** CodeDen's version, named in the footer line. */
   version: string;
+  /** Exact values to hide wherever they appear (CodeDen's install token), besides known shapes. */
+  knownSecrets?: readonly string[];
 }
 
 const STATUS: Readonly<Record<SessionStatus, string>> = {
@@ -85,9 +89,26 @@ export function transcriptFileName(
  * with the ledger's cost (labelled as in §12.6), then each turn of the root thread with its
  * messages, plans, todos, questions, approvals, notices, one line per tool call, and subagents
  * with their own threads folded into `<details>`. Reasoning, tool output and diffs are left out.
+ * Secrets are replaced with `[redacted]` (`redactAndCount`), and the header says how many.
  */
 export function sessionTranscriptMarkdown(src: TranscriptSource): string {
-  return `${[header(src), "---", ...body(src)].join("\n\n")}\n`;
+  let redacted = 0;
+  const redact = (text: string) => {
+    const r = redactAndCount(text, { known: src.knownSecrets ?? [] });
+    redacted += r.count;
+    return r.text;
+  };
+  // Text cut short is redacted while rendering; everything is checked again once written.
+  const rest = redact(body(src, redact).join("\n\n"));
+  const head = redact(escapeFolds(header(src)));
+  return `${[head, redactionNote(redacted), "---", rest].filter(Boolean).join("\n\n")}\n`;
+}
+
+/** The header's line saying how many values were hidden; none when nothing was. */
+function redactionNote(count: number): string | null {
+  if (count === 0) return null;
+  const values = `${count} value${count === 1 ? "" : "s"}`;
+  return `_${values} redacted: anything that looked like a secret (a token, a key, a password) was replaced._`;
 }
 
 // ---------------------------------------------------------------- header
@@ -157,6 +178,7 @@ interface Walk {
   /** Threads already rendered, so a malformed link can't loop. */
   seen: Set<string>;
   root: string | null;
+  redact: (text: string) => string;
 }
 
 function turnCost(t: TurnUsage): string {
@@ -177,7 +199,7 @@ function turnHeading(n: number, turn: Turn | undefined, usage: TurnUsage | undef
   return parts.join(" · ");
 }
 
-function body(src: TranscriptSource): string[] {
+function body(src: TranscriptSource, redact: (text: string) => string): string[] {
   const byThread = new Map<string, ItemRecord[]>();
   for (const record of [...src.items].sort((a, b) => a.position - b.position)) {
     const list = byThread.get(record.threadId) ?? [];
@@ -189,6 +211,7 @@ function body(src: TranscriptSource): string[] {
     byThread,
     seen: new Set(),
     root: src.session.worktreePath ?? src.session.cwd,
+    redact,
   };
   // Subagent threads render under their card; every other thread is a conversation of turns.
   const children = new Set(
@@ -207,7 +230,7 @@ function body(src: TranscriptSource): string[] {
     const turns = src.turns.filter((t) => t.threadId === threadId);
     const records = byThread.get(threadId) ?? [];
     const turnIds = [...new Set([...turns.map((t) => t.id), ...records.map((r) => r.turnId)])];
-    const ctx: ItemContext = { root: walk.root, speaker: SPEAKERS[src.session.role] };
+    const ctx: ItemContext = { root: walk.root, speaker: SPEAKERS[src.session.role], redact };
     for (const turnId of turnIds) {
       const turn = turns.find((t) => t.id === turnId);
       const usage = src.usage?.turns.find((t) => t.turnId === turnId);
@@ -221,29 +244,36 @@ function body(src: TranscriptSource): string[] {
       );
       if (turn?.error && turn.status !== "completed") {
         const what = turn.status === "interrupted" ? "Turn interrupted" : "Turn failed";
-        blocks.push(quote(`**${what}:** ${turn.error.message.trim()}`));
+        blocks.push(escapeFolds(quote(`**${what}:** ${turn.error.message.trim()}`)));
       }
     }
   }
   return blocks.length > 0 ? blocks : ["_No messages yet._"];
 }
 
-/** A thread's items as Markdown blocks; consecutive tool calls share one list. */
+/**
+ * A thread's items as Markdown blocks; consecutive tool calls share one list. Literal fold tags
+ * in what the items say are escaped (`escapeFolds`), so only a subagent's own fold opens one.
+ */
 function renderItems(records: ItemRecord[], ctx: ItemContext, walk: Walk): string[] {
   const blocks: string[] = [];
   let tools: string[] = [];
   const flush = () => {
-    if (tools.length > 0) blocks.push(tools.join("\n"));
+    if (tools.length > 0) blocks.push(escapeFolds(tools.join("\n")));
     tools = [];
   };
   for (const { item } of records) {
     if (item.kind === "tool_call") {
-      tools.push(toolLine(item, ctx.root));
+      tools.push(toolLine(item, ctx));
       continue;
     }
     flush();
-    const block = item.kind === "subagent" ? subagentBlock(item, walk) : itemBlock(item, ctx);
-    if (block) blocks.push(block);
+    if (item.kind === "subagent") {
+      blocks.push(subagentBlock(item, walk));
+      continue;
+    }
+    const block = itemBlock(item, ctx);
+    if (block) blocks.push(escapeFolds(block));
   }
   flush();
   return blocks;
@@ -276,15 +306,16 @@ function subagentBlock(item: ItemOf<"subagent">, walk: Walk): string {
   if (item.status === "in_progress") facts.push("still running");
   else if (item.status !== "completed") facts.push(item.status);
   const what = item.description ? `: ${oneLine(item.description)}` : "";
-  const parts = [[`**${name}**${what}`, ...facts].join(" · ")];
-  if (item.summary?.trim()) parts.push(quote(item.summary.trim()));
+  const parts = [escapeFolds([`**${name}**${what}`, ...facts].join(" · "))];
+  if (item.summary?.trim()) parts.push(escapeFolds(quote(item.summary.trim())));
 
   const childId = item.childThreadId;
   const records = walk.seen.has(childId) ? [] : (walk.byThread.get(childId) ?? []);
   walk.seen.add(childId);
   const inner: string[] = [];
-  if (item.prompt?.trim()) inner.push(`**Task**\n\n${item.prompt.trim()}`);
-  inner.push(...renderItems(records, { root: walk.root, speaker: "Subagent" }, walk));
+  if (item.prompt?.trim()) inner.push(`**Task**\n\n${escapeFolds(item.prompt.trim())}`);
+  const ctx: ItemContext = { root: walk.root, speaker: "Subagent", redact: walk.redact };
+  inner.push(...renderItems(records, ctx, walk));
   if (inner.length > 0) {
     const steps = records.length;
     const label = steps > 0 ? `Its thread (${steps} step${steps === 1 ? "" : "s"})` : "Its task";

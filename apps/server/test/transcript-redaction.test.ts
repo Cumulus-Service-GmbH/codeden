@@ -106,7 +106,10 @@ describe("transcript export: secrets (#315)", () => {
         }),
         rec(command("c1", `export GITHUB_TOKEN=${SECRETS.github}`)),
         rec(
-          command("c2", `curl -H "Authorization: Bearer ${SECRETS.bearer}" https://api.example.com`),
+          command(
+            "c2",
+            `curl -H "Authorization: Bearer ${SECRETS.bearer}" https://api.example.com`,
+          ),
         ),
         rec(command("c3", `gh auth login --with-token <<< ${SECRETS.githubFine}`)),
         rec(command("c4", `cat > .env <<'EOF'\nDB_PASSWORD=${SECRETS.password}\nEOF`)),
@@ -153,6 +156,48 @@ describe("transcript export: secrets (#315)", () => {
     // What isn't a secret stays readable.
     expect(md).toContain("https://api.example.com");
     expect(md).toContain("GITHUB_TOKEN=[redacted]");
+  });
+
+  it("hides a secret before cutting a long command, so no piece of it is left", () => {
+    const long = `curl ${"x".repeat(270)} -H "Authorization: Bearer ${SECRETS.bearer}"`;
+    const md = sessionTranscriptMarkdown(source([rec(command("c5", long))]));
+    expect(md).toContain('-H "Authorization: Bear…`');
+    expect(md).not.toContain(SECRETS.bearer.slice(0, 6));
+    expect(md).toContain("_1 value redacted:");
+  });
+
+  it("hides the exact values it is given, such as the install token", () => {
+    const install = "f00d".repeat(16);
+    const md = sessionTranscriptMarkdown({
+      ...source([
+        rec({ id: "r3", status: "completed", kind: "assistant_message", text: `Using ${install}` }),
+      ]),
+      knownSecrets: [install],
+    });
+    expect(md).toContain("**Agent**\n\nUsing [redacted]");
+  });
+
+  it("adds no note when there is nothing to hide", () => {
+    const md = sessionTranscriptMarkdown(
+      source([rec({ id: "r4", status: "completed", kind: "assistant_message", text: "All good" })]),
+    );
+    expect(md).not.toContain("redacted");
+  });
+
+  it("escapes fold tags in prose but leaves them in code", () => {
+    const md = sessionTranscriptMarkdown(
+      source([
+        rec({
+          id: "r5",
+          status: "completed",
+          kind: "assistant_message",
+          text: "Use `<details>` like so:\n\n```html\n<details><summary>x</summary></details>\n```\n\nNot </details> or <DETAILS open> here.",
+        }),
+      ]),
+    );
+    expect(md).toContain("Use `<details>` like so:");
+    expect(md).toContain("```html\n<details><summary>x</summary></details>\n```");
+    expect(md).toContain("Not &lt;/details> or &lt;DETAILS open> here.");
   });
 
   it("keeps a literal </details> in a subagent's message from closing its fold early", () => {
