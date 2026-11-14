@@ -41,6 +41,8 @@ describe("size check counting (§10.1)", () => {
       "src/routeTree.gen.ts",
       "src/components/ui/button.tsx",
       "apps/web/src/components/ui/dialog.tsx",
+      "apps/server/drizzle/20261114131826_project_default_model/snapshot.json",
+      "drizzle/meta/0003_snapshot.json",
     ]) {
       expect(isUncountedFile(path), path).toBe(true);
     }
@@ -49,6 +51,10 @@ describe("size check counting (§10.1)", () => {
       "src/components/board.tsx",
       "src/ui/theme.ts",
       "src/build-info.ts",
+      "apps/server/drizzle/20261114131826_project_default_model/migration.sql",
+      "drizzle/0003_add_users.sql",
+      "src/snapshot.json",
+      "test/fixtures/meta/snapshot.json",
       "package.json",
       "README.md",
     ]) {
