@@ -1,4 +1,4 @@
-import type { FactoryStatus, WorkType } from "@codeden/contracts";
+import { drainText, type FactoryStatus, type WorkType } from "@codeden/contracts";
 import type { ViewCard } from "../stages";
 import { type AgentInputs, type SceneAgent, sceneAgents } from "./agents";
 import { frontOf, type StationId, stationOf, type Tile, tileId } from "./floor";
@@ -31,6 +31,11 @@ export interface TicketPile {
 export interface Scene {
   /** Kill switch on or loop stopped: the lights dim and everyone sits down. */
   stopped: boolean;
+  /**
+   * Finishing current work, then stopping (`FactoryStatus.drain`): the items still in flight, and
+   * a "CLOSED" sign on the IN door; null when not draining.
+   */
+  draining: number | null;
   agents: SceneAgent[];
   seating: Seating;
   tickets: TicketPile;
@@ -78,8 +83,10 @@ export function sceneOf(inputs: AgentInputs, prev: Seating | null): Scene {
     agents.map((a) => ({ key: a.key, station: stationOf(a) })),
   );
   const all = [...Object.values(pipeline.stages).flat(), ...pipeline.needsYou];
+  const stopped = f.killSwitch || f.globalKillSwitch || f.loopState === "stopped";
   return {
-    stopped: f.killSwitch || f.globalKillSwitch || f.loopState === "stopped",
+    stopped,
+    draining: f.drain && !stopped ? f.drain.inFlight : null,
     agents,
     seating,
     tickets: ticketsOf([...pipeline.stages.intake, ...pipeline.stages.type]),
@@ -214,6 +221,9 @@ export function sceneSummary(scene: Scene): string {
   const lines = [parts.length > 0 ? `${parts.join(", ")}.` : "The factory floor is quiet."];
   if (scene.scout?.active && !scene.stopped)
     lines.push(`The scout is on round ${scene.scout.round}.`);
+  if (scene.draining !== null) {
+    lines.push(`${drainText(scene.draining)}; the IN door is closed until the factory resumes.`);
+  }
   if (scene.stopped) lines.push("The loop is stopped.");
   return lines.join(" ");
 }

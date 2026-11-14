@@ -11,6 +11,7 @@ import { factoryKeys, useFactoryStatus } from "@/lib/factory";
 import { ago, compact, usd } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { AutonomyDialog, ExperimentalBadge } from "./autonomy-dialog";
+import { DrainChip } from "./drain-chip";
 import { FactoryRunButtons, OpenFactoryViewButton } from "./factory-actions";
 import { ChecksColumn, IgnoredColumn, RecentColumn } from "./factory-columns";
 import { FactoryGuideButton } from "./factory-guide";
@@ -131,7 +132,7 @@ export function FactoryPanel({ project }: { project: Project }) {
         </div>
         <div className="ml-auto flex flex-wrap items-center gap-1">
           <OpenFactoryViewButton projectId={projectId} variant="outline" />
-          {f.loopState === "paused" && (
+          {f.loopState === "paused" && !f.drain && (
             <Button size="sm" onClick={() => resume.mutate()} disabled={resume.isPending}>
               <Play /> Resume
             </Button>
@@ -154,7 +155,7 @@ export function FactoryPanel({ project }: { project: Project }) {
             </Link>
           </Button>
           <FactoryGuideButton />
-          <KillSwitchButton scope={{ projectId }} on={f.killSwitch} />
+          <KillSwitchButton scope={{ projectId }} on={f.killSwitch} drain={f.drain} />
         </div>
       </div>
 
@@ -180,7 +181,11 @@ export function FactoryPanel({ project }: { project: Project }) {
             </span>
             <span className="ml-auto flex min-w-0 items-center gap-1.5">
               <WipChip f={f} />
-              <LoopState state={f.loopState} stopped={stopped} />
+              {f.drain && !stopped ? (
+                <DrainChip f={f} />
+              ) : (
+                <LoopState state={f.loopState} stopped={stopped} />
+              )}
             </span>
           </div>
           <PipelineDiagram f={f} />
