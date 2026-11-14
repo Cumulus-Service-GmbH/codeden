@@ -81,14 +81,11 @@ export function projectFactoryRoutes(s: AppServices) {
     .post(
       "/:id/factory/items/:itemId/follow-ups/file",
       jsonBody(FactoryFileFollowUpRequest),
-      async (c) =>
-        c.json<FactoryItemResponse>({
-          item: await f.fileFollowUp(
-            c.req.param("id"),
-            c.req.param("itemId"),
-            c.req.valid("json").index,
-          ),
-        }),
+      async (c) => {
+        const id = c.req.param("id");
+        const item = await f.fileFollowUp(id, c.req.param("itemId"), c.req.valid("json").index);
+        return c.json<FactoryItemResponse>(await f.itemResponse(id, item));
+      },
     );
 }
 
