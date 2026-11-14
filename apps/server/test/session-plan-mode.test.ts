@@ -16,6 +16,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
 import { homePaths } from "../src/paths";
+import { ArtifactService } from "../src/services/artifacts";
 import type { RunnerPort } from "../src/services/runner-port";
 import { type LauncherDeps, SessionLauncher } from "../src/services/sessions/launcher";
 import { planModeUnsupported } from "../src/services/sessions/permissions";
@@ -258,7 +259,7 @@ describe("SessionLauncher.sessionOptions", () => {
     expect(launcher.sessionOptions({ ...sampleSession }).planMode).toBe(false);
   });
 
-  it("sends CodeDen's home, whose credential files are the ones the agent's policy guards", () => {
+  it("sends CodeDen's home, whose credential files the agent's policy guards, and its own artifacts folder", () => {
     const home = join(tmpdir(), "codeden-home");
     const launcher = new SessionLauncher({
       runner: { mcpProxyUrl: () => null },
@@ -266,8 +267,19 @@ describe("SessionLauncher.sessionOptions", () => {
       home,
     } as unknown as LauncherDeps);
     expect(launcher.sessionOptions({ ...sampleSession }).codedenHome).toBe(home);
-    // The files the policy guards are the ones the server keeps its credentials in.
+    expect(launcher.sessionOptions({ ...sampleSession }).artifactsDir).toBeUndefined();
+    // With the artifacts service, the session's own artifacts folder, which it may read (#338).
     const paths = homePaths(home);
+    const withArtifacts = new SessionLauncher({
+      runner: { mcpProxyUrl: () => null },
+      projects: { get: () => sampleProjectGone() },
+      home,
+      artifacts: new ArtifactService(undefined as never, undefined as never, paths.artifacts),
+    } as unknown as LauncherDeps);
+    expect(withArtifacts.sessionOptions({ ...sampleSession }).artifactsDir).toBe(
+      join(home, "artifacts", sampleSession.id),
+    );
+    // The files the policy guards are the ones the server keeps its credentials in.
     expect([paths.token, paths.runnerLock, paths.remoteAccess]).toEqual(
       CODEDEN_CREDENTIAL_FILES.map((file) => join(home, file)),
     );

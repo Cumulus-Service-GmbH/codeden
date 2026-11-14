@@ -54,6 +54,15 @@ describe("permission levels (§11.2)", () => {
     expect(CODEDEN_MCP_CONFIG_DIR).toBe("runner/mcp");
   });
 
+  it("round-trips the session's own artifacts folder, and leaves it out by default", () => {
+    const base = { sessionId: "s1", role: "agent", cwd: "/repo", autonomy: "auto" } as const;
+    expect(SessionOptions.parse(base).artifactsDir).toBeUndefined();
+    const opts = SessionOptions.parse({ ...base, artifactsDir: "/home/me/.codeden/artifacts/s1" });
+    expect(SessionOptions.parse(JSON.parse(JSON.stringify(opts)))).toEqual(opts);
+    expect(opts.artifactsDir).toBe("/home/me/.codeden/artifacts/s1");
+    expect(SessionOptions.safeParse({ ...base, artifactsDir: "" }).success).toBe(false);
+  });
+
   it("treats the readOnly capability as optional", () => {
     const caps = {
       resume: true,

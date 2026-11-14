@@ -27,9 +27,11 @@ export { wildcardPattern } from "./wildcard";
  * of the home holds the database (other sessions' transcripts, inbox items, MCP token hashes),
  * settings, logs, backups and other sessions' worktrees. Touching anything there asks at every
  * level, Full included, and is refused for read-only sessions (§11.2); agents get CodeDen state
- * through its MCP tools. The one exception is the session's own folders under the home (its
- * worktree in `<home>/wt/`, the orchestrator's folder). The data directory comes from the
- * session (`SessionOptions.codedenHome`); without it, this rule is off.
+ * through its MCP tools. The exceptions are the session's own folders under the home: its
+ * worktree in `<home>/wt/` (the orchestrator's folder), and, for reading only, its artifacts
+ * folder `<home>/artifacts/<session id>` (`SessionOptions.artifactsDir`, `forReading`), so it can
+ * look at its own screenshots (#338). The data directory comes from the session
+ * (`SessionOptions.codedenHome`); without it, this rule is off.
  */
 
 /** A risky verdict on CodeDen's own home or credentials, which every level asks about. */
@@ -170,15 +172,31 @@ export function touchesCodedenCredentials(target: string, ctx: PathContext): boo
 
 /**
  * The session's own folders inside CodeDen's home: its worktree (`<home>/wt/<project>/<id>`,
- * or the orchestrator's `<home>/orchestrator`) and extra roots there. A working directory that
- * is the home, or holds it, opens nothing.
+ * or the orchestrator's `<home>/orchestrator`) and extra roots there, and, for a call that only
+ * reads (`forReading`), its artifacts folder. A working directory that is the home, or holds it,
+ * opens nothing; an artifacts folder must lie below a folder of the home (`artifacts/<id>`), so
+ * it can never open the home or a whole folder in it such as `artifacts` or `runner`.
  */
 function ownFolders(ctx: PathContext): string[] {
   const home = ctx.codedenHome;
   if (!home) return [];
-  return [ctx.cwd, ...(ctx.extraRoots ?? [])].filter(
-    (root) => isInside(root, home, ctx) && !samePath(root, home, ctx),
-  );
+  const p = pathApi(ctx);
+  const below = (root: string) => isInside(root, home, ctx) && !samePath(root, home, ctx);
+  const artifacts =
+    ctx.reading && ctx.artifactsDir && below(p.dirname(p.resolve(ctx.artifactsDir)))
+      ? [ctx.artifactsDir]
+      : [];
+  return [ctx.cwd, ...(ctx.extraRoots ?? [])].filter(below).concat(artifacts);
+}
+
+/**
+ * `ctx` for a call that only reads (a file read, a listing, a search, a command on the read-only
+ * allowlist): the session's own artifacts folder (`artifactsDir`) counts as one of its own
+ * folders, so it may read its screenshots, as in its own worktree (#338). Writes, deletes, and
+ * anything else in CodeDen's home are judged on `ctx` itself and still ask.
+ */
+export function forReading(ctx: PathContext): PathContext {
+  return ctx.artifactsDir ? { ...ctx, reading: true } : ctx;
 }
 
 /**
