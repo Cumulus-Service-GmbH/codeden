@@ -17,6 +17,7 @@ import {
   type FactoryPlanRoundRequest,
   type FactoryReproductionReport,
   type FactoryRetryMode,
+  type FactoryScorecard,
   type FactorySetTypeRequest,
   type FactoryStatus,
   isFactoryMode,
@@ -25,6 +26,7 @@ import {
   type Project,
   type RawEventEnvelope,
   type ReviewVerdict,
+  type ScorecardDays,
   type Session,
   type SetAutonomyModeRequest,
   type SetAutonomyModeResponse,
@@ -59,6 +61,7 @@ import { PrFiles } from "./overlap";
 import { reportReproduction, submitAnalysis } from "./pipeline";
 import { localDay } from "./policy";
 import { ProviderBackoffStore } from "./provider-backoffs";
+import { buildScorecard } from "./scorecard";
 import { runScoutNow } from "./scout";
 import { fileIssue, planRound, reportFindings } from "./scout-reports";
 import {
@@ -467,6 +470,14 @@ export class FactoryService {
     const limits = this.deps.projects.get(projectId).factoryLimits;
     const costs = await itemCosts(this.ctx, projectId, limits, [item]);
     return { item, cost: costs.get(item.id) ?? null };
+  }
+
+  /**
+   * The scorecard (`scorecard.ts`): how each builder and reviewer, by provider and model, did on
+   * the work that finished in the last `days`.
+   */
+  scorecard(projectId: string, days: ScorecardDays): Promise<FactoryScorecard> {
+    return buildScorecard(this.ctx, projectId, days);
   }
 
   /** Write today's digest now (the loop writes one per day on its own). */

@@ -20,6 +20,7 @@ import { LessonsCard } from "./lessons-card";
 import { LOOP_LABEL, MODE_LABEL } from "./meta";
 import { PipelineDiagram } from "./pipeline-diagram";
 import { PullRequestsCard } from "./pull-requests-card";
+import { ScorecardCard } from "./scorecard-card";
 import { WipChip } from "./wip-chip";
 
 function Meter(props: {
@@ -256,6 +257,7 @@ export function FactoryPanel({ project }: { project: Project }) {
           lessons={f.lessons}
           learning={f.tuning.learnFromReviews}
         />
+        <ScorecardCard projectId={projectId} />
         {f.lastDigest && (
           <details className="rounded-lg border border-border bg-surface px-3 py-2 text-2xs">
             <summary className="cursor-pointer text-muted-foreground">

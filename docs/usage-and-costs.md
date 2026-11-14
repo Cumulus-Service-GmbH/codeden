@@ -51,6 +51,7 @@ Gemini CLI reports each turn's tokens (cached and thinking tokens included) and 
 - Each **session header** shows its cost and tokens; each **turn footer** shows what that turn took.
 - Each **project page** has a spend card (today, 7 days, this month).
 - The **factory budget meter** reads from the same ledger, so the factory's limits and your reports always agree.
+- The factory panel's **Scorecard** shows the cost per merge of each builder and reviewer, by provider and model, from the same ledger and with the same labels (see [the scorecard](software-factory.md#the-scorecard)).
 
 ## Rate limits
 

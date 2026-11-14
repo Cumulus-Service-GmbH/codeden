@@ -9,11 +9,13 @@ import {
   FactoryLessonResponse,
   FactoryLoop,
   type FactoryRetryOptions,
+  FactoryScorecard,
   type FactorySetTypeRequest,
   FactoryStatus,
   type KillSwitchMode,
   type KillSwitchRequestInit,
   KillSwitchResponse,
+  type ScorecardDays,
   type SetAutonomyModeRequestInit,
   SetAutonomyModeResponse,
   VisionResponse,
@@ -29,6 +31,11 @@ export interface FactoryApi {
   status(projectId: string): Promise<FactoryStatus>;
   /** One work item with what it cost so far. */
   item(projectId: string, itemId: string): Promise<FactoryItemResponse>;
+  /**
+   * The scorecard: first-pass merges, revise rounds, reverts, cost and time to merge by builder
+   * and reviewer (provider and model) over the work that finished in the last `days`.
+   */
+  scorecard(projectId: string, days: ScorecardDays): Promise<FactoryScorecard>;
   /**
    * Switch mode (and save limits). Factory modes need a GitHub project (409
    * `not_a_github_project`), a vision file (409 `vision_required`) and limits with a daily
@@ -98,6 +105,8 @@ export function httpFactoryApi(http: Fetcher): FactoryApi {
     status: (id) => get(`${p(id)}/factory`, (v) => FactoryStatus.parse(v)),
     item: (id, itemId) =>
       get(`${p(id)}/factory/items/${enc(itemId)}`, (v) => FactoryItemResponse.parse(v)),
+    scorecard: (id, days) =>
+      get(`${p(id)}/factory/scorecard?days=${days}`, (v) => FactoryScorecard.parse(v)),
     setMode: (id, req) =>
       call("PUT", `${p(id)}/autonomy`, req, (v) => SetAutonomyModeResponse.parse(v)),
     vision: (id) => get(`${p(id)}/vision`, (v) => VisionResponse.parse(v)),

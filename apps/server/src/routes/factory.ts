@@ -5,6 +5,8 @@ import {
   type FactoryItemResponse,
   type FactoryLessonResponse,
   FactoryRetryOptions,
+  type FactoryScorecard,
+  FactoryScorecardQuery,
   FactorySetTypeRequest,
   KillSwitchRequest,
   PutVisionRequest,
@@ -12,7 +14,7 @@ import {
 } from "@codeden/contracts";
 import { Hono } from "hono";
 import type { AppServices } from "../services/container";
-import { jsonBody } from "./validate";
+import { jsonBody, queryOf } from "./validate";
 
 /**
  * `/api/projects/:id/...`: autonomy mode, vision, the factory panel and its controls (§10.1).
@@ -21,6 +23,7 @@ import { jsonBody } from "./validate";
  * `drain`: finish the work in flight, then stop); `factory/resume` also cancels a drain.
  * `DELETE factory/lessons/:lessonId` forgets a lesson (404 `lesson_not_found`).
  * `follow-ups/file` is "File issue" for one review follow-up of a merged item.
+ * `factory/scorecard?days=7|30|90` (30 by default) is the scorecard by builder and reviewer.
  */
 export function projectFactoryRoutes(s: AppServices) {
   const f = s.factory;
@@ -47,6 +50,9 @@ export function projectFactoryRoutes(s: AppServices) {
       return c.json(await f.status(c.req.param("id")));
     })
     .post("/:id/factory/digest", async (c) => c.json(await f.digestNow(c.req.param("id"))))
+    .get("/:id/factory/scorecard", queryOf(FactoryScorecardQuery), async (c) =>
+      c.json<FactoryScorecard>(await f.scorecard(c.req.param("id"), c.req.valid("query").days)),
+    )
     .get("/:id/factory/items/:itemId", async (c) => {
       const id = c.req.param("id");
       return c.json<FactoryItemResponse>(

@@ -15,6 +15,7 @@ import {
   type ReviewVerdict,
 } from "@codeden/contracts";
 import type { FactoryApi } from "../factory-api";
+import { demoScorecard } from "./factory-scorecard";
 import type { FixtureWorkItem } from "./fixtures/factory-fixture-types";
 import { defaultFactoryLimits, factoryFor, visionDoc } from "./fixtures/ops";
 import type { MockWorld } from "./world";
@@ -283,6 +284,8 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
   return {
     status: (id) => delay(status(id), 140),
     item: (id, itemId) => delay({ item: item(id, itemId), cost: find(id, itemId).cost }),
+    scorecard: (id, days) =>
+      delay(demoScorecard(id, days, isFactoryMode(project(id)?.autonomyMode ?? "assisted"))),
     async setMode(projectId, req) {
       const p = project(projectId);
       if (!p) throw new Error(`No project ${projectId}`);

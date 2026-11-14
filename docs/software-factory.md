@@ -72,6 +72,22 @@ Under the diagram: spend against the daily budget, agents working out of the lim
 
 The loop runs its regular check every 30 seconds: it moves work in progress, picks up new issues, starts free agents and, in a dark factory, starts the scout if it's due. **Check now** on the panel runs that check immediately, and tries again providers it skipped because they [weren't signed in](factory-loop.md#reviewers-and-providers). In a dark factory, **Run scout now** starts a [scout round](#the-dark-factory) right away.
 
+### The scorecard
+
+You choose who builds and who reviews under **Agents** in the [settings](#settings-and-limits). The **Scorecard** section of the factory panel shows how each choice has done, so you can choose based on results. Open it to see a table **by builder**, **by reviewer** or **by pair** (builder and reviewer together), each by provider and model, over the last **7, 30 or 90 days**:
+
+| Column | What it counts |
+|---|---|
+| **Finished** | Work that merged in the window, or failed in it because of its own work |
+| **Merged** | Merges in the window (a merge reverted since still counts), and the share of the finished work |
+| **First pass** | The share of merges that needed no revise round (no failed review or check) and weren't reverted |
+| **Revise rounds** | Revise rounds per finished item |
+| **Reverted** | Merges reverted because CI on the default branch failed after them. In the reviewer view, these are approvals that let a regression through |
+| **Cost / merge** | What the finished work cost, failures included, divided by the merges. Each item's cost counts every session that worked on it, with the same "≈" and API-equivalent labels as its [cost](usage-and-costs.md) |
+| **To merge** | The median time from the factory taking the issue in to its merge |
+
+Each item counts for the builder and reviewer of its last attempt, with the model their sessions ran ("default model" when the provider reported none). A **Retry** starts the count afresh. Failures outside the work (a session that died, CI that never started), rejected and escalated work, and the factory's own revert PRs don't count. Docs-only changes with no agent review appear as **No review**. A row of two or three items says little, so look at **Finished** before comparing rates.
+
 ### The Factory view
 
 While the factory runs you mostly just want to glance at it. The **Factory view** is a calm, full-screen page for that, made to stay open on a second screen. It shows only the factory: no sidebar, no sessions list, no side panels. The factory panel stays where it is, for settings, limits and details.
@@ -448,6 +464,7 @@ Everything in the UI is also available over the local API (with the install toke
 | Route | |
 |---|---|
 | `GET /api/projects/:id/factory` | Panel status (items with their pipeline step and how long they've been in it, ignored issues, the scout, and for the Factory view: its figures in `stats`, in `viewRecent` the escalations, open or recent failures and today's merges that the capped `recent` list can leave out, and each item's `ownedPr`) |
+| `GET /api/projects/:id/factory/scorecard?days=30` | [The scorecard](#the-scorecard) over the last 7, 30 (the default) or 90 days: `builders`, `reviewers` and `pairs`, each a list of rows by provider and model. Any other `days` is a 400 |
 | `PUT /api/projects/:id/autonomy` | `{ mode, limits?, tuning? }` (`mode`: `software_factory` or `dark_factory`; the old `autopilot` still reads as `software_factory`) |
 | `GET` / `PUT /api/projects/:id/vision` | Read or write the vision |
 | `POST /api/projects/:id/factory/admit` | `{ itemId, type? }`: let an ignored issue in |

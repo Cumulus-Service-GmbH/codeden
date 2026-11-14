@@ -1,4 +1,9 @@
-import type { EventEnvelope, FactoryItemStage, FactoryStatus } from "@codeden/contracts";
+import type {
+  EventEnvelope,
+  FactoryItemStage,
+  FactoryStatus,
+  ScorecardDays,
+} from "@codeden/contracts";
 import { type QueryClient, useQuery } from "@tanstack/react-query";
 import { useClient } from "./api";
 import { ApiRequestError } from "./api/http";
@@ -9,6 +14,8 @@ export const factoryKeys = {
   status: (projectId: string) => ["factory", "status", projectId] as const,
   item: (projectId: string, itemId: string) => ["factory", "item", projectId, itemId] as const,
   vision: (projectId: string) => ["factory", "vision", projectId] as const,
+  scorecard: (projectId: string, days: ScorecardDays) =>
+    ["factory", "scorecard", projectId, days] as const,
 };
 
 const FACTORY_EVENTS = new Set<string>([
@@ -25,6 +32,8 @@ export function invalidateFactory(queryClient: QueryClient, env: EventEnvelope):
   if (FACTORY_EVENTS.has(env.type)) {
     void queryClient.invalidateQueries({ queryKey: ["factory", "status"] });
     void queryClient.invalidateQueries({ queryKey: ["factory", "item"] });
+    // Refetched only while the scorecard is open (an inactive query just goes stale).
+    void queryClient.invalidateQueries({ queryKey: ["factory", "scorecard"] });
   }
 }
 
@@ -77,6 +86,19 @@ export function useFactoryItem(projectId: string, itemId: string) {
       const stage = query.state.data?.item.stage;
       return stage && SPENDING_STAGES.has(stage) ? BUSY_REFRESH_MS : false;
     },
+  });
+}
+
+/**
+ * The factory scorecard over the last `days` (§10.1): fetched on demand (`enabled` while the
+ * panel's Scorecard is open), refetched on factory events. Not polled: it covers finished work.
+ */
+export function useFactoryScorecard(projectId: string, days: ScorecardDays, enabled = true) {
+  const client = useClient();
+  return useQuery({
+    queryKey: factoryKeys.scorecard(projectId, days),
+    queryFn: () => client.factory.scorecard(projectId, days),
+    enabled,
   });
 }
 
