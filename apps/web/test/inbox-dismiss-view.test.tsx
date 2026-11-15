@@ -206,6 +206,51 @@ describe("dismiss the inbox view (#407)", () => {
     expect(message).toBe(`Dismissed ${INBOX_BULK_MAX - 3} notices, then couldn't dismiss the rest`);
     expect(opts.description).toBe("The server is not reachable. 3 items that wait on you stay.");
   });
+
+  it("says what Undo restored when a later restore request fails (#443)", async () => {
+    const client = createMockClient();
+    vi.spyOn(client, "dismissInbox").mockImplementation(async (ids) => ({
+      dismissed: ids.length,
+      ids,
+      kept: 0,
+    }));
+    vi.spyOn(client, "restoreInbox")
+      .mockImplementationOnce(async (ids) => ({ restored: ids.length, ids }))
+      .mockRejectedValueOnce(new Error("The server is not reachable"));
+    renderWithClient(<DismissView items={manyNotices(INBOX_BULK_MAX + 5)} />, client);
+
+    await confirmDismiss();
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    const [, opts] = toast.success.mock.calls[0] as [string, { action: { onClick: () => void } }];
+    opts.action.onClick();
+
+    // The first request reopened INBOX_BULK_MAX notices: the toast says so, not that nothing was undone.
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    const [message, errorOpts] = toast.error.mock.calls[0] as [string, { description: string }];
+    expect(message).toBe(`Restored ${INBOX_BULK_MAX} notices, then couldn't restore the rest`);
+    expect(errorOpts.description).toBe("The server is not reachable");
+  });
+
+  it("says Undo failed when its first restore request fails (#443)", async () => {
+    const client = createMockClient();
+    vi.spyOn(client, "dismissInbox").mockImplementation(async (ids) => ({
+      dismissed: ids.length,
+      ids,
+      kept: 0,
+    }));
+    vi.spyOn(client, "restoreInbox").mockRejectedValue(new Error("The server is not reachable"));
+    renderWithClient(<DismissView items={manyNotices(INBOX_BULK_MAX + 5)} />, client);
+
+    await confirmDismiss();
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    const [, opts] = toast.success.mock.calls[0] as [string, { action: { onClick: () => void } }];
+    opts.action.onClick();
+
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    const [message, errorOpts] = toast.error.mock.calls[0] as [string, { description: string }];
+    expect(message).toBe("Couldn't undo the dismiss");
+    expect(errorOpts.description).toBe("The server is not reachable");
+  });
 });
 
 /** `n` open notices (nothing in them waits on the user). */

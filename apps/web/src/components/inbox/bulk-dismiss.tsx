@@ -48,14 +48,21 @@ function batches(ids: string[]): string[][] {
   return out;
 }
 
-/** Undo from the toast: reopens exactly what the dismiss closed (`POST /api/inbox/restore`). */
+/**
+ * Undo from the toast: reopens exactly what the dismiss closed (`POST /api/inbox/restore`). When
+ * a later request fails, the toast still says what the earlier ones reopened.
+ */
 async function undo(client: CodeDenClient, ids: string[], what: (n: number) => string) {
   let restored = 0;
   try {
     for (const batch of batches(ids)) restored += (await client.restoreInbox(batch)).restored;
     toast.success(`Restored ${what(restored)}`);
   } catch (e) {
-    toast.error("Couldn't undo the dismiss", { description: (e as Error).message });
+    const message =
+      restored > 0
+        ? `Restored ${what(restored)}, then couldn't restore the rest`
+        : "Couldn't undo the dismiss";
+    toast.error(message, { description: (e as Error).message });
   }
 }
 
