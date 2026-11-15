@@ -31,6 +31,16 @@ function stayLine(n: number): string {
   return n === 1 ? "1 item that waits on you stays" : `${n} items that wait on you stay`;
 }
 
+/** A toast's line for the items the server kept: "3 items that wait on you stay.", or none. */
+function keptLine(kept: number): string | undefined {
+  return kept > 0 ? `${stayLine(kept)}.` : undefined;
+}
+
+/** `message` ending as a sentence, so another can follow it. */
+function sentence(message: string): string {
+  return /[.!?]$/.test(message) ? message : `${message}.`;
+}
+
 /** `ids` split into requests the server accepts (at most {@link INBOX_BULK_MAX} each). */
 function batches(ids: string[]): string[][] {
   const out: string[][] = [];
@@ -84,23 +94,24 @@ export function useBulkDismiss(what: (n: number) => string) {
     },
     onError: (e: Error) => toast.error("Couldn't dismiss them", { description: e.message }),
     onSuccess: (res) => {
+      const kept = keptLine(res.kept);
       if (res.dismissed === 0) {
-        toast.warning("Nothing was dismissed", {
-          description: res.kept > 0 ? `${stayLine(res.kept)}.` : undefined,
-        });
+        toast.warning("Nothing was dismissed", { description: kept });
         return;
       }
       const action = { label: "Undo", onClick: () => void undo(client, res.ids, what) };
       if (res.error) {
+        // The reason first, then what the requests that went through kept, as on success.
+        const reason = res.error.message;
         toast.error(`Dismissed ${what(res.dismissed)}, then couldn't dismiss the rest`, {
-          description: res.error.message,
+          description: kept ? `${sentence(reason)} ${kept}` : reason,
           action,
           duration: UNDO_MS,
         });
         return;
       }
       toast.success(`Dismissed ${what(res.dismissed)}`, {
-        description: res.kept > 0 ? `${stayLine(res.kept)}.` : undefined,
+        description: kept,
         action,
         duration: UNDO_MS,
       });

@@ -204,8 +204,7 @@ describe("dismiss the inbox view (#407)", () => {
     await waitFor(() => expect(toast.error).toHaveBeenCalled());
     const [message, opts] = toast.error.mock.calls[0] as [string, { description: string }];
     expect(message).toBe(`Dismissed ${INBOX_BULK_MAX - 3} notices, then couldn't dismiss the rest`);
-    expect(opts.description).toContain("The server is not reachable");
-    expect(opts.description).toContain("3 items that wait on you stay");
+    expect(opts.description).toBe("The server is not reachable. 3 items that wait on you stay.");
   });
 });
 
