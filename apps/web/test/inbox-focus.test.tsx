@@ -1,4 +1,4 @@
-import type { ConflictRecord } from "@codeden/contracts";
+import type { ConflictRecord, Snapshot } from "@codeden/contracts";
 import { act, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createMockClient } from "@/lib/api/mock";
@@ -55,5 +55,33 @@ describe("inbox focus from a toast", () => {
     const card = document.getElementById("inbox-item-cf-audit");
     expect(card?.dataset.focused).toBe("true");
     expect(card?.textContent).toContain("Run a security audit on Storefront");
+  });
+
+  it("scrolls to a conflict that loaded before the snapshot once the snapshot lands", async () => {
+    // A direct load of /inbox?item=<conflict>: the small conflicts request answers first, while
+    // the inbox still shows its loading rows, so there is no card to scroll to until then (#400).
+    const scrolledTo = watchScrolls();
+    const base = createMockClient();
+    const snapshot = await base.getSnapshot();
+    let release: (s: Snapshot) => void = () => {};
+    const client = Object.assign(base, {
+      getSnapshot: () =>
+        new Promise<Snapshot>((resolve) => {
+          release = resolve;
+        }),
+      listConflicts: async () => fixtureConflicts,
+    });
+    renderWithClient(<InboxPage focusItemId="cf-audit" />, client, { withRouter: true });
+    await screen.findByRole("status", { name: "Loading the inbox" });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    await frame();
+    expect(screen.getByRole("status", { name: "Loading the inbox" })).toBeTruthy();
+    expect(scrolledTo()).toEqual([]);
+
+    await act(async () => release(snapshot));
+    await waitFor(() => expect(scrolledTo()).toEqual(["inbox-item-cf-audit"]));
+    expect(document.getElementById("inbox-item-cf-audit")?.dataset.focused).toBe("true");
   });
 });

@@ -16,6 +16,9 @@ import { PageHeader } from "./page-header";
 
 const NO_ITEMS: InboxItem[] = [];
 
+/** The filters conflicts are listed and counted under (`inboxCounts`). */
+const conflictFilters: ReadonlySet<InboxFilter> = new Set(["all", "asks"]);
+
 const FILTERS: { id: InboxFilter; label: string }[] = [
   { id: "all", label: "All" },
   { id: "asks", label: "Needs an answer" },
@@ -73,8 +76,10 @@ export function InboxPage({ focusItemId }: { focusItemId?: string }) {
   const groups = groupInbox(items, filter);
   const counts = inboxCounts(items, conflictList.length);
   const resolved = items.filter((i) => i.status !== "open").slice(0, 5);
-  // Conflicts count under All and Needs an answer: there, nothing is listed until they're known.
-  const conflictsShown = filter === "all" || filter === "asks";
+  // Conflicts count under All and Needs an answer: there, nothing is listed and no count shown
+  // until they're known, so the header, the tabs and the list agree.
+  const countKnown = (f: InboxFilter) => loaded && !(conflictFilters.has(f) && conflicts.isPending);
+  const conflictsShown = conflictFilters.has(filter);
   const showConflicts = conflictsShown && conflictList.length > 0;
   const nothingListed = groups.length === 0 && !showConflicts;
   const body =
@@ -88,14 +93,16 @@ export function InboxPage({ focusItemId }: { focusItemId?: string }) {
 
   // A toast's Open: show every item, then scroll once the target has actually rendered, from
   // the snapshot or (a conflict, whose record id is its inbox item id) the conflicts query.
+  // Conflicts and groups are on screen only in the list body: conflicts that load before the
+  // snapshot sit behind the loading rows, and count once the list replaces them.
   useEffect(() => {
     if (focusItemId) setFilter("all");
   }, [focusItemId]);
   const focusRendered =
     focusItemId !== undefined &&
     [
-      ...(showConflicts ? conflictList.map((c) => c.id) : []),
-      ...groups.flatMap((g) => g.items.map((i) => i.id)),
+      ...(body === "list" && showConflicts ? conflictList.map((c) => c.id) : []),
+      ...(body === "list" ? groups.flatMap((g) => g.items.map((i) => i.id)) : []),
       ...resolved.map((i) => i.id),
     ].includes(focusItemId);
   useEffect(() => {
@@ -113,7 +120,7 @@ export function InboxPage({ focusItemId }: { focusItemId?: string }) {
       <PageHeader
         icon={<Inbox />}
         title="Inbox"
-        meta={loaded ? `${counts.all} waiting on you` : "Loading…"}
+        meta={countKnown("all") ? `${counts.all} waiting on you` : "Loading…"}
       />
       <div className="min-h-0 flex-1 overflow-y-auto scroll-thin">
         <div className="mx-auto w-full max-w-3xl px-4 py-5 sm:px-6 sm:py-6">
@@ -129,7 +136,9 @@ export function InboxPage({ focusItemId }: { focusItemId?: string }) {
                 )}
               >
                 {f.label}
-                {loaded && <span className="text-3xs tabular-nums opacity-70">{counts[f.id]}</span>}
+                {countKnown(f.id) && (
+                  <span className="text-3xs tabular-nums opacity-70">{counts[f.id]}</span>
+                )}
               </button>
             ))}
           </div>

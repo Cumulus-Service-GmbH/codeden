@@ -62,6 +62,9 @@ describe("inbox while the snapshot is loading", () => {
 
     expect(screen.queryByText("You're all caught up")).toBeNull();
     expect(screen.getByRole("status", { name: "Loading the inbox" })).toBeTruthy();
+    // No count yet beside the loading rows: All counts conflicts too.
+    expect(screen.queryByText("0 waiting on you")).toBeNull();
+    expect(screen.getByText("Loading…")).toBeTruthy();
 
     await act(async () => conflicts.release([]));
     await screen.findByText("You're all caught up");
