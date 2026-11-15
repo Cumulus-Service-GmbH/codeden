@@ -207,19 +207,23 @@ async function recoverOne(
   if (builder && builder.status !== "stopped") {
     return resume ? resumeBuilder(ctx, project, loop, item, builder) : loop;
   }
-  // The builder is gone: a fresh one picks the work up from the queue.
-  ctx.store.updateItem(item.id, (i) => ({
-    ...i,
-    ...base,
-    stage: "backlog",
-    builderSessionId: null,
-    reviewerSessionId: null,
-    review: null,
-    checks: [],
-    note: "Back in the queue after a failure outside its code: its builder is gone",
-    nudges: freshNudges(i.nudges, at),
-    earlierSessionIds: [...new Set([...i.earlierSessionIds, ...(builder ? [builder.id] : [])])],
-  }));
+  // The builder is gone: a fresh one picks the work up from the queue. Its reviewer is let go
+  // with it; both become earlier sessions, archived once none of them is busy (`cleanup.ts`).
+  ctx.store.updateItem(item.id, (i) => {
+    const { reviewerSessionId, earlierSessionIds } = letGoReviewer(i);
+    return {
+      ...i,
+      ...base,
+      stage: "backlog",
+      builderSessionId: null,
+      reviewerSessionId,
+      review: null,
+      checks: [],
+      note: "Back in the queue after a failure outside its code: its builder is gone",
+      nudges: freshNudges(i.nudges, at),
+      earlierSessionIds: [...new Set([...earlierSessionIds, ...(builder ? [builder.id] : [])])],
+    };
+  });
   return loop;
 }
 
