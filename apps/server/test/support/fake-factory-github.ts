@@ -7,6 +7,7 @@ import type {
 } from "@codeden/contracts";
 import { ServiceError } from "../../src/services/errors";
 import type {
+  Commenter,
   CommitChecks,
   FactoryGithub,
   FactoryPr,
@@ -38,7 +39,16 @@ export interface FakePr extends FactoryPr {
 export class FakeFactoryGithub implements FactoryGithub {
   issues: GithubIssue[] = [];
   prs = new Map<number, FakePr>();
-  comments: Array<{ number: number; body: string }> = [];
+  /**
+   * Comments on issues and PRs (one numbering, as on GitHub). Without an `author` it is
+   * CodeDen's own (the `viewer`); a test adds other people's with their login and association.
+   */
+  comments: Array<{
+    number: number;
+    body: string;
+    author?: string;
+    association?: GithubAuthorAssociation;
+  }> = [];
   merges: Array<{ number: number; sha: string | null; title: string }> = [];
   reverts: Array<{ sha: string; prNumber: number }> = [];
   /** CI state per commit sha (default success). */
@@ -98,6 +108,19 @@ export class FakeFactoryGithub implements FactoryGithub {
       login: this.issue(projectId, number)?.author ?? null,
       association: this.associations.get(number) ?? "none",
     };
+  }
+
+  /** When false, `commenters` fails (GitHub can't be read). */
+  commentsReadable = true;
+  /** `commenters` calls, in order. */
+  commenterReads: number[] = [];
+
+  async commenters(_projectId: string, number: number): Promise<Commenter[]> {
+    this.commenterReads.push(number);
+    if (!this.commentsReadable) throw new Error("GitHub is having a moment (502)");
+    return this.comments
+      .filter((c) => c.number === number)
+      .map((c) => ({ login: c.author ?? this.viewer, association: c.association ?? "none" }));
   }
 
   /** An issue opened on GitHub by `author` (what the sync would project). */

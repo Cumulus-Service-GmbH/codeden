@@ -1,13 +1,14 @@
 import type { FactorySpotChecks, SpotCheckEntry } from "@codeden/contracts";
 import { Link } from "@tanstack/react-router";
 import { Check, Eye, TriangleAlert } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { ago } from "@/lib/format";
 import { platform } from "@/lib/platform";
 import { cn } from "@/lib/utils";
 import { FileSpotCheckIssueButton, OpenPrButton, SpotCheckDecision } from "./spot-check-actions";
 import {
   SPOT_CHECK_REASON,
+  SPOT_CHECKS_ANCHOR,
   showSpotChecks,
   spotCheckProblemText,
   spotCheckShareText,
@@ -17,21 +18,38 @@ import {
  * The factory panel's Spot-checks list (§10.1): the merges set aside for a person's quick look,
  * each with its item, its PR view and the reviewer's verdict, and **Looks good** / **Found a
  * problem**; below them the checks recorded lately. Nothing in the factory waits on them. Open
- * while something waits; hidden while spot-checks are off and there is nothing to show.
+ * while something waits; hidden while spot-checks are off and there is nothing to show. Its id is
+ * `SPOT_CHECKS_ANCHOR`; with `focus` (the page was opened at that anchor) it opens and scrolls
+ * into view, so the first merge waiting for a look is on screen.
  */
 export function SpotChecksCard({
   projectId,
   spotChecks,
+  focus = false,
 }: {
   projectId: string;
   spotChecks: FactorySpotChecks;
+  focus?: boolean;
 }) {
-  const [open, setOpen] = useState(spotChecks.outstanding > 0);
+  const [open, setOpen] = useState(focus || spotChecks.outstanding > 0);
+  const ref = useRef<HTMLDetailsElement>(null);
+  // The card renders once the factory status is in, after the router's own scroll to the
+  // anchor ran, so it scrolls itself there.
+  useEffect(() => {
+    if (!focus) return;
+    setOpen(true);
+    const frame = requestAnimationFrame(() =>
+      ref.current?.scrollIntoView?.({ block: "start", behavior: "auto" }),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [focus]);
   if (!showSpotChecks(spotChecks)) return null;
   const { pending, recent, outstanding } = spotChecks;
   return (
     <details
-      className="group rounded-lg border border-border bg-surface text-2xs"
+      ref={ref}
+      id={SPOT_CHECKS_ANCHOR}
+      className="group scroll-mt-3 rounded-lg border border-border bg-surface text-2xs"
       data-testid="factory-spot-checks"
       open={open}
       onToggle={(e) => setOpen(e.currentTarget.open)}
@@ -136,7 +154,14 @@ function PendingRow({ projectId, entry }: { projectId: string; entry: SpotCheckE
         )}
       </p>
       <div className="flex flex-wrap items-center gap-1">
-        {entry.pr && <OpenPrButton projectId={projectId} pr={entry.pr} />}
+        {entry.pr && (
+          <OpenPrButton
+            projectId={projectId}
+            pr={entry.pr}
+            itemId={entry.itemId}
+            title={entry.title}
+          />
+        )}
         <SpotCheckDecision projectId={projectId} itemId={entry.itemId} title={entry.title} />
       </div>
     </li>

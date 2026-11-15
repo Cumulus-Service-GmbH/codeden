@@ -98,8 +98,14 @@ function Verdict({ review, item }: { review: ReviewVerdict; item: FactoryItem })
       {review.lessons.length > 0 && (
         <div className="mt-3 text-2xs" data-testid="review-lessons">
           <p className="flex items-center gap-1.5 font-medium text-muted-foreground">
-            <Lightbulb className="size-3.5" aria-hidden /> Lessons recorded
+            <Lightbulb className="size-3.5" aria-hidden />{" "}
+            {item.lessonsNote ? "Lessons not kept" : "Lessons recorded"}
           </p>
+          {item.lessonsNote && (
+            <p className="mt-0.5 text-status-waiting" data-testid="review-lessons-note">
+              {item.lessonsNote}
+            </p>
+          )}
           <ul className="mt-1 list-disc space-y-0.5 pl-5 text-foreground/85">
             {review.lessons.map((l) => (
               <li key={l}>{l}</li>
@@ -177,7 +183,6 @@ export function FactoryItemPage({ projectId, itemId }: { projectId: string; item
                 {item.summary || item.title}
               </p>
             </section>
-            <SpecApprovalCard item={item} projectId={projectId} />
             <InvestigationCard item={item} />
             {item.acceptanceCriteria.length > 0 && (
               <section>
@@ -208,6 +213,8 @@ export function FactoryItemPage({ projectId, itemId }: { projectId: string; item
                 </ul>
               </section>
             )}
+            {/* After the spec and its criteria, so you read what you approve before deciding. */}
+            <SpecApprovalCard item={item} projectId={projectId} />
             {item.stage !== "ignored" && (
               <section>
                 <SectionLabel className="mb-2">

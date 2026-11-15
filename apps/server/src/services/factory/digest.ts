@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  type DigestLesson,
   type DigestSpotChecks,
   type FactoryDigest,
   type FactoryItem,
@@ -15,6 +16,7 @@ import {
 import type { InboxService } from "../inbox-service";
 import { budgetSpend, type FactoryContext, factoryNotice, raiseInbox } from "./context";
 import { drainLine } from "./drain";
+import { digestLessons } from "./lessons";
 import { prInboxIds } from "./merge";
 import { localDay } from "./policy";
 import { ownedPr } from "./pr-status";
@@ -47,6 +49,7 @@ export async function writeDigest(
     pausedReason: loop.state === "paused" ? loop.pausedReason : null,
     draining: drainLine(ctx, project.id, loop),
     spotChecks: digestSpotChecks(ctx, project.id, day),
+    lessons: digestLessons(ctx, project.id, day),
     now: ctx.now(),
   });
   ctx.store.saveDigest(digest);
@@ -126,6 +129,8 @@ export function buildDigest(opts: {
   draining?: string | null;
   /** Spot-checks of the day and the window (`digestSpotChecks`); none by default. */
   spotChecks?: DigestSpotChecks;
+  /** Lessons first learned during the day (`digestLessons`); none by default. */
+  lessons?: DigestLesson[];
   now?: Date;
 }): FactoryDigest {
   const shipped = opts.items
@@ -201,6 +206,7 @@ export function buildDigest(opts: {
       checked30d: 0,
       problems30d: 0,
     },
+    lessons: opts.lessons ?? [],
     createdAt: (opts.now ?? new Date()).toISOString(),
   };
   return {
@@ -232,6 +238,12 @@ export function spotCheckLine(s: DigestSpotChecks | undefined): string | null {
       ? `none checked in the last ${SPOT_CHECK_WINDOW_DAYS} days`
       : `over ${SPOT_CHECK_WINDOW_DAYS} days a person found a problem in ${s.problems30d} of ${s.checked30d} checked merge${s.checked30d === 1 ? "" : "s"} (${share}%)`;
   return `Spot-checks: ${today}, ${s.outstanding} outstanding; ${window}.`;
+}
+
+/** "from #3": the issue of the work whose review taught it, else its pull request. */
+function lessonSource(l: DigestLesson): string {
+  const number = l.issueNumber ?? l.prNumber;
+  return number !== null ? `from #${number}` : "from a review";
 }
 
 /** Markdown text of a digest (inbox body and orchestrator notice). */
@@ -273,6 +285,13 @@ export function renderDigest(
   if (d.handled.length > 0) {
     lines.push("", `Failures it handled on its own (${d.handled.length}):`);
     for (const h of d.handled) lines.push(`- ${h.title}${h.detail ? `: ${h.detail}` : ""}`);
+  }
+  if (d.lessons.length > 0) {
+    lines.push(
+      "",
+      `Learned from reviews (${d.lessons.length}); each goes into briefs a day after it was learned, unless you forget it in the Factory view's Lessons:`,
+    );
+    for (const l of d.lessons) lines.push(`- New lesson: ${l.text}, ${lessonSource(l)}`);
   }
   lines.push("", `Spend: ${budget}`);
   const spot = spotCheckLine(d.spotChecks);

@@ -10,6 +10,7 @@ import { Link } from "@tanstack/react-router";
 import { AlertTriangle, UserCheck } from "lucide-react";
 import { toast } from "sonner";
 import { SectionLabel } from "@/components/common/bits";
+import { Markdown } from "@/components/thread/markdown";
 import { Button } from "@/components/ui/button";
 import { useClient } from "@/lib/api";
 import { factoryKeys } from "@/lib/factory";
@@ -17,7 +18,7 @@ import { ago } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { CheckPill } from "./factory-columns";
 import { costFact, costTitle, hasCost } from "./item-cost";
-import { CHECK_HELP, TYPE_LABEL } from "./meta";
+import { CHECK_HELP, OUTCOME_LABEL, TYPE_LABEL } from "./meta";
 import { RetryButton } from "./retry-button";
 
 /**
@@ -85,7 +86,7 @@ export function InvestigationCard({ item }: { item: FactoryItem }) {
       </SectionLabel>
       <div className="rounded-xl border border-border bg-card p-4 text-[13px]">
         <p className={cn("font-medium", ok ? "text-status-done" : "text-status-waiting")}>
-          {inv.outcome.replace("_", " ")}
+          {OUTCOME_LABEL[inv.outcome]}
         </p>
         <p className="mt-1 leading-relaxed">{inv.summary}</p>
         {inv.testPath && (
@@ -93,10 +94,11 @@ export function InvestigationCard({ item }: { item: FactoryItem }) {
             Test: <code className="font-mono">{inv.testPath}</code>
           </p>
         )}
+        {/* The spec (or the reproduction's notes) as the agent wrote it, in Markdown, in full. */}
         {inv.details && (
-          <pre className="mt-2 max-h-64 overflow-auto rounded-md bg-surface p-2 font-sans text-2xs leading-relaxed whitespace-pre-wrap">
-            {inv.details}
-          </pre>
+          <div className="mt-3 border-t border-border pt-3" data-testid="investigation-details">
+            <Markdown>{inv.details}</Markdown>
+          </div>
         )}
       </div>
     </section>

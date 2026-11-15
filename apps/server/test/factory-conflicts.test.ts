@@ -176,7 +176,7 @@ describe("factory PRs without CI (merge conflicts, a new head)", () => {
     // No revise round: an agent can't turn CI on.
     expect(item(id).attempts).toBe(0);
     // The reviewer's verdict, arriving after that, is still kept on the item.
-    expect(review(id, CHANGES).recorded).toBe(true);
+    expect((await review(id, CHANGES)).recorded).toBe(true);
     expect(item(id).review?.summary).toBe(CHANGES.summary);
   });
 
@@ -214,7 +214,7 @@ describe("factory PRs without CI (merge conflicts, a new head)", () => {
     Object.assign(pr, { checks: "failure", failedChecks: ["test"] });
     await tick();
     expect(item(id)).toMatchObject({ stage: "building", attempts: 1 });
-    const res = review(id, CHANGES);
+    const res = await review(id, CHANGES);
     expect(res.recorded).toBe(true);
     await tick();
     expect(lastMessageTo(builder)).toMatch(/sort\.exe \/O/);

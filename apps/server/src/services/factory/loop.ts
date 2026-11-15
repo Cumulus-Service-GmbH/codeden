@@ -303,7 +303,7 @@ async function startBuilder(
   }
   const { provider, model } = choice;
   try {
-    const lessons = briefLessons(ctx, project.id);
+    const lessons = await briefLessons(ctx, item);
     const res = await ctx.sessions.startBuilder(item, vision, provider, model, lessons);
     if (res.status === "conflict") {
       const other = res.existing.map((w) => w.workKey).join(", ");

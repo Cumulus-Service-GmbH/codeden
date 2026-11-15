@@ -77,6 +77,7 @@ const item: FactoryItem = {
   reviewerProvider: "codex",
   reviewerNote: null,
   review: null,
+  lessonsNote: null,
   followUps: [],
   spotCheck: null,
   checks: [{ name: "ci", state: "pass", detail: null, escalate: false, at: ts }],
@@ -202,6 +203,7 @@ describe("factory API contracts (§10.1)", () => {
       mergePath: _mp,
       followUps: _fu,
       spotCheck: _sc,
+      lessonsNote: _ln,
       sessionIds: _sid,
       itemBudgetSince: _ibs,
       ...old
@@ -209,6 +211,7 @@ describe("factory API contracts (§10.1)", () => {
     expect(FactoryItem.parse(old)).toMatchObject({
       followUps: [],
       spotCheck: null,
+      lessonsNote: null,
       sessionIds: [],
       itemBudgetSince: null,
       mergePath: null,

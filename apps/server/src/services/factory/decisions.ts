@@ -14,7 +14,7 @@ import { reviewedHead, verdictHead, withVerdictHead } from "./approval";
 import { sessionsToArchive } from "./cleanup";
 import type { FactoryContext } from "./context";
 import { announceType } from "./intake";
-import { recordLessons } from "./lessons";
+import type { KeptLessons } from "./lessons";
 import { closeInboxFor } from "./merge";
 import { ownedPr } from "./pr-status";
 import { lateReviewPrompt } from "./prompts";
@@ -226,14 +226,15 @@ export const APPROVE_WITH_CONCERNS =
  * that comes late is kept too: while a revise round runs, its findings are `forward`ed to the author (the
  * caller sends them); on a failed item it is recorded for whoever picks the work up. A request
  * for changes that only the reviewer's own environment stands behind is never recorded or
- * forwarded (`review-environment.ts`). Its lessons are kept whatever happens to the verdict
- * (`lessons.ts`): they are about the repository, not this pull request.
+ * forwarded (`review-environment.ts`). The caller then keeps its lessons (`keepLessons`) for the
+ * `item` returned, whatever happened to the verdict: they are about the repository, not this
+ * pull request.
  */
 export function submitReview(
   ctx: FactoryContext,
   session: Session,
   verdict: ReviewVerdict,
-): ReviewOutcome {
+): ReviewOutcome & { item: FactoryItem } {
   const item = session.projectId
     ? ctx.store.items(session.projectId).find((i) => i.reviewerSessionId === session.id)
     : undefined;
@@ -243,14 +244,18 @@ export function submitReview(
   if (verdict.verdict === "approve" && verdict.security.concerns.length > 0) {
     throw badRequest(APPROVE_WITH_CONCERNS, "approve_with_concerns");
   }
-  const kept = recordLessons(ctx, item, verdict.lessons).length;
-  const res = settleVerdict(ctx, item, verdict);
-  if (kept === 0) return res;
-  const lessons = kept === 1 ? "1 lesson" : `${kept} lessons`;
-  return { ...res, message: `${res.message} Kept ${lessons} for later builders and reviewers.` };
+  return { ...settleVerdict(ctx, item, verdict), item };
 }
 
-type ReviewOutcome = {
+/** The reviewer's answer, with what became of its lessons (`keepLessons`). */
+export function withKeptLessons<T extends { message: string }>(res: T, lessons: KeptLessons): T {
+  if (lessons.dropped) return { ...res, message: `${res.message} ${lessons.dropped}.` };
+  if (lessons.kept === 0) return res;
+  const kept = lessons.kept === 1 ? "1 lesson" : `${lessons.kept} lessons`;
+  return { ...res, message: `${res.message} Kept ${kept} for later builders and reviewers.` };
+}
+
+export type ReviewOutcome = {
   recorded: boolean;
   message: string;
   forward?: { sessionId: string; text: string };

@@ -1,6 +1,6 @@
 import type { Project } from "@codeden/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { Link } from "@tanstack/react-router";
+import { Link, useLocation } from "@tanstack/react-router";
 import { AlertTriangle, Factory, FileText, Newspaper, Play, SlidersHorizontal } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -21,6 +21,7 @@ import { LOOP_LABEL, MODE_LABEL } from "./meta";
 import { PipelineDiagram } from "./pipeline-diagram";
 import { PullRequestsCard } from "./pull-requests-card";
 import { ScorecardCard } from "./scorecard-card";
+import { SPOT_CHECKS_ANCHOR } from "./spot-checks";
 import { SpotChecksCard } from "./spot-checks-card";
 import { WipChip } from "./wip-chip";
 
@@ -80,6 +81,8 @@ export function FactoryPanel({ project }: { project: Project }) {
   const client = useClient();
   const queryClient = useQueryClient();
   const { data: f } = useFactoryStatus(projectId);
+  // `#spot-checks`: opened from the inbox's spot-check item.
+  const hash = useLocation({ select: (l) => l.hash });
   const [limitsOpen, setLimitsOpen] = useState(false);
   const refresh = () => void queryClient.invalidateQueries({ queryKey: factoryKeys.all });
   const fail = (title: string) => (e: Error) => toast.error(title, { description: e.message });
@@ -253,7 +256,11 @@ export function FactoryPanel({ project }: { project: Project }) {
           <RecentColumn projectId={projectId} recent={f.recent} />
           <IgnoredColumn projectId={projectId} ignored={f.ignored} />
         </div>
-        <SpotChecksCard projectId={projectId} spotChecks={f.spotChecks} />
+        <SpotChecksCard
+          projectId={projectId}
+          spotChecks={f.spotChecks}
+          focus={hash === SPOT_CHECKS_ANCHOR}
+        />
         <LessonsCard
           projectId={projectId}
           lessons={f.lessons}

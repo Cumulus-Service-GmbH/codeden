@@ -50,6 +50,7 @@ const base: FactoryItem = {
   reviewerProvider: "codex",
   reviewerNote: null,
   review: null,
+  lessonsNote: null,
   followUps: [],
   spotCheck: null,
   checks: [],

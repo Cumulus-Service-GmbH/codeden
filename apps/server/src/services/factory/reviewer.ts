@@ -109,7 +109,7 @@ async function startReviewer(
     reviewHead(ctx, project, item, pr),
     mayAutoMerge(item, project.factoryLimits),
     text,
-    text ? undefined : briefLessons(ctx, project.id),
+    text ? undefined : await briefLessons(ctx, item),
   );
   if (res.status !== "started") return { status: res.status };
   return { sessionId: res.sessionId, provider: choice.provider, note: choice.note };

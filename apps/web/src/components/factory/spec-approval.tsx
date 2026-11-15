@@ -159,7 +159,7 @@ export function SpecApprovalCard({ item, projectId }: { item: FactoryItem; proje
             <span className="text-muted-foreground">
               {" "}
               (submitted {ago(spec.requestedAt)}). Read the analysis and the acceptance criteria
-              below. Approve it and the agent builds it; ask for changes and it revises the spec
+              above. Approve it and the agent builds it; ask for changes and it revises the spec
               first.
             </span>
           </p>

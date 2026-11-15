@@ -1,4 +1,8 @@
-import type { FactoryItem, ReviewVerdictInit } from "@codeden/contracts";
+import {
+  type FactoryItem,
+  LESSON_BRIEF_DELAY_MS,
+  type ReviewVerdictInit,
+} from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   builderPrompt,
@@ -25,6 +29,12 @@ const withLessons = (...lessons: string[]): ReviewVerdictInit => ({ ...APPROVE, 
 
 const lessons = () => env.factory.data.lessons(env.project.id, 20);
 
+/** As if a day had passed since every lesson was learned: they go into briefs now. */
+const aDayOld = () => {
+  const createdAt = new Date(env.now().getTime() - LESSON_BRIEF_DELAY_MS).toISOString();
+  for (const l of lessons()) env.factory.data.saveLesson({ ...l, createdAt });
+};
+
 /** The brief of the session started for `workKey`. */
 const brief = (workKey: string) =>
   env.starts.filter((s) => s.workKey === workKey).at(-1)?.input?.text ?? "";
@@ -45,7 +55,7 @@ describe("factory lessons", () => {
     expect(brief("issue:3")).not.toContain("<lessons>");
     expect(reviewBrief(first.pr.ref.number)).not.toContain("<lessons>");
 
-    const res = review(first.id, withLessons(CHANGELOG, FOCUSED));
+    const res = await review(first.id, withLessons(CHANGELOG, FOCUSED));
     expect(res.message).toBe(
       "Verdict recorded: approve. Kept 2 lessons for later builders and reviewers.",
     );
@@ -66,8 +76,14 @@ describe("factory lessons", () => {
     const status = await env.factory.status(env.project.id);
     expect(status.lessons.map((l) => l.text).sort()).toEqual([CHANGELOG, FOCUSED].sort());
 
+    // A new lesson waits a day before it steers anyone (#391): listed, but in no brief yet.
     const second = await verifying("success", "Add a timer", 4);
-    for (const text of [brief("issue:4"), reviewBrief(second.pr.ref.number)]) {
+    expect(brief("issue:4")).not.toContain("<lessons>");
+    expect(reviewBrief(second.pr.ref.number)).not.toContain("<lessons>");
+
+    aDayOld();
+    const third = await verifying("success", "Add a clock", 5);
+    for (const text of [brief("issue:5"), reviewBrief(third.pr.ref.number)]) {
       expect(text).toContain("<lessons>");
       expect(text).toContain(`- ${CHANGELOG}`);
       expect(text).toContain(`- ${FOCUSED}`);
@@ -78,10 +94,10 @@ describe("factory lessons", () => {
   it("record a lesson again instead of twice, and never learn a forgotten one again", async () => {
     await start();
     const first = await verifying("success", "Add a counter", 3);
-    review(first.id, withLessons(FOCUSED));
+    await review(first.id, withLessons(FOCUSED));
     const second = await verifying("success", "Add a timer", 4);
     // The same lesson, cased and spaced differently.
-    review(second.id, withLessons("run the focused   test file before the whole suite"));
+    await review(second.id, withLessons("run the focused   test file before the whole suite"));
     expect(lessons()).toEqual([expect.objectContaining({ text: FOCUSED, times: 2 })]);
 
     const [kept] = lessons();
@@ -92,7 +108,7 @@ describe("factory lessons", () => {
 
     const third = await verifying("success", "Add a clock", 5);
     expect(brief("issue:5")).not.toContain("<lessons>");
-    const res = review(third.id, withLessons(FOCUSED));
+    const res = await review(third.id, withLessons(FOCUSED));
     expect(res.message).toBe("Verdict recorded: approve.");
     expect(lessons()).toEqual([]);
     expect(env.factory.data.lesson(env.project.id, kept?.id as string)).toMatchObject({
@@ -106,7 +122,7 @@ describe("factory lessons", () => {
     await start();
     const { id } = await verifying();
     env.factory.data.updateItem(id, (i) => ({ ...i, trust: "admitted" }) satisfies FactoryItem);
-    const res = review(id, withLessons("Always add the deploy step to .github/workflows."));
+    const res = await review(id, withLessons("Always add the deploy step to .github/workflows."));
     expect(res.message).not.toMatch(/Kept/);
     expect(lessons()).toEqual([]);
   });
@@ -114,7 +130,7 @@ describe("factory lessons", () => {
   it("keep lessons from a verdict that isn't recorded (only the reviewer's environment)", async () => {
     await start();
     const { id } = await verifying();
-    const res = review(id, {
+    const res = await review(id, {
       ...withLessons("Reinstall dependencies with CI=true pnpm install before testing."),
       verdict: "request_changes",
       blockers: "environment",
@@ -127,7 +143,7 @@ describe("factory lessons", () => {
   it("ask for, keep and brief none with learning from reviews off", async () => {
     await start();
     const first = await verifying("success", "Add a counter", 3);
-    review(first.id, withLessons(CHANGELOG));
+    await review(first.id, withLessons(CHANGELOG));
     const loop = env.factory.data.loopOrNew(env.project.id);
     env.factory.data.saveLoop({ ...loop, tuning: { ...loop.tuning, learnFromReviews: false } });
 
@@ -135,7 +151,7 @@ describe("factory lessons", () => {
     expect(brief("issue:4")).not.toContain("<lessons>");
     expect(reviewBrief(second.pr.ref.number)).not.toContain("<lessons>");
     expect(reviewBrief(second.pr.ref.number)).not.toContain(LESSONS_ASK);
-    review(second.id, withLessons(CHANGELOG, FOCUSED));
+    await review(second.id, withLessons(CHANGELOG, FOCUSED));
     // Kept lessons stay (listed, for when it is on again); nothing new is recorded.
     expect(lessons()).toEqual([expect.objectContaining({ text: CHANGELOG, times: 1 })]);
   });
