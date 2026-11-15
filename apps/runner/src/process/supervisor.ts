@@ -1,7 +1,14 @@
 import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process";
 import { isInside } from "../util/paths";
 import { childEnv } from "./env";
-import { isAlive, killTree, killTreeAndOrphans, listDescendants } from "./tree";
+import {
+  isAlive,
+  killProcess,
+  killTree,
+  killTreeAndOrphans,
+  listDescendants,
+  type ProcessLife,
+} from "./tree";
 
 /** A process the runner started (or adopted, like a pty shell). */
 export interface TrackedProcess {
@@ -90,6 +97,8 @@ export class ProcessSupervisor {
    */
   runShell(command: string, opts: RunShellOptions): Promise<RunShellResult> {
     return new Promise((resolveResult) => {
+      // Tells what the shell started from what an earlier process with its pid did.
+      const life: ProcessLife = { startedAt: Date.now() };
       const child = this.spawn(command, [], {
         cwd: opts.cwd,
         shell: true,
@@ -133,7 +142,7 @@ export class ProcessSupervisor {
       const endTree = () =>
         child.pid === undefined
           ? Promise.resolve()
-          : killTreeAndOrphans(child.pid, 2_000).catch(() => undefined);
+          : killTreeAndOrphans(child.pid, { ...life }).catch(() => undefined);
       const kill = () => {
         void endTree().then(() => closeAfter(exited ? OUTPUT_GRACE_MS : KILLED_GRACE_MS));
       };
@@ -159,6 +168,7 @@ export class ProcessSupervisor {
       });
       child.once("exit", (code) => {
         exited = true;
+        life.endedAt = Date.now();
         exitCode = code;
         if (!opts.endTree) return closeAfter(OUTPUT_GRACE_MS);
         ending = endTree();
@@ -192,6 +202,10 @@ export class ProcessSupervisor {
     await Promise.all(this.list().map((p) => this.kill(p.pid)));
     if (!sweepDescendants) return;
     const rest = await listDescendants(process.pid).catch(() => [] as number[]);
-    await Promise.all(rest.map((pid) => killTree(pid, 500)));
+    // Each was found, checked by start time on Windows (`treeIn`), so it's ended on its own there:
+    // `taskkill /T` would follow parent ids that may belong to an earlier process.
+    await Promise.all(
+      rest.map((pid) => (process.platform === "win32" ? killProcess(pid) : killTree(pid, 500))),
+    );
   }
 }
