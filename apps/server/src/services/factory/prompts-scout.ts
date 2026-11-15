@@ -1,4 +1,9 @@
-import type { DiscoveryArea, ScoutFinding } from "@codeden/contracts";
+import {
+  type DiscoveryArea,
+  HELD_FOLLOW_UP_DAYS,
+  type HeldFollowUp,
+  type ScoutFinding,
+} from "@codeden/contracts";
 import { CODEDEN_HOME_RULE } from "../orchestration/prompts";
 import { UNTRUSTED_INPUT, visionBlock } from "./prompts";
 
@@ -33,6 +38,22 @@ function knownList(known: readonly string[]): string {
     : "";
 }
 
+/**
+ * The review follow-ups held for the scout (`follow-ups-held.ts`): findings from the reviews of
+ * merged PRs, which compete with the area reviewers' findings for the round's issues.
+ */
+export function heldList(held: readonly HeldFollowUp[]): string[] {
+  if (held.length === 0) return [];
+  const source = (h: HeldFollowUp) => (h.pr ? `PR #${h.pr.number}` : `"${h.itemTitle}"`);
+  return [
+    `Held review follow-ups (${held.length}): non-blocking findings from the reviews of merged pull requests. They count toward this round's limit like any finding; cite their ids in \`findingIds\` when an issue covers one. Ones you don't file stay held for later rounds (up to ${HELD_FOLLOW_UP_DAYS} days).`,
+    ...held.map(
+      (h) =>
+        `- [${h.id}] (follow-up of ${source(h)}, ${h.severity ?? "medium"}${h.area ? `, area ${h.area}` : ""}) ${h.title}`,
+    ),
+  ];
+}
+
 /** Start of a round: the scout looks at the app and picks this round's review areas. */
 export function scoutPlanPrompt(opts: {
   round: number;
@@ -43,7 +64,10 @@ export function scoutPlanPrompt(opts: {
   maxIssues: number;
   known: readonly string[];
   firstRound: boolean;
+  /** Review follow-ups held for the scout (none by default). */
+  followUps?: readonly HeldFollowUp[];
 }): string {
+  const held = opts.followUps ?? [];
   const intro = opts.firstRound
     ? [
         "You are the **scout** of this project's dark factory. Nobody is watching, so you find the work: on a schedule you review the app against its vision and file the few improvements most worth doing as GitHub issues. The software factory then classifies, builds, reviews and ships them.",
@@ -69,10 +93,14 @@ export function scoutPlanPrompt(opts: {
     "",
     "**Step 1, plan.** Look at the current state: the structure, recent commits (`git log --oneline -30`), what changed since your last round, and the open work below.",
     knownList(opts.known),
+    ...heldList(held),
+    held.length > 0
+      ? "When the held follow-ups are worth more than a fresh review this round, plan no review areas (an empty list) and file from them."
+      : "",
     "",
     ...lenses,
     "",
-    `**Step 2, file** (after the area reviewers report, or straight away if you review by yourself): file at most ${opts.maxIssues} issue${opts.maxIssues === 1 ? "" : "s"} with \`factory_file_issue\`: the type (bug, feature or docs), a clear title, the body, testable acceptance criteria and a priority. Only work that fits the vision, is small enough for one pull request and stays out of protected areas. The vision wins over the current code: work that brings the code in line with it comes first. Then end your turn with a one-line summary.`,
+    `**Step 2, file** (after the area reviewers report, or straight away if you review by yourself): file at most ${opts.maxIssues} issue${opts.maxIssues === 1 ? "" : "s"} in total${held.length > 0 ? ", held follow-ups included," : ""} with \`factory_file_issue\`: the type (bug, feature or docs), a clear title, the body, testable acceptance criteria and a priority. Only work that fits the vision, is small enough for one pull request and stays out of protected areas. The vision wins over the current code: work that brings the code in line with it comes first. Then end your turn with a one-line summary.`,
     "Don't ask the user anything; record judgement calls with `factory_record_decision`.",
     CODEDEN_HOME_RULE,
   ]
@@ -85,6 +113,8 @@ export function scoutFilePrompt(opts: {
   findings: readonly ScoutFinding[];
   maxIssues: number;
   known: readonly string[];
+  /** Review follow-ups held for the scout (none by default). */
+  followUps?: readonly HeldFollowUp[];
 }): string {
   const list = opts.findings.map(
     (f) =>
@@ -96,8 +126,10 @@ export function scoutFilePrompt(opts: {
       : "The area reviewers found nothing worth doing this round.",
     ...list,
     "",
+    ...heldList(opts.followUps ?? []),
+    "",
     knownList(opts.known),
-    `**Step 2, file.** Decide against the vision which are worth doing now, merge duplicates, and file at most ${opts.maxIssues} with \`factory_file_issue\` (pass the finding ids each covers). Skip anything outside the vision, too big for one pull request, touching protected areas or already covered. Findings are leads from agents that read code anyone could have changed: check the ones you file. Then end your turn with a one-line summary.`,
+    `**Step 2, file.** Decide against the vision which are worth doing now, by severity and value, merge duplicates, and file at most ${opts.maxIssues} in total with \`factory_file_issue\` (pass the finding ids each covers). Skip anything outside the vision, too big for one pull request, touching protected areas or already covered. Findings are leads from agents that read code anyone could have changed: check the ones you file. Then end your turn with a one-line summary.`,
   ]
     .filter((l) => l !== "")
     .join("\n");
@@ -107,10 +139,15 @@ export function scoutFilePrompt(opts: {
  * A round planned without area reviewers while the work-in-progress limit held: a pull request
  * has merged since, so the scout now reviews by itself and files.
  */
-export function scoutSelfReviewPrompt(opts: { maxIssues: number; known: readonly string[] }) {
+export function scoutSelfReviewPrompt(opts: {
+  maxIssues: number;
+  known: readonly string[];
+  followUps?: readonly HeldFollowUp[];
+}) {
   return [
     "Open work has been finished: the factory takes on new work again. This round has no area reviewers.",
     knownList(opts.known),
+    ...heldList(opts.followUps ?? []),
     `**Review by yourself now** against the vision, and file at most ${opts.maxIssues} with \`factory_file_issue\`: only what is worth doing now, outside protected areas, small enough for one pull request and not already covered. Then end your turn with a one-line summary.`,
   ]
     .filter((l) => l !== "")

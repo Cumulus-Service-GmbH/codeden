@@ -83,6 +83,7 @@ export const scoutStatus: ScoutStatus = {
   nextRoundAt: null,
   rounds: 4,
   runNowBlockedBy: null,
+  heldFollowUps: [],
 };
 
 export function status(patch: Partial<FactoryStatus> = {}): FactoryStatus {

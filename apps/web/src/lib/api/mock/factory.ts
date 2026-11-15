@@ -17,6 +17,7 @@ import {
   type SpecApproval,
 } from "@codeden/contracts";
 import type { FactoryApi } from "../factory-api";
+import { demoHeldFollowUps, withoutHeld } from "./factory-follow-ups";
 import { demoScorecard } from "./factory-scorecard";
 import {
   assertSpecVersion,
@@ -183,6 +184,8 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
   reviseSpecLater(world, specs);
   /** Follow-ups filed with "File issue", by `<itemId>:<index>`. */
   const filedFollowUps = new Map<string, GitHubIssueRef>();
+  /** Held follow-ups dismissed from the scout's list, by `<itemId>:<index>`. */
+  const dismissedFollowUps = new Set<string>();
   /** Issues filed from spot-checks so far (their numbers). */
   let spotIssues = 0;
   const project = (id: string) => world.snapshot.projects.find((p) => p.id === id);
@@ -242,6 +245,7 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
               nextRoundAt: null,
               rounds: 4,
               runNowBlockedBy: "A scout round is already running.",
+              heldFollowUps: demoHeldFollowUps(f.recent.map(toWork), MOCK_APPROVAL.followUps?.[1]),
             }
           : null,
       stats: { mergedToday: f.mergesToday, ...f.stats },
@@ -315,6 +319,16 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
               (n === 0
                 ? { number: 412, url: "https://github.com/hearth-co/hearth/issues/412" }
                 : null),
+            // In the dark factory, the scout's held list says which one waits for a round.
+            ...(s.scout?.heldFollowUps.some((h) => h.itemId === itemId && h.index === n)
+              ? { heldAt: w.mergedAt as string }
+              : {}),
+            ...(dismissedFollowUps.has(`${itemId}:${n}`)
+              ? {
+                  heldAt: w.mergedAt as string,
+                  dropped: { reason: "dismissed" as const, at: now() },
+                }
+              : {}),
           }))
         : [],
       checks: s.mergeChecks.find((c) => c.itemId === itemId)?.checks ?? [],
@@ -466,6 +480,13 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
           problems30d: status(projectId).spotChecks.problems30d,
         },
         lessons: [],
+        followUps: {
+          held: 0,
+          filed: filedFollowUps.size,
+          dropped: 0,
+          dismissed: dismissedFollowUps.size,
+          waiting: status(projectId).scout?.heldFollowUps.length ?? 0,
+        },
         text: "Nothing shipped yet today.",
         createdAt: now(),
       };
@@ -548,6 +569,14 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
           url: `https://github.com/hearth-co/hearth/issues/${number}`,
         });
       }
+      world.factory.set(id, withoutHeld(status(id), itemId, index));
+      return delay(item(id, itemId));
+    },
+    async dismissFollowUp(id, itemId, index) {
+      const key = `${itemId}:${index}`;
+      if (filedFollowUps.has(key)) throw new Error("Already filed");
+      dismissedFollowUps.add(key);
+      world.factory.set(id, withoutHeld(status(id), itemId, index));
       return delay(item(id, itemId));
     },
     async spotCheck(id, itemId, req) {

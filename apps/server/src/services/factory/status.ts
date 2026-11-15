@@ -14,6 +14,7 @@ import {
 } from "@codeden/contracts";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { drainStatus } from "./drain";
+import { heldFollowUps } from "./follow-ups-held";
 import { itemCosts } from "./item-cost";
 import { localDay, queueOrder } from "./policy";
 import { ownedPr, pullRequests } from "./pr-status";
@@ -187,5 +188,6 @@ function scoutStatus(
           ).toISOString(),
     rounds: scout.rounds,
     runNowBlockedBy: scoutNowBlocker(project, loop, scoutNowFacts(ctx, project, loop, spend)),
+    heldFollowUps: heldFollowUps(ctx, project.id),
   };
 }

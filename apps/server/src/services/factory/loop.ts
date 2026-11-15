@@ -127,8 +127,9 @@ export async function runTick(
   await closeEarlyPrs(ctx, project).catch((error: unknown) =>
     ctx.log?.(`factory: settling PRs opened before the spec: ${errorMessage(error)}`),
   );
-  // Merged work's review follow-ups become issues (dark factory), also while paused.
-  await fileDueFollowUps(ctx, project).catch((error: unknown) =>
+  // Merged work's review follow-ups are held for the scout or become issues (dark factory), also
+  // while paused.
+  await fileDueFollowUps(ctx, project, loop).catch((error: unknown) =>
     ctx.log?.(`factory: filing follow-ups: ${errorMessage(error)}`),
   );
   // Finished work gives back its sessions and worktrees, also while paused; once after the

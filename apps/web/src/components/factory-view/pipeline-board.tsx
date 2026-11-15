@@ -285,7 +285,9 @@ export function PipelineBoard({
               last={i === VIEW_STAGES.length - 1}
             >
               <div className="flex flex-col gap-1.5">
-                {stage.id === "intake" && scout && <ScoutCard scout={scout} />}
+                {stage.id === "intake" && scout && (
+                  <ScoutCard scout={scout} projectId={f.projectId} />
+                )}
                 <Cards
                   cards={cards}
                   now={now}

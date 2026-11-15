@@ -1,8 +1,9 @@
 import type {
   AutonomyMode,
+  FactoryFollowUp,
   FactoryItem,
+  FollowUpDropReason,
   FollowUpSeverity,
-  GitHubIssueRef,
   ReviewFollowUp,
 } from "@codeden/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -18,10 +19,18 @@ import { cn } from "@/lib/utils";
 /**
  * The reviewer's follow-ups on the factory item page (§10.1): non-blocking findings that never
  * hold up the merge. Before the merge they are listed from the verdict; once it merged, each
- * shows the issue that tracks it, or "File issue" (the dark factory files them by itself).
+ * shows the issue that tracks it, or "File issue" (a dark factory holds them for its scout or
+ * files them by itself), with whether it is held for the scout or was dropped from that list.
  */
 
-const SEVERITY_TONE: Record<FollowUpSeverity, string> = {
+const DROPPED_LABEL: Record<FollowUpDropReason, string> = {
+  duplicate: "duplicate",
+  expired: "expired",
+  capped: "dropped",
+  dismissed: "dismissed",
+};
+
+export const SEVERITY_TONE: Record<FollowUpSeverity, string> = {
   high: "border-status-failed/40 text-status-failed",
   medium: "border-status-waiting/40 text-status-waiting",
   low: "border-border text-muted-foreground",
@@ -66,7 +75,7 @@ export function FollowUps({
     onError: (e: Error) => toast.error("Couldn't file the issue", { description: e.message }),
   });
   const merged = item.followUps.length > 0;
-  const listed: Array<ReviewFollowUp & { issue?: GitHubIssueRef | null }> = merged
+  const listed: Array<ReviewFollowUp & Partial<FactoryFollowUp>> = merged
     ? item.followUps
     : (item.review?.followUps ?? []);
   if (listed.length === 0) return null;
@@ -83,6 +92,18 @@ export function FollowUps({
             >
               <span className="min-w-0 flex-1">{f.title}</span>
               <Facts f={f} />
+              {merged && !issue && (f.dropped || f.heldAt) && (
+                <span
+                  className="shrink-0 text-3xs text-muted-foreground"
+                  title={
+                    f.dropped
+                      ? "Left the scout's held list without an issue"
+                      : "Held for the scout's next round"
+                  }
+                >
+                  {f.dropped ? DROPPED_LABEL[f.dropped.reason] : "held for the scout"}
+                </span>
+              )}
               {merged &&
                 (issue ? (
                   <button
@@ -109,10 +130,10 @@ export function FollowUps({
       <p className="mt-1.5 text-3xs text-muted-foreground">
         {merged
           ? mode === "dark_factory"
-            ? "The factory files these as issues; one it couldn't file waits here."
+            ? "Held ones wait for the scout, which weighs them against its other findings; the rest are filed as issues."
             : "File the ones worth doing as issues; the factory picks them up from there."
           : mode === "dark_factory"
-            ? "They don't hold up the merge; the factory files them as issues once it merges."
+            ? "They don't hold up the merge; once it merges, high-severity and security ones are filed as issues and the rest wait for the scout's rounds."
             : "They don't hold up the merge; once it merges you can file them as issues here."}
       </p>
     </section>

@@ -16,7 +16,7 @@ import { unverifiedRevert } from "./revert-watch";
 import { isBusy } from "./sessions";
 import { claimSlot } from "./slots";
 import { REVERTED_AT } from "./stats";
-import { FOLLOW_UPS_DUE } from "./store";
+import { FOLLOW_UPS_DUE, FOLLOW_UPS_HELD } from "./store";
 
 /**
  * Automatic reverts (§10.1, Merge). When CI on the default branch fails after a factory merge,
@@ -219,7 +219,7 @@ export function revertsOnResume(ctx: FactoryContext, projectId: string): void {
 
 /**
  * The nudges a reverted item's revise round starts from: its revise rounds, automatic re-reviews,
- * PRs still to close and follow-ups still to file are kept; the merge's own marks (its queue
+ * PRs still to close and follow-ups still to file or held for the scout are kept; the merge's own marks (its queue
  * place, the merges it stacked on, its heads and approvals) are dropped, so the new PR starts
  * afresh and its merge isn't judged against the old one's.
  */
@@ -231,6 +231,7 @@ function reviseNudges(nudges: FactoryItem["nudges"]): FactoryItem["nudges"] {
         k.startsWith("supersede_") ||
         k.startsWith(FAILED_ON_MAIN) ||
         k === FOLLOW_UPS_DUE ||
+        k === FOLLOW_UPS_HELD ||
         k === REVERTED_AT ||
         k === AFTER_REVERT ||
         (isReReviewRecord(k) && !k.startsWith("verdict_")),

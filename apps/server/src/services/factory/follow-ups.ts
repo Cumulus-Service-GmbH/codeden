@@ -1,22 +1,34 @@
 import {
   type FactoryFollowUp,
   type FactoryItem,
+  type FactoryLoop,
   FOLLOW_UP_LABEL,
   type GitHubIssueRef,
   type Project,
-  sameFollowUpTitle,
 } from "@codeden/contracts";
 import { badRequest, errorMessage } from "../errors";
 import type { FactoryContext } from "./context";
+import {
+  type FollowUpPass,
+  filedAtOnce,
+  heldFollowUps,
+  holdFollowUp,
+  maintainHeldFollowUps,
+  openIssueFor,
+  scoutHoldsFollowUps,
+  setFollowUp,
+} from "./follow-ups-held";
 import { FACTORY_LABEL } from "./intake";
 import { FOLLOW_UPS_DUE } from "./store";
 
 /**
  * Review follow-ups (§10.1, Review and revise): the reviewer's non-blocking findings. They
  * never fail a merge check or start a revise round. When the pull request merges, the item keeps
- * the follow-ups of the verdict on record; the dark factory then files each as an issue (labelled
- * and linked to the PR), the software factory lists them on the item to file with "File issue".
- * A follow-up whose title matches an open issue is linked to that issue instead of filed again.
+ * the follow-ups of the verdict on record. A dark factory whose scout runs rounds holds the low
+ * and medium ones for the scout (`follow-ups-held.ts`) and files high-severity and security ones
+ * at once; with the scout off it files each one at once (labelled and linked to the PR). The
+ * software factory lists them on the item to file with "File issue". A follow-up whose title
+ * matches an open issue is linked to that issue instead of filed again.
  */
 
 /** How long the dark factory keeps retrying follow-ups GitHub didn't take; then they wait on the item. */
@@ -71,43 +83,45 @@ async function fileOne(
 ): Promise<GitHubIssueRef> {
   const f = item.followUps[index] as FactoryFollowUp;
   if (f.issue) return f.issue;
-  const open = ctx.github.openIssues(project.id).find((i) => sameFollowUpTitle(i.title, f.title));
-  const issue: GitHubIssueRef =
-    filed.find((i) => sameFollowUpTitle(i.title ?? "", f.title)) ??
-    (open
-      ? { number: open.number, url: open.url, title: open.title }
-      : await ctx.github.createIssue(project.id, {
-          title: f.title,
-          body: issueBody(item, f),
-          labels: [FACTORY_LABEL, FOLLOW_UP_LABEL],
-        }));
+  const issue =
+    openIssueFor(ctx, project.id, f.title, filed) ??
+    (await ctx.github.createIssue(project.id, {
+      title: f.title,
+      body: issueBody(item, f),
+      labels: [FACTORY_LABEL, FOLLOW_UP_LABEL],
+    }));
   filed.push({ ...issue, title: issue.title ?? f.title });
-  ctx.store.updateItem(
-    item.id,
-    (i) => ({
-      ...i,
-      followUps: i.followUps.map((x, n) => (n === index ? { ...x, issue } : x)),
-    }),
-    { touch: false },
-  );
+  setFollowUp(ctx, item.id, index, { issue, filedAt: ctx.now().toISOString() });
   return issue;
 }
 
 /**
- * The loop's step for merged work: in the dark factory, file the follow-ups that wait (retried
- * on the next ticks while GitHub doesn't take them, for up to `FOLLOW_UPS_RETRY_MS`). In the
- * software factory they wait on the item for a person's "File issue".
+ * The loop's step for merged work. In a dark factory: hold the follow-ups that wait for the
+ * scout, or file them when they go straight through or the scout is off (retried on the next
+ * ticks while GitHub doesn't take them, for up to `FOLLOW_UPS_RETRY_MS`), then keep the held list
+ * current. In the software factory they wait on the item for a person's "File issue".
  */
-export async function fileDueFollowUps(ctx: FactoryContext, project: Project): Promise<void> {
-  const filed: GitHubIssueRef[] = [];
+export async function fileDueFollowUps(
+  ctx: FactoryContext,
+  project: Project,
+  loop: FactoryLoop,
+): Promise<void> {
+  const dark = project.autonomyMode === "dark_factory";
+  const hold = scoutHoldsFollowUps(project, loop);
+  const pass: FollowUpPass = {
+    filed: [],
+    held: hold ? heldFollowUps(ctx, project.id).map((h) => h.title) : [],
+  };
   for (const item of ctx.store.itemsWithFollowUpsDue(project.id)) {
     const since = Date.parse(item.nudges[FOLLOW_UPS_DUE] ?? "");
     let failed = false;
-    if (project.autonomyMode === "dark_factory") {
+    if (dark) {
       for (const [index, f] of item.followUps.entries()) {
-        if (f.issue) continue;
+        if (f.issue || f.heldAt || f.dropped) continue;
+        const current = ctx.store.item(item.id) ?? item;
         try {
-          await fileOne(ctx, project, ctx.store.item(item.id) ?? item, index, filed);
+          if (hold && !filedAtOnce(f)) holdFollowUp(ctx, project, current, index, pass);
+          else await fileOne(ctx, project, current, index, pass.filed);
         } catch (error) {
           failed = true;
           ctx.log?.(`factory: filing a follow-up of ${item.id}: ${errorMessage(error)}`);
@@ -124,9 +138,10 @@ export async function fileDueFollowUps(ctx: FactoryContext, project: Project): P
       { touch: false },
     );
   }
+  if (dark) maintainHeldFollowUps(ctx, project);
 }
 
-/** "File issue" on the item page: file one follow-up of a merged item (once). */
+/** "File issue" on the item page, and "File now" on the scout's held list: file one follow-up of a merged item (once). */
 export async function fileFollowUp(
   ctx: FactoryContext,
   project: Project,
