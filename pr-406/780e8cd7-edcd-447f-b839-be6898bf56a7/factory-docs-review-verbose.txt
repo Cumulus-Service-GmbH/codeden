@@ -1,0 +1,124 @@
+=== pnpm vitest run apps/server/test/factory-docs-review.test.ts --reporter=verbose ===
+
+ RUN  v5.1.0 C:/Users/leon/.codeden/wt/codeden/780e8cd7
+
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > the docs pipeline with auto-merge on > reviews a change to package.json before it merges 101ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > the docs pipeline with auto-merge on > reviews a CI workflow before it merges 69ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > the docs pipeline with auto-merge on > reviews a lock file before it merges 62ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > the docs pipeline with auto-merge on > reviews a deleted test before it merges 62ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > the docs pipeline with auto-merge on > still merges documentation and images without a review 58ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > the docs pipeline with auto-merge on > reviews an SVG before it merges 63ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > the docs pipeline with auto-merge on > reviews an MDX page before it merges 63ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > the docs pipeline with auto-merge on > escalates a change to LICENSE.md and never merges it 62ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > the docs pipeline with auto-merge on > escalates a change to LICENSE and never merges it 61ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > the docs pipeline with auto-merge on > escalates a change to LICENSE.txt and never merges it 61ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > the docs pipeline with auto-merge on > escalates a change to COPYING and never merges it 47ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > the docs pipeline with auto-merge on > escalates a change to NOTICE and never merges it 62ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > the docs pipeline with auto-merge on > escalates a change to packages/x/LICENSE.md and never merges it 61ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > the docs pipeline with auto-merge on > skips the review for prose plus a raster image 62ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > counts README.md as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > counts docs/guide.md as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > counts NOTES.txt as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > counts docs/api.rst as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > counts docs/img.png as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > counts assets/photo.JPG as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > counts docs/shot.jpeg as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > counts docs/anim.gif as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > counts docs/pic.webp as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > counts public/favicon.ico as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > counts apps/web/README.md as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > counts docs\windows\path.md as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > counts ./docs/guide.md as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts package.json as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts apps/server/package.json as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts pnpm-lock.yaml as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts yarn.lock as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts Cargo.lock as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts go.sum as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts tsconfig.json as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts biome.json as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts pyproject.toml as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts setup.ini as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts .github/workflows/ci.yml as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts .gitignore as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts docs/site/intro.mdx as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts docs/logo.svg as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts public/ICON.SVG as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts LICENSE as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts LICENSE.md as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts LICENSE.txt as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts packages/x/license.md as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts COPYING as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts NOTICE as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts requirements.txt as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts requirements-dev.txt as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts services/api/requirements/base.txt as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts constraints.txt as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts CMakeLists.txt as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts apps/server/test/x.test.ts as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts apps/server/test/fixtures/expected.md as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts src/__tests__/snapshot.png as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts CLAUDE.md as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts apps/web/AGENTS.md as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts AGENTS.override.md as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts CLAUDE.local.md as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts GEMINI.md as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts .claude/commands/ship.md as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts .agents/skills/x/SKILL.md as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts .github/copilot-instructions.md as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts .cursor/rules/x.md as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts src/index.ts as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts docs/build.mjs as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > never counts Makefile as documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isDocFile > is narrower than isNonCodeFile, which only relaxes the tests checks 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isLicenseFile > protects LICENSE 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isLicenseFile > protects LICENSE.md 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isLicenseFile > protects license.txt 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isLicenseFile > protects LICENCE 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isLicenseFile > protects UNLICENSE 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isLicenseFile > protects LICENSE-MIT 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isLicenseFile > protects LICENSE_APACHE.txt 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isLicenseFile > protects COPYING 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isLicenseFile > protects COPYING.LESSER 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isLicenseFile > protects NOTICE 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isLicenseFile > protects NOTICE.md 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isLicenseFile > protects packages/x/LICENSE 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isLicenseFile > protects LICENSES/MIT.txt 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isLicenseFile > protects docs\LICENSE.md 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isLicenseFile > leaves src/components/Notice.tsx alone 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isLicenseFile > leaves src/license.ts alone 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isLicenseFile > leaves scripts/license-check.mjs alone 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isLicenseFile > leaves docs/licensing.md alone 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > isLicenseFile > leaves docs/notices/banner.md alone 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > docsOnly > needs every file, old paths of renames included, to be documentation 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > docsOnly > reviews a PR whose file list GitHub cut short, or that lists no files 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > fast merge: dependency manifests and lock files always re-test > treats package.json as merge-sensitive 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > fast merge: dependency manifests and lock files always re-test > treats apps/server/package.json as merge-sensitive 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > fast merge: dependency manifests and lock files always re-test > treats packages/contracts/package.json as merge-sensitive 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > fast merge: dependency manifests and lock files always re-test > treats pnpm-lock.yaml as merge-sensitive 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > fast merge: dependency manifests and lock files always re-test > treats apps/web/yarn.lock as merge-sensitive 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > fast merge: dependency manifests and lock files always re-test > treats vendor/custom.lock as merge-sensitive 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > fast merge: dependency manifests and lock files always re-test > treats go.sum as merge-sensitive 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > fast merge: dependency manifests and lock files always re-test > treats services/api/go.mod as merge-sensitive 0ms
+ ✓ |@codeden/server| test/factory-docs-review.test.ts > fast merge: dependency manifests and lock files always re-test > treats Cargo.lock as merge-sensitive 0ms
+
+ Test Files  1 passed (1)
+      Tests  99 passed (99)
+   Start at  07:13:30
+   Duration  2.01s (tests 47%, import 26%, transform 26%)
+
+
+
+=== pnpm test (tail) ===
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'README.md', LF will be replaced by CRLF the next time Git touches it
+
+ Test Files  516 passed | 12 skipped (528)
+      Tests  4076 passed | 55 skipped (4131)
+   Start at  07:10:54
+   Duration  141.75s (tests 40%, import 30%, transform 13%, environment 12%, setup 4%)
+
+    Isolate  528 workers spawned · ~800ms startup each (spawn + environment, per file)
+             at least ~12.82s faster with isolate: false — reuses workers across files instead of one per file
+
