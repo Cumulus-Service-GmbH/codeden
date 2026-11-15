@@ -15,8 +15,11 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { useSnapshotData } from "@/lib/queries";
 import { useComposerBounds } from "@/lib/toast-placement";
 import { cn } from "@/lib/utils";
+import type { SpeechToText } from "@/lib/voice/engines";
 import { type Draft, getDraft, useComposerStore } from "@/stores/composer";
 import { AttachmentStrip, filesToAttachments, toInputAttachments } from "./attachments";
+import { DictationStrip } from "./dictation-strip";
+import { useDictation } from "./use-dictation";
 import { VoiceButton } from "./voice-button";
 
 export const composerPlaceholders: Record<Session["role"], string> = {
@@ -43,8 +46,9 @@ export const isSendKey = (e: KeyboardEvent<HTMLTextAreaElement>) =>
  * The composer's input box (§13), shared by session composers and the composer of a role
  * session that does not exist yet: text, image and file paste, drag-and-drop and the attach
  * button, the attachment strip and dictation (button and shortcuts, in the dictation language
- * from Settings). The draft lives in the composer store under `draftKey`; callers add their
- * own controls and handle keys, including Enter to send.
+ * from Settings, with what it hears shown live under the text). The draft lives in the
+ * composer store under `draftKey`; callers add their own controls and handle keys, including
+ * Enter to send.
  */
 export function ComposerBox({
   draftKey,
@@ -57,6 +61,7 @@ export function ComposerBox({
   options,
   actions,
   children,
+  dictationEngine,
 }: {
   draftKey: string;
   placeholder: string;
@@ -79,11 +84,19 @@ export function ComposerBox({
   actions?: ReactNode;
   /** The send control, after the dictation button. */
   children: ReactNode;
+  /** Overrides the dictation engine from Settings (tests). */
+  dictationEngine?: SpeechToText;
 }) {
   const draft = useComposerStore((s) => getDraft(s, draftKey));
   const focusToken = useComposerStore((s) => s.focusToken);
   const { setText, addAttachments, removeAttachment } = useComposerStore.getState();
   const dictationLanguage = useSnapshotData((s) => s.settings.voice.dictation.language, null);
+  const dictation = useDictation({
+    baseText: draft.text,
+    onText: (t) => setText(draftKey, t),
+    language: dictationLanguage,
+    engine: dictationEngine,
+  });
   const ownRef = useRef<HTMLTextAreaElement>(null);
   const ref = textareaRef ?? ownRef;
   const fileInput = useRef<HTMLInputElement>(null);
@@ -158,6 +171,7 @@ export function ComposerBox({
             aria-activedescendant={combobox?.open ? combobox.activeId : undefined}
             className="block max-h-64 min-h-[56px] w-full resize-none bg-transparent px-4 pt-3.5 pb-1 text-[14px] leading-relaxed outline-none [field-sizing:content] placeholder:text-muted-foreground/70"
           />
+          <DictationStrip dictation={dictation} />
           <div className="flex flex-wrap items-center gap-0.5 gap-y-1 px-2 pb-2">
             <input
               ref={fileInput}
@@ -183,11 +197,7 @@ export function ComposerBox({
             {options}
             <div className="ml-auto flex items-center gap-1">
               {actions}
-              <VoiceButton
-                baseText={draft.text}
-                onText={(t) => setText(draftKey, t)}
-                language={dictationLanguage}
-              />
+              <VoiceButton dictation={dictation} />
               {children}
             </div>
           </div>

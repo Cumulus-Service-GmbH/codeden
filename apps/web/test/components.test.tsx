@@ -2,7 +2,6 @@ import type { ItemOf, UserQuestion } from "@codeden/contracts";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { VoiceButton } from "@/components/composer/voice-button";
 import { ConflictCard } from "@/components/project/conflict-card";
 import { ApprovalCard } from "@/components/thread/cards/approval-card";
 import { QuestionCard } from "@/components/thread/cards/question-card";
@@ -13,7 +12,6 @@ import { mockUsageApi } from "@/components/usage/mock-data";
 import { createMockClient } from "@/lib/api/mock";
 import { conflicts } from "@/lib/api/mock/fixtures/sessions";
 import type { WorkEntry } from "@/lib/transcript/timeline";
-import type { SpeechToText } from "@/lib/voice/engines";
 import { renderWithClient } from "./utils";
 
 const approval: ItemOf<"approval_request"> = {
@@ -624,24 +622,5 @@ describe("ConflictCard", () => {
     fireEvent.click(screen.getByRole("button", { name: /Force/ }));
     const start = screen.getByRole("button", { name: "Start anyway" }) as HTMLButtonElement;
     expect(start.disabled).toBe(true);
-  });
-});
-
-describe("VoiceButton", () => {
-  it("is disabled when speech recognition is unsupported", () => {
-    const engine: SpeechToText = { supported: false, start: vi.fn(), stop: vi.fn() };
-    renderWithClient(<VoiceButton baseText="" onText={() => {}} engine={engine} />);
-    expect((screen.getByRole("button") as HTMLButtonElement).disabled).toBe(true);
-  });
-
-  it("streams dictated text after the existing draft", () => {
-    let handlers: Parameters<SpeechToText["start"]>[0] | undefined;
-    const engine: SpeechToText = { supported: true, start: (o) => (handlers = o), stop: vi.fn() };
-    const onText = vi.fn();
-    renderWithClient(<VoiceButton baseText="Fix" onText={onText} engine={engine} />);
-    fireEvent.click(screen.getByRole("button"));
-    handlers?.onText("the flaky test", true);
-    expect(onText).toHaveBeenCalledWith("Fix the flaky test");
-    expect(screen.getByRole("button").getAttribute("aria-pressed")).toBe("true");
   });
 });

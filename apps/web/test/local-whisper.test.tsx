@@ -8,27 +8,31 @@ import { createMockClient } from "@/lib/api/mock";
 import { createCloudStt } from "@/lib/voice/cloud-stt";
 import { renderWithClient } from "./utils";
 
-// No microphone or audio decoder in jsdom: the clip and its WAV conversion are stand-ins.
+// No microphone or audio decoder in jsdom: the clip, its WAV conversion and the live
+// microphone are stand-ins. The live microphone is fed by the test.
+const liveMic = vi.hoisted(() => ({
+  feed: (_samples: Float32Array, _rate: number) => {},
+}));
 vi.mock("@/lib/voice/recorder", () => ({
-  canRecord: () => true,
   recordClip: vi.fn(async () => new Blob(["webm"], { type: "audio/webm" })),
-  startRecording: vi.fn(async () => {
-    let finish: (clip: Blob) => void = () => {};
-    const stopped = new Promise<Blob>((resolve) => {
-      finish = resolve;
-    });
-    return {
-      stopped,
-      stop: () => {
-        finish(new Blob(["webm"], { type: "audio/webm" }));
-        return stopped;
-      },
-    };
+}));
+vi.mock("@/lib/voice/mic-capture", () => ({
+  canCapture: () => true,
+  startMicCapture: vi.fn(async (onSamples: (samples: Float32Array, rate: number) => void) => {
+    liveMic.feed = onSamples;
+    return { stop: () => {} };
   }),
 }));
-vi.mock("@/lib/voice/wav", () => ({
+vi.mock("@/lib/voice/wav", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/lib/voice/wav")>()),
   toWhisperWav: vi.fn(async () => new Blob(["RIFF"], { type: "audio/wav" })),
 }));
+
+/** One second of a tone (speech) then a second of silence, at 16 kHz. */
+const spokenPhrase = () =>
+  Float32Array.from({ length: 32_000 }, (_, i) =>
+    i < 16_000 ? 0.3 * Math.sin((2 * Math.PI * 220 * i) / 16_000) : 0,
+  );
 
 const status = (over: Partial<LocalSttStatus["models"][number]> = {}): LocalSttStatus => ({
   supported: true,
@@ -117,23 +121,30 @@ describe("local Whisper settings", () => {
     expect(query).toEqual({ engine: "local", language: "en" });
   });
 
-  it("dictates through local Whisper: records, converts to WAV, transcribes once", async () => {
+  it("dictates through local Whisper: each phrase goes as a 16 kHz WAV as soon as it ends", async () => {
     const client = createMockClient();
     const stt = vi.spyOn(client.voice, "stt");
     const engine = createCloudStt(client, "local");
     expect(engine.supported).toBe(true);
+    expect(engine.live).toBe("segments");
     const onText = vi.fn();
     const onEnd = vi.fn();
     const onError = vi.fn();
-    // Stopping right away (before the microphone is ready) still ends the recording.
     engine.start({ language: "en-US", onText, onEnd, onError });
-    engine.stop();
-    await waitFor(() => expect(onEnd).toHaveBeenCalledTimes(1));
-    expect(onError).not.toHaveBeenCalled();
-    expect(onText).toHaveBeenCalledWith("Run the checkout tests again", true);
+    liveMic.feed(spokenPhrase(), 16_000);
+    // Sent before stop, once.
+    await waitFor(() => expect(stt).toHaveBeenCalledTimes(1));
     const [audio, query] = stt.mock.calls[0] ?? [];
     expect((audio as Blob).type).toBe("audio/wav");
     expect(query).toEqual({ engine: "local", language: "en" });
+    await waitFor(() =>
+      expect(onText).toHaveBeenCalledWith({ final: "Run the checkout tests again", draft: "" }),
+    );
+    expect(onEnd).not.toHaveBeenCalled();
+    engine.stop();
+    await waitFor(() => expect(onEnd).toHaveBeenCalledTimes(1));
+    expect(onError).not.toHaveBeenCalled();
+    expect(stt).toHaveBeenCalledTimes(1);
   });
 
   it("shows why a test failed", async () => {

@@ -18,8 +18,9 @@ Both directions sit behind swappable engines. The defaults are free and run in y
 | OpenAI | An OpenAI API key (shared with OpenAI Images) | `gpt-4o-mini-transcribe` |
 
 - **Language:** leave it on auto to follow the browser (or, for server engines, to detect the language), or pick one.
+- **Text appears as you speak.** The Browser engine shows words as it hears them. Local (Whisper), ElevenLabs and OpenAI show text phrase by phrase: each time you pause briefly, the phrase you just said is transcribed and added. Words still in progress show in muted italics under your message and join it once they're final. A level meter and "Listening…" show that the microphone hears you before any text arrives. Stopping adds the last phrase, and if dictation fails partway, the text already transcribed stays.
 
-Cloud dictation records in the browser and sends the audio to the CodeDen server, which forwards it to the provider with your key. The key never reaches the page.
+Cloud dictation captures the microphone in the browser and sends each phrase to the CodeDen server, which forwards it to the provider with your key. Each piece of audio is sent once, so it costs the same as sending the whole recording. The key never reaches the page.
 
 If your browser has no working speech recognition (Firefox, the desktop app), the Browser engine is marked unavailable and Settings suggests Local (Whisper).
 

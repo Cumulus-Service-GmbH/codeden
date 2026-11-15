@@ -704,9 +704,25 @@ Both sides sit behind provider interfaces, so engines can be swapped:
   - **Optional:** **local Whisper**, offline and private, for browsers and shells without a working speech service (Firefox, Electron). Details below.
   - **Feature detection.** The browser engine counts as available only when the recognition API exists and its speech service has not failed here (a `network` or `service-not-allowed` error is remembered per browser until the user picks the browser engine again). Where it is unavailable, Settings and setup say so and suggest Local (Whisper). This is capability detection, never a check for a particular browser or shell.
 
+**Live dictation.** Text appears while the user speaks, with every engine.
+
+- **Engine capabilities.** Each engine says how its text arrives (`live: "interim" | "segments"`) and whether the last text can come after stop (`finishesAfterStop`). Every update carries settled text (`final`) and text still in progress (`draft`); engines that can measure it also report the microphone level and how many segments are being transcribed. The composer reads these, never an engine id.
+- **Browser engine:** interim results are the draft; final results are settled. Interim words still unsettled when recognition ends are kept as final.
+- **Server engines (cloud and local Whisper): segments on pauses.** The UI captures raw microphone samples with Web Audio (an AudioWorklet loaded from CodeDen's own files, which `script-src 'self'` allows; ScriptProcessor where worklets are missing). `MediaRecorder` chunks can't be decoded on their own, so they don't fit here. A segmenter splits the samples on short pauses:
+  - speech is told from silence by each 20 ms frame's energy, against a threshold that follows the room's noise floor;
+  - a segment ends after 600 ms of silence, keeping 200 ms before its first speech and 300 ms after its last;
+  - a segment with under 250 ms of speech is dropped, so silence never reaches Whisper;
+  - continuous speech is cut at its quietest moment once a segment reaches 25 s, well under the local engine's 120 s.
+- **Sending segments.** Each finished segment goes to the existing `POST /api/stt` as a 16 kHz mono WAV straight away, so the server API and its contracts are unchanged. Each piece of audio is transcribed once, so a cloud engine costs the same as before. Results may come back in any order:
+  - the settled run from the first segment is appended to the draft, after whatever was typed before dictating;
+  - segments that came back ahead of one still pending show as draft.
+  Stopping flushes the segment in progress and finishes once every segment is back. A failed segment stops listening, reports the error once and keeps every segment that succeeded.
+- **In the composer:** a line under the text shows a level meter and "Listening…" before any text arrives (a pulsing dot when the engine has no level), the draft in muted italics, and "Transcribing…" while segments are pending. The microphone button shows a spinner until the last segment is in.
+- **Provider streaming is deferred.** Word-by-word streaming (OpenAI's realtime transcription, ElevenLabs' realtime Scribe) would need a WebSocket relay per provider on the server, so keys stay in the keychain, plus new contracts. Local Whisper has no streaming mode in its runtime. Segments work the same for all three engines with no server change, so they came first. Streaming can be added later as another `live` capability behind the same interface.
+
 **Local Whisper.** `voice.dictation.engine: "local"` with `voice.dictation.local.model`.
 
-- **Where it runs.** On the CodeDen server, like the cloud engines: the UI records with `MediaRecorder`, decodes and resamples the clip in the browser (Web Audio) to **WAV, 16-bit PCM, mono, 16 kHz**, and uploads it to `POST /api/stt?engine=local`. The server validates the WAV (format, at most 120 s) and transcribes it in-process, so no audio decoder (ffmpeg) is needed on the server, and the same path works in a plain browser, in the desktop app and later from a phone on the LAN. One clip is transcribed at a time; the loaded model is freed after ten idle minutes.
+- **Where it runs.** On the CodeDen server, like the cloud engines: the UI captures the microphone and resamples each dictation segment in the browser (Web Audio) to **WAV, 16-bit PCM, mono, 16 kHz**, and uploads it to `POST /api/stt?engine=local`. The Settings **Test** records a clip with `MediaRecorder` and decodes it the same way. The server validates the WAV (format, at most 120 s) and transcribes it in-process, so no audio decoder (ffmpeg) is needed on the server, and the same path works in a plain browser, in the desktop app and later from a phone on the LAN. One clip is transcribed at a time; the loaded model is freed after ten idle minutes.
 - **Runtime: whisper.cpp as a Node-API addon.** The prebuilt `index.node` for the platform is fetched from the npm registry as the tarball of `@fugood/node-whisper-<platform>-<arch>` (MIT) and extracted by CodeDen itself, so **no npm, compiler or system Node.js** is involved. Node-API keeps it loadable from any Node or Electron version. Prebuilt for all six targets (Windows, macOS, Linux; x64 and arm64), about 1.2 to 1.6 MB to download (2.5 to 4.8 MB on disk). Apple silicon uses Metal; elsewhere it runs on the CPU. Linux needs glibc 2.34+ and `libgomp1`; anything else reports "not supported" honestly.
 - **Alternatives weighed.**
   - *whisper.cpp release binaries:* official builds cover Windows and Ubuntu but not a macOS command line (only an Xcode framework), and a CLI means temp files and process spawning per clip.
@@ -839,7 +855,7 @@ Detailed, trustworthy reports on spend and usage across every provider, project 
   - text, pasted images and file attachments, `@` file mentions, `/` commands and skills
   - provider, model and effort pickers, plus the autonomy level and a **Plan** toggle where the provider reports `planMode` (§11.2)
   - queue or steer while a turn runs
-  - the voice button
+  - the voice button, with live dictation text under the message (§11.3)
   - **follow-up chips** after a turn completes (§7.5)
 - **New session.** Opens a draft in the centre that looks and works like a session, with the same composer (pickers, attachments, `@` and `/` from the project folder and the chosen provider, send keys) and the optional work key behind the header's ⋯. Nothing is created until the first send, which starts the session (`POST /api/sessions`, with the duplicate-work check of §8.4 shown inline); the draft then becomes that session in place. An unsent draft (text, options, work key) is kept in the browser per project.
 - **Right panel** (tabs): diff, files, browser, terminal, issue/PR, session details. A bottom terminal drawer is optional.
