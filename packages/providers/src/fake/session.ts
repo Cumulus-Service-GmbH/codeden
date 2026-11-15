@@ -11,7 +11,7 @@ import type {
 import { type ProviderSession, ProviderSessionError, type SessionConfigChange } from "../adapter";
 import { AsyncQueue } from "../async-queue";
 import type { FakeProviderOptions } from "./adapter";
-import { runCompaction } from "./compact";
+import { compactFailureIn, type FakeCompactFailure, runCompaction } from "./compact";
 import { fakeMcpInput, fakeMcpResult } from "./mcp-result";
 import { type FakeTurn, proposePlan } from "./plan";
 
@@ -114,6 +114,9 @@ export class FakeSession implements ProviderSession {
     this.turn?.abort.abort();
   }
 
+  /** How the next compaction fails, set by a `[compact:fail:…]` message (`./compact`). */
+  private compactFailure: FakeCompactFailure | undefined;
+
   /** Compact now: a scripted compaction turn (`./compact`). */
   async compact(): Promise<void> {
     if (this.events.isClosed) throw new ProviderSessionError("closed", "Session is closed");
@@ -124,7 +127,9 @@ export class FakeSession implements ProviderSession {
       abort: new AbortController(),
     };
     this.turn = turn;
-    void runCompaction(this.planTurn(turn), turn.abort.signal).finally(() => {
+    const failure = this.compactFailure;
+    this.compactFailure = undefined;
+    void runCompaction(this.planTurn(turn), turn.abort.signal, failure).finally(() => {
       if (this.turn === turn) this.turn = undefined;
     });
   }
@@ -150,6 +155,7 @@ export class FakeSession implements ProviderSession {
     // A root turn's fork point is its own id: `forkConversation({ upTo })` names it.
     const forkPoint = turnId;
     const prompt = input.text;
+    this.compactFailure = compactFailureIn(prompt) ?? this.compactFailure;
     try {
       this.emit({ type: "turn.started", threadId, turnId });
       await this.step(turn);

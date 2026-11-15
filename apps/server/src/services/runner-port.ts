@@ -122,6 +122,7 @@ export function toServiceError(error: unknown): ServiceError {
     code === "unsupported" ||
     code === "no_turn" ||
     code === "turn_running" ||
+    code === "compacting" ||
     code === "dialog_open" ||
     code === "no_dialog" ||
     // A git request for a session that runs in place in a folder without git (#409).

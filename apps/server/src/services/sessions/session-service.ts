@@ -40,7 +40,7 @@ import {
 } from "../runner-port";
 import type { UtilityService } from "../utility";
 import { freezeChecks } from "./checks";
-import { compactRefusal, startCompaction } from "./compact";
+import { compactingRefusal, compactionRunning, compactRefusal, startCompaction } from "./compact";
 import { derivePurpose, deriveWorkKey, findConflicts } from "./conflicts";
 import { planFork } from "./fork";
 import { planHandoff } from "./handoff";
@@ -316,8 +316,13 @@ export class SessionService {
     if (BUSY.has(session.status) || delivering) {
       if (req.whenBusy === "reject") throw conflict("A turn is running", "turn_running");
       if (req.whenBusy === "steer" && !delivering) {
-        await this.steer(id, req.input);
-        return { status: "steered" };
+        try {
+          await this.steer(id, req.input);
+          return { status: "steered" };
+        } catch (error) {
+          // A compaction can't be steered: the message goes once it ends.
+          if (runnerErrorCode(error) !== "compacting") throw error;
+        }
       }
       return this.enqueue(id, req.input, from);
     }
@@ -351,6 +356,7 @@ export class SessionService {
     if (!this.provider(session.provider, id)?.capabilities.steer) {
       throw conflict("This provider cannot steer a running turn", "unsupported");
     }
+    if (compactionRunning(this.deps.repo, session)) throw compactingRefusal();
     const input = this.forRunner(session, raw);
     await this.runnerOf(id)
       .request({ name: "session.steer", sessionId: id, input })

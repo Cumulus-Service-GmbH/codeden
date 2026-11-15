@@ -39,8 +39,9 @@ export interface PlanOptions {
 
 /**
  * Decide, from a session and its root turns (newest first), whether its last turn is retried
- * and when. Only an idle agent session whose last root turn failed for a passing reason
- * qualifies (`awaitsRetryDecision`); `attempt` counts the consecutive such failures. A transient
+ * and when. Only an idle agent session whose last root turn, a work turn (never a compaction),
+ * failed for a passing reason qualifies (`awaitsRetryDecision`); `attempt` counts the
+ * consecutive such failures. A transient
  * failure waits `delaysMs[attempt - 1]` after the turn ended, a usage limit until `retryAt`
  * plus the margin. Past the last delay, without a reset time, or switched off: give up. Pure.
  */
@@ -53,11 +54,14 @@ export function planRetry(
   if (!turn?.error || turn.status !== "failed" || session.status !== "idle") {
     return { action: "none" };
   }
+  // "Continue where you left off" after a compaction would re-run the finished task before it.
+  if (turn.kind === "compact") return { action: "none" };
   const error = turn.error;
   if (!awaitsRetryDecision(session, error)) return { action: "none" };
   let attempt = 0;
   for (const t of rootTurns) {
-    if (t.status !== "failed" || !t.error || !awaitsRetryDecision(session, t.error)) break;
+    if (t.kind === "compact" || t.status !== "failed" || !t.error) break;
+    if (!awaitsRetryDecision(session, t.error)) break;
     attempt += 1;
   }
   const giveUp = (exhausted: boolean): RetryDecision => ({
