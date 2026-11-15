@@ -81,7 +81,7 @@ function TreeNode({
   );
 }
 
-/** Worktree file tree plus a highlighted viewer (§12.3). */
+/** The session folder's file tree (worktree or in place) plus a highlighted viewer (§12.3). */
 export function FilesPanel({ sessionId }: { sessionId: string }) {
   const client = useClient();
   const theme = useResolvedTheme();
@@ -126,7 +126,7 @@ export function FilesPanel({ sessionId }: { sessionId: string }) {
       <div className="min-h-0 flex-1 overflow-auto scroll-thin">
         {!selected ? (
           <EmptyState icon={<Files />} title="Pick a file" className="h-full">
-            Browse the session's worktree.
+            Browse the session's folder.
           </EmptyState>
         ) : file.error ? (
           <EmptyState icon={<Files />} title="Can't show this file" className="h-full">

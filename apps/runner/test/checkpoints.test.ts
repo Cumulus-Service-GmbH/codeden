@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, statSync, utimesSync } from "node:fs";
-import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { dirname, join } from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createCheckpoint,
   deleteCheckpoints,
@@ -11,7 +11,7 @@ import {
   restoreFiles,
 } from "../src/git/checkpoints";
 import { diff as gitDiff, status as gitStatus } from "../src/git/ops";
-import { makeRepo, removeDir, sh, write } from "./helpers";
+import { makeRepo, removeDir, sh, tempDir, write } from "./helpers";
 
 const repos: string[] = [];
 function repo(files?: Record<string, string>): string {
@@ -232,6 +232,23 @@ describe("git.diff and git.status", () => {
     expect(result.files?.map((f) => `${f.status}:${f.path}`)).toEqual(["modified:a.txt"]);
     await createCheckpoint(dir, "s1", 0);
     expect(sh(dir, "show", `${refComponentRef("s1", 0)}:a.txt`)).toBe("b");
+  });
+
+  it("fail with not_a_repo in a folder that isn't a git repository (#409)", async () => {
+    // A session running in place in a project folder without git: the Diff tab says why.
+    const dir = tempDir("codeden-no-git-");
+    repos.push(dir);
+    // Git stops looking for a repository at the folder's parent, wherever the temp folder is.
+    vi.stubEnv("GIT_CEILING_DIRECTORIES", dirname(dir));
+    try {
+      const notARepo = { code: "not_a_repo", message: `${dir} is not a git repository` };
+      await expect(gitStatus(dir)).rejects.toMatchObject(notARepo);
+      await expect(gitDiff({ name: "git.diff", cwd: dir, fromRef: "HEAD" })).rejects.toMatchObject(
+        notARepo,
+      );
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 });
 

@@ -31,10 +31,21 @@ export function cwdMissing(cwd: string): CommandError {
 }
 
 /**
+ * The error for a git command run outside any repository, such as in a session that runs in
+ * place in a project folder without git, instead of `git_failed`.
+ */
+export function notARepo(cwd: string): CommandError {
+  return new CommandError("not_a_repo", `${cwd} is not a git repository`);
+}
+
+/** Git's own message for a folder outside any repository (`LC_ALL=C` keeps it in English). */
+const NOT_A_REPO = /^fatal: not a git repository/m;
+
+/**
  * Run `git` non-interactively: no terminal prompts, no credential manager windows, no pager,
  * no editor, stable output. Throws `CommandError("git_failed")` with stderr for unexpected
- * exit codes, and `cwd_missing` when `cwd` doesn't exist. A brokered `credential` is never in
- * an error message.
+ * exit codes, `not_a_repo` when `cwd` isn't in a git repository, and `cwd_missing` when `cwd`
+ * doesn't exist. A brokered `credential` is never in an error message.
  */
 export function git(cwd: string, args: string[], opts: GitOptions = {}): Promise<GitResult> {
   if (!existsSync(cwd)) return Promise.reject(cwdMissing(cwd));
@@ -76,6 +87,8 @@ export function git(cwd: string, args: string[], opts: GitOptions = {}): Promise
       const exit = code ?? -1;
       if (timedOut) {
         reject(new CommandError("git_timeout", `git ${args[0]} timed out`));
+      } else if (exit === 128 && NOT_A_REPO.test(stderr)) {
+        reject(notARepo(cwd));
       } else if (!(opts.okCodes ?? [0]).includes(exit)) {
         reject(
           new CommandError(

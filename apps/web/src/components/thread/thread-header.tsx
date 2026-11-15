@@ -40,6 +40,7 @@ import { forkOriginLabel, isHandoff, isReview } from "@/lib/fork-origin";
 import { statusLabel } from "@/lib/format";
 import { useProject, useSession } from "@/lib/queries";
 import { MARKDOWN_HINT, useSessionActions } from "@/lib/session-actions";
+import { hasRightPanel } from "@/lib/session-workspace";
 import { cn } from "@/lib/utils";
 import { useViewport } from "@/lib/viewport";
 import { useLayoutStore } from "@/stores/layout";
@@ -215,7 +216,7 @@ export function ThreadHeader({ session, running }: { session: Session; running: 
           </TooltipTrigger>
           <TooltipContent>Terminal · Ctrl J</TooltipContent>
         </Tooltip>
-        {session.worktreePath && (
+        {hasRightPanel(session) && (
           <Tooltip>
             <TooltipTrigger asChild>
               <Button
