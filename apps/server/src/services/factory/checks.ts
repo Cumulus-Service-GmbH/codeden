@@ -131,8 +131,10 @@ export function evaluateChecks(i: CheckInputs): { checks: MergeCheck[]; outcome:
   ) => out.set(name, { name, state, detail, escalate, at: i.now });
   const files = i.pr.files;
 
+  // A rename or copy counts under its old path too: moving a file out of a protected folder
+  // removes it there.
   const hits = protectedHits({
-    files,
+    files: [...new Set([...files, ...(i.pr.renamedFrom ?? [])])],
     text: [i.pr.title, i.pr.body, i.issueTitle ?? ""].join("\n"),
     limits: i.limits,
     areas: i.areas,
