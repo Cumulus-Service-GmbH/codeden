@@ -123,7 +123,7 @@ While the factory runs you mostly just want to glance at it. The **Factory view*
 
 Open it with **Factory view** on the project page or the factory panel, or **Factory view · <project>** in the command palette (Ctrl K). It has its own address, `/projects/<projectId>/factory/view`, so you can bookmark it. **Full screen** in its header fills the screen (in the desktop app, F11 does the same), and **Exit** goes back to the project page. It's only offered for projects in software factory or dark factory mode.
 
-- **The header** shows the project, its mode and the loop state (with the reason when it's paused, "stopped" when a kill switch is on, or **Draining: N items in flight** while it [finishes current work before stopping](#the-kill-switch)). Two counters answer "is anything waiting on me?": how many items **need you** (exactly what the **Needs you** lane lists) and how many **failed**. The kill switch (**Finish current work, then stop** or **Stop now**; **Resume** while draining), **Check now** and **Run scout now** work here as on the panel.
+- **The header** shows the project, its mode and the loop state (with the reason when it's paused, "stopped" when a kill switch is on, or **Draining: N items in flight** while it [finishes current work before stopping](#the-kill-switch)). Two counters answer "is anything waiting on me?": how many items **need you** (exactly what the **Needs you** lane lists) and how many **failed**. The kill switch (**Finish current work, then stop** or **Stop now**; **Resume** while draining), **Check now** and **Run scout now** work here as on the panel. Beside them, the **Board | Floor | Pixel** toggle picks how the view shows the factory (see [Board, Floor and Pixel](#board-floor-and-pixel)).
 - **The figures**, in one row: spend today against the daily budget, merges today (against the daily cap when auto-merge is on), agents working against the limit, the factory's open pull requests, failures and reverts today, and the median time from issue to merge over the last 7 days (from when the factory took the issue in). Under merges, once the queue has merged something, a line shows how it merged over 7 days ("5 fast · 2 re-tested": on their own CI, or re-tested against the default branch first). Under failures, a line counts the fast merges reverted over 7 days. Where the panel shows the same figure, it's the same number.
 - **The pipeline**, left to right: **Intake** (new issues before their type is known, and in a dark factory the scout's round and its area reviewers), **Identify type** (sorted into bug, feature or docs, waiting for a free agent), **Building** (reproduce or analyze, then implement), **Reviewing** (the independent review, the merge checks and CI), **Merge queue** (in the order they merge, each pull request with its state and place, such as "Updating · #1" or "Queued #2", plus the ones rebasing or rebuilding) and **Merged** (today's merges).
   - **Cards.** Each item is a card with its issue number and title, its type, what it's doing now (its agent's latest progress line), and how long it's been in its step. It also shows its pull request's state, while it's reviewed or queued how many merge checks passed (for example 5/8), and what it cost so far ("≈ $1.24"; hover for what kind of figure it is). The cost turns amber from 80% of the [per-item cap](#settings-and-limits).
@@ -136,17 +136,54 @@ Open it with **Factory view** on the project page or the factory panel, or **Fac
   - **Answer the agent's question**: its builder or reviewer asked you something or wants an approval. **Answer** opens the session.
   - **Approve the spec**: a feature's spec waits for you, with [Approve specs before building](#approve-specs-before-building) on. **Review spec** opens the item, where you approve it or ask for changes.
 
-  The same definition counts the header's **need you**, the pixel scene's repair bay and the daily digest's **Waiting on you**, so they always agree. What the factory settles or recovers by itself never shows here: a failure outside the work's code (a session that died, CI that never started) stays in its stage until the factory puts it back, and work whose issue is closed on GitHub settles on its own (see [Closed issues settle their work](#closed-issues-settle-their-work)). However much newer history there is, an old escalation or a failure with an open pull request stays until it's settled. The side sheet of a card shows the same buttons. On wide screens the lane takes at most about a third of the height and scrolls, so the pipeline stays in view. Cards waiting on a person are outlined in amber, failed ones in red.
+  The same definition counts the header's **need you**, the repair bay in Floor and Pixel and the daily digest's **Waiting on you**, so they always agree. What the factory settles or recovers by itself never shows here: a failure outside the work's code (a session that died, CI that never started) stays in its stage until the factory puts it back, and work whose issue is closed on GitHub settles on its own (see [Closed issues settle their work](#closed-issues-settle-their-work)). However much newer history there is, an old escalation or a failure with an open pull request stays until it's settled. The side sheet of a card shows the same buttons. On wide screens the lane takes at most about a third of the height and scrolls, so the pipeline stays in view. Cards waiting on a person are outlined in amber, failed ones in red.
 - **Click a card** to see its details in a side sheet without leaving the view: the steps of its pipeline with the current one marked (also "waiting for a free agent" and "watching CI on the default branch"), the issue and the pull request, the merge checks, the review, links to the builder's and reviewer's sessions, and what the item cost so far (with where it stands against the per-item cap, when one is set). The item page shows the same cost.
 - **The PM chat** shows the last three turns with the project's PM and its usual message box. Replies stream in as in any session, and **Open full chat** opens the PM's page. On screens 1280 pixels wide and up it sits beside the pipeline, and **Hide** folds it into a slim bar. Narrower, it opens from that bar as a side sheet.
 
 On tablets and phones the stages stack as sections you can fold, the figures wrap, and the PM chat opens from a button as a sheet from the bottom. Each stage is a labelled region and each card a button named after its number, title and state. A screen reader hears cards move politely ("#142 moved to Reviewing"), and with reduced motion on, cards don't animate.
 
+#### Board, Floor and Pixel
+
+The toggle in the header, **Board | Floor | Pixel**, picks how the view shows the factory:
+
+- **Board**, the default: the figures, the **Needs you** lane and the pipeline as stages and cards, as described above.
+- **Floor**: the factory as a 3D workshop, with every agent standing at the station for its step. See [Floor mode](#floor-mode).
+- **Pixel**: a small pixel-art factory floor, seen from above, where agents walk between stations as the work moves on. See [Pixel mode](#pixel-mode).
+
+Floor and Pixel take the place of the figures and the pipeline: their budget gauge and merge counter stand in for the figures, and the PM chat becomes part of the scene. The header, its counters and the side sheet stay the same in every mode. Your browser remembers which one you picked. The toggle is one radio group: Tab reaches the chosen mode, and the arrow keys move between them. Phones (narrower than 640 pixels) don't get the toggle, since a scene would be too small to tap there; they always show the board.
+
+#### Floor mode
+
+**Floor** draws the factory as a 3D workshop, seen from above at an angle. It's a cutaway: the back and left walls stand at full height, the front and right are a low curb, and there's no roof, so every station is in view. The zones run across the floor in the board's order, each with its name painted on the floor and on a wall sign:
+
+| Zone | What's there |
+|---|---|
+| **INTAKE** | The roll-up door, a pallet with the waiting tickets (up to 8 drawn) and a sign with the full count. |
+| **PREP** | Desks for the builders that reproduce a bug (with a bug jar) or analyze a feature (with a whiteboard). |
+| **BUILD** | Workbenches with laptops, for the builders implementing or revising and for agents rebasing a pull request. |
+| **REVIEW** | Desks with a laptop and a clipboard, for the reviewers. A pull request waiting for its CI stays here. |
+| **MERGE** | The conveyor, with a crate on the belt for each agent merging, and a signal tower that lights amber while CI runs. |
+| **SHIP** | The dock door in the right wall, under today's merge count, and agents whose merged work still has CI on the default branch watched. |
+| Repair bay | A fenced corner at the front left with the same crates as in Pixel mode: **Needs a retry**, **Stuck** and **Yours to merge**. |
+| PM booth | The PM's raised glass booth in the back-right corner. |
+
+A dial on the back wall shows spend against the daily budget; without a budget it's hidden.
+
+**Every agent is a crew figure** at the station for its step: a small droplet-shaped figure on two feet. Its body tone shows its provider, a badge on its belly carries the provider's mark, and an accessory shows its role: a neckerchief for builders, glasses for reviewers, a collar and a wrench for rebasers, a headset for the PM. An agent without a session yet is a neutral grey. The scout and area reviewers of a dark factory are listed in the roster but don't stand on the floor.
+
+**Everyone gets a seat.** Stations start with seats for your **Agents at once** [limit](#settings-and-limits) and add a row when more agents need one, so there's never a "+N" and nobody queues. Seats don't move while the view is open, and an agent keeps its seat while its step stays at the same station.
+
+**Move around.** Drag to pan, and scroll or pinch to zoom, from a little wider than the whole workshop to about four times closer. **Fit**, in the bottom-right corner, or a double-click on the floor frames the whole workshop again. With reduced motion on, the camera jumps there instead of easing.
+
+**The roster is how you reach the agents.** The picture itself is decorative: screen readers skip it, and clicking a figure does nothing. The **Crew** drawer on the scene's left edge lists every agent as a button, in pipeline order and then the PM, the scout and its area reviewers, each with its role, issue and title, step, status (working, thinking, waiting for approval, blocked, done), provider and model. Hover or focus a row for the agent's card, the same one as in Pixel mode (Escape closes it). Click the row, or press Enter, to open the item's side sheet; for the PM it opens the PM chat, and for the scout and area reviewers their sessions. The roster starts open when the window is 1600 pixels wide or more, and its **Crew** header folds and opens it.
+
+Under the scene, the same line as in Pixel mode says what it shows, and updates for screen readers. The PM chat docks beside the floor as in Pixel mode: on screens 1280 pixels wide and up it sits beside the scene and folds into a slim **PM chat** tab; narrower, the **PM chat** button (or the PM in the roster) opens it over the right side of the scene.
+
+Floor follows the light and dark themes. It loads only when you pick it, and draws only when something changes (the factory, the camera, the window size or the theme), never while the tab is hidden. If your browser can't run WebGL, or loses it and doesn't get it back, the view shows the board with "Factory floor needs WebGL; showing the board." for the rest of that visit.
+
 #### Pixel mode
 
-**Pixel mode** in the header swaps the figures and the pipeline for a small pixel-art factory floor, seen from above, that works along with the factory. It's off by default. The board stays the full view, and your browser remembers which one you picked.
-
-The floor runs left to right like the pipeline:
+**Pixel** swaps the figures and the pipeline for a small pixel-art factory floor, seen from above, that works along with the factory. The floor runs left to right like the pipeline:
 
 | Zone | What's there |
 |---|---|
@@ -179,7 +216,7 @@ Click an agent to open its item's side sheet; its card also has **Open session**
 
 Under the scene, a line says what it shows ("4 building, 1 in review, 3 merged today, 1 waiting for approval, 2 in the repair bay") and updates for screen readers. The wall also has a gauge for spend against the daily budget. While the factory finishes current work before stopping, a red **CLOSED** board hangs on the IN door, the agents carry on, and the line under the scene says how many items are still in flight. With the kill switch on or the loop stopped, the lights dim and everyone sits down.
 
-The scene is one small canvas drawn about 12 times a second while someone walks, and half as often when only the idle animations play. It stops drawing while the tab is hidden, and with reduced motion on it shows a still frame, with the same labels and status marks, that changes only when the factory does. Pixel mode isn't offered on phones (narrower than 640 pixels), where the scene would be too small to tap; they always show the board.
+The scene is one small canvas drawn about 12 times a second while someone walks, and half as often when only the idle animations play. It stops drawing while the tab is hidden, and with reduced motion on it shows a still frame, with the same labels and status marks, that changes only when the factory does.
 
 ### Finished work cleans up after itself
 
