@@ -21,6 +21,8 @@ export const forkableTurn = (session: Session, row: TurnEnd) =>
  * "Fork from here" on a finished turn's footer: a new session whose conversation ends with
  * this turn and whose code is this turn's checkpoint. Shown on hover when the provider can fork.
  * On touch screens it is always shown, in line after the turn's summary rather than over it.
+ * Never shown in a project whose folder isn't a git repository, where no fork can be made: the
+ * ⋯ menu's Fork session says why.
  */
 export function ForkFromHere({ sessionId, row }: { sessionId: string; row: TurnEnd }) {
   const session = useSession(sessionId);
@@ -36,7 +38,7 @@ export function ForkFromHere({ sessionId, row }: { sessionId: string; row: TurnE
 function ForkButton({ session, turnId }: { session: Session; turnId: string }) {
   const fork = useForkSession(session);
   const reasonId = useId();
-  if (!fork.canFork) return null;
+  if (!fork.canFork || fork.notARepo) return null;
   const blocked = fork.blocked;
   return (
     <>

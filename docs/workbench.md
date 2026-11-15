@@ -81,7 +81,7 @@ Want to try a second approach without losing the first? Open the session's **⋯
 - **Same agent.** It keeps the provider, model, effort, permissions and linked issue. Its pull request targets the same base branch. If the original is still planning, the fork keeps planning too, and implements once you approve its own plan.
 - **Original unchanged.** Nothing about the original session changes. Both can carry on side by side.
 
-The fork's header shows **Fork of …** with a link back, and **Details** shows where it was forked from. To see how the two approaches differ, use **Compare with** in either session's Diff panel ([above](#compare-with-another-session)). Fork is offered when the provider supports it (Claude and Codex do). It's available once the session has had a turn and while no turn is running; while a turn runs, the menu says why it's disabled.
+The fork's header shows **Fork of …** with a link back, and **Details** shows where it was forked from. To see how the two approaches differ, use **Compare with** in either session's Diff panel ([above](#compare-with-another-session)). Fork is offered when the provider supports it (Claude and Codex do). It's available once the session has had a turn and while no turn is running; while a turn runs, the menu says why it's disabled. A fork needs its own worktree, so in a project whose folder isn't a git repository the menu lists Fork disabled with "The project folder isn't a git repository", and **Fork from here** isn't shown.
 
 ### Fork from an earlier turn
 
@@ -104,7 +104,7 @@ In the dialog, pick the provider, model and effort, and optionally say what the 
 - **Same work.** It keeps the permissions, plan mode, work key and linked issue. Its pull request is a new one that targets the same base branch.
 - **Original unchanged.** Nothing about the original session changes.
 
-The new session's header shows **Handed off from …** with a link back, and **Details** shows where it came from. **Compare with** in the Diff panel shows how its code differs from the original's. Hand off works on every provider and needs no fork support. It's available once the session has done some work, and while no turn is running and nothing waits on you: a session that failed or was stopped (after a usage limit, say) can be handed off. CodeDen won't hand off to a provider that can't keep the session's permissions: read-only needs a provider that enforces it, and a session that's still planning needs one with plan mode.
+The new session's header shows **Handed off from …** with a link back, and **Details** shows where it came from. **Compare with** in the Diff panel shows how its code differs from the original's. Hand off works on every provider and needs no fork support. It's available once the session has done some work, and while no turn is running and nothing waits on you: a session that failed or was stopped (after a usage limit, say) can be handed off. CodeDen won't hand off to a provider that can't keep the session's permissions: read-only needs a provider that enforces it, and a session that's still planning needs one with plan mode. Like a fork, it needs a worktree, so it's disabled in a project whose folder isn't a git repository.
 
 ## Review with another agent
 
@@ -118,7 +118,7 @@ In the dialog, pick the reviewer's provider, model and effort (it starts on anot
 - **A verdict.** The reviewer ends with **Approve** or **Request changes**, then its findings, most severe first, each with the file and line, a case where it fails and whether it blocks the merge, and what it checked.
 - **Original unchanged.** Nothing about the reviewed session changes. To act on the findings, send them to it as a message.
 
-The review's header shows **Review of …** with a link back, and **Details** shows where it came from. Reviews aren't listed under **Compare with** in the Diff panel, since they have no code of their own. Review is available once the session has done some work, and while no turn is running and nothing waits on you. A review session can't itself be reviewed. Archive the review when you're done, and its worktree is removed.
+The review's header shows **Review of …** with a link back, and **Details** shows where it came from. Reviews aren't listed under **Compare with** in the Diff panel, since they have no code of their own. Review is available once the session has done some work, and while no turn is running and nothing waits on you. It's disabled in a project whose folder isn't a git repository, since the reviewer needs a worktree. A review session can't itself be reviewed. Archive the review when you're done, and its worktree is removed.
 
 ## Share a session
 
