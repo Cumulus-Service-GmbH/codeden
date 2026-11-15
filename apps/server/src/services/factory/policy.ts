@@ -99,14 +99,42 @@ export const isTestFile = (path: string) => TEST_FILE.test(path);
 export const isUiFile = (path: string) => UI_FILE.test(path) && !isTestFile(path);
 export const isNonCodeFile = (path: string) => NON_CODE.test(path);
 
+/**
+ * CodeDen's own folder, always protected (§10.1). It is built in, not a default that the vision
+ * or the limits could drop. `project.json` setup runs in every new worktree and its checks run in
+ * check loops. The vision says what the factory works toward and what it protects. Automations
+ * run prompts on a schedule. Matched at any depth, for a project folder below the repo root.
+ */
+export const ALWAYS_PROTECTED_GLOB = "**/.codeden/**";
+
+/** Why a file under `.codeden/` always needs a person, for the escalation's reason. */
+export function alwaysProtectedWhy(path: string): string {
+  const name = path.replace(/\\/g, "/").replace(/^(?:.*\/)?\.codeden\//, "");
+  if (name === "project.json") return "setup commands every new worktree runs, and checks";
+  if (/^vision\.md$/i.test(name)) return "the vision the factory follows, protected areas included";
+  if (name.startsWith("automations/")) return "an automation prompt that runs on a schedule";
+  return "CodeDen's project configuration";
+}
+
+/**
+ * The vision's protected areas plus the vision file itself, which is always protected wherever
+ * the project keeps it (`Project.visionPath`; the default is under `.codeden/` anyway).
+ */
+export function withVisionFile(areas: ProtectedAreas, visionPath: string): ProtectedAreas {
+  const file = visionPath.replaceAll("\\", "/").replace(/^\.\//, "");
+  return { ...areas, globs: [...areas.globs, file] };
+}
+
 export interface ProtectedHits {
-  paths: Array<{ path: string; globs: string[] }>;
+  /** `why` is set for CodeDen's own files (`ALWAYS_PROTECTED_GLOB`). */
+  paths: Array<{ path: string; globs: string[]; why?: string }>;
   topics: string[];
 }
 
 /**
- * Protected paths and topics a change touches: configured `protectedPaths`, the vision's
- * protected areas, and deploy/release files unless deploys are allowed.
+ * Protected paths and topics a change touches: CodeDen's own `.codeden/` folder (always),
+ * configured `protectedPaths`, the vision's protected areas, and deploy/release files unless
+ * deploys are allowed.
  */
 export function protectedHits(input: {
   files: readonly string[];
@@ -116,12 +144,17 @@ export function protectedHits(input: {
   areas: ProtectedAreas;
 }): ProtectedHits {
   const globs = [
+    ALWAYS_PROTECTED_GLOB,
     ...input.limits.protectedPaths,
     ...input.areas.globs,
     ...(input.limits.allowDeploys ? [] : DEPLOY_GLOBS),
   ];
   const paths = input.files
-    .map((path) => ({ path, globs: matchingGlobs(path, globs) }))
+    .map((path) => {
+      const matched = matchingGlobs(path, globs);
+      const always = matched.includes(ALWAYS_PROTECTED_GLOB);
+      return { path, globs: matched, ...(always ? { why: alwaysProtectedWhy(path) } : {}) };
+    })
     .filter((h) => h.globs.length > 0);
   const topics = input.areas.topics.filter((t) => mentionsTopic(input.text, t));
   return { paths, topics };

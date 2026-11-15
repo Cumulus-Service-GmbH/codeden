@@ -110,7 +110,7 @@ export const NON_INTERACTIVE_COMMANDS =
   "Run installs and other commands non-interactively: nothing can answer a prompt in your shell. If a command waits on a prompt (such as \"Proceed? (Y/n)\"), stop it and rerun it non-interactively (with `CI=true`, `--yes` or the tool's own flag); don't wait for it.";
 
 const WORK_RULES = [
-  "Rules: work only in this worktree, keep the change small and focused, stay out of protected areas, and never deploy or release anything. Don't stop to ask the user: make the reasonable call within the issue and the vision and say what you assumed in the pull request. If you truly cannot go on, call `finish` with outcome `blocked`.",
+  "Rules: work only in this worktree, keep the change small and focused, stay out of protected areas (CodeDen's own `.codeden/` folder is always one: a change there never merges by itself), and never deploy or release anything. Don't stop to ask the user: make the reasonable call within the issue and the vision and say what you assumed in the pull request. If you truly cannot go on, call `finish` with outcome `blocked`.",
   FOREGROUND_COMMANDS,
   NON_INTERACTIVE_COMMANDS,
   UNTRUSTED_INPUT,

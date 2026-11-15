@@ -307,7 +307,10 @@ Anything here **always comes to you**: a pull request that touches it is escalat
 | `infrastructure`, `infra` | `**/infra/**`, `**/terraform/**`, `**/*.tf`, `.github/workflows/**` |
 | `licensing`, `license` | `LICENSE`, `LICENSE.*`, `COPYING` |
 
-You can add more globs in the factory settings (**Protected paths**), on top of the vision's. The vision file itself and deploy files are always protected (see below).
+You can add more globs in the factory settings (**Protected paths**), on top of the vision's. Some files are always protected (see below):
+- CodeDen's own `.codeden/` folder, built in and impossible to switch off. It holds `project.json` (setup commands that run in every new worktree, and the checks), `VISION.md` and the automations that run on a schedule. The escalation names the file and why.
+- The vision file itself, wherever the project keeps it.
+- Deploy files.
 
 ## Merge checks
 
@@ -315,7 +318,7 @@ Every check must pass before a pull request is ready to merge. Results are recor
 
 | Check | Passes when |
 |---|---|
-| **Protected areas** | No changed path matches a protected glob, the vision file or a deploy file, and no protected topic is mentioned. A failure escalates the PR to you |
+| **Protected areas** | No changed path is under `.codeden/` or matches a protected glob, the vision file or a deploy file, and no protected topic is mentioned. A failure escalates the PR to you |
 | **Size** | The change is within **Largest change** (`maxChangedLines`, default 5,000 added + deleted lines) and **Most files changed** (`maxChangedFiles`, no limit by default). Lockfiles and generated or vendored files (such as drizzle-kit's migration snapshots) don't count. The PM can allow a bigger change that can't be split |
 | **CI** | The PR's checks are green. While the PR has merge conflicts it waits for them to be rebased away (GitHub runs no CI on a conflicting PR). No checks on the head commit wait 10 minutes from when that head appeared, then count as "CI never started" (see [below](#failures-outside-the-work)), unless `requireCi` is off |
 | **Review** | The independent reviewer approves against the issue, the spec and the vision. Skipped for docs-only changes in the docs pipeline |

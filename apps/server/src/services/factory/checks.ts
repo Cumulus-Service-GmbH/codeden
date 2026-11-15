@@ -142,7 +142,10 @@ export function evaluateChecks(i: CheckInputs): { checks: MergeCheck[]; outcome:
       hits.paths.length ? `paths: ${list(hits.paths.map((h) => h.path))}` : "",
       hits.topics.length ? `topics: ${hits.topics.join(", ")}` : "",
     ].filter(Boolean);
-    set("protected_paths", "fail", `Touches protected areas (${parts.join("; ")})`, true);
+    // CodeDen's own files say why: they run on the user's machine or steer the factory.
+    const own = hits.paths.flatMap((h) => (h.why ? [`${h.path} (${h.why})`] : []));
+    const why = own.length ? `. CodeDen's own files always need a person: ${list(own, 3)}` : "";
+    set("protected_paths", "fail", `Touches protected areas (${parts.join("; ")})${why}`, true);
   } else set("protected_paths", "pass", null);
 
   const size = changeSize(i.pr);

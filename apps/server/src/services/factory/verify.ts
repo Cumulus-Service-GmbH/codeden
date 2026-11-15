@@ -14,7 +14,7 @@ import { handleFailure } from "./failures";
 import type { FactoryPr, PrEvidence } from "./github-port";
 import { prDecidedOutside, readyForYou } from "./merge";
 import { escalate, failItem, runAudit } from "./outcomes";
-import { isUiFile } from "./policy";
+import { isUiFile, withVisionFile } from "./policy";
 import { joinQueue, leaveQueue } from "./queue";
 import {
   advanceConflicting,
@@ -135,7 +135,7 @@ export async function advanceVerifying(
     tuning: loop.tuning,
     largeChange: item.largeChange ?? null,
     revert: item.source === "revert",
-    areas: vision.parsed.protectedAreas,
+    areas: withVisionFile(vision.parsed.protectedAreas, project.visionPath),
     now: now.toISOString(),
   });
   let current = ctx.store.updateItem(item.id, (i) => ({
