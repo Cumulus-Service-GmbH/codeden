@@ -29,7 +29,8 @@ const projectBase = {
    * re-detection (server start, after turns in local-only projects, on demand). A folder that
    * isn't one has no worktrees: its sessions run in the folder itself, and a worktree asked for
    * is refused when the session is created (`not_a_repo`). Defaults to true so events written
-   * before it existed still parse; the next server start detects it again.
+   * before it existed still parse; the next server start detects it again, and a session start in
+   * a project that check hasn't reached yet waits for its check of the folder.
    */
   isGitRepo: z.boolean().default(true),
   defaultBranch: z.string().nullable(),

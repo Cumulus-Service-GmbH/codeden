@@ -32,7 +32,15 @@ interface Hosted {
   drainInterrupted: boolean;
   /** A root turn was running when the runner started closing the session. */
   turnCutOff: boolean;
+  /** `compact` asked for a compaction: the next root turn to start is it (`kind: "compact"`). */
+  compactPending?: boolean;
+  /** The root turn compacting the conversation now, if one is. */
+  compactTurnId?: string;
 }
+
+/** A steer during a compaction (the server answers the same when it knows first). */
+const COMPACTING =
+  "The conversation is being compacted, so there is no turn to steer. Send the message instead: it waits in the queue and goes once the compaction ends.";
 
 export interface SessionHostOptions {
   log?: (message: string) => void;
@@ -146,11 +154,15 @@ export class SessionHost {
   async send(cmd: RunnerCommandOf<"session.send">): Promise<void> {
     const hosted = this.get(cmd.sessionId);
     await hosted.checkpointChain;
+    // A message's turn is work, also after a compaction that failed without starting one.
+    const compactPending = hosted.compactPending;
+    hosted.compactPending = false;
     try {
       await hosted.session.send(cmd.input);
     } catch (error) {
       // The server queues the message behind the running turn instead of failing the session.
       if (error instanceof ProviderSessionError && error.code === "turn_running") {
+        hosted.compactPending = compactPending;
         throw new CommandError("turn_running", error.message);
       }
       throw error;
@@ -158,8 +170,13 @@ export class SessionHost {
   }
 
   async steer(cmd: RunnerCommandOf<"session.steer">): Promise<void> {
-    const { session } = this.get(cmd.sessionId);
+    const hosted = this.get(cmd.sessionId);
+    const { session } = hosted;
     if (!session.steer) throw new CommandError("unsupported", "This provider cannot steer turns");
+    // A compaction has no conversation turn to fold a message into (Codex refuses outright).
+    if (hosted.compactPending || hosted.compactTurnId) {
+      throw new CommandError("compacting", COMPACTING);
+    }
     await session.steer(cmd.input);
   }
 
@@ -167,18 +184,25 @@ export class SessionHost {
     await this.get(sessionId).session.interrupt();
   }
 
-  /** Compact the conversation now, as a turn of its own (`capabilities.compact`). */
+  /**
+   * Compact the conversation now, as a turn of its own (`capabilities.compact`). The turn it
+   * starts goes out marked `kind: "compact"`, whichever provider runs it.
+   */
   async compact(sessionId: string): Promise<void> {
     const hosted = this.get(sessionId);
     if (!hosted.session.compact) {
       throw new CommandError("unsupported", "This provider cannot compact a conversation");
     }
     await hosted.checkpointChain;
+    hosted.compactPending = true;
     try {
       await hosted.session.compact();
     } catch (error) {
-      // As for a message: the server tells the user a turn is running.
+      // As for a message: the server tells the user a turn is running. Refused before it
+      // started, so the next turn isn't the compaction. After any other failure the provider
+      // may have started (and ended) its turn already; the next message clears the mark.
       if (error instanceof ProviderSessionError && error.code === "turn_running") {
+        hosted.compactPending = false;
         throw new CommandError("turn_running", error.message);
       }
       throw error;
@@ -329,8 +353,20 @@ export class SessionHost {
     }
   }
 
-  /** A drain-interrupted root turn is reported as cut off by a runner restart. */
+  /**
+   * A drain-interrupted root turn is reported as cut off by a runner restart, and the root turn
+   * a compaction starts is marked as one.
+   */
   private rewrite(hosted: Hosted, event: AgentEvent): AgentEvent {
+    if (
+      hosted.compactPending &&
+      event.type === "turn.started" &&
+      event.threadId === hosted.rootThreadId
+    ) {
+      hosted.compactPending = false;
+      hosted.compactTurnId = event.turnId;
+      return { ...event, kind: "compact" };
+    }
     if (
       hosted.drainInterrupted &&
       event.type === "turn.interrupted" &&
@@ -354,6 +390,7 @@ export class SessionHost {
       event.type === "turn.interrupted"
     ) {
       if (hosted.state !== "closing") hosted.state = "idle";
+      if (hosted.compactTurnId === event.turnId) hosted.compactTurnId = undefined;
       if (hosted.checkpoints) this.checkpoint(sessionId, hosted, event.turnId);
     }
   }
