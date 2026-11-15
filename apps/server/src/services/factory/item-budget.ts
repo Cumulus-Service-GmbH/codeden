@@ -20,6 +20,12 @@ import { BUILDER_FAILED_REASON } from "./turn-race";
  * item from spending the day's budget by itself. Spend counts every session of the item since
  * it was last retried (`FactoryItem.itemBudgetSince`), from the usage ledger. It is checked as
  * the loop ticks, so an item can go over by what its sessions spend between two ticks.
+ *
+ * The cap stops agent turns, not the steps that cost nothing. Verification also holds work no
+ * agent touches any more (an approved PR waiting on CI, queued to merge, brought up to date by
+ * GitHub's update-branch), and a review is often the turn that goes over: such an item moves on
+ * and merges, and stops only before a step that would start an agent turn
+ * (`stopBeforeAgentTurn`).
  */
 
 /** Stages whose items an agent may still work on or pick up: checked against the cap. */
@@ -43,9 +49,11 @@ export function itemBudgetReason(over: string): string {
 
 /**
  * Items in the queue, building or verifying (or failed, when the loop would put them back by
- * itself) that reached the per-item cap: their running sessions are stopped and they fail as
- * `stuck`, which reaches the inbox (a recorded decision in
- * a dark factory) and never counts toward the failure streak. Runs while paused or draining too:
+ * itself) that reached the per-item cap have their running sessions stopped. Those in the queue,
+ * building or failed then fail as `stuck`, which reaches the inbox (a recorded decision in a
+ * dark factory) and never counts toward the failure streak. Those verifying move on through the
+ * steps that start no agent turn (CI, the merge queue, update-branch, the merge) and stop as
+ * stuck only before one that would (`stopBeforeAgentTurn`). Runs while paused or draining too:
  * work in flight moves on then. Nothing happens without a cap.
  */
 export async function enforceItemBudgets(
@@ -65,9 +73,30 @@ export async function enforceItemBudgets(
   for (const item of items) {
     const spent = capSpendOf(turns.get(item.id) ?? [], item.itemBudgetSince);
     const over = itemBudgetReached(spent, limits);
-    if (over) loop = await stopOverBudget(ctx, loop, item, over, limits);
+    if (!over) continue;
+    if (item.stage === "verifying") await stopBusySessions(ctx, item, over);
+    else loop = await stopOverBudget(ctx, loop, item, over, limits);
   }
   return loop;
+}
+
+/**
+ * Before a step that starts an agent turn on a verifying item (a review or re-review, a revise
+ * round, a rebase or integrator, the builder brought back for the audit, an agent's commit that
+ * starts CI): an item over its cap stops here instead, as stuck, its note saying why. Null when
+ * it may go on.
+ */
+export async function stopBeforeAgentTurn(
+  ctx: FactoryContext,
+  project: Project,
+  loop: FactoryLoop,
+  item: FactoryItem,
+): Promise<FactoryLoop | null> {
+  const over = overItemBudget(ctx, project, item);
+  if (!over) return null;
+  const next = await stopOverBudget(ctx, loop, item, over, project.factoryLimits);
+  ctx.store.updateItem(item.id, (i) => ({ ...i, note: overBudgetNote(over) }));
+  return next;
 }
 
 /**
@@ -80,6 +109,16 @@ function putBackByItself(item: FactoryItem): boolean {
   );
 }
 
+/** Stop the item's builder and reviewer sessions that are at work. */
+async function stopBusySessions(ctx: FactoryContext, item: FactoryItem, over: string) {
+  for (const id of new Set([item.builderSessionId, item.reviewerSessionId])) {
+    const session = id ? ctx.repo.find(id)?.session : undefined;
+    if (!session || !isBusy(session)) continue;
+    ctx.log?.(`factory: ${item.id}: ${session.id} stopped at the item's spend cap (${over})`);
+    await ctx.sessions.stop(session.id);
+  }
+}
+
 async function stopOverBudget(
   ctx: FactoryContext,
   loop: FactoryLoop,
@@ -87,10 +126,7 @@ async function stopOverBudget(
   over: string,
   limits: Pick<FactoryLimits, "itemBudget">,
 ): Promise<FactoryLoop> {
-  for (const id of new Set([item.builderSessionId, item.reviewerSessionId])) {
-    const session = id ? ctx.repo.find(id)?.session : undefined;
-    if (session && isBusy(session)) await ctx.sessions.stop(session.id);
-  }
+  await stopBusySessions(ctx, item, over);
   ctx.log?.(`factory: ${item.id}: stopped at its spend cap (${over})`);
   return markStuck(
     ctx,
@@ -102,8 +138,9 @@ async function stopOverBudget(
 }
 
 /**
- * Why a failed or escalated item is over its cap, or null: such an item starts no agent turn
- * (no rebase, integrator or re-review) until it is retried.
+ * Why the item is over its cap, or null. A failed or escalated item over it starts no agent turn
+ * (no rebase, integrator or re-review) until it is retried; a verifying one stops before its
+ * next (`stopBeforeAgentTurn`).
  */
 export function overItemBudget(
   ctx: FactoryContext,

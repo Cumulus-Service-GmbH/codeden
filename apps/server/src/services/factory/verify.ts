@@ -8,10 +8,11 @@ import {
 import { errorMessage } from "../errors";
 import { settleApproval, verdictHead } from "./approval";
 import { codeFiles, evaluateChecks, hasTestResults, sameChecks } from "./checks";
-import { kickCi } from "./ci-kick";
+import { CI_KICK_NUDGE, kickCi } from "./ci-kick";
 import { type FactoryContext, visionOf } from "./context";
 import { handleFailure } from "./failures";
 import type { FactoryPr, PrEvidence } from "./github-port";
+import { stopBeforeAgentTurn } from "./item-budget";
 import { prDecidedOutside, readyForYou } from "./merge";
 import { escalate, failItem, runAudit } from "./outcomes";
 import { changedPaths, isUiFile, withVisionFile } from "./policy";
@@ -84,8 +85,16 @@ export async function advanceVerifying(
   }
   // What it changes, for overlap-aware scheduling of the queue (`overlap.ts`).
   ctx.prFiles.set(project.id, pr.ref.number, pr.files);
+  // Work over its spend cap moves on through the steps that start no agent turn (CI, the merge
+  // queue, update-branch, the merge) and stops before one that would (`item-budget.ts`).
+  const beforeAgentTurn = (current: FactoryItem) =>
+    stopBeforeAgentTurn(ctx, project, loop, current);
   // CI that never started is started again (by its agent, or an integrator that takes the PR
   // over when the author's session is gone); its clock waits until that happened.
+  if (item.nudges[CI_KICK_NUDGE]) {
+    const stopped = await beforeAgentTurn(item);
+    if (stopped) return stopped;
+  }
   const kicking = await kickCi(ctx, project, item, pr);
   item = ctx.store.item(item.id) ?? item;
 
@@ -152,13 +161,25 @@ export async function advanceVerifying(
   if (outcome === "pending") {
     // Merge conflicts (another merge came first): the PR's agent rebases, then CI runs again.
     // A review in progress still counts; a new one waits for the rebased head.
-    if (conflicting) return advanceConflicting(ctx, project, loop, current, pr);
+    if (conflicting) {
+      return (
+        (await beforeAgentTurn(current)) ?? advanceConflicting(ctx, project, loop, current, pr)
+      );
+    }
     // The audit is due but cleanup removed the builder's worktree: bring it back first.
     if (auditConfigured && builder?.worktreeRemovedAt && !auditCache.has(headKey)) {
-      return restoreForAudit(ctx, project, loop, current, builder, pr.headSha);
+      return (
+        (await beforeAgentTurn(current)) ??
+        restoreForAudit(ctx, project, loop, current, builder, pr.headSha)
+      );
     }
-    const reviewed = checks.find((c) => c.name === "review")?.state !== "skipped";
-    if (!reviewed) return loop;
+    const review = checks.find((c) => c.name === "review")?.state;
+    if (review === "skipped") return loop;
+    // An approval that covers this head waits on CI alone; any other review takes an agent's turn.
+    if (review !== "pass") {
+      const stopped = await beforeAgentTurn(current);
+      if (stopped) return stopped;
+    }
     current = await ensureReviewer(ctx, project, loop, current, vision.text, pr);
     return reviewerStalled(ctx, project, loop, current);
   }
