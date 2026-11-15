@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,9 +12,9 @@ import { removeTree } from "./support/remove-tree";
 
 /**
  * Upgrading to the build that records `Project.isGitRepo` (#408): the migration adds the column
- * with `true` for every project, and the server's start-up re-detection corrects it in the
- * background, one project at a time (#425). A session started before that check reaches a
- * plain-folder project must still run in the project folder, not ask for a worktree.
+ * as `true` for every project, and the server's start-up check corrects it in the background,
+ * one project at a time (#425). A session started before that check reaches a plain-folder
+ * project must still run in the project folder, not ask for a worktree.
  */
 const TOKEN = "e".repeat(64);
 const all = findMigrationsDir();
@@ -21,9 +22,13 @@ const names = readdirSync(all).filter((n) => /^\d{14}_/.test(n));
 const ts = "2026-11-14T10:00:00.000Z";
 
 let home: string;
+/** The first project in the list, whose start-up check is slow: it holds up the others. */
+let slow: string;
+/** A plain folder: not a git repository. */
 let folder: string;
+/** A git checkout. */
+let repo: string;
 let server: RunningServer | undefined;
-/** `git` runs in the project folder that the start-up re-detection hasn't been let through. */
 let held: (() => void)[];
 
 /** The migrations of the build before #408, which had no `is_git_repo` column. */
@@ -36,9 +41,9 @@ function migrationsBeforeIsGitRepo(): string {
   return dir;
 }
 
-/** The re-detection of the plain folder waits until `release()`: a slow start-up check. */
+/** `git` in the slow project waits until `release()`; everything else runs for real. */
 const exec: Exec = (command, args, opts) =>
-  command === "git" && args[0] === "-C" && args[1] === folder
+  command === "git" && args[0] === "-C" && args[1] === slow
     ? new Promise((resolve) => held.push(() => resolve(runTool(command, args, opts))))
     : runTool(command, args, opts);
 const release = () => {
@@ -57,18 +62,22 @@ const api = async (method: string, path: string, body?: unknown) => {
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "codeden-upgrade-git-"));
   held = [];
+  slow = join(home, "archive");
   folder = join(home, "music-videos");
-  mkdirSync(folder);
+  repo = join(home, "todo-app");
+  for (const dir of [slow, folder, repo]) mkdirSync(dir);
   writeFileSync(join(folder, "notes.txt"), "lyrics\n");
-  // A database written by the previous build, holding one project in a plain folder.
+  execFileSync("git", ["-C", repo, "init", "-q", "-b", "main"], { stdio: "pipe" });
+  // A database written by the previous build, with its projects in this order.
   const dataDir = join(home, "data");
   mkdirSync(dataDir);
   const old = openDatabase(join(dataDir, "codeden.db"), migrationsBeforeIsGitRepo());
-  old.client
-    .prepare(
-      "INSERT INTO projects (id, kind, name, slug, path, created_at, updated_at) VALUES ('p1', 'local', 'music-videos', 'music-videos', ?, ?, ?)",
-    )
-    .run(folder, ts, ts);
+  const insert = old.client.prepare(
+    "INSERT INTO projects (id, kind, name, slug, path, default_branch, sort_order, created_at, updated_at) VALUES (?, 'local', ?, ?, ?, ?, ?, ?, ?)",
+  );
+  insert.run("p0", "archive", "archive", slow, null, 0, ts, ts);
+  insert.run("p1", "music-videos", "music-videos", folder, null, 1, ts, ts);
+  insert.run("p2", "todo-app", "todo-app", repo, "main", 2, ts, ts);
   old.close();
 });
 
@@ -79,8 +88,9 @@ afterEach(async () => {
   await removeTree(home);
 });
 
-const start = () =>
-  startServer({
+/** Starts the upgraded server and waits until its start-up check is held up on the first project. */
+async function startUpgraded(): Promise<void> {
+  server = await startServer({
     port: 0,
     dataDir: join(home, "data"),
     token: TOKEN,
@@ -91,39 +101,47 @@ const start = () =>
     exec,
     github: { sync: false },
   });
+  await waitUntil(() => (held.length > 0 ? true : undefined));
+}
 
-describe("a plain-folder project right after upgrading to the build with isGitRepo", () => {
-  it("is not read as a git repository before the start-up re-detection reaches it", async () => {
-    server = await start();
-    // The start-up check of the folder has begun and is still running.
-    await waitUntil(() => (held.length > 0 ? true : undefined));
+/** A session start as the New session view sends it, and the workspace it recorded. */
+async function startSession(projectId: string, workspace?: { mode: "worktree" }) {
+  const res = await api("POST", "/sessions", {
+    projectId,
+    provider: "fake",
+    input: { text: "Hey" },
+    ...(workspace ? { workspace } : {}),
+  });
+  if (res.status !== 200) return { status: res.status, body: res.body, mode: undefined };
+  const started = StartSessionResponse.parse(res.body);
+  if (started.status !== "started") throw new Error(started.status);
+  const detail = SessionDetail.parse((await api("GET", `/sessions/${started.sessionId}`)).body);
+  return { status: res.status, body: res.body, mode: detail.startMeta?.workspaceMode };
+}
 
-    const project = Project.parse((await api("GET", "/projects/p1")).body);
-    expect(project.isGitRepo).toBe(false);
+describe("right after upgrading, before the start-up check reaches the project", () => {
+  it("runs a new session in a plain folder in the project folder", async () => {
+    await startUpgraded();
+    // Still `true`, as the migration left it: the check hasn't reached the project yet.
+    expect(Project.parse((await api("GET", "/projects/p1")).body).isGitRepo).toBe(true);
+
+    const started = await startSession("p1");
+    expect(started.status, JSON.stringify(started.body)).toBe(200);
+    expect(started.mode).toBe("repo_root");
+    // The start checked the folder, and the project says so now.
+    expect(Project.parse((await api("GET", "/projects/p1")).body).isGitRepo).toBe(false);
   });
 
-  it("runs a session started before the re-detection finishes in the project folder", async () => {
-    server = await start();
-    await waitUntil(() => (held.length > 0 ? true : undefined));
+  it("refuses a worktree there when the session is created, with not_a_repo", async () => {
+    await startUpgraded();
+    const started = await startSession("p1", { mode: "worktree" });
+    expect(started.status).toBe(400);
+    expect(started.body).toMatchObject({ error: { code: "not_a_repo" } });
+  });
 
-    // What the New session view sends: no workspace, so the default applies.
-    const res = await api("POST", "/sessions", {
-      projectId: "p1",
-      provider: "fake",
-      input: { text: "Hey" },
-    });
-    expect(res.status, JSON.stringify(res.body)).toBe(200);
-    const started = StartSessionResponse.parse(res.body);
-    if (started.status !== "started") throw new Error(started.status);
-    const detail = SessionDetail.parse((await api("GET", `/sessions/${started.sessionId}`)).body);
-    expect(detail.startMeta?.workspaceMode).toBe("repo_root");
-
-    // Once the check is let through it records the folder as it is: still no git repository.
-    release();
-    const checked = await waitUntil(async () => {
-      const p = Project.parse((await api("GET", "/projects/p1")).body);
-      return p.isGitRepo ? undefined : p;
-    });
-    expect(checked.isGitRepo).toBe(false);
+  it("still gives a new session in a git checkout its own worktree", async () => {
+    await startUpgraded();
+    expect((await startSession("p2")).mode).toBe("worktree");
+    expect(Project.parse((await api("GET", "/projects/p2")).body).isGitRepo).toBe(true);
   });
 });
