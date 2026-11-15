@@ -61,10 +61,10 @@ function isDrizzleSnapshot(dirs: string[], name: string): boolean {
   );
 }
 
-/** True for a package manager's lockfile, in any folder. */
+/** True for a package manager's lockfile, in any folder: the known names, and any `*.lock`. */
 export function isLockfile(path: string): boolean {
   const name = (path.replace(/\\/g, "/").split("/").at(-1) ?? "").toLowerCase();
-  return LOCKFILES.has(name);
+  return LOCKFILES.has(name) || name.endsWith(".lock");
 }
 
 /** True for files the size check doesn't count (lockfiles, generated or vendored files). */

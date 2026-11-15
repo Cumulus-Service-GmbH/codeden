@@ -16,7 +16,6 @@ import { isLockfile } from "./size";
 
 /** Root files that change how every package installs, builds or runs. */
 const ROOT_FILES = new Set([
-  "package.json",
   "pnpm-workspace.yaml",
   ".npmrc",
   ".nvmrc",
@@ -30,8 +29,25 @@ const ROOT_FILES = new Set([
   "go.work",
 ]);
 
-/** Dependency manifests, wherever they are (their lockfiles are covered by `isLockfile`). */
-const MANIFESTS = new Set(["go.mod", "cargo.toml", "pyproject.toml", "gemfile", "composer.json"]);
+/**
+ * Dependency manifests, wherever they are: a workspace package's `package.json` installs and
+ * runs scripts like the root one (their lockfiles are covered by `isLockfile`).
+ */
+const MANIFESTS = new Set([
+  "package.json",
+  "go.mod",
+  "cargo.toml",
+  "pyproject.toml",
+  "pipfile",
+  "gemfile",
+  "composer.json",
+  "pubspec.yaml",
+  "mix.exs",
+  "package.swift",
+  "pom.xml",
+  "build.gradle",
+  "build.gradle.kts",
+]);
 
 /** Build, test and lint config by base name: `vite.config.ts`, `tsconfig.base.json`, ... */
 const CONFIG_NAME =

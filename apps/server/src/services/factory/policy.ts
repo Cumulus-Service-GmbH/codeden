@@ -94,10 +94,36 @@ const TEST_FILE =
 const UI_FILE = /\.(tsx|jsx|vue|svelte|astro|css|scss|sass|less|html)$/i;
 const NON_CODE =
   /\.(md|mdx|txt|rst|json|ya?ml|toml|ini|lock|svg|png|jpe?g|gif|webp|ico)$|(^|\/)(LICENSE|\.gitignore|\.editorconfig)$/i;
+const DOC_FILE = /\.(md|mdx|txt|rst|svg|png|jpe?g|gif|webp|ico)$/i;
+/**
+ * Files with a docs extension that aren't documentation: `.txt` files that steer an install or
+ * a build, the instructions coding agents load (`CLAUDE.md`, `AGENTS.md`, ...), and anything in
+ * a dot-folder (`.github/`, `.claude/`, `.codex/`, `.agents/`, `.cursor/`, ...), where tools read
+ * files as configuration or prompts.
+ */
+const NOT_DOCS =
+  /(^|\/)(requirements|constraints)([-._][^/]*)?\.txt$|(^|\/)requirements\/[^/]+\.txt$|(^|\/)CMakeLists\.txt$|(^|\/)(CLAUDE|AGENTS|GEMINI)(\.[\w-]+)?\.md$|(^|\/)\.[^/]+\//i;
 
 export const isTestFile = (path: string) => TEST_FILE.test(path);
 export const isUiFile = (path: string) => UI_FILE.test(path) && !isTestFile(path);
+/**
+ * Not code for the tests checks: docs, config, manifests, lock files and assets. A change made
+ * only of these needs no tests or test results (`codeFiles` in `checks.ts`). Never use it to
+ * decide whether a change is reviewed: config and lock files change what runs. That is
+ * `isDocFile`.
+ */
 export const isNonCodeFile = (path: string) => NON_CODE.test(path);
+
+/**
+ * Documentation, the only files the docs pipeline merges without the independent review:
+ * prose (`md`, `mdx`, `txt`, `rst`) and images (`svg`, `png`, `jpg`, `gif`, `webp`, `ico`), in
+ * any folder. Config, manifests, lock files, workflows, tests (fixtures too), agent instructions
+ * and code are never documentation.
+ */
+export function isDocFile(path: string): boolean {
+  const normalized = path.replace(/\\/g, "/").replace(/^\.\//, "");
+  return DOC_FILE.test(normalized) && !NOT_DOCS.test(normalized) && !isTestFile(normalized);
+}
 
 /**
  * CodeDen's own folder, always protected (§10.1). It is built in, not a default that the vision

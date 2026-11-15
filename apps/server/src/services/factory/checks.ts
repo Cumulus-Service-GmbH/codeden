@@ -9,7 +9,14 @@ import type {
   WorkType,
 } from "@codeden/contracts";
 import type { FactoryPr } from "./github-port";
-import { changedPaths, isNonCodeFile, isTestFile, isUiFile, protectedHits } from "./policy";
+import {
+  changedPaths,
+  isDocFile,
+  isNonCodeFile,
+  isTestFile,
+  isUiFile,
+  protectedHits,
+} from "./policy";
 import { type RecheckCause, recheckWhy } from "./recheck";
 import { changeSize, overSizeLimit, sizeLimitText } from "./size";
 
@@ -106,9 +113,24 @@ export function notAuthorFixable(check: MergeCheck): boolean {
   return check.name === "ci" && (check.detail ?? "").startsWith(NEVER_STARTED);
 }
 
-/** Code files of a change (not tests, docs, config or assets). */
+/**
+ * Code files of a change (not tests, docs, config or assets), for the tests checks only: a
+ * change without code needs no tests or test results. Whether it is reviewed is `docsOnly`.
+ */
 export function codeFiles(files: readonly string[]): string[] {
   return files.filter((f) => !isTestFile(f) && !isNonCodeFile(f));
+}
+
+/**
+ * Whether a PR is documentation only, so the docs pipeline may merge it without the
+ * independent review: GitHub listed every file, and each one, old paths of renames included,
+ * is documentation (`isDocFile`). A manifest, lock file, workflow, test or deleted file of any
+ * other kind means it is reviewed like any other PR.
+ */
+export function docsOnly(pr: Pick<FactoryPr, "files" | "renamedFrom" | "changedFiles">): boolean {
+  const all = changedPaths(pr);
+  if (all.length === 0 || (pr.changedFiles ?? 0) > pr.files.length) return false;
+  return all.every(isDocFile);
 }
 
 function list(items: string[], max = 5): string {
@@ -188,8 +210,9 @@ export function evaluateChecks(i: CheckInputs): { checks: MergeCheck[]; outcome:
   const paths = changedPaths(i.pr);
   const code = codeFiles(paths);
   // The docs pipeline has no agent review (Implement docs change -> Merge), as long as the
-  // change really is docs only; anything touching code is reviewed like any other change.
-  const reviewed = !(i.type === "docs" && code.length === 0);
+  // change really is documentation only; config, manifests, lock files, workflows, tests and
+  // code are reviewed like any other change.
+  const reviewed = !(i.type === "docs" && docsOnly(i.pr));
   if (!reviewed)
     set("review", "skipped", "Docs-only change: the docs pipeline has no agent review");
   else if (!i.review)

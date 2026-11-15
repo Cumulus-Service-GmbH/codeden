@@ -253,7 +253,7 @@ const REVIEW_FOCUS: Record<WorkType, string> = {
   bug: "Does the change fix the reported bug at its cause? Is there a regression test that fails without the fix and passes with it? Could it break anything else?",
   feature:
     "Does it implement the spec and every acceptance criterion? Is the public API sensible and backward compatible? Are the docs updated?",
-  docs: "Is every command, path, option and API it mentions correct for the code as written?",
+  docs: "Is every command, path, option and API it mentions correct for the code as written? Anything it changes besides documentation (config, manifests, lock files, workflows, tests, code) needs a reason in the issue: review it like any other change.",
 };
 
 /** How a reviewer repairs a broken install before testing (pnpm projects, non-interactive). */

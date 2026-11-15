@@ -79,10 +79,12 @@ describe("which files always re-test", () => {
       "packages/contracts/src/index.ts",
       "services/api/go.mod",
       "requirements-dev.txt",
+      "apps/web/package.json",
+      "vendor/custom.lock",
+      "go.sum",
     ])
       expect(isMergeSensitive(path), path).toBe(true);
     for (const path of [
-      "apps/web/package.json",
       "apps/server/src/services/factory/queue.ts",
       "packages/contracts/src/factory.ts",
       "docs/software-factory.md",
