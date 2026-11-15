@@ -75,6 +75,28 @@ describe("dictation segmenter", () => {
     expect(first.length + (rest[0]?.length ?? 0)).toBe(words.length);
   });
 
+  it("learns a room louder than the minimum threshold from the start, so its hum isn't speech", () => {
+    // A fan or air conditioner: about 0.028 RMS, above the 0.01 that is always silence.
+    const room = (ms: number) => samples(ms, RATE, 0.04, 50);
+    const lengthsMs = (segments: Float32Array[]) => segments.map((s) => (s.length * 1000) / RATE);
+    const hum = createSegmenter({ sampleRate: RATE });
+    expect(lengthsMs(hum.push(room(3000)))).toEqual([]);
+    expect(lengthsMs(hum.flush())).toEqual([]);
+
+    // Speaking soon after starting: only the phrase is sent, with its usual lead-in and tail.
+    const segmenter = createSegmenter({ sampleRate: RATE });
+    const segments = segmenter.push(audio(room(1500), speech(800), room(1000)));
+    expect(lengthsMs(segments)).toEqual([200 + 800 + 300]);
+    expect(lengthsMs(segmenter.flush())).toEqual([]);
+
+    // A microphone that starts with exact zeros is seeded from the room after them.
+    const late = createSegmenter({ sampleRate: RATE });
+    const startup = new Float32Array(ms(500));
+    expect(lengthsMs(late.push(audio(startup, room(1000), speech(800), room(1000))))).toEqual([
+      200 + 800 + 300,
+    ]);
+  });
+
   it("flushes the segment still open when dictation stops mid-phrase", () => {
     const segmenter = createSegmenter({ sampleRate: RATE });
     // 510 ms: the last 10 ms are a partial frame.
