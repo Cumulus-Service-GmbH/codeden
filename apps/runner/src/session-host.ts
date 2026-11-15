@@ -154,7 +154,7 @@ export class SessionHost {
   async send(cmd: RunnerCommandOf<"session.send">): Promise<void> {
     const hosted = this.get(cmd.sessionId);
     await hosted.checkpointChain;
-    // A message's turn is work, also after a compaction that failed without starting one.
+    // A message's turn is work, never a compaction.
     const compactPending = hosted.compactPending;
     hosted.compactPending = false;
     try {
@@ -199,12 +199,16 @@ export class SessionHost {
       await hosted.session.compact();
     } catch (error) {
       // As for a message: the server tells the user a turn is running. Refused before it
-      // started, so the next turn isn't the compaction. After any other failure the provider
-      // may have started (and ended) its turn already; the next message clears the mark.
+      // started, so the next turn isn't the compaction.
       if (error instanceof ProviderSessionError && error.code === "turn_running") {
         hosted.compactPending = false;
         throw new CommandError("turn_running", error.message);
       }
+      // After any other failure the provider may have started (and ended) its turn already:
+      // once the pump has seen what it emitted, that turn has taken the mark. No compaction is
+      // coming, so a turn the provider starts on its own later is work, and can be steered.
+      await pumped();
+      hosted.compactPending = false;
       throw error;
     }
   }
@@ -398,4 +402,12 @@ export class SessionHost {
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Resolves once the pending microtasks have run, so a session's pump has handled every event
+ * its provider had already emitted (the pump's loop never waits on anything else).
+ */
+function pumped(): Promise<void> {
+  return new Promise((r) => setImmediate(r));
 }
