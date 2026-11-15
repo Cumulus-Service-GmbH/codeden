@@ -1,6 +1,0 @@
----
-section: fixed
----
-
-- **Agents no longer stop for approval to list the names of their environment variables.** At Auto, a listing that shows only names runs without asking. In PowerShell that covers `Get-ChildItem env: | … | Select-Object -ExpandProperty Name`, `ForEach-Object { $_.Name }`, `(Get-ChildItem env:).Name` and `Get-ChildItem env: -Name`; in POSIX shells, `printenv | cut -d= -f1`, `sed 's/=.*//'` and `awk -F= '{print $1}'`; the same commands from cmd or `bash -c` / `pwsh -Command` run too. Clearing variables in the agent's own shell also runs (`Remove-Item Env:…`, `… | ForEach-Object { Remove-Item "Env:$($_.Name)" }`, `unset`, `env -u`). In a dark factory these checks used to stall builders and reviewers until someone approved them. Anything that prints values still asks, as before: `Get-ChildItem env:` on its own, `printenv`, a filter or sort on values, or names passed on to look their values up (`… | ForEach-Object { $_.Value }`, `… | xargs printenv`).
-- **Factory briefs no longer tell agents to unset CodeDen's internal variables before running tests.** Agent sessions haven't inherited CodeDen's `CODEDEN_*` variables since 0.7.1, so the advice is out of date. A lesson that still gives it is left out of every brief and the Factory panel, and a review that suggests it again isn't kept.

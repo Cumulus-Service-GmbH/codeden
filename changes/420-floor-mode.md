@@ -1,9 +1,0 @@
----
-section: added
----
-
-- **Floor mode in the Factory view.** The header's toggle now reads **Board | Floor | Pixel**. Floor shows your factory as a 3D workshop seen from above at an angle: Intake with its roll-up door, ticket pallet and a sign with the full count, desks for Prep, workbenches for Build, review desks, a merge conveyor with a signal tower that lights amber while CI runs, a dock door with today's merge count, a fenced repair bay with its crates, the PM's glass booth and a budget dial. Every agent is a small crew figure standing at the station for its step. Its body tone shows its provider, a badge on its belly carries the provider's mark, and an accessory shows its role: a neckerchief for builders, glasses for reviewers, a collar and wrench for rebasers, a headset for the PM.
-  - **Everyone gets a seat.** Stations start with seats for your agent limit and add a row when more agents need one, so there's never a "+N". Seats don't move while the view is open, and agents keep theirs while their step stays at the same station.
-  - **Move around.** Drag to pan, and scroll or pinch to zoom. **Fit** (or a double-click on the floor) frames the whole workshop again. With reduced motion the camera moves instantly.
-  - **Readable without the picture.** A roster on the left lists every agent with its role, issue, step, status, provider and model. Hover or focus a row for the agent's card, or press Enter to open its item, its session or the PM chat. A caption under the scene says what's happening, and the PM chat docks beside it.
-  - Floor follows the light and dark themes. It loads only when you turn it on and draws only when something changes, never while the tab is hidden. Without WebGL the view shows the board and says why. Like Pixel, it's offered on screens 640 px wide and up, and the view remembers your choice per browser.
