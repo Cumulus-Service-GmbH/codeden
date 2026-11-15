@@ -69,7 +69,21 @@ export const ThreadStartedEvent = z.object({
   thread: ThreadInfo,
 });
 
-export const TurnStartedEvent = z.object({ type: z.literal("turn.started"), ...turnScoped });
+/**
+ * What a turn is for. `work`: the agent works on a message. `compact`: the provider summarizes
+ * the conversation to free up context ("Compact now", `ProviderCapabilities.compact`), with no
+ * message to answer. A compaction is never continued after a failure, never reported as
+ * finished work, and can't be steered.
+ */
+export const TurnKind = z.enum(["work", "compact"]);
+export type TurnKind = z.infer<typeof TurnKind>;
+
+export const TurnStartedEvent = z.object({
+  type: z.literal("turn.started"),
+  ...turnScoped,
+  /** Absent: `work`. The runner marks the turn a compaction starts (`session.compact`). */
+  kind: TurnKind.optional(),
+});
 
 /**
  * Where the provider's conversation stands at the end of a root turn, as an opaque position:

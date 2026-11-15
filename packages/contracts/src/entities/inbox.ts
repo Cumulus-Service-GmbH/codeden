@@ -103,14 +103,18 @@ export function inboxAttempts(item: Pick<InboxItem, "attempts">): number {
  * (an MCP server's form is a question too), factory specs, changed setup commands, start
  * conflicts and triage decisions.
  */
-const ANSWER_KINDS: ReadonlySet<InboxItemKind> = new Set([
+export const INBOX_ANSWER_KINDS: readonly InboxItemKind[] = [
   "question",
   "approval",
   "spec_approval",
   "setup_change",
   "conflict",
   "triage",
-]);
+];
+const ANSWER_KINDS: ReadonlySet<InboxItemKind> = new Set(INBOX_ANSWER_KINDS);
+
+/** The `notify` of a high-priority item a person has to act on (see `inboxWaitsOnYou`). */
+export const INBOX_ACT_NOTIFY: readonly InboxNotify[] = ["needs_you", "failure"];
 
 /**
  * The item waits on the user, so the inbox's bulk dismiss (`POST /api/inbox/dismiss`) never
@@ -122,7 +126,7 @@ const ANSWER_KINDS: ReadonlySet<InboxItemKind> = new Set([
  */
 export function inboxWaitsOnYou(item: Pick<InboxItem, "kind" | "priority" | "notify">): boolean {
   if (ANSWER_KINDS.has(item.kind)) return true;
-  return item.priority === "high" && (item.notify === "needs_you" || item.notify === "failure");
+  return item.priority === "high" && INBOX_ACT_NOTIFY.includes(item.notify);
 }
 
 /**

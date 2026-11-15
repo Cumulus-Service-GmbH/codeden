@@ -1,5 +1,7 @@
 import {
   type DismissInboxResponse,
+  INBOX_ACT_NOTIFY,
+  INBOX_ANSWER_KINDS,
   INBOX_BULK_MAX,
   type InboxCounts,
   type InboxDismissFilter,
@@ -15,7 +17,7 @@ import {
   type RuntimeResponse,
   type Session,
 } from "@codeden/contracts";
-import { and, desc, eq, inArray, type SQL } from "drizzle-orm";
+import { and, count, desc, eq, inArray, not, type SQL, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { rowToInbox } from "../db/rows";
 import { inboxItems } from "../db/schema";
@@ -39,26 +41,15 @@ export class InboxService {
   ) {}
 
   list(query: ListInboxQuery = {}): InboxItem[] {
-    return this.newest(query, 1000);
+    return this.newest(matching(query), 1000);
   }
 
-  /**
-   * The newest `limit` items matching `query`, optionally narrowed to some `kinds`. The kinds
-   * filter runs in SQL, before the limit, so older matching items aren't crowded out by newer
-   * items of other kinds.
-   */
-  private newest(
-    query: ListInboxQuery & { kinds?: readonly InboxItemKind[] },
-    limit: number,
-  ): InboxItem[] {
-    const conditions: SQL[] = [eq(inboxItems.status, query.status ?? "open")];
-    if (query.projectId) conditions.push(eq(inboxItems.projectId, query.projectId));
-    if (query.sessionId) conditions.push(eq(inboxItems.sessionId, query.sessionId));
-    if (query.kinds) conditions.push(inArray(inboxItems.kind, [...query.kinds]));
+  /** The newest `limit` items `where` matches. */
+  private newest(where: SQL | undefined, limit: number): InboxItem[] {
     return this.db
       .select()
       .from(inboxItems)
-      .where(and(...conditions))
+      .where(where)
       .orderBy(desc(inboxItems.createdAt))
       .limit(limit)
       .all()
@@ -174,14 +165,34 @@ export class InboxService {
   ): DismissInboxResponse {
     const now = new Date().toISOString();
     const resolution: JsonValue = note ? { bulk: true, note } : { bulk: true };
-    const closed: InboxItem[] = [];
-    let kept = 0;
-    for (const item of this.inScope(scope)) {
-      if (inboxWaitsOnYou(item)) kept++;
-      else closed.push(closedItem(item, "dismissed", resolution, now));
-    }
+    const { items, kept } = "ids" in scope ? this.byIds(scope.ids) : this.byFilter(scope.filter);
+    const closed = items.map((item) => closedItem(item, "dismissed", resolution, now));
     this.appendUpdates(closed);
     return { dismissed: closed.length, ids: closed.map((i) => i.id), kept };
+  }
+
+  /** The open items among `ids` a bulk dismiss closes, and how many it keeps as waiting on you. */
+  private byIds(ids: readonly string[]): BulkScope {
+    const open = [...new Set(ids)]
+      .slice(0, INBOX_BULK_MAX)
+      .map((id) => this.find(id))
+      .filter((item): item is InboxItem => item?.status === "open");
+    const items = open.filter((item) => !inboxWaitsOnYou(item));
+    return { items, kept: open.length - items.length };
+  }
+
+  /**
+   * The newest open items `filter` matches that a bulk dismiss closes (at most
+   * {@link INBOX_BULK_MAX}), and how many matching items it keeps as waiting on you. Both run in
+   * SQL, so items that wait on the user don't take slots under the cap and crowd out older
+   * notices (#433).
+   */
+  private byFilter(filter: InboxDismissFilter): BulkScope {
+    const scope = matching(filter);
+    const waits = waitsOnYou();
+    const items = this.newest(and(scope, not(waits)), INBOX_BULK_MAX);
+    const row = this.db.select({ n: count() }).from(inboxItems).where(and(scope, waits)).get();
+    return { items, kept: row?.n ?? 0 };
   }
 
   /**
@@ -219,22 +230,36 @@ export class InboxService {
     );
   }
 
-  /** The open items a bulk dismiss covers: the ids given, or the newest a filter matches. */
-  private inScope(scope: { ids: readonly string[] } | { filter: InboxDismissFilter }) {
-    if ("ids" in scope) {
-      return [...new Set(scope.ids)]
-        .slice(0, INBOX_BULK_MAX)
-        .map((id) => this.find(id))
-        .filter((item): item is InboxItem => item?.status === "open");
-    }
-    const { projectId, sessionId, kinds } = scope.filter;
-    return this.newest({ projectId, sessionId, kinds }, INBOX_BULK_MAX);
-  }
-
   /** Close an open item CodeDen settled by itself, with a short note on why (`InboxSettlement`). */
   settle(item: InboxItem, settlement: InboxSettlement): InboxItem {
     return this.close(item, "resolved", settlement);
   }
+}
+
+/** What a bulk dismiss covers: the open items it closes, and how many it keeps. */
+interface BulkScope {
+  items: InboxItem[];
+  kept: number;
+}
+
+/**
+ * Items with `query`'s status (open when not given), project and session, of one of `kinds` when
+ * given. Every condition runs in SQL, before any limit, so older matching items aren't crowded
+ * out by newer items that don't match.
+ */
+function matching(query: ListInboxQuery & { kinds?: readonly InboxItemKind[] }): SQL | undefined {
+  const conditions: SQL[] = [eq(inboxItems.status, query.status ?? "open")];
+  if (query.projectId) conditions.push(eq(inboxItems.projectId, query.projectId));
+  if (query.sessionId) conditions.push(eq(inboxItems.sessionId, query.sessionId));
+  if (query.kinds) conditions.push(inArray(inboxItems.kind, [...query.kinds]));
+  return and(...conditions);
+}
+
+/** `inboxWaitsOnYou` in SQL: a kind that needs an answer, or high priority a person acts on. */
+function waitsOnYou(): SQL {
+  const answer = inArray(inboxItems.kind, [...INBOX_ANSWER_KINDS]);
+  const act = inArray(inboxItems.notify, [...INBOX_ACT_NOTIFY]);
+  return sql`(${answer} or (${eq(inboxItems.priority, "high")} and ${act}))`;
 }
 
 /** The item was closed by a bulk dismiss (`dismissMany`), not one at a time. */

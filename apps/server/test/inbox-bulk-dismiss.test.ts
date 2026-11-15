@@ -6,6 +6,9 @@ import {
   INBOX_BULK_MAX,
   InboxCounts,
   type InboxItem,
+  InboxItemKind,
+  InboxNotify,
+  inboxWaitsOnYou,
   RestoreInboxResponse,
 } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -164,6 +167,44 @@ describe("inbox bulk dismiss", () => {
     expect(res).toEqual({ dismissed: 1, ids: ["old-failed"], kept: 0 });
     expect(statusOf("old-failed")).toBe("dismissed");
     expect(statusOf("msg0")).toBe("open");
+  });
+
+  it("by filter reaches notices older than the newest items that wait on the user (#433)", async () => {
+    put("old-notice");
+    // More newer open items that wait on the user than one bulk dismiss covers.
+    const waiting = Array.from({ length: INBOX_BULK_MAX }, (_, i) =>
+      item(`q${i}`, { kind: "question", notify: "needs_you" }),
+    );
+    server.services.store.append(
+      waiting.map((it) => ({
+        type: "inbox.created" as const,
+        sessionId: null,
+        payload: { item: it },
+      })),
+    );
+
+    const res = await dismiss({ filter: { projectId: "p1" } });
+    expect(res).toEqual({ dismissed: 1, ids: ["old-notice"], kept: INBOX_BULK_MAX });
+    expect(statusOf("old-notice")).toBe("dismissed");
+    expect(statusOf("q0")).toBe("open");
+  });
+
+  it("by filter keeps exactly what inboxWaitsOnYou keeps, for every kind, priority and notify", async () => {
+    const all = InboxItemKind.options.flatMap((kind) =>
+      (["low", "normal", "high"] as const).flatMap((priority) =>
+        InboxNotify.options.map((notify) =>
+          item(`${kind}-${priority}-${notify}`, { kind, priority, notify }),
+        ),
+      ),
+    );
+    server.services.store.append(
+      all.map((it) => ({ type: "inbox.created" as const, sessionId: null, payload: { item: it } })),
+    );
+
+    const res = await dismiss({ filter: {} });
+    const notices = all.filter((it) => !inboxWaitsOnYou(it)).map((it) => it.id);
+    expect(res.ids.sort()).toEqual(notices.sort());
+    expect(res.kept).toBe(all.length - notices.length);
   });
 
   it("by ids skips what waits on the user, ids that aren't open and repeats", async () => {

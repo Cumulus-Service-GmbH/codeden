@@ -14,6 +14,7 @@ import type {
   SessionChecks,
   SessionResult,
   StartedBy,
+  TurnKind,
   Usage,
   UserInput,
   WorkProgress,
@@ -172,6 +173,8 @@ export const turns = sqliteTable(
     usage: json<Usage>("usage"),
     /** The provider's fork point at the end of the turn (`forkPoint` on its end event, §9). */
     forkPoint: text("fork_point"),
+    /** What the turn was for (`TurnKind`, from its `turn.started`); null: `work`. */
+    kind: text("kind").$type<TurnKind>(),
   },
   (t) => [primaryKey({ columns: [t.sessionId, t.id] })],
 );
