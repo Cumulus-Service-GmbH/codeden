@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { TurnKind } from "../agent-events";
 import { SessionChecks } from "../checks";
 import {
   AutonomyLevel,
@@ -182,6 +183,8 @@ export const Turn = z.object({
    * recorded before CodeDen kept these, or a provider that doesn't report them.
    */
   forkPoint: z.string().nullable().optional(),
+  /** What the turn was for (`kind` on its `turn.started`). Absent or null: `work`. */
+  kind: TurnKind.nullable().optional(),
 });
 export type Turn = z.infer<typeof Turn>;
 

@@ -28,6 +28,11 @@ export const CodeEditor = lazyComponent(() =>
   import("@/components/editor/code-editor").then((m) => m.CodeEditor),
 );
 
+/** The Factory view's Floor mode, a 3D workshop (`three`): loaded only when Floor is on. */
+export const FloorScene = lazyComponent(() =>
+  import("@/components/factory-view/floor/floor-scene").then((m) => m.FloorScene),
+);
+
 /** One file's diff from a patch (`@pierre/diffs`), such as a pull request's changed file. */
 export const PatchDiff = lazyComponent(
   () => import("@pierre/diffs/react").then((m) => m.PatchDiff),

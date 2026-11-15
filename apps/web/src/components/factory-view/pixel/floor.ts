@@ -1,4 +1,4 @@
-import type { SceneAgent } from "./agents";
+import type { StationId, StationSeats, Tile } from "../scene/stations";
 
 /**
  * The factory floor's plan (#264): a grid of 8-pixel tiles on a 384×216 canvas, laid out left to
@@ -16,11 +16,6 @@ export const SCENE_H = ROWS * TILE;
 /** The back wall's rows; the floor starts below them. */
 export const WALL_ROWS = 4;
 export const WALL_H = WALL_ROWS * TILE;
-
-export interface Tile {
-  c: number;
-  r: number;
-}
 
 export const tileId = (t: Tile): number => t.r * COLS + t.c;
 export const sameTile = (a: Tile, b: Tile): boolean => a.c === b.c && a.r === b.r;
@@ -51,10 +46,7 @@ export const ZONES: Zone[] = [
   { id: "control", label: "PM", c0: 40, c1: 47 },
 ];
 
-/** Where an agent sits: one station per step zone, and single posts in the control room. */
-export type StationId = "prep" | "bench" | "review" | "merge" | "ship" | "pm" | "scout" | "area";
-
-export interface Station {
+export interface Station extends StationSeats {
   id: StationId;
   /** Seat tiles in the order they are handed out; the agent stands here, facing the viewer. */
   seats: Tile[];
@@ -123,31 +115,6 @@ export const STATIONS: Record<StationId, Station> = {
     more: { x: 41 * TILE, y: 25 * TILE },
   },
 };
-
-/**
- * The station an agent works at, by its role and step: the pipeline's zone for its step. A PR
- * waiting on CI stays where it is (at the review desk, or on the conveyor); a merged one whose
- * CI is still watched stands by the shipping door.
- */
-export function stationOf(a: Pick<SceneAgent, "role" | "step" | "card">): StationId {
-  if (a.role === "pm" || a.role === "scout" || a.role === "area") return a.role;
-  switch (a.step) {
-    case "reproducing":
-    case "analyzing":
-      return "prep";
-    case "implementing":
-    case "revising":
-    case "rebasing":
-      return "bench";
-    case "merging":
-      return "merge";
-    case "watching_ci":
-      if (a.card?.item.stage === "watching") return "ship";
-      return a.card?.item.step === "merge" ? "merge" : "review";
-    default:
-      return "review";
-  }
-}
 
 /** The conveyor runs up into the shipping door. */
 export const BELT = { c0: 33, c1: 34, r0: 5, r1: 25 };

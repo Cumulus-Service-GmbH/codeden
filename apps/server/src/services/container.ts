@@ -265,6 +265,14 @@ export function createServices(opts: ServicesOptions): AppServices {
     sandboxes,
     log: opts.log,
   });
+  // Before the session service: a start in a project the start-up check hasn't reached checks it.
+  const redetector = new ProjectRedetector({
+    projects,
+    store: opts.store,
+    repo: sessionRepo,
+    onGithubChanged: (projectId) => github.sync.soon(projectId, { now: true }),
+    log: opts.log,
+  });
   sessions = new SessionService({
     repo: sessionRepo,
     projects,
@@ -279,6 +287,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     tokens: mcpTokens,
     utility,
     sandboxes,
+    projectChecks: redetector,
   });
   const checksLoop = new ChecksLoop({
     db: opts.db,
@@ -333,13 +342,6 @@ export function createServices(opts: ServicesOptions): AppServices {
   // The factory and issue triage share it, so both trust the same issue authors.
   const factoryGithub = opts.factory?.github ?? new GithubFactoryPort(github);
   const trustedAuthors = projectTrustedAuthors(projects);
-  const redetector = new ProjectRedetector({
-    projects,
-    store: opts.store,
-    repo: sessionRepo,
-    onGithubChanged: (projectId) => github.sync.soon(projectId, { now: true }),
-    log: opts.log,
-  });
   const setup = new SetupService({
     exec,
     settings: opts.settings,

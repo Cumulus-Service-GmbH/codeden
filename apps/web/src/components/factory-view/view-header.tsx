@@ -1,16 +1,7 @@
 import type { FactoryStatus, Project } from "@codeden/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import {
-  AlertTriangle,
-  Factory,
-  Gamepad2,
-  Maximize,
-  Minimize,
-  Play,
-  UserRound,
-  X,
-} from "lucide-react";
+import { AlertTriangle, Factory, Maximize, Minimize, Play, UserRound, X } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { toast } from "sonner";
 import { ExperimentalBadge } from "@/components/factory/autonomy-dialog";
@@ -24,7 +15,8 @@ import { Button } from "@/components/ui/button";
 import { useClient } from "@/lib/api";
 import { factoryKeys } from "@/lib/factory";
 import { cn } from "@/lib/utils";
-import type { PixelMode } from "./pixel/use-pixel-mode";
+import type { ViewMode } from "./view-mode";
+import { ViewModeToggle } from "./view-mode-toggle";
 
 /** Browser full screen for the view (in the desktop app too; F11 there does the same). */
 function useFullscreen() {
@@ -110,13 +102,13 @@ export function ViewHeader({
   f,
   needsPerson,
   failed,
-  pixel,
+  view,
 }: {
   project: Project;
   f: FactoryStatus;
   needsPerson: number;
   failed: number;
-  pixel: PixelMode;
+  view: ViewMode;
 }) {
   const client = useClient();
   const queryClient = useQueryClient();
@@ -177,18 +169,7 @@ export function ViewHeader({
           paused={f.loopState === "paused"}
         />
         <FactoryGuideButton />
-        {pixel.available && (
-          <Button
-            size="sm"
-            variant={pixel.on ? "secondary" : "ghost"}
-            onClick={() => pixel.set(!pixel.on)}
-            aria-pressed={pixel.on}
-            title="A pixel-art scene of the factory at work, instead of the board"
-            data-testid="factory-view-pixel"
-          >
-            <Gamepad2 /> Pixel mode
-          </Button>
-        )}
+        {view.available && <ViewModeToggle view={view} />}
         {full.supported && (
           <Button
             size="sm"

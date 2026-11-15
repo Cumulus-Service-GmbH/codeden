@@ -1,17 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  STATIONS,
-  type StationId,
-  type Tile,
-  tileId,
-  walkable,
-} from "@/components/factory-view/pixel/floor";
-import {
-  assignSeats,
-  type Seating,
-  type SeatRequest,
-  sameSeating,
-} from "@/components/factory-view/pixel/seating";
+import { STATIONS, tileId, walkable } from "@/components/factory-view/pixel/floor";
 import {
   arrived,
   findPath,
@@ -21,6 +9,13 @@ import {
   type Walker,
   walkerTile,
 } from "@/components/factory-view/pixel/walk";
+import {
+  assignSeats,
+  type Seating,
+  type SeatRequest,
+  sameSeating,
+} from "@/components/factory-view/scene/seating";
+import type { StationId, Tile } from "@/components/factory-view/scene/stations";
 
 /**
  * Issue #264: the floor follows the pipeline, every agent sits at its station, positions are
@@ -28,6 +23,9 @@ import {
  */
 
 const ask = (key: string, station: StationId): SeatRequest => ({ key, station });
+/** Seating on pixel mode's fixed floor plan. */
+const seat = (prev: Seating | null, agents: readonly SeatRequest[]) =>
+  assignSeats(prev, agents, STATIONS);
 const many = (n: number, station: StationId, prefix = station) =>
   Array.from({ length: n }, (_, i) => ask(`${prefix}-${i}`, station));
 
@@ -58,7 +56,7 @@ describe("pixel floor plan (#264)", () => {
 
 describe("pixel seating (#264)", () => {
   it("seats each agent at its station, in seat order", () => {
-    const s = assignSeats(null, [ask("a", "prep"), ask("b", "bench"), ask("c", "review")]);
+    const s = seat(null, [ask("a", "prep"), ask("b", "bench"), ask("c", "review")]);
     expect([...s.seats.entries()].map(([k, v]) => [k, v.station, v.tile, v.queued])).toEqual([
       ["a", "prep", STATIONS.prep.seats[0], false],
       ["b", "bench", STATIONS.bench.seats[0], false],
@@ -69,7 +67,7 @@ describe("pixel seating (#264)", () => {
   it("queues agents in front of a full station, then counts the rest as +N", () => {
     const seats = STATIONS.bench.seats.length;
     const queue = STATIONS.bench.queue.length;
-    const s = assignSeats(null, many(seats + queue + 3, "bench"));
+    const s = seat(null, many(seats + queue + 3, "bench"));
     const placed = [...s.seats.values()];
     expect(placed.filter((x) => !x.queued)).toHaveLength(seats);
     expect(placed.filter((x) => x.queued).map((x) => x.tile)).toEqual(STATIONS.bench.queue);
@@ -79,7 +77,7 @@ describe("pixel seating (#264)", () => {
 
   it("never puts two agents on one tile, however crowded every station is", () => {
     const stations = Object.keys(STATIONS) as StationId[];
-    const s = assignSeats(
+    const s = seat(
       null,
       stations.flatMap((id) => many(20, id)),
     );
@@ -88,27 +86,24 @@ describe("pixel seating (#264)", () => {
 
   it("keeps everyone where they are when the same agents come again", () => {
     const agents = [...many(4, "bench"), ...many(3, "review"), ...many(14, "prep")];
-    const first = assignSeats(null, agents);
-    const again = assignSeats(first, agents);
+    const first = seat(null, agents);
+    const again = seat(first, agents);
     expect(sameSeating(first, again)).toBe(true);
     // The order of the data doesn't matter either.
-    expect(sameSeating(first, assignSeats(first, [...agents].reverse()))).toBe(true);
+    expect(sameSeating(first, seat(first, [...agents].reverse()))).toBe(true);
   });
 
   it("doesn't move the others when an agent arrives or leaves", () => {
     const agents = many(5, "bench");
-    const first = assignSeats(null, agents);
-    const without = assignSeats(
+    const first = seat(null, agents);
+    const without = seat(
       first,
       agents.filter((a) => a.key !== "bench-1"),
     );
     for (const a of agents.filter((x) => x.key !== "bench-1"))
       expect(without.seats.get(a.key)).toEqual(first.seats.get(a.key));
     // A newcomer takes the first free seat: the one that was freed.
-    const back = assignSeats(without, [
-      ...agents.filter((a) => a.key !== "bench-1"),
-      ask("new", "bench"),
-    ]);
+    const back = seat(without, [...agents.filter((a) => a.key !== "bench-1"), ask("new", "bench")]);
     expect(back.seats.get("new")?.tile).toEqual(first.seats.get("bench-1")?.tile);
     for (const a of agents.filter((x) => x.key !== "bench-1"))
       expect(back.seats.get(a.key)).toEqual(first.seats.get(a.key));
@@ -117,9 +112,9 @@ describe("pixel seating (#264)", () => {
   it("gives a freed seat to the first in the queue", () => {
     const n = STATIONS.review.seats.length;
     const agents = many(n + 2, "review");
-    const first = assignSeats(null, agents);
+    const first = seat(null, agents);
     expect(first.seats.get(`review-${n}`)?.queued).toBe(true);
-    const next = assignSeats(first, agents.slice(1));
+    const next = seat(first, agents.slice(1));
     expect(next.seats.get(`review-${n}`)).toMatchObject({
       queued: false,
       tile: STATIONS.review.seats[0],
@@ -131,8 +126,8 @@ describe("pixel seating (#264)", () => {
   });
 
   it("moves an agent to a new seat when its step changes station", () => {
-    const first = assignSeats(null, [ask("a", "bench"), ask("b", "bench")]);
-    const next = assignSeats(first, [ask("a", "review"), ask("b", "bench")]);
+    const first = seat(null, [ask("a", "bench"), ask("b", "bench")]);
+    const next = seat(first, [ask("a", "review"), ask("b", "bench")]);
     expect(next.seats.get("a")?.station).toBe("review");
     expect(next.seats.get("b")).toEqual(first.seats.get("b"));
   });

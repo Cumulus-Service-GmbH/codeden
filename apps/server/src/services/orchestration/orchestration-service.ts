@@ -428,6 +428,7 @@ export class OrchestrationService {
             session,
             finalMessage: (sessionId, turnId) =>
               finalAssistantMessage(this.deps.db, sessionId, turnId),
+            turnKind: (sessionId, turnId) => this.deps.repo.turn(sessionId, turnId)?.kind,
             mcpServer: (sessionId, itemId) => formServerOf(this.deps.repo, sessionId, itemId),
           }),
           ...deriveGithubNotices(events, session, this.deps.trustedAuthors),
