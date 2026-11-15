@@ -1,7 +1,6 @@
 import {
   BoxGeometry,
   type BufferGeometry,
-  CircleGeometry,
   CylinderGeometry,
   Group,
   type Material,
@@ -379,10 +378,6 @@ export function buildWorkshop(layout: WorkshopLayout, p: FloorPalette, kit: Kit)
   drum.rotation.x = Math.PI / 2;
   drum.position.set(x1 + 0.06, 1.08, door.z);
   group.add(drum);
-  // A ring around where the budget dial sits.
-  const ring = new Mesh(kit.own(new CircleGeometry(0.27, 32)), kit.matte(p.sign));
-  ring.position.set(layout.budgetDial.x, 0.78, z0 + 0.008);
-  group.add(ring);
 
   add(
     group,

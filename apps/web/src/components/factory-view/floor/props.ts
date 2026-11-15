@@ -195,8 +195,11 @@ export function buildProps(
     );
   });
 
-  // The budget dial on the back wall, when there is a budget.
+  // The budget dial on the back wall in its dark ring, when there is a budget.
   if (scene.gauge !== null) {
+    const ring = new Mesh(kit.own(new CircleGeometry(0.27, 32)), kit.matte(p.sign));
+    ring.position.set(layout.budgetDial.x, 0.78, layout.bounds.z0 + 0.008);
+    group.add(ring);
     const dial = new Mesh(
       kit.own(new CircleGeometry(0.24, 40)),
       kit.matte(null, { map: kit.canvasTexture(dialCanvas(scene.gauge, p)) }),

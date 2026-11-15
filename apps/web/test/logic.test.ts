@@ -8,7 +8,7 @@ import { MockWorld } from "@/lib/api/mock/world";
 import { cronError, describeCron, nextRuns } from "@/lib/cron";
 import { ageShort, duration, subagentStatsParts, subagentStatsTitle, until } from "@/lib/format";
 import { groupInbox, inboxCounts } from "@/lib/inbox";
-import { matchesCombo } from "@/lib/shortcuts";
+import { formatCombo, matchesCombo } from "@/lib/shortcuts";
 import { applyDomainEvent } from "@/lib/snapshot-reducer";
 import { inQuietHours, shouldReadAloud, stripForSpeech } from "@/lib/voice/speech-text";
 
@@ -158,6 +158,18 @@ describe("shortcuts", () => {
     expect(matchesCombo(space, "mod+shift+space")).toBe(true);
     expect(matchesCombo(space, "mod+shift+s")).toBe(false);
     expect(matchesCombo(key({ key: " ", code: "Space" }), "mod+shift+space")).toBe(false);
+  });
+  it("labels the space bar `Space`, like the other named keys", () => {
+    // The modifiers depend on the platform (`Ctrl Shift` or `⌘ ⇧`); the key name doesn't.
+    const keyName = (combo: string) => formatCombo(combo).split(" ").at(-1);
+    expect(keyName("mod+shift+space")).toBe("Space");
+    expect(keyName("alt+space")).toBe("Space");
+    expect(keyName("shift+enter")).toBe("Enter");
+    // Other keys the recorder in Settings saves in lowercase.
+    expect(keyName("mod+f5")).toBe("F5");
+    expect(keyName("alt+tab")).toBe("Tab");
+    expect(keyName("mod+shift+l")).toBe("L");
+    expect(keyName("mod+,")).toBe(",");
   });
 });
 

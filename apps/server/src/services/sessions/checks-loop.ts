@@ -50,9 +50,9 @@ interface ActiveRun {
 
 /**
  * "Keep going until checks pass" (§9 Project checks). After a root turn of an agent session
- * completes, when the session keeps going until checks pass, this runs the session's frozen
- * checks one by one on its runner, in its working directory, and shows them as a card in that
- * turn. When some fail and rounds are left, it sends them to the agent in a `codeden` message,
+ * completes (not a compaction), when the session keeps going until checks pass, this runs the
+ * session's frozen checks one by one on its runner, in its working directory, and shows them as
+ * a card in that turn. When some fail and rounds are left, it sends them to the agent in a `codeden` message,
  * which starts the next round; when all pass, or the rounds run out, the session stays idle.
  * The round count is the session's (`SessionChecks.round`, kept by `SessionService` as messages
  * go out), so turns CodeDen starts itself never add rounds. Stop, a new message, stopping or
@@ -131,6 +131,8 @@ export class ChecksLoop {
     const session = this.deps.repo.find(sessionId)?.session;
     const checks = session?.checks;
     if (!session || !checks || session.rootThreadId !== event.threadId) return;
+    // A compaction changes no files and finishes no work: nothing to check, no round to start.
+    if (this.deps.repo.turn(sessionId, event.turnId)?.kind === "compact") return;
     if (loopSkipReason(session) || this.deps.hasPendingMessage(sessionId)) return;
     if (checks.capReached) return;
     const run: ActiveRun = {

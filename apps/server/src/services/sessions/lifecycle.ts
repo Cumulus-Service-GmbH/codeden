@@ -134,11 +134,15 @@ export class SessionLifecycle {
     });
   }
 
-  /** Utility-model hooks (§7.4, §7.5); no-ops with the default `UtilityService`. */
+  /**
+   * Utility-model hooks (§7.4, §7.5); no-ops with the default `UtilityService`. Not after a
+   * compaction: it gives no answer to suggest follow-ups or a title from.
+   */
   private async afterTurn(sessionId: string, event: AgentEventOf<"turn.completed">): Promise<void> {
     try {
       const session = this.deps.repo.find(sessionId)?.session;
       if (!session || session.rootThreadId !== event.threadId) return;
+      if (this.deps.repo.turn(sessionId, event.turnId)?.kind === "compact") return;
       const settings = this.deps.settings.get();
       const turnItems = this.deps.db
         .select()
