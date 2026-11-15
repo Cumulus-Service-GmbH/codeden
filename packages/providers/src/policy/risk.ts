@@ -10,6 +10,7 @@ import {
   touchesCodedenHome,
 } from "./codeden-home";
 import { binName, CD, DISCARD, unwrap } from "./command-words";
+import { classifyDelete } from "./deletes";
 import { dumpsEnvironment } from "./env-dumps";
 import { type ListOutput, namesOnly } from "./env-names";
 import { classifyGit } from "./git";
@@ -145,14 +146,21 @@ function classifyList(
   }
   const names = namesOnly(list, output);
   let here = ctx;
+  let head = 0;
   for (const [i, cmd] of list.entries()) {
+    if (!cmd.piped) head = i;
     for (const [k, nested] of cmd.nested.entries()) {
       const into = k === 0 && names.projections.has(i) ? "names" : "feeds";
       const result = classifyList(nested, here, depth, into);
       if (result.risky) return result;
     }
     const shown = output === "shown" && list[i + 1]?.piped !== true;
-    const result = classifySimple(cmd, here, depth, { namesOnly: names.listings.has(i), shown });
+    const source = cmd.piped ? list[head] : undefined;
+    const result = classifySimple(cmd, here, depth, {
+      namesOnly: names.listings.has(i),
+      shown,
+      source,
+    });
     if (result.risky) return result;
     here = afterCd(cmd, here);
   }
@@ -208,10 +216,12 @@ function inlineScript(
 /**
  * Where a simple command stands in its list. `namesOnly`: it lists the environment but only the
  * names reach the agent (`./env-names`). `shown`: its output reaches the agent, not another command.
+ * `source`: when it reads a pipe, the command at the head of that pipeline (`./deletes`).
  */
 interface Placement {
   namesOnly: boolean;
   shown: boolean;
+  source?: SimpleCommand;
 }
 
 function classifySimple(
@@ -256,18 +266,8 @@ function classifySimple(
   const install = classifyInstall(bin, lower);
   if (install.risky) return install;
 
-  if (["rm", "rmdir", "del", "erase", "rd", "remove-item", "ri", "unlink", "shred"].includes(bin)) {
-    const targets = args.filter((a) => !a.startsWith("-") && !/^\/[a-z]$/i.test(a));
-    for (const target of targets) {
-      if (/^[\\/]$/.test(target) || /^[a-z]:[\\/]?$/i.test(target)) {
-        return risky("outside_worktree", `Deletes ${target}`);
-      }
-      // `*` empties the current directory: fine in the worktree or a folder in temp.
-      if (!isWritable(target === "*" ? "." : target, ctx)) {
-        return risky("outside_worktree", `Deletes ${target}, outside the worktree`);
-      }
-    }
-  }
+  const deletes = classifyDelete(cmd, ctx, at.source);
+  if (deletes.risky) return deletes;
 
   const dest = copyDestination(bin, args);
   const outputs = toolOutputs(bin, args);
