@@ -1,5 +1,5 @@
 import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { PackageManager, ProjectDetection } from "@codeden/contracts";
 import { badRequest } from "../errors";
 import type { Exec } from "../exec";
@@ -107,11 +107,10 @@ async function git(exec: Exec, cwd: string, args: string[]): Promise<string | nu
   return result.code === 0 ? result.stdout.trim() || null : null;
 }
 
-/** Inspect a folder: git checkout, remote, GitHub coordinates, branches, package manager. */
-export async function detectProject(exec: Exec, dir: string): Promise<ProjectDetection> {
-  const root = await git(exec, dir, ["rev-parse", "--show-toplevel"]);
+/** A folder's git root (null: none) and package manager, before any remote or branch is read. */
+function baseDetection(dir: string, root: string | null): ProjectDetection {
   const packageManager = detectPackageManager(dir);
-  const base: ProjectDetection = {
+  return {
     isGitRepo: root !== null,
     gitRoot: root ? resolve(root) : null,
     remoteUrl: null,
@@ -121,6 +120,27 @@ export async function detectProject(exec: Exec, dir: string): Promise<ProjectDet
     packageManager,
     suggestedSetupCommands: suggestedSetup(packageManager),
   };
+}
+
+/**
+ * What `detectProject` finds in a folder that git can't find a checkout for, without running
+ * git: there is no `.git` (a folder, or a worktree's file) in it or in any folder above it,
+ * which is where git looks. Null when there is one: only git can tell what it is. Only a few
+ * file checks, so server start runs it for every project before it serves anything (#454).
+ */
+export function detectPlainFolder(dir: string): ProjectDetection | null {
+  for (let at = resolve(dir); ; ) {
+    if (existsSync(join(at, ".git"))) return null;
+    const parent = dirname(at);
+    if (parent === at) return baseDetection(dir, null);
+    at = parent;
+  }
+}
+
+/** Inspect a folder: git checkout, remote, GitHub coordinates, branches, package manager. */
+export async function detectProject(exec: Exec, dir: string): Promise<ProjectDetection> {
+  const root = await git(exec, dir, ["rev-parse", "--show-toplevel"]);
+  const base = baseDetection(dir, root);
   if (!root) return base;
 
   const [rawRemote, originHead, current] = await Promise.all([

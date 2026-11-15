@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { GithubIssue, Project, ProjectDetection, RawEventEnvelope } from "@codeden/contracts";
@@ -8,6 +8,7 @@ import { type Database, openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
 import { runTool } from "../src/services/exec";
 import { GithubStore } from "../src/services/github/store";
+import { detectPlainFolder } from "../src/services/projects/detect";
 import { ProjectService } from "../src/services/projects/project-service";
 import { reconcileProject } from "../src/services/projects/reconcile";
 import { removeTree } from "./support/remove-tree";
@@ -386,5 +387,40 @@ describe("ProjectService.refresh", () => {
     git(folder, "remote", "add", "origin", "https://github.com/octo/test-todo.git");
     const again = await service.create({ source: { type: "local", path: folder } });
     expect(again.project).toMatchObject({ id, kind: "github", archivedAt: null });
+  });
+});
+
+describe("ProjectService.refreshPlainFolder (#454)", () => {
+  it("records a plain folder without git, and leaves anything with a .git at or above it to git", async () => {
+    const { id, folder } = await plainFolderProject();
+    // As the upgrade left it: every project read as a git repository.
+    store.append([
+      {
+        type: "project.updated",
+        sessionId: null,
+        payload: { project: { ...service.get(id), isGitRepo: true } },
+      },
+    ]);
+    expect(service.refreshPlainFolder(id)).toMatchObject({
+      changed: true,
+      outcome: "git_missing",
+      detected: { isGitRepo: false, gitRoot: null },
+    });
+    expect(service.get(id).isGitRepo).toBe(false);
+    expect(service.refreshPlainFolder(id)).toMatchObject({ changed: false });
+
+    git(folder, "init", "-q", "-b", "main");
+    expect(service.refreshPlainFolder(id)).toBeNull();
+    const inside = join(folder, "packages", "web");
+    mkdirSync(inside, { recursive: true });
+    expect(detectPlainFolder(inside)).toBeNull();
+    // A linked worktree has a `.git` file, not a folder.
+    const worktree = join(dir, "worktree");
+    mkdirSync(worktree);
+    writeFileSync(join(worktree, ".git"), "gitdir: ../test-todo/.git/worktrees/worktree\n");
+    expect(detectPlainFolder(worktree)).toBeNull();
+
+    rmSync(folder, { recursive: true, force: true });
+    expect(service.refreshPlainFolder(id)).toBeNull();
   });
 });

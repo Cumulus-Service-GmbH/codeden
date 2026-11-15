@@ -21,7 +21,14 @@ import { projects } from "../../db/schema";
 import type { EventStore } from "../../events/store";
 import { badRequest, conflict, notFound, ServiceError } from "../errors";
 import type { Exec } from "../exec";
-import { detectProject, isDirectory, normalizeCloneUrl, redactUrls, sameRealPath } from "./detect";
+import {
+  detectPlainFolder,
+  detectProject,
+  isDirectory,
+  normalizeCloneUrl,
+  redactUrls,
+  sameRealPath,
+} from "./detect";
 import { type Reconciled, reconcileProject } from "./reconcile";
 
 export { redactUrls };
@@ -208,6 +215,23 @@ export class ProjectService {
     }
     const detected = await detectProject(this.deps.exec, before.path);
     // Re-read: another change (a rename, a pin) may have landed while git ran.
+    return this.apply(id, detected);
+  }
+
+  /**
+   * `refresh` at once, without running git, for a folder git can't find a checkout for
+   * (`detectPlainFolder`); null when only git can tell, or the folder is missing. Server start
+   * runs it before it serves anything, so a plain folder never reads as a git repository while
+   * the start-up check works through the other projects (#454).
+   */
+  refreshPlainFolder(id: string): RefreshProjectResponse | null {
+    const { path } = this.get(id);
+    const detected = isDirectory(path) ? detectPlainFolder(path) : null;
+    return detected ? this.apply(id, detected) : null;
+  }
+
+  /** Reconcile the project with what was detected, appending `project.updated` if it changed. */
+  private apply(id: string, detected: ProjectDetection): RefreshProjectResponse {
     const result = this.reconcile(this.get(id), detected, new Date().toISOString());
     if (result.changed) {
       this.deps.store.append([

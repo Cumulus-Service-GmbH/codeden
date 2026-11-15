@@ -21,7 +21,8 @@ const TURN_ENDS = new Set(["agent.turn.completed", "agent.turn.failed", "agent.t
  * the server starts, and whenever an agent turn ends in a local-only project: the moment an
  * agent may have run `git init` or added a GitHub `origin`. One check per project at a time;
  * a turn that ends during a check queues one more. A session start doesn't wait for the
- * background check to reach its project: it checks that project first (`current`).
+ * background check to reach its project: it checks that project first (`current`). Plain
+ * folders don't wait at all: start settles them without git before the server serves anything.
  */
 export class ProjectRedetector {
   private unsubscribe: (() => void) | undefined;
@@ -31,23 +32,42 @@ export class ProjectRedetector {
   /**
    * Projects stored before this start that no check has reached yet: what their records say
    * about the folder may be out of date (an upgrade adds `isGitRepo` as true for all of them).
+   * Never a plain folder: start settles those at once.
    */
   private readonly unchecked = new Set<string>();
 
   constructor(private readonly deps: ProjectRedetectorDeps) {}
 
-  /** Follow turn ends and, unless `checkAll: false`, check every project in the background. */
+  /**
+   * Follow turn ends and, unless `checkAll: false`, check every project: a plain folder at once
+   * (no git needed, `ProjectService.refreshPlainFolder`), before the server serves anything, so
+   * the UI never offers it a worktree (#454); the others in the background.
+   */
   start(opts: { checkAll?: boolean } = {}): void {
     this.stopped = false;
     this.unsubscribe ??= this.deps.store.subscribe((events) => this.onEvents(events));
     if (opts.checkAll === false) return;
     try {
-      for (const project of this.deps.projects.list()) this.unchecked.add(project.id);
+      for (const project of this.deps.projects.list()) {
+        if (!this.checkPlainFolder(project.id)) this.unchecked.add(project.id);
+      }
     } catch (error) {
       this.deps.log?.(`projects: listing for the start-up check: ${errorMessage(error)}`);
       return;
     }
     setImmediate(() => void this.checkAll());
+  }
+
+  /** True when the project's folder is a plain one and its record now says so. Never throws. */
+  private checkPlainFolder(projectId: string): boolean {
+    try {
+      const result = this.deps.projects.refreshPlainFolder(projectId);
+      if (result?.changed) this.deps.log?.(`projects: ${result.project.name}: ${result.message}`);
+      return result !== null;
+    } catch (error) {
+      this.deps.log?.(`projects: checking ${projectId}: ${errorMessage(error)}`);
+      return false;
+    }
   }
 
   /**

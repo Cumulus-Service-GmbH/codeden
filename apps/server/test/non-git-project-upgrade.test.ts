@@ -13,8 +13,9 @@ import { removeTree } from "./support/remove-tree";
 /**
  * Upgrading to the build that records `Project.isGitRepo` (#408): the migration adds the column
  * as `true` for every project, and the server's start-up check corrects it in the background,
- * one project at a time (#425). A session started before that check reaches a plain-folder
- * project must still run in the project folder, not ask for a worktree.
+ * one project at a time (#425). A plain-folder project must read as one from the first request
+ * (#454), and a session started there before the git check reaches it must run in the project
+ * folder, not ask for a worktree.
  */
 const TOKEN = "e".repeat(64);
 const all = findMigrationsDir();
@@ -22,7 +23,10 @@ const names = readdirSync(all).filter((n) => /^\d{14}_/.test(n));
 const ts = "2026-11-14T10:00:00.000Z";
 
 let home: string;
-/** The first project in the list, whose start-up check is slow: it holds up the others. */
+/**
+ * The first project in the list, a git checkout (so the start-up check runs git there) whose
+ * check is slow: it holds up the others.
+ */
 let slow: string;
 /** A plain folder: not a git repository. */
 let folder: string;
@@ -42,11 +46,13 @@ function migrationsBeforeIsGitRepo(): string {
 }
 
 /** `git` in the slow project waits until `release()`; everything else runs for real. */
+let holding: boolean;
 const exec: Exec = (command, args, opts) =>
-  command === "git" && args[0] === "-C" && args[1] === slow
+  holding && command === "git" && args[0] === "-C" && args[1] === slow
     ? new Promise((resolve) => held.push(() => resolve(runTool(command, args, opts))))
     : runTool(command, args, opts);
 const release = () => {
+  holding = false;
   for (const go of held.splice(0)) go();
 };
 
@@ -62,12 +68,15 @@ const api = async (method: string, path: string, body?: unknown) => {
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), "codeden-upgrade-git-"));
   held = [];
+  holding = true;
   slow = join(home, "archive");
   folder = join(home, "music-videos");
   repo = join(home, "todo-app");
   for (const dir of [slow, folder, repo]) mkdirSync(dir);
   writeFileSync(join(folder, "notes.txt"), "lyrics\n");
-  execFileSync("git", ["-C", repo, "init", "-q", "-b", "main"], { stdio: "pipe" });
+  for (const dir of [slow, repo]) {
+    execFileSync("git", ["-C", dir, "init", "-q", "-b", "main"], { stdio: "pipe" });
+  }
   // A database written by the previous build, with its projects in this order.
   const dataDir = join(home, "data");
   mkdirSync(dataDir);
@@ -138,13 +147,9 @@ describe("right after upgrading, before the start-up check reaches the project",
 
   it("runs a new session in a plain folder in the project folder", async () => {
     await startUpgraded();
-    // Still `true`, as the migration left it: the check hasn't reached the project yet.
-    expect(Project.parse((await api("GET", "/projects/p1")).body).isGitRepo).toBe(true);
-
     const started = await startSession("p1");
     expect(started.status, JSON.stringify(started.body)).toBe(200);
     expect(started.mode).toBe("repo_root");
-    // The start checked the folder, and the project says so now.
     expect(Project.parse((await api("GET", "/projects/p1")).body).isGitRepo).toBe(false);
   });
 
