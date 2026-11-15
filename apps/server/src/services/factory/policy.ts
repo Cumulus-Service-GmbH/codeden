@@ -93,36 +93,57 @@ const TEST_FILE =
   /(^|\/)(__tests__|tests?|spec|e2e)\/|\.(test|spec)\.[cm]?[jt]sx?$|_test\.(go|py)$|(^|\/)test_[^/]+\.py$/i;
 const UI_FILE = /\.(tsx|jsx|vue|svelte|astro|css|scss|sass|less|html)$/i;
 const NON_CODE =
-  /\.(md|mdx|txt|rst|json|ya?ml|toml|ini|lock|svg|png|jpe?g|gif|webp|ico)$|(^|\/)(LICENSE|\.gitignore|\.editorconfig)$/i;
-const DOC_FILE = /\.(md|mdx|txt|rst|svg|png|jpe?g|gif|webp|ico)$/i;
+  /\.(md|mdx|txt|rst|json|ya?ml|toml|ini|lock|svg|png|jpe?g|gif|webp|ico)$|(^|\/)(\.gitignore|\.editorconfig)$/i;
+/**
+ * Plain prose and raster images. Not `.mdx` (its JSX and imports run when a docs site builds)
+ * and not `.svg` (it can carry scripts and event handlers that run wherever it's served).
+ */
+const DOC_FILE = /\.(md|txt|rst|png|jpe?g|gif|webp|ico)$/i;
 /**
  * Files with a docs extension that aren't documentation: `.txt` files that steer an install or
  * a build, the instructions coding agents load (`CLAUDE.md`, `AGENTS.md`, ...), and anything in
  * a dot-folder (`.github/`, `.claude/`, `.codex/`, `.agents/`, `.cursor/`, ...), where tools read
- * files as configuration or prompts.
+ * files as configuration or prompts. License files are always protected (`isLicenseFile`).
  */
 const NOT_DOCS =
   /(^|\/)(requirements|constraints)([-._][^/]*)?\.txt$|(^|\/)requirements\/[^/]+\.txt$|(^|\/)CMakeLists\.txt$|(^|\/)(CLAUDE|AGENTS|GEMINI)(\.[\w-]+)?\.md$|(^|\/)\.[^/]+\//i;
+/**
+ * License files: `LICENSE`, `LICENCE`, `UNLICENSE`, `COPYING` and `NOTICE` at any depth, bare,
+ * with a variant (`LICENSE-MIT`, `COPYING.LESSER`) or as prose (`LICENSE.md`, `NOTICE.txt`),
+ * and anything in a `LICENSES/` folder. Code that shares the name (`Notice.tsx`,
+ * `license.ts`) is not one: this is always on, so it must not catch ordinary files.
+ */
+const LICENSE_FILE =
+  /(^|\/)LICEN[CS]ES\/|(^|\/)(LICEN[CS]E|UNLICENSE|COPYING|NOTICE)([-_][\w-]+)?(\.(md|markdown|txt|rst|adoc|lesser|lib))?$/i;
+
+const normalizePath = (path: string) => path.replace(/\\/g, "/").replace(/^\.\//, "");
 
 export const isTestFile = (path: string) => TEST_FILE.test(path);
 export const isUiFile = (path: string) => UI_FILE.test(path) && !isTestFile(path);
+/** A license file (`LICENSE_FILE`): always protected, never documentation. */
+export const isLicenseFile = (path: string) => LICENSE_FILE.test(normalizePath(path));
 /**
- * Not code for the tests checks: docs, config, manifests, lock files and assets. A change made
- * only of these needs no tests or test results (`codeFiles` in `checks.ts`). Never use it to
- * decide whether a change is reviewed: config and lock files change what runs. That is
- * `isDocFile`.
+ * Not code for the tests checks: docs, config, manifests, lock files, assets and license files.
+ * A change made only of these needs no tests or test results (`codeFiles` in `checks.ts`). Never
+ * use it to decide whether a change is reviewed: config and lock files change what runs. That
+ * is `isDocFile`.
  */
-export const isNonCodeFile = (path: string) => NON_CODE.test(path);
+export const isNonCodeFile = (path: string) => NON_CODE.test(path) || isLicenseFile(path);
 
 /**
  * Documentation, the only files the docs pipeline merges without the independent review:
- * prose (`md`, `mdx`, `txt`, `rst`) and images (`svg`, `png`, `jpg`, `gif`, `webp`, `ico`), in
- * any folder. Config, manifests, lock files, workflows, tests (fixtures too), agent instructions
- * and code are never documentation.
+ * prose (`md`, `txt`, `rst`) and raster images (`png`, `jpg`, `gif`, `webp`, `ico`), in any
+ * folder. MDX, SVG, config, manifests, lock files, workflows, tests (fixtures too), agent
+ * instructions, license files and code are never documentation.
  */
 export function isDocFile(path: string): boolean {
-  const normalized = path.replace(/\\/g, "/").replace(/^\.\//, "");
-  return DOC_FILE.test(normalized) && !NOT_DOCS.test(normalized) && !isTestFile(normalized);
+  const normalized = normalizePath(path);
+  return (
+    DOC_FILE.test(normalized) &&
+    !NOT_DOCS.test(normalized) &&
+    !isTestFile(normalized) &&
+    !isLicenseFile(normalized)
+  );
 }
 
 /**
@@ -141,6 +162,9 @@ export function alwaysProtectedWhy(path: string): string {
   if (name.startsWith("automations/")) return "an automation prompt that runs on a schedule";
   return "CodeDen's project configuration";
 }
+
+/** Why a license file always needs a person, for the escalation's reason. */
+export const LICENSE_WHY = "the project's license terms";
 
 /**
  * The vision's protected areas plus the vision file itself, which is always protected wherever
@@ -164,15 +188,18 @@ export function changedPaths(pr: {
 }
 
 export interface ProtectedHits {
-  /** `why` is set for CodeDen's own files (`ALWAYS_PROTECTED_GLOB`). */
+  /**
+   * `why` is set for the files that are always protected: CodeDen's own (`ALWAYS_PROTECTED_GLOB`)
+   * and license files (`isLicenseFile`).
+   */
   paths: Array<{ path: string; globs: string[]; why?: string }>;
   topics: string[];
 }
 
 /**
- * Protected paths and topics a change touches: CodeDen's own `.codeden/` folder (always),
- * configured `protectedPaths`, the vision's protected areas, and deploy/release files unless
- * deploys are allowed.
+ * Protected paths and topics a change touches: CodeDen's own `.codeden/` folder and license files
+ * (always), configured `protectedPaths`, the vision's protected areas, and deploy/release files
+ * unless deploys are allowed.
  */
 export function protectedHits(input: {
   files: readonly string[];
@@ -190,10 +217,14 @@ export function protectedHits(input: {
   const paths = input.files
     .map((path) => {
       const matched = matchingGlobs(path, globs);
-      const always = matched.includes(ALWAYS_PROTECTED_GLOB);
-      return { path, globs: matched, ...(always ? { why: alwaysProtectedWhy(path) } : {}) };
+      const why = matched.includes(ALWAYS_PROTECTED_GLOB)
+        ? alwaysProtectedWhy(path)
+        : isLicenseFile(path)
+          ? LICENSE_WHY
+          : null;
+      return { path, globs: matched, ...(why ? { why } : {}) };
     })
-    .filter((h) => h.globs.length > 0);
+    .filter((h) => h.globs.length > 0 || h.why);
   const topics = input.areas.topics.filter((t) => mentionsTopic(input.text, t));
   return { paths, topics };
 }

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { docsOnly } from "../src/services/factory/checks";
 import { isMergeSensitive } from "../src/services/factory/fast-merge";
-import { isDocFile, isNonCodeFile } from "../src/services/factory/policy";
+import { isDocFile, isLicenseFile, isNonCodeFile } from "../src/services/factory/policy";
 import { VISION_TEMPLATE } from "../src/services/factory/vision";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
 import { factorySteps } from "./support/factory-steps";
@@ -108,7 +108,7 @@ describe("the docs pipeline with auto-merge on", () => {
       expect(reviewCheck(id)?.state).not.toBe("skipped");
       expect(item(id).stage).toBe("escalated");
       expect(item(id).reason).toMatch(/protected areas/);
-      expect(item(id).reason).toContain(file);
+      expect(item(id).reason).toContain(`${file} (the project's license terms)`);
     },
   );
 
@@ -197,6 +197,38 @@ describe("isDocFile", () => {
       expect(isNonCodeFile(path)).toBe(true);
       expect(isDocFile(path)).toBe(false);
     }
+  });
+});
+
+describe("isLicenseFile", () => {
+  it.each([
+    "LICENSE",
+    "LICENSE.md",
+    "license.txt",
+    "LICENCE",
+    "UNLICENSE",
+    "LICENSE-MIT",
+    "LICENSE_APACHE.txt",
+    "COPYING",
+    "COPYING.LESSER",
+    "NOTICE",
+    "NOTICE.md",
+    "packages/x/LICENSE",
+    "LICENSES/MIT.txt",
+    "docs\\LICENSE.md",
+  ])("protects %s", (path) => {
+    expect(isLicenseFile(path)).toBe(true);
+  });
+
+  // Always on, so it must not catch ordinary files that share the name.
+  it.each([
+    "src/components/Notice.tsx",
+    "src/license.ts",
+    "scripts/license-check.mjs",
+    "docs/licensing.md",
+    "docs/notices/banner.md",
+  ])("leaves %s alone", (path) => {
+    expect(isLicenseFile(path)).toBe(false);
   });
 });
 
