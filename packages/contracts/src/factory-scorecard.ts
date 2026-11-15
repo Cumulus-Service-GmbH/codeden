@@ -68,6 +68,10 @@ export const FactoryScorecardRow = z.object({
   unpricedTurns: z.int().nonnegative(),
   /** A provider of these sessions is a subscription login: an API-equivalent figure (§12.6). */
   apiEquivalent: z.boolean(),
+  /** Merges a person spot-checked (`FactoryItem.spotCheck` decided), whenever they checked. */
+  spotChecked: z.int().nonnegative().default(0),
+  /** Of those, the ones where the person found a problem. */
+  spotProblems: z.int().nonnegative().default(0),
 });
 export type FactoryScorecardRow = z.infer<typeof FactoryScorecardRow>;
 

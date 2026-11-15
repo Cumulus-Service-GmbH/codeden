@@ -23,6 +23,8 @@ const row: FactoryScorecardRow = {
   estimatedUsd: 1.25,
   unpricedTurns: 0,
   apiEquivalent: true,
+  spotChecked: 2,
+  spotProblems: 1,
 };
 
 describe("factory scorecard (#361)", () => {
@@ -47,6 +49,21 @@ describe("factory scorecard (#361)", () => {
       pairs: [row, { ...row, key: "codex:gpt-5.5|none", reviewer: null, merged: 0, firstPass: 0 }],
     };
     expect(FactoryScorecard.parse(JSON.parse(JSON.stringify(card)))).toEqual(card);
+  });
+
+  it("reads rows from before spot-checks as none checked (#380)", () => {
+    const { spotChecked: _c, spotProblems: _p, ...old } = row;
+    const card = { projectId: "p1", days: 30, since: ts, finished: 5, builders: [old] };
+    const parsed = FactoryScorecard.parse({ ...card, reviewers: [], pairs: [] });
+    expect(parsed.builders[0]).toMatchObject({ spotChecked: 0, spotProblems: 0 });
+    expect(
+      FactoryScorecard.safeParse({
+        ...card,
+        builders: [{ ...row, spotProblems: -1 }],
+        reviewers: [],
+        pairs: [],
+      }).success,
+    ).toBe(false);
   });
 
   it("rejects figures that can't be", () => {

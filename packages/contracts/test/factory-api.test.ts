@@ -78,6 +78,7 @@ const item: FactoryItem = {
   reviewerNote: null,
   review: null,
   followUps: [],
+  spotCheck: null,
   checks: [{ name: "ci", state: "pass", detail: null, escalate: false, at: ts }],
   attempts: 0,
   reason: null,
@@ -200,12 +201,14 @@ describe("factory API contracts (§10.1)", () => {
       stepSince: _ss,
       mergePath: _mp,
       followUps: _fu,
+      spotCheck: _sc,
       sessionIds: _sid,
       itemBudgetSince: _ibs,
       ...old
     } = item;
     expect(FactoryItem.parse(old)).toMatchObject({
       followUps: [],
+      spotCheck: null,
       sessionIds: [],
       itemBudgetSince: null,
       mergePath: null,

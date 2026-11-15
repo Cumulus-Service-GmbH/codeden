@@ -22,6 +22,12 @@ import {
   WorkType,
 } from "./factory-pipeline";
 import { FactoryFailureKind, FactoryPrEntry } from "./factory-prs";
+import {
+  DigestSpotChecks,
+  FactorySpotChecks,
+  SpotCheck,
+  SpotCheckPercent,
+} from "./factory-spot-checks";
 
 /**
  * The factory loop of software-factory and dark-factory projects (§10.1): work items, merge
@@ -234,6 +240,11 @@ export const FactoryItem = z.object({
    * with the issue that tracks it once filed (by the dark factory, or with "File issue").
    */
   followUps: z.array(FactoryFollowUp).default([]),
+  /**
+   * The spot-check of its merge (`factory-spot-checks.ts`): set when it merged and was set aside
+   * for a person's quick look, then what they found. Null when its merge wasn't sampled.
+   */
+  spotCheck: SpotCheck.nullable().default(null),
   checks: z.array(MergeCheck),
   /** Fix rounds after failed merge checks. */
   attempts: z.int().nonnegative(),
@@ -397,6 +408,14 @@ export const FactoryTuning = z.object({
    * still waiting.
    */
   specApproval: z.boolean().default(false),
+  /**
+   * "Spot-check share of automatic merges" (`factory-spot-checks.ts`): the percentage of automatic
+   * merges set aside for a person's quick look, picked deterministically by work item. Merges of
+   * work let in from an untrusted author or allowed past the size limit are always included. Null
+   * (the default): the mode's share (`spotCheckShare`: 10 in a dark factory, 0 otherwise). 0 turns
+   * spot-checks off. Nothing ever waits on a spot-check.
+   */
+  spotCheckPercent: SpotCheckPercent.nullable().default(null),
 });
 export type FactoryTuning = z.infer<typeof FactoryTuning>;
 
@@ -520,6 +539,8 @@ export const FactoryDigest = z.object({
   handled: z
     .array(z.object({ title: z.string(), detail: z.string(), inboxItemId: Id }))
     .default([]),
+  /** Spot-checks people recorded during the day and over the window, and those outstanding. */
+  spotChecks: DigestSpotChecks.prefault({}),
   text: z.string(),
   createdAt: Timestamp,
 });
@@ -873,6 +894,8 @@ export const FactoryStatus = z.object({
    * the newest `LESSONS_IN_BRIEF`, last recorded first.
    */
   lessons: z.array(FactoryLesson).default([]),
+  /** Spot-checks of automatic merges: the share in force, the figures and the lists. */
+  spotChecks: FactorySpotChecks.prefault({}),
   lastDigest: FactoryDigest.nullable(),
   /**
    * When the loop last ticked (the panel's "last check"), changed or not. After a server
@@ -889,6 +912,17 @@ export const FactoryItemResponse = z.object({
   cost: FactoryItemCost.nullable().default(null),
 });
 export type FactoryItemResponse = z.infer<typeof FactoryItemResponse>;
+
+/**
+ * `POST /api/projects/:id/factory/items/:itemId/spot-check` and `.../spot-check/file-issue`: the
+ * item with what was recorded. The verdict is recorded before the follow-up issue is filed, so
+ * `issueError` says why GitHub didn't take the issue ("File issue" tries again); null otherwise.
+ */
+export const FactorySpotCheckResponse = z.object({
+  item: FactoryItem,
+  issueError: z.string().nullable().default(null),
+});
+export type FactorySpotCheckResponse = z.infer<typeof FactorySpotCheckResponse>;
 
 /**
  * `factory_allow_large_change`: the PM lets an item that failed only the size check merge

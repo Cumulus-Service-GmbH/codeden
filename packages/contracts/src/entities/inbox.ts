@@ -22,6 +22,12 @@ export const InboxItemKind = z.enum([
    * (§10.1, `FactoryTuning.specApproval`); resolved once they approve it or ask for changes.
    */
   "spec_approval",
+  /**
+   * Factory merges set aside for a person's quick look (§10.1, `factory-spot-checks.ts`): one item
+   * per project ("3 merges to spot-check"), refreshed as merges are sampled and resolved once none
+   * is outstanding. Nothing waits on it.
+   */
+  "spot_check",
 ]);
 export type InboxItemKind = z.infer<typeof InboxItemKind>;
 

@@ -33,6 +33,7 @@ export * from "./factory-pipeline";
 export * from "./factory-prs";
 export * from "./factory-retry";
 export * from "./factory-scorecard";
+export * from "./factory-spot-checks";
 export * from "./form-answers";
 export * from "./github";
 export * from "./images-api";
