@@ -56,7 +56,7 @@ export const SHORTCUTS: Shortcut[] = [
 
 export const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
-/** Human label for a combo, e.g. `Ctrl Shift L` or `⌘ ⇧ L`. */
+/** Human label for a combo, e.g. `Ctrl Shift L`, `⌘ ⇧ L` or `Ctrl Shift Space`. */
 export function formatCombo(combo: string): string {
   return combo
     .split("+")
@@ -64,8 +64,8 @@ export function formatCombo(combo: string): string {
       if (part === "mod") return isMac ? "⌘" : "Ctrl";
       if (part === "shift") return isMac ? "⇧" : "Shift";
       if (part === "alt") return isMac ? "⌥" : "Alt";
-      if (part === "enter") return "Enter";
-      return part.length === 1 ? part.toUpperCase() : part;
+      // Combos store keys in lowercase (`l`, `enter`, `space`, `f5`); labels capitalise them.
+      return part.charAt(0).toUpperCase() + part.slice(1);
     })
     .join(" ");
 }
@@ -97,6 +97,17 @@ export function shortcut(id: ShortcutId): Shortcut {
   const s = SHORTCUTS.find((x) => x.id === id);
   if (!s) throw new Error(`Unknown shortcut ${id}`);
   return s;
+}
+
+/**
+ * Whether a combo leaves typing alone: it holds Ctrl/⌘ or Alt, or is a function key (F1–F24).
+ * Shift alone doesn't count (Shift+A types "A"); a combo like `space`, `a` or `enter` would take
+ * that key over in every text field.
+ */
+export function leavesTypingAlone(combo: string): boolean {
+  const parts = combo.toLowerCase().split("+");
+  if (parts.includes("mod") || parts.includes("alt")) return true;
+  return /^f([1-9]|1[0-9]|2[0-4])$/.test(parts.at(-1) ?? "");
 }
 
 /** True when focus is in a text field, where single-key shortcuts must not fire. */

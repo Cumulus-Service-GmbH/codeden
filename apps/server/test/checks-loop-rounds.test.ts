@@ -95,7 +95,8 @@ describe("the checks loop's round count (#412)", () => {
     await c.sessions.update(id, { untilChecksPass: false });
     await c.sessions.update(id, { untilChecksPass: true });
     expect(c.env.repo.get(id).checks?.round).toBeUndefined();
-    await c.sessions.compact(id);
+    // A turn CodeDen starts itself (not a compaction, which runs no checks) runs them again.
+    await c.sessions.continueAfterRestart(id, RESTART_CONTINUE_MESSAGE);
     await until(() => rounds().length === 3);
     expect(c.card(id, "u4")?.data.round).toBe(0);
     expect(rounds()).toEqual([1, 2, 1]);

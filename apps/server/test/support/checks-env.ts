@@ -10,6 +10,7 @@ import {
   type RunnerCommandOf,
   type RunnerCommandResult,
   type SessionChecks,
+  type TurnKind,
   type UserInput,
 } from "@codeden/contracts";
 import type { ProjectService } from "../../src/services/projects/project-service";
@@ -102,7 +103,7 @@ export interface ChecksEnv {
   /** Turns the provider has run so far: their ids are `u1`, `u2`, ... */
   turnCount: () => number;
   /** A turn of the provider: the message it was sent (none for a compaction), then its end. */
-  turn: (sessionId: string, input: UserInput | null, end?: TurnEnd) => string;
+  turn: (sessionId: string, input: UserInput | null, end?: TurnEnd, kind?: TurnKind) => string;
   newSession: (checks?: SessionChecks) => string;
   /** The checks card of a turn. */
   card: (
@@ -127,11 +128,16 @@ export function createChecksEnv(): ChecksEnv {
   const agent = (sessionId: string, ...events: AgentEvent[]) =>
     env.store.append(events.map((e) => agentEventToNewEvent(sessionId, e)));
 
-  const turn = (sessionId: string, input: UserInput | null, end: TurnEnd = "complete") => {
+  const turn = (
+    sessionId: string,
+    input: UserInput | null,
+    end: TurnEnd = "complete",
+    kind?: TurnKind,
+  ) => {
     const turnId = `u${++turnNo}`;
     agent(
       sessionId,
-      { type: "turn.started", threadId: T, turnId },
+      { type: "turn.started", threadId: T, turnId, ...(kind ? { kind } : {}) },
       ...(input
         ? [
             {
@@ -177,10 +183,12 @@ export function createChecksEnv(): ChecksEnv {
         return { cancelled: had };
       }
       if (command.name === "session.send" || command.name === "session.compact") {
-        // The provider runs the turn once the runner has taken the message.
-        const input = command.name === "session.send" ? command.input : null;
+        // The provider runs the turn once the runner has taken the message. The runner marks
+        // the turn a compaction starts (`SessionHost.compact`).
+        const compact = command.name === "session.compact";
+        const input = compact ? null : command.input;
         const end = turnEnds.shift() ?? "complete";
-        setImmediate(() => turn(command.sessionId, input, end));
+        setImmediate(() => turn(command.sessionId, input, end, compact ? "compact" : undefined));
       }
       return {};
     }) as RunnerPort["request"],
