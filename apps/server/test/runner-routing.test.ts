@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HOME_RUNNER_ID, type RunnerRecord } from "@codeden/contracts";
@@ -13,6 +13,7 @@ import { BrowserService } from "../src/services/browser/browser-service";
 import { type RunnerPort, type RunnerRouter, runnerUnavailable } from "../src/services/runner-port";
 import type { SessionRepo } from "../src/services/sessions/repo";
 import { sampleSession } from "./helpers";
+import { removeTree } from "./support/remove-tree";
 
 let dir: string;
 let database: Database;
@@ -24,9 +25,9 @@ beforeEach(() => {
   store = new EventStore(database.db);
 });
 
-afterEach(() => {
+afterEach(async () => {
   database.close();
-  rmSync(dir, { recursive: true, force: true });
+  await removeTree(dir);
 });
 
 const ts = "2026-11-13T10:00:00.000Z";

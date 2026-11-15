@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -13,6 +13,7 @@ import { openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
 import { SessionRepo } from "../src/services/sessions/repo";
 import { SessionService, type SessionServiceDeps } from "../src/services/sessions/session-service";
+import { removeTree } from "./support/remove-tree";
 
 const caps: ProviderInfo["capabilities"] = {
   resume: true,
@@ -79,7 +80,7 @@ function withService(
       await run(start, repo);
     } finally {
       database.close();
-      rmSync(dir, { recursive: true, force: true });
+      await removeTree(dir);
     }
   };
 }

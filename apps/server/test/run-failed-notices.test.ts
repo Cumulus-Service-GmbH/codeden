@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type RunningServer, startServer } from "../src/server";
 import { sampleSession } from "./helpers";
 import { waitUntil } from "./support/harness";
+import { removeTree } from "./support/remove-tree";
 
 // Issue #275, review: a session has one `run_failed` item, and a further failure updates it in
 // place. Raised through `InboxService` (auto-retry giving up, the launcher, Retry), that update
@@ -38,7 +39,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await server?.close();
   server = undefined;
-  rmSync(home, { recursive: true, force: true });
+  await removeTree(home);
 });
 
 const services = () => (server as RunningServer).services;

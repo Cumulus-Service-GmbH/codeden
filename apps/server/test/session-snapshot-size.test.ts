@@ -1,10 +1,11 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agentEventToNewEvent, type NewEvent, SessionSnapshot } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type RunningServer, startServer } from "../src";
 import { sampleSessionEvent } from "./helpers";
+import { removeTree } from "./support/remove-tree";
 
 const TOKEN = "t".repeat(64);
 const auth = { authorization: `Bearer ${TOKEN}` };
@@ -25,7 +26,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await server.close();
-  rmSync(home, { recursive: true, force: true });
+  await removeTree(home);
 });
 
 const a = (e: Parameters<typeof agentEventToNewEvent>[1]) => agentEventToNewEvent("s1", e);

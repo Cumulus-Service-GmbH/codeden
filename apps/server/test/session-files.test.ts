@@ -1,10 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ServiceError } from "../src/services/errors";
 import { listSessionFiles, readSessionFile } from "../src/services/files/session-files";
 import { LocalWorkspaceFs } from "../src/services/workspace-fs/local";
+import { removeTree } from "./support/remove-tree";
 
 let dir: string;
 let home: string;
@@ -23,9 +24,9 @@ beforeEach(() => {
   writeFileSync(join(dir, "src", "blob.bin"), Buffer.from([1, 0, 2]));
 });
 
-afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
-  rmSync(home, { recursive: true, force: true });
+afterEach(async () => {
+  await removeTree(dir);
+  await removeTree(home);
 });
 
 describe("session files", () => {

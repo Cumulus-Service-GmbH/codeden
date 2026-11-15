@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Settings } from "@codeden/contracts";
@@ -11,6 +11,7 @@ import {
   reportFileReset,
 } from "../src/services/file-reset-notice";
 import { SettingsStore } from "../src/settings-store";
+import { removeTree } from "./support/remove-tree";
 
 let dir: string;
 let file: string;
@@ -20,9 +21,9 @@ beforeEach(() => {
   file = join(dir, "settings.json");
 });
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
-  rmSync(dir, { recursive: true, force: true });
+  await removeTree(dir);
 });
 
 /** Copies CodeDen kept of a settings file it could not use. */

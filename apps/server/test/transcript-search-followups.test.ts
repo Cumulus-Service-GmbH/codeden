@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -14,6 +14,7 @@ import { EventStore } from "../src/events/store";
 import { SearchBackfill } from "../src/services/search/backfill";
 import { searchTranscripts } from "../src/services/search/search";
 import { sampleSession } from "./helpers";
+import { removeTree } from "./support/remove-tree";
 
 /**
  * Issue #166: what the review of transcript search (#98) found missing or broken. Each case
@@ -30,10 +31,10 @@ beforeEach(() => {
   store = new EventStore(database.db);
 });
 
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers();
   database.close();
-  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await removeTree(dir);
 });
 
 function session(id: string, extra: Partial<typeof sampleSession> & { archivedAt?: string } = {}) {

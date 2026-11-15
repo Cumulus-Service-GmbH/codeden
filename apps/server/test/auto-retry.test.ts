@@ -164,9 +164,9 @@ describe("AutoRetry", () => {
     retry = make();
     retry.start();
   });
-  afterEach(() => {
+  afterEach(async () => {
     retry.stop();
-    env.close();
+    await env.close();
   });
 
   const agent = (sessionId: string, ...events: AgentEvent[]) =>

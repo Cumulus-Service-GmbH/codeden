@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -21,6 +21,7 @@ import { Outbox } from "../src/services/sessions/outbox";
 import { SessionRepo } from "../src/services/sessions/repo";
 import { SessionService, type SessionServiceDeps } from "../src/services/sessions/session-service";
 import { sampleSession } from "./helpers";
+import { removeTree } from "./support/remove-tree";
 
 const PROJECT = "p1";
 
@@ -80,9 +81,9 @@ beforeEach(() => {
   conflicts = new ConflictService({ db: database.db, store, inbox, artifacts, sessions });
 });
 
-afterEach(() => {
+afterEach(async () => {
   database.close();
-  rmSync(dir, { recursive: true, force: true });
+  await removeTree(dir);
 });
 
 /** The New session draft's start: its text, and the work key field when one was typed. */

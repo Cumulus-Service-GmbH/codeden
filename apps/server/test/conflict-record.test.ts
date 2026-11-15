@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -15,6 +15,7 @@ import { ArtifactService } from "../src/services/artifacts";
 import { InboxService } from "../src/services/inbox-service";
 import { ConflictService } from "../src/services/orchestration/conflicts";
 import type { SessionService } from "../src/services/sessions/session-service";
+import { removeTree } from "./support/remove-tree";
 
 const PNG_B64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
@@ -84,9 +85,9 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
   database.close();
-  rmSync(dir, { recursive: true, force: true });
+  await removeTree(dir);
 });
 
 /** Every event's payload, as stored in the log. */

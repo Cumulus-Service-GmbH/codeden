@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -15,6 +15,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type RunningServer, startServer } from "../src";
 import type { Exec } from "../src/services/exec";
+import { removeTree } from "./support/remove-tree";
 
 const TOKEN = "a".repeat(64);
 let home: string;
@@ -52,7 +53,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await server.close();
-  rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await removeTree(home);
 });
 
 const call = async (method: string, path: string, body?: unknown) => {

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -15,6 +15,7 @@ import { EventStore } from "../src/events/store";
 import { backfillUsageLedger } from "../src/services/usage/backfill";
 import { UsageService } from "../src/services/usage/usage-service";
 import { sampleSession } from "./helpers";
+import { removeTree } from "./support/remove-tree";
 
 let dir: string;
 let database: Database;
@@ -92,10 +93,10 @@ beforeEach(() => {
   emit("s1", { type: "thread.started", thread: { id: "t" } });
 });
 
-afterEach(() => {
+afterEach(async () => {
   usage.stop();
   database.close();
-  rmSync(dir, { recursive: true, force: true });
+  await removeTree(dir);
   vi.useRealTimers();
 });
 

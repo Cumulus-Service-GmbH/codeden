@@ -22,6 +22,7 @@ import { AgentConfigService } from "../src/services/agent-config/agent-config-se
 import { notFound, ServiceError } from "../src/services/errors";
 import type { ProjectService } from "../src/services/projects/project-service";
 import type { SessionRepo } from "../src/services/sessions/repo";
+import { removeTree } from "./support/remove-tree";
 
 function put(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true });
@@ -99,7 +100,7 @@ describe("skill switches", () => {
     put(join(home, ".codex", "skills", "review", "SKILL.md"), skillMd("review"));
     put(join(repo, ".agents", "skills", "release", "SKILL.md"), skillMd("release"));
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => removeTree(dir));
 
   describe("Claude Code skillOverrides", () => {
     it("reads each skill's state, the most specific file winning", () => {

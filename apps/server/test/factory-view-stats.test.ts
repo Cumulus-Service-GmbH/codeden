@@ -157,9 +157,9 @@ describe("the Factory view's stats (§10.1)", () => {
 
 describe("time in step (§10.1)", () => {
   let env: FactoryEnv;
-  afterEach(() => {
-    env?.close();
+  afterEach(async () => {
     vi.useRealTimers();
+    await env?.close();
   });
 
   it("starts at creation and restarts only when the pipeline step changes", () => {
@@ -217,9 +217,9 @@ describe("time in step (§10.1)", () => {
 
 describe("finished work the Factory view keeps (§10.1)", () => {
   let env: FactoryEnv;
-  afterEach(() => {
-    env?.close();
+  afterEach(async () => {
     vi.useRealTimers();
+    await env?.close();
   });
 
   it("keeps escalations, recent or open failures and today's merges", () => {

@@ -17,9 +17,9 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-11-12T10:00:00.000Z"));
 });
-afterEach(() => {
-  env?.close();
+afterEach(async () => {
   vi.useRealTimers();
+  await env?.close();
 });
 
 const enable = (mode: "software_factory" | "dark_factory" = "software_factory") =>

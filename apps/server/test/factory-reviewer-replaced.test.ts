@@ -31,9 +31,9 @@ beforeEach(() => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date("2026-11-14T10:00:00.000Z"));
 });
-afterEach(() => {
-  env?.close();
+afterEach(async () => {
   vi.useRealTimers();
+  await env?.close();
 });
 const { item, tick, enable, verifying, review, lastMessageTo } = factorySteps(() => env);
 

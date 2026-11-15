@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { type RunningServer, startServer } from "../src";
 import { type DesktopUpdater, DesktopUpdateService } from "../src/services/updates/desktop";
 import { sampleSession } from "./helpers";
+import { removeTree } from "./support/remove-tree";
 
 const TOKEN = "d".repeat(64);
 
@@ -208,7 +209,7 @@ describe("desktop host seam", () => {
   afterEach(async () => {
     await server?.close();
     server = undefined;
-    rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    await removeTree(home);
   });
 
   const call = async (path: string, init?: RequestInit) => {

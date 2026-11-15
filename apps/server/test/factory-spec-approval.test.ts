@@ -182,7 +182,7 @@ describe("spec approval before building (#363)", () => {
     expect(toBuilder(id).at(-1)?.text).toMatch(/Implement feature/);
     expect(inboxOf(id)?.status).toBe("resolved");
 
-    env.close();
+    await env.close();
     env = createFactoryEnv();
     enable({}, true, "dark_factory" as "software_factory");
     const dark = await feature("Add JSON export");

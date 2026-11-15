@@ -10,6 +10,7 @@ import { runTool } from "../src/services/exec";
 import { GithubStore } from "../src/services/github/store";
 import { ProjectService } from "../src/services/projects/project-service";
 import { reconcileProject } from "../src/services/projects/reconcile";
+import { removeTree } from "./support/remove-tree";
 
 const ts = "2026-11-08T10:00:00.000Z";
 const now = "2026-11-08T11:00:00.000Z";
@@ -173,9 +174,9 @@ beforeEach(() => {
   service = new ProjectService({ db: database.db, store, exec: runTool, projectsDir: dir });
 });
 
-afterEach(() => {
+afterEach(async () => {
   database.close();
-  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await removeTree(dir);
 });
 
 async function plainFolderProject(): Promise<{ id: string; folder: string }> {

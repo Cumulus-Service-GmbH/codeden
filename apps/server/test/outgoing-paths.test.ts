@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -11,6 +11,7 @@ import {
   remoteOutgoingFile,
 } from "../src/services/outgoing-paths";
 import type { WorkspaceFs } from "../src/services/workspace-fs/workspace-fs";
+import { removeTree } from "./support/remove-tree";
 
 // The rule for files an agent sends out by path (`share_to_chat`, `browser_upload`): only from
 // the session's own folders, never a secrets file.
@@ -25,8 +26,8 @@ beforeEach(() => {
   opts = { cwd: join(dir, "wt"), artifactsDir: join(dir, "artifacts"), use: "uploaded" };
 });
 
-afterEach(() => {
-  rmSync(dir, { recursive: true, force: true });
+afterEach(async () => {
+  await removeTree(dir);
 });
 
 describe("localOutgoingFile", () => {

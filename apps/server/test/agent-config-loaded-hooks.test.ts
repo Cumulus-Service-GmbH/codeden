@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { LoadedAgentConfig } from "@codeden/contracts";
@@ -9,6 +9,7 @@ import { claudeSessionHookFiles } from "../src/services/agent-config/hooks";
 import { AgentConfigHooks } from "../src/services/agent-config/hooks-service";
 import type { ProjectService } from "../src/services/projects/project-service";
 import type { SessionRepo } from "../src/services/sessions/repo";
+import { removeTree } from "./support/remove-tree";
 
 function put(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true });
@@ -40,7 +41,7 @@ describe("hooks that apply to a session's working folder", () => {
       shelf: new HookShelf(join(dir, "data", "disabled-hooks.json")),
     });
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => removeTree(dir));
 
   /** A worktree of `repo` whose `.git` file points at the main checkout. */
   function worktree(): string {

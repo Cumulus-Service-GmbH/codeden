@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ItemRecord, type Role, ThreadItemsPage } from "@codeden/contracts";
@@ -8,6 +8,7 @@ import { EventStore } from "../src/events/store";
 import { NoticeStore } from "../src/services/orchestration/notices";
 import { Reminders } from "../src/services/orchestration/reminders";
 import { type Harness, startHarness, waitUntil } from "./support/harness";
+import { removeTree } from "./support/remove-tree";
 
 const NOW = Date.parse("2026-11-10T09:00:00.000Z");
 const MIN = 60_000;
@@ -24,10 +25,10 @@ describe("scheduled wake-ups (§8.2)", () => {
     notices = new NoticeStore(database.db, new EventStore(database.db));
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     vi.useRealTimers();
     database.close();
-    rmSync(dir, { recursive: true, force: true });
+    await removeTree(dir);
   });
 
   const reminders = () => {

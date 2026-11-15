@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -15,6 +15,7 @@ import { type Exec, runTool } from "../src/services/exec";
 import { GithubFactoryPort } from "../src/services/factory/github-port";
 import { changeSize } from "../src/services/factory/size";
 import { FakeGithub, type FakePrFile } from "./support/fake-github";
+import { removeTree } from "./support/remove-tree";
 
 const TOKEN = "e".repeat(64);
 let home: string;
@@ -86,7 +87,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await server?.close();
-  rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await removeTree(home);
 });
 
 describe("github routes", () => {

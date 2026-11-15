@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -25,6 +25,7 @@ import { SessionRepo } from "../src/services/sessions/repo";
 import { SessionService, type SessionServiceDeps } from "../src/services/sessions/session-service";
 import { sampleSession } from "./helpers";
 import { type Harness, startHarness, waitUntil } from "./support/harness";
+import { removeTree } from "./support/remove-tree";
 
 const caps: ProviderInfo["capabilities"] = {
   resume: true,
@@ -173,7 +174,7 @@ describe("updateSession with planMode", () => {
       expect(pending()).toBeUndefined();
     } finally {
       database.close();
-      rmSync(dir, { recursive: true, force: true });
+      await removeTree(dir);
     }
   });
 });
@@ -238,7 +239,7 @@ describe("SessionService.start with planMode", () => {
       expect(launch).toHaveBeenCalledTimes(3);
     } finally {
       database.close();
-      rmSync(dir, { recursive: true, force: true });
+      await removeTree(dir);
     }
   });
 });

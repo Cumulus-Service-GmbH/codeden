@@ -1,4 +1,4 @@
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HOME_RUNNER_ID, type RunnerEvent, type RunnerStream } from "@codeden/contracts";
@@ -12,6 +12,7 @@ import { sampleSession } from "./helpers";
 import { type FakeRunner, startFakeRunner } from "./support/fake-runner";
 import { waitUntil } from "./support/harness";
 import { type InProcessLink, startInProcessLink } from "./support/in-process-link";
+import { removeTree } from "./support/remove-tree";
 
 /**
  * A sandbox runner reached through an exec link is as untrusted as one on loopback
@@ -41,7 +42,7 @@ afterEach(async () => {
   hub = undefined;
   for (const runner of runners.splice(0)) await runner.close();
   database.close();
-  rmSync(dir, { recursive: true, force: true });
+  await removeTree(dir);
 });
 
 const createSession = (id: string, runnerId: string | null) =>

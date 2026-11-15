@@ -1,10 +1,11 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventEnvelope, SessionSnapshot } from "@codeden/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { isProcessAlive, type RunningServer, readLiveRunnerLock, startServer } from "../src";
 import { sampleSession } from "./helpers";
+import { removeTree } from "./support/remove-tree";
 
 const TOKEN = "e".repeat(64);
 let home: string;
@@ -24,7 +25,7 @@ beforeAll(() => {
 
 afterAll(async () => {
   await server?.close({ stopRunner: true });
-  rmSync(home, { recursive: true, force: true });
+  await removeTree(home);
 });
 
 const start = () =>

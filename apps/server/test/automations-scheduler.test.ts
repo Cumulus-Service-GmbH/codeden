@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Automation, AutomationGuards, type Project } from "@codeden/contracts";
@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Database, openDatabase } from "../src/db/client";
 import { ScheduleStore } from "../src/services/automations/schedule-store";
 import { CronScheduler, type SchedulePair } from "../src/services/automations/scheduler";
+import { removeTree } from "./support/remove-tree";
 
 const ts = "2026-11-07T10:00:00.000Z";
 
@@ -88,9 +89,9 @@ describe("cron scheduler: persisted next runs, catch-up, skips", () => {
     skipped = [];
     pairs = [pair()];
   });
-  afterEach(() => {
+  afterEach(async () => {
     db.close();
-    rmSync(dir, { recursive: true, force: true });
+    await removeTree(dir);
   });
 
   it("persists the next run and fires when it is due", async () => {

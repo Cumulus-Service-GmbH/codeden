@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AgentEvent, agentEventToNewEvent, type Item } from "@codeden/contracts";
@@ -9,6 +9,7 @@ import { inboxItems } from "../src/db/schema";
 import { EventStore } from "../src/events/store";
 import { SessionRepo } from "../src/services/sessions/repo";
 import { sampleSession } from "./helpers";
+import { removeTree } from "./support/remove-tree";
 
 let dir: string;
 let database: Database;
@@ -23,9 +24,9 @@ beforeEach(() => {
   store.append([{ type: "session.created", sessionId: "s1", payload: { session: sampleSession } }]);
 });
 
-afterEach(() => {
+afterEach(async () => {
   database.close();
-  rmSync(dir, { recursive: true, force: true });
+  await removeTree(dir);
 });
 
 const agent = (...events: AgentEvent[]) =>

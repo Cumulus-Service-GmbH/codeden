@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NetworkStatus, SetNetworkPasswordResponse, SignInError } from "@codeden/contracts";
@@ -10,6 +10,7 @@ import { RemoteAccessStore } from "../src/network/store";
 import { authRoutes, networkRoutes } from "../src/routes/network";
 import { errorResponse } from "../src/routes/validate";
 import { loopbackOrigins, securityMiddleware } from "../src/security";
+import { removeTree } from "./support/remove-tree";
 
 /**
  * The security middleware and the sign-in routes with the peer address injected the way
@@ -154,7 +155,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "codeden-netsec-"));
   build();
 });
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeTree(dir));
 
 describe("with network access off", () => {
   it("refuses every remote peer, even with the install token", async () => {

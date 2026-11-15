@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import type { NetworkInterfaceInfo } from "node:os";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +15,7 @@ import { SignInLimiter } from "../src/network/rate-limit";
 import { PasswordRuleError, RemoteAccessStore } from "../src/network/store";
 import { PASSPHRASE_WORDS } from "../src/network/words";
 import type { FileReset } from "../src/user-json-file";
+import { removeTree } from "./support/remove-tree";
 
 const FAST = { N: 1024, r: 8, p: 1 };
 const GOOD = "maple-river-quiet-orbit-candle";
@@ -194,7 +195,7 @@ describe("RemoteAccessStore", () => {
     file = join(dir, "remote-access.json");
     now = Date.parse("2026-11-08T10:00:00.000Z");
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => removeTree(dir));
   const make = () => new RemoteAccessStore(file, () => now);
 
   it("starts off with no password and refuses to switch on without one", () => {

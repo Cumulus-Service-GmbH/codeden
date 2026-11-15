@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ItemRecord, RawEventEnvelope, UserInput } from "@codeden/contracts";
@@ -8,6 +8,7 @@ import { EventStore } from "../src/events/store";
 import { ArtifactService } from "../src/services/artifacts";
 import { clientEvent, clientInput, clientItemRecord } from "../src/services/sessions/client-items";
 import { sampleSession } from "./helpers";
+import { removeTree } from "./support/remove-tree";
 
 const PNG_B64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
@@ -27,9 +28,9 @@ beforeEach(() => {
   artifacts = new ArtifactService(database.db, store, artifactsDir);
 });
 
-afterEach(() => {
+afterEach(async () => {
   database.close();
-  rmSync(dir, { recursive: true, force: true });
+  await removeTree(dir);
 });
 
 const pasted: UserInput = {

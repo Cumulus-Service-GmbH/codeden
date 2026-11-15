@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type {
@@ -20,6 +20,7 @@ import { MemorySecretStore } from "../../src/services/secrets";
 import { SessionRepo } from "../../src/services/sessions/repo";
 import { sampleSession } from "../helpers";
 import { FakeGithub } from "./fake-github";
+import { removeTree } from "./remove-tree";
 
 /** A `GithubService` over a real SQLite database and a fake GitHub (no network, no runner). */
 export interface GithubEnv {
@@ -49,7 +50,7 @@ export interface GithubEnv {
    * 401) and `gh auth token` prints `token`, which GitHub knows as `login`.
    */
   switchAccount: (token: string, login: string) => void;
-  close: () => void;
+  close: () => Promise<void>;
 }
 
 const ts = "2026-11-07T10:00:00.000Z";
@@ -224,10 +225,10 @@ export function createGithubEnv(opts: GithubEnvOptions = {}): GithubEnv {
       gh.accounts.set(token, login);
       env.ghTokens = [token];
     },
-    close: () => {
+    close: async () => {
       service.stop();
       db.close();
-      rmSync(dir, { recursive: true, force: true });
+      await removeTree(dir);
     },
   });
   return env;

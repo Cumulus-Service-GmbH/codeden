@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AgentEventOf, agentEventToNewEvent } from "@codeden/contracts";
@@ -12,6 +12,7 @@ import { ArtifactService } from "../src/services/artifacts";
 import { GeneratedImages } from "../src/services/sessions/generated-images";
 import { SessionRepo } from "../src/services/sessions/repo";
 import { sampleSession } from "./helpers";
+import { removeTree } from "./support/remove-tree";
 
 /** A 1x1 PNG. */
 const PNG = Buffer.from(
@@ -34,10 +35,10 @@ beforeEach(() => {
   started = [];
 });
 
-afterEach(() => {
+afterEach(async () => {
   for (const service of started) service.stop();
   database.close();
-  rmSync(dir, { recursive: true, force: true });
+  await removeTree(dir);
 });
 
 /** A fresh service, as after a server start; resolves once its recovery pass is done. */
