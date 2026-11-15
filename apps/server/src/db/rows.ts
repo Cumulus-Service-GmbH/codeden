@@ -99,15 +99,21 @@ export function rowToInbox(r: InboxRow): InboxItem {
 }
 
 export function automationToRow(a: Automation): AutomationRow {
-  return { ...a, workKey: a.workKey ?? null, createdBy: a.createdBy ?? null };
+  return {
+    ...a,
+    workKey: a.workKey ?? null,
+    createdBy: a.createdBy ?? null,
+    approvedAutonomy: a.approvedAutonomy ?? null,
+  };
 }
 
 export function rowToAutomation(r: AutomationRow): Automation {
-  const { workKey, createdBy, ...rest } = r;
+  const { workKey, createdBy, approvedAutonomy, ...rest } = r;
   return Automation.parse({
     ...rest,
     ...(workKey === null ? {} : { workKey }),
     ...(createdBy === null ? {} : { createdBy }),
+    ...(approvedAutonomy === null ? {} : { approvedAutonomy }),
   });
 }
 

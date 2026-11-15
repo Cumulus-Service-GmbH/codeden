@@ -1,5 +1,5 @@
 import { existsSync, type FSWatcher, watch } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type {
   Automation,
   AutomationFileError,
@@ -13,7 +13,11 @@ import { rowToAutomation } from "../../db/rows";
 import { automations } from "../../db/schema";
 import type { EventStore } from "../../events/store";
 import { errorMessage } from "../errors";
+import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
+import { changesBehaviour } from "./approval";
+import { fileChangeInbox } from "./pm-change-notice";
+import type { ScheduleStore } from "./schedule-store";
 import {
   findTemplatesDir,
   type ParsedAutomationFile,
@@ -29,6 +33,10 @@ export interface AutomationSourcesDeps {
   globalDir: string;
   /** Built-in templates folder (found automatically when omitted). */
   templatesDir?: string;
+  /** Where the notice goes when a file's change switches an automation off. */
+  inbox?: InboxService;
+  /** Per-project switches of automations for all projects, cleared with their own switch. */
+  schedules?: ScheduleStore;
   /** Called after a reload changed any definition. */
   onChange?: () => void;
   /** Rescan interval for folders created after start (default 60 s; 0 disables). */
@@ -59,8 +67,12 @@ function definitionKey(a: Automation): string {
  * Automation definitions from Markdown files (§10): global ones in `~/.codeden/automations/`
  * (they target all projects) and each project's `.codeden/automations/` (that project only).
  * They are mirrored into the `automations` projection through `automation.saved` /
- * `automation.deleted`, keeping the enabled flag (files never enable anything). Folders are
- * watched, with a periodic rescan for folders created later. Built-in templates are read once.
+ * `automation.deleted`, keeping the enabled flag and approved permission level (files never
+ * enable anything). An agent or a merged pull request can rewrite a file, so a change to what
+ * an automation that is on does (trigger, action, guards) switches it off, with an inbox item
+ * showing the change, until a person switches it on again; a new name or description keeps it
+ * on. Folders are watched, with a periodic rescan for folders created later. Built-in templates
+ * are read once.
  */
 export class AutomationSources {
   private readonly paths = new Map<string, string>();
@@ -172,11 +184,14 @@ export class AutomationSources {
     this.paths.clear();
     for (const [k, v] of paths) this.paths.set(k, v);
     this.watchDirs(dirs);
-    return this.sync(found);
+    return this.sync(found, now);
   }
 
-  /** Store new or changed file definitions and delete those whose file is gone. */
-  private sync(found: Automation[]): boolean {
+  /**
+   * Store new or changed file definitions and delete those whose file is gone. A change to
+   * what an automation that is on does switches it off and tells the user.
+   */
+  private sync(found: Automation[], now: string): boolean {
     const existing = new Map(
       this.deps.db
         .select()
@@ -189,13 +204,22 @@ export class AutomationSources {
         }),
     );
     const events: NewEvent[] = [];
+    const switchedOff: Array<{ before: Automation; after: Automation }> = [];
     for (const next of found) {
       const prev = existing.get(next.id);
       existing.delete(next.id);
       if (prev && definitionKey(prev) === definitionKey(next)) continue;
-      const automation: Automation = prev
-        ? { ...next, enabled: prev.enabled, createdAt: prev.createdAt }
-        : next;
+      let automation = next;
+      if (prev) {
+        const off = this.isOn(prev) && changesBehaviour(prev, next);
+        automation = {
+          ...next,
+          enabled: prev.enabled && !off,
+          createdAt: prev.createdAt,
+          ...(prev.approvedAutonomy ? { approvedAutonomy: prev.approvedAutonomy } : {}),
+        };
+        if (off) switchedOff.push({ before: prev, after: automation });
+      }
       events.push({ type: "automation.saved", sessionId: null, payload: { automation } });
     }
     for (const gone of existing.keys()) {
@@ -203,8 +227,31 @@ export class AutomationSources {
     }
     if (events.length === 0) return false;
     this.deps.store.append(events);
+    for (const { before, after } of switchedOff) this.switchedOff(before, after, now);
     this.deps.onChange?.();
     return true;
+  }
+
+  /** On by its own switch, or (for all projects) in a project that switched it on. */
+  private isOn(a: Automation): boolean {
+    if (a.enabled) return true;
+    if (a.target.type !== "all_projects" || !this.deps.schedules) return false;
+    return this.deps.schedules.forAutomation(a.id).some((r) => r.enabledOverride === true);
+  }
+
+  /** Projects that switched it on follow its own switch again (now off); the user is told. */
+  private switchedOff(before: Automation, after: Automation, now: string): void {
+    for (const row of this.deps.schedules?.forAutomation(after.id) ?? []) {
+      if (row.enabledOverride !== true) continue;
+      this.deps.schedules?.upsert(after.id, row.projectId, { enabledOverride: null });
+    }
+    const path = this.paths.get(after.id);
+    const shown =
+      path && after.source === "project_file"
+        ? `${PROJECT_AUTOMATIONS_DIR.replace(/\\/g, "/")}/${basename(path)}`
+        : (path ?? null);
+    this.deps.log?.(`automations: ${after.id} switched off: its file changed what it does`);
+    this.deps.inbox?.put(fileChangeInbox(before, after, shown, now));
   }
 
   private watchDirs(dirs: string[]): void {

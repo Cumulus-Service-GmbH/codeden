@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   type Automation,
   type AutomationRun,
+  type AutonomyLevel,
   type ConflictDecision,
   type GitHubIssueRef,
   type GithubIssue,
@@ -51,6 +52,11 @@ export interface FireRequest {
   issue?: GithubIssue | GitHubIssueRef;
   /** Manual runs: the caller's decision after a `conflict`. */
   conflict?: ConflictDecision;
+  /**
+   * The permission level of the session a run starts: the action's, capped at the level a
+   * person approved (`runAutonomy`); undefined leaves it to the project's default.
+   */
+  autonomy: AutonomyLevel | undefined;
 }
 
 const TRIGGER_TEXT: Record<TriggerKind, string> = {
@@ -285,7 +291,7 @@ export class AutomationExecutor {
       provider: action.provider,
       model: action.model,
       effort: action.effort,
-      autonomy: action.autonomy,
+      autonomy: req.autonomy,
       purpose: run.purpose,
       workKey: run.workKey,
       startedBy: run.startedBy,

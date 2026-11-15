@@ -125,6 +125,14 @@ export type AutomationGuards = z.infer<typeof AutomationGuards>;
 export const AutomationCreator = z.enum(["user", "pm", "import"]);
 export type AutomationCreator = z.infer<typeof AutomationCreator>;
 
+/**
+ * The permission level a person approved for an automation's sessions (§10): the level its
+ * definition asked for when they switched it on, or `default` when it named none (the
+ * project's default level).
+ */
+export const ApprovedAutonomy = z.union([AutonomyLevel, z.literal("default")]);
+export type ApprovedAutonomy = z.infer<typeof ApprovedAutonomy>;
+
 /** An automation: trigger + action + target + guards. Off by default. */
 export const Automation = z.object({
   id: Id,
@@ -150,6 +158,12 @@ export const Automation = z.object({
    * a PM through `create_automation` (`pm`), or an import of shared files (`import`).
    */
   createdBy: AutomationCreator.optional(),
+  /**
+   * The permission level a person last approved by switching it on (or creating or saving it
+   * on). Runs nobody starts by hand never get a higher one; a change in its file or by a PM
+   * to what it does switches it off until someone approves again. Absent until then.
+   */
+  approvedAutonomy: ApprovedAutonomy.optional(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
 });

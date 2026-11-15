@@ -20,6 +20,7 @@ import type { AutomationPort } from "../orchestration/ports";
 import type { ProjectService } from "../projects/project-service";
 import type { SessionRepo } from "../sessions/repo";
 import type { SessionService } from "../sessions/session-service";
+import { runAutonomy } from "./approval";
 import { effectiveTimezone } from "./cron";
 import { AutomationDefinitions } from "./definitions";
 import {
@@ -98,6 +99,8 @@ export class AutomationService implements AutomationPort {
       db: deps.db,
       store: deps.store,
       projects: deps.projects,
+      inbox: deps.inbox,
+      schedules: this.schedules,
       globalDir: join(deps.home, "automations"),
       templatesDir: deps.templatesDir,
       rescanMs: deps.rescanMs,
@@ -119,6 +122,7 @@ export class AutomationService implements AutomationPort {
       orchestration: deps.orchestration,
       github: deps.github,
       triageAutomation: (projectId) => this.triageAutomation(projectId),
+      sessionAutonomy: (automation, project) => this.runAutonomy(automation, project),
       reported: (projectId, issueNumber, decision) =>
         this.executor.completeTriage(projectId, issueNumber, decision),
     });
@@ -170,9 +174,23 @@ export class AutomationService implements AutomationPort {
     if (!this.deps.settings.get().automations.enabled || project.archivedAt) return false;
     if (!this.schedules.projectSettings(project.id).enabled) return false;
     if (automation.action.type === "triage" && project.kind !== "github") return false;
+    return this.switchedOn(automation, project);
+  }
+
+  /** The automation's own switch, or its override in this project (automations for all projects). */
+  private switchedOn(automation: Automation, project: Project): boolean {
     if (automation.target.type === "project") return automation.enabled;
     const override = this.schedules.get(automation.id, project.id)?.enabledOverride;
     return override ?? automation.enabled;
+  }
+
+  /** The permission level of a run's session in this project, capped at the approved one. */
+  runAutonomy(automation: Automation, project: Project, byPerson = false) {
+    return runAutonomy(automation, {
+      fallback: project.autonomy ?? this.deps.settings.get().autonomy.default,
+      on: this.switchedOn(automation, project),
+      byPerson,
+    });
   }
 
   /**
@@ -300,11 +318,20 @@ export class AutomationService implements AutomationPort {
     }
   }
 
-  /** Run now (`run_automation`, `POST /api/automations/:id/run`), with the conflict check. */
-  async run(automationId: string, req: RunAutomationRequest): Promise<RunAutomationResponse> {
+  /**
+   * Run now (`run_automation`, `POST /api/automations/:id/run`), with the conflict check.
+   * `byPerson`: the user started it in Automations, so it runs at the level it asks for; a PM's
+   * run gets no more than the level a person approved.
+   */
+  async run(
+    automationId: string,
+    req: RunAutomationRequest,
+    opts: { byPerson?: boolean } = {},
+  ): Promise<RunAutomationResponse> {
     const { automation, project } = this.inProject(automationId, req.projectId);
     const fire = this.fireRequest(automation, project, "manual", req.context);
-    return this.fire({ ...fire, conflict: req.conflict });
+    const autonomy = this.runAutonomy(automation, project, opts.byPerson);
+    return this.fire({ ...fire, conflict: req.conflict, autonomy });
   }
 
   // ---------------------------------------------------------------- internals
@@ -337,6 +364,7 @@ export class AutomationService implements AutomationPort {
       triggeredBy,
       timezone,
       vars: { ...baseVars(project, this.now(), timezone), ...extra },
+      autonomy: this.runAutonomy(automation, project),
     };
   }
 

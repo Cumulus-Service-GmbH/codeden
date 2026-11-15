@@ -114,11 +114,13 @@ describe("inbox grouping", () => {
       "run_failed",
       "triage",
       "automation_result",
+      // An automation switched off because its file changed what it does (#389).
+      "message",
     ]);
     expect(groupInbox(inboxItems, "problems").map((g) => g.id)).toEqual(["run_failed"]);
   });
   it("counts tabs including conflicts", () => {
-    expect(inboxCounts(inboxItems, 1)).toEqual({ all: 10, asks: 5, reviews: 3, problems: 2 });
+    expect(inboxCounts(inboxItems, 1)).toEqual({ all: 11, asks: 5, reviews: 4, problems: 2 });
   });
   it("shows worktrees that couldn't be removed with the problems", () => {
     const base = inboxItems.find((i) => i.kind === "run_failed");

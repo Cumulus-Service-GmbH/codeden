@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { isDeepStrictEqual } from "node:util";
 import {
   Automation,
   type AutomationCreator,
@@ -19,6 +18,7 @@ import { automations } from "../../db/schema";
 import type { EventStore } from "../../events/store";
 import { badRequest, conflict, notFound } from "../errors";
 import type { ProjectService } from "../projects/project-service";
+import { approved, changesBehaviour } from "./approval";
 import { collectImportFiles, previewFile, previewImport } from "./import";
 import { resolveImportLink } from "./import-link";
 import type { ScheduleStore } from "./schedule-store";
@@ -55,18 +55,17 @@ export interface UpdateOptions {
    * When the change gives an automation that is on a different trigger, action or guards,
    * switch it off in the same change, so a person approves what it now does before it runs
    * again (a PM's edits, §10). Only the automation's own switch: an automation for all
-   * projects keeps its per-project overrides.
+   * projects keeps its per-project overrides. Without it the change is a person's, and saving
+   * an automation that is on approves its permission level.
    */
   switchOffOnChange?: boolean;
 }
 
-/** The fields that decide what an automation does, when and how often. */
-export const BEHAVIOUR_FIELDS = ["trigger", "action", "guards"] as const;
-
 /**
  * Database-stored automations (§10): create (from a template or from scratch), update,
  * delete, enable and disable, and the starter set offered to new projects. File-based
- * automations are read-only here except for their enabled switch.
+ * automations are read-only here except for their enabled switch. Switching one on, or a
+ * person creating or saving one that is on, records the permission level they approved.
  */
 export class AutomationDefinitions {
   constructor(private readonly deps: DefinitionsDeps) {}
@@ -115,7 +114,8 @@ export class AutomationDefinitions {
       updatedAt: now,
     });
     validateAutomation(automation);
-    return this.save(automation);
+    // Created on: only a person does that (a PM's and imported automations are created off).
+    return this.save(automation.enabled ? approved(automation) : automation);
   }
 
   update(id: string, req: UpdateAutomationRequest, opts: UpdateOptions = {}): Automation {
@@ -135,12 +135,8 @@ export class AutomationDefinitions {
       updatedAt: new Date().toISOString(),
     });
     validateAutomation(next);
-    const switchOff =
-      opts.switchOffOnChange &&
-      next.enabled &&
-      BEHAVIOUR_FIELDS.some(
-        (key) => req[key] !== undefined && !isDeepStrictEqual(current[key], next[key]),
-      );
+    if (!opts.switchOffOnChange) return this.save(next.enabled ? approved(next) : next);
+    const switchOff = next.enabled && changesBehaviour(current, next);
     return this.save(switchOff ? { ...next, enabled: false } : next);
   }
 
@@ -159,15 +155,18 @@ export class AutomationDefinitions {
   setEnabled(id: string, enabled: boolean, projectId?: string): Automation {
     const a = this.get(id);
     if (projectId) this.deps.projects.get(projectId);
-    if (projectId && a.target.type === "all_projects") {
-      this.deps.schedules.upsert(id, projectId, { enabledOverride: enabled });
-      return a;
-    }
     if (projectId && a.target.type === "project" && a.target.projectId !== projectId) {
       throw notFound(`Automation ${id} does not belong to that project`, "automation_not_found");
     }
-    if (a.enabled === enabled) return a;
-    return this.save({ ...a, enabled, updatedAt: new Date().toISOString() });
+    // Switching it on, here or in one project, approves its permission level as it is now.
+    const next = { ...(enabled ? approved(a) : a), updatedAt: new Date().toISOString() };
+    const approvalChanged = next.approvedAutonomy !== a.approvedAutonomy;
+    if (projectId && a.target.type === "all_projects") {
+      this.deps.schedules.upsert(id, projectId, { enabledOverride: enabled });
+      return approvalChanged ? this.save(next) : a;
+    }
+    if (a.enabled === enabled && !approvalChanged) return a;
+    return this.save({ ...next, enabled });
   }
 
   /** Drop a project's override of an all-projects automation; it follows its own switch again. */

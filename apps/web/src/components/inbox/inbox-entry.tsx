@@ -132,7 +132,10 @@ export function InboxEntry({ item, focused = false }: { item: InboxItem; focused
         <div className="rounded-xl border border-border bg-card px-4 py-3">
           <h3 className="text-[14px] font-medium">{item.title}</h3>
           {item.body && (
-            <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">{item.body}</p>
+            // Bodies keep their line breaks (a changed automation's diff, a PM's change list).
+            <p className="mt-1 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-muted-foreground">
+              {item.body}
+            </p>
           )}
           {item.kind === "pr_review" && !resolved && <PrReviewStatus item={item} />}
           {!resolved && (

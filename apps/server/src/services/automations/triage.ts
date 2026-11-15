@@ -1,6 +1,7 @@
 import {
   type Automation,
   type AutomationRun,
+  type AutonomyLevel,
   type GitHubIssueRef,
   type GithubIssue,
   type InboxItem,
@@ -48,6 +49,11 @@ export interface TriageDeps {
   github: TriageGithub;
   /** The project's enabled triage automation, if any. */
   triageAutomation: (projectId: string) => Automation | undefined;
+  /**
+   * The permission level of a session it starts: its policy's, capped at the level a person
+   * approved (undefined: the project's default). The policy's own level when absent.
+   */
+  sessionAutonomy?: (automation: Automation, project: Project) => AutonomyLevel | undefined;
   /** A report arrived: complete the triage runs waiting on this issue. */
   reported?: (projectId: string, issueNumber: number, decision: string) => void;
 }
@@ -113,7 +119,7 @@ export class TriageService {
   private async act(project: Project, report: TriageReport): Promise<TriageReportResult> {
     if (report.decision !== "ready") return { status: "recorded" };
     const automation = this.deps.triageAutomation(project.id);
-    const policy = policyOf(automation);
+    const policy = this.sessionPolicy(automation, project);
     const { issue, author } = this.syncedIssue(project, report.issueNumber);
     const trust = await this.authorTrust(project, report.issueNumber, author);
     if (automation && policy.autoStart && project.autonomyMode !== "manual" && trust.trusted) {
@@ -159,7 +165,7 @@ export class TriageService {
     const item = this.openItem(itemId);
     const project = this.deps.projects.get(item.projectId ?? "");
     if (!item.issue) throw badRequest("The decision has no issue", "no_issue");
-    const policy = policyOf(this.deps.triageAutomation(project.id));
+    const policy = this.sessionPolicy(this.deps.triageAutomation(project.id), project);
     const start = await this.startForIssue(
       project,
       item.issue,
@@ -184,6 +190,13 @@ export class TriageService {
       ...(req.reason ? { reason: req.reason } : {}),
     });
     return { item: closed, start: null };
+  }
+
+  /** The policy for the sessions it starts, at no more than the approved permission level. */
+  private sessionPolicy(automation: Automation | undefined, project: Project): TriagePolicy {
+    const policy = policyOf(automation);
+    if (!automation || !this.deps.sessionAutonomy) return policy;
+    return { ...policy, autonomy: this.deps.sessionAutonomy(automation, project) };
   }
 
   private openItem(itemId: string): InboxItem {

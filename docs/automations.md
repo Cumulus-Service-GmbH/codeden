@@ -159,7 +159,9 @@ Every automation can be written as a Markdown file with YAML frontmatter: it is 
 | `~/.codeden/automations/<name>.md` | All projects (also listed as a template) | `global:<name>` |
 | `<repo>/.codeden/automations/<name>.md` | That project (commit it to share it with your team, or don't) | `project:<projectId>:<name>` |
 
-CodeDen watches both folders (and rescans every 60 seconds), so saving the file is enough; **Reload files** on the Automations page re-reads them immediately. Files that fail to parse are listed with their error. File automations are edited in the file; in the UI you can switch them on and off, run them, export them and **Duplicate to edit**. The enabled switch survives edits. New file automations start **off**.
+CodeDen watches both folders (and rescans every 60 seconds), so saving the file is enough; **Reload files** on the Automations page re-reads them immediately. Files that fail to parse are listed with their error. File automations are edited in the file; in the UI you can switch them on and off, run them, export them and **Duplicate to edit**. New file automations start **off**. The switch survives a new name or description, but anyone who can change the file (an agent, a merged pull request) could change what it runs, so when the file of an automation that's on changes its schedule or trigger, prompt, permissions, agent or guards, CodeDen switches it off and your inbox shows the change as a diff: "Automation *name* changed in its file: review and turn it back on". It runs on its own again only once you switch it on. An agent's edit to these files asks first at the Auto level.
+
+When you switch an automation on, CodeDen records the permission level you approved. Runs you don't start yourself (on its schedule, on an event, or by the PM) never get a higher level than that, even if the file asks for more; **Run now** on the Automations page runs it as the file says.
 
 ### A complete example
 

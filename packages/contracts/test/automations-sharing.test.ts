@@ -41,6 +41,19 @@ describe("sharing automations (§10)", () => {
     expect(Automation.safeParse({ ...sampleAutomation, createdBy: "robot" }).success).toBe(false);
   });
 
+  it("round-trips the approved permission level, and reads automations without one (#389)", () => {
+    const { approvedAutonomy: _, ...stored } = sampleAutomation;
+    expect(Automation.parse(stored).approvedAutonomy).toBeUndefined();
+    expect(roundTrip(Automation, sampleAutomation).approvedAutonomy).toBe("default");
+    expect(
+      roundTrip(Automation, { ...sampleAutomation, approvedAutonomy: "read_only" })
+        .approvedAutonomy,
+    ).toBe("read_only");
+    expect(Automation.safeParse({ ...sampleAutomation, approvedAutonomy: "root" }).success).toBe(
+      false,
+    );
+  });
+
   it("round-trips import sources, previews and requests", () => {
     roundTrip(AutomationImportSource, { files: [{ name: "a.md", content: "---" }] });
     roundTrip(AutomationImportSource, { text: "---\nname: x\n---" });

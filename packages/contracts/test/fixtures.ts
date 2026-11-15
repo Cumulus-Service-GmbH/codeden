@@ -299,6 +299,7 @@ export const sampleAutomation: Automation = {
     quietHours: { start: "22:00", end: "07:00" },
     catchUpMissed: false,
   },
+  approvedAutonomy: "default",
   createdAt: ts,
   updatedAt: ts,
 };

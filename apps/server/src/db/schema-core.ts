@@ -236,6 +236,8 @@ export const automations = sqliteTable("automations", {
   workKey: text("work_key"),
   /** `user` (or null), `pm` or `import`. */
   createdBy: text("created_by").$type<NonNullable<Automation["createdBy"]>>(),
+  /** The permission level a person last approved: a level or `default`; null until then. */
+  approvedAutonomy: text("approved_autonomy").$type<NonNullable<Automation["approvedAutonomy"]>>(),
   createdAt: text("created_at").notNull(),
   updatedAt: text("updated_at").notNull(),
 });

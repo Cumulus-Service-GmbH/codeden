@@ -150,7 +150,8 @@ export function automationRoutes(s: AppServices) {
       return c.json(itemOf(s, updated, projectId));
     })
     .post("/:id/run", jsonBody(RunAutomationRequest), async (c) =>
-      c.json(await a.run(c.req.param("id"), c.req.valid("json"))),
+      // The user's "Run now": it runs at the permission level it asks for.
+      c.json(await a.run(c.req.param("id"), c.req.valid("json"), { byPerson: true })),
     )
     .post("/:id/pause", jsonBody(AutomationProjectRequest), async (c) => {
       const { projectId } = c.req.valid("json");
