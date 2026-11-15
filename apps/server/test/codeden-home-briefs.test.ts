@@ -1,8 +1,11 @@
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { agentPrompt, type PromptSession } from "../src/mcp/prompt";
 import { builderPrompt, reviewerPrompt } from "../src/services/factory/prompts";
 import { lensPrompt, scoutPlanPrompt } from "../src/services/factory/prompts-scout";
 import { rolePrompt } from "../src/services/orchestration/prompts";
+import { UNSET_ADVICE } from "./support/unset-advice";
 
 /**
  * Agents are told plainly to keep out of CodeDen's own home and database (#320): CodeDen state
@@ -65,6 +68,26 @@ function briefs(): Record<string, string> {
     agent: agentPrompt(agent, { kind: "github" }),
   };
 }
+
+describe("CodeDen's internal variables in the briefs (#422)", () => {
+  it("no brief tells agents to unset them", () => {
+    const fix = builderPrompt(
+      item({ investigation: { kind: "reproduction", outcome: "reproduced", summary: "s" } }),
+      "v",
+    );
+    for (const [role, text] of Object.entries({ ...briefs(), "builder (fix)": fix })) {
+      expect(text, role).not.toMatch(UNSET_ADVICE);
+    }
+  });
+
+  it("nor does the repository's agent guide", () => {
+    const guide = readFileSync(
+      fileURLToPath(new URL("../../../AGENTS.md", import.meta.url)),
+      "utf8",
+    );
+    expect(guide).not.toMatch(UNSET_ADVICE);
+  });
+});
 
 describe("CodeDen's home in the briefs (#320)", () => {
   it("every role's brief states the rule", () => {

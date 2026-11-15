@@ -3,6 +3,7 @@ import {
   type DigestLesson,
   type FactoryItem,
   type FactoryLesson,
+  isRetiredLesson,
   LESSONS_IN_BRIEF,
   lessonInBriefsAt,
   lessonKey,
@@ -31,11 +32,18 @@ export function learnsFromReviews(ctx: FactoryContext, projectId: string): boole
   return ctx.store.loopOrNew(projectId, ctx.now()).tuning.learnFromReviews;
 }
 
+/**
+ * The project's lessons in force, last recorded first: not forgotten, and not retired advice
+ * (`isRetiredLesson`) kept before CodeDen retired it.
+ */
+export function lessonsInForce(ctx: FactoryContext, projectId: string): FactoryLesson[] {
+  return ctx.store.lessons(projectId).filter((l) => !isRetiredLesson(l.text));
+}
+
 /** The lessons in force that briefs carry now: past their delay, newest first. */
 function lessonsInBriefs(ctx: FactoryContext, projectId: string): string[] {
   const now = ctx.now().getTime();
-  return ctx.store
-    .lessons(projectId)
+  return lessonsInForce(ctx, projectId)
     .filter((l) => lessonInBriefsAt(l).getTime() <= now)
     .slice(0, LESSONS_IN_BRIEF)
     .map((l) => l.text);
@@ -93,8 +101,8 @@ export async function keepLessons(
 
 /**
  * Record lessons from trusted work (`keepLessons` checked their source). A lesson the project has
- * is recorded again (`times`, `lastSeenAt`); a forgotten one stays forgotten. Returns the lessons
- * recorded.
+ * is recorded again (`times`, `lastSeenAt`); a forgotten one stays forgotten, and retired advice
+ * (`isRetiredLesson`) is never recorded. Returns the lessons recorded.
  */
 function recordLessons(
   ctx: FactoryContext,
@@ -105,7 +113,7 @@ function recordLessons(
   const recorded: FactoryLesson[] = [];
   for (const text of lessons) {
     const key = lessonKey(text);
-    if (!key) continue;
+    if (!key || isRetiredLesson(text)) continue;
     const known = ctx.store.lessonByKey(item.projectId, key);
     if (known?.removedAt) continue;
     const lesson: FactoryLesson = known
