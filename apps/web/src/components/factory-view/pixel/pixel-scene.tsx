@@ -1,6 +1,6 @@
 import type { FactoryStatus } from "@codeden/contracts";
 import { useNavigate } from "@tanstack/react-router";
-import { Fragment, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { Fragment, useId, useMemo, useRef } from "react";
 import { useRoleSession } from "@/components/orchestration/role-chat";
 import { usePrefersReducedMotion } from "@/lib/motion";
 import { cn } from "@/lib/utils";
@@ -8,6 +8,7 @@ import { agentCard, agentLabel } from "../scene/agent-card";
 import type { SceneAgent } from "../scene/agents";
 import { bayCount, bayDescription } from "../scene/repair-bay";
 import { sceneSummary } from "../scene/scene-model";
+import { useHover } from "../scene/use-hover";
 import {
   cardNumber,
   cardStateLabel,
@@ -34,33 +35,6 @@ const TERMINAL_W = 340;
 /** Session states whose agent can be doing something worth a bubble. */
 const LIVE = new Set(["starting", "running", "waiting"]);
 const TAB_W = 32;
-
-/** The hovered or focused target; a short delay before closing lets the pointer reach a card. */
-function useHover() {
-  const [key, setKey] = useState<string | null>(null);
-  const timer = useRef(0);
-  const enter = useCallback((k: string) => {
-    window.clearTimeout(timer.current);
-    setKey(k);
-  }, []);
-  const leave = useCallback(() => {
-    window.clearTimeout(timer.current);
-    timer.current = window.setTimeout(() => setKey(null), 200);
-  }, []);
-  const close = useCallback(() => {
-    window.clearTimeout(timer.current);
-    setKey(null);
-  }, []);
-  useEffect(() => () => window.clearTimeout(timer.current), []);
-  // Escape closes an open card.
-  useEffect(() => {
-    if (key === null) return;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && close();
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [key, close]);
-  return { key, enter, leave, close };
-}
 
 function targetLabel(t: SceneTarget, now: number): string {
   if (t.kind === "agent") return agentLabel(agentCard(t.agent, now));
@@ -193,7 +167,7 @@ export function PixelScene({
                       recent={<RecentActivity store={activity} sessionId={t.agent.sessionId} />}
                       agent={t.agent}
                       card={agentCard(t.agent, now)}
-                      anchor={t.rect}
+                      place={{ anchor: t.rect }}
                       onEnter={keep}
                       onLeave={hover.leave}
                       onOpenItem={

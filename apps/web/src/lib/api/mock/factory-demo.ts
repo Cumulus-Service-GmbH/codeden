@@ -57,8 +57,8 @@ function demoSessions(world: MockWorld): Session[] {
     }),
     make("s-demo-review-59", {
       title: "Review: Coupon total rounds the wrong way",
-      provider: "codex",
-      model: "gpt-6.1-sol-mini",
+      provider: "gemini",
+      model: "gemini-3-pro",
       workKey: "factory:review:59",
       status: "running",
       progress: { text: "Checks pass; waiting for CI on #59", at: at() },
