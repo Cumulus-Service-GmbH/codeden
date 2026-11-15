@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 import { ForkFromHere } from "@/components/thread/fork-from-here";
 import { createMockClient } from "@/lib/api/mock";
+import { useSession } from "@/lib/queries";
 import { renderWithClient } from "./utils";
 
 const toast = vi.hoisted(() => Object.assign(vi.fn(), { loading: vi.fn() }));
@@ -53,4 +54,31 @@ describe("Fork from here", () => {
     const describedBy = button.getAttribute("aria-describedby");
     expect(describedBy && document.getElementById(describedBy)?.textContent).toBe(reason);
   });
+
+  it("isn't offered in a project whose folder isn't a git repository (#424)", async () => {
+    const base = createMockClient();
+    const client = {
+      ...base,
+      getSnapshot: async () => {
+        const snapshot = await base.getSnapshot();
+        const projects = snapshot.projects.map((p) => ({ ...p, isGitRepo: false }));
+        return { ...snapshot, projects };
+      },
+    };
+    renderWithClient(
+      <>
+        <ForkFromHere sessionId="s-search" row={row} />
+        <SnapshotLoaded />
+      </>,
+      client,
+      { withRouter: true },
+    );
+    await screen.findByText("loaded");
+    expect(screen.queryByRole("button", { name: /Fork from here/ })).toBeNull();
+  });
 });
+
+/** Shows "loaded" once the snapshot (with `s-search` and its project) has loaded. */
+function SnapshotLoaded() {
+  return useSession("s-search") ? <span>loaded</span> : null;
+}

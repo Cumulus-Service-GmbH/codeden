@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import type { DictationText, SpeechToText } from "@/lib/voice/engines";
 import type { SamplesListener } from "@/lib/voice/mic-capture";
-import { createSegmentQueue } from "@/lib/voice/segment-queue";
+import { createSegmentQueue, separator } from "@/lib/voice/segment-queue";
 import { createSegmentedStt } from "@/lib/voice/segmented-stt";
 import { createSegmenter, rms } from "@/lib/voice/segmenter";
 
@@ -120,6 +120,47 @@ describe("dictation segment queue", () => {
     expect(pending).toEqual([1, 2, 3, 2, 1, 0]);
     expect(transcribe).toHaveBeenCalledTimes(3);
     expect(onError).not.toHaveBeenCalled();
+  });
+
+  // The segments as the engine returns them, and the text a user would expect.
+  it.each([
+    ["English", ["Fix the flaky test", "in checkout"], "Fix the flaky test in checkout"],
+    ["Chinese", ["修复不稳定的测试", "在结账流程中"], "修复不稳定的测试在结账流程中"],
+    [
+      "Japanese",
+      ["不安定なテストを", "チェックアウトで直して"],
+      "不安定なテストをチェックアウトで直して",
+    ],
+    ["Thai", ["แก้การทดสอบที่ไม่เสถียร", "ในหน้าชำระเงิน"], "แก้การทดสอบที่ไม่เสถียรในหน้าชำระเงิน"],
+    ["mixed Chinese and English", ["修复", "React 组件", "的测试"], "修复 React 组件的测试"],
+  ])("joins %s segments the way the language is written", async (_language, segments, expected) => {
+    const onText = vi.fn();
+    const queue = createSegmentQueue<string>({
+      transcribe: async (s) => s,
+      onText,
+      onError: vi.fn(),
+    });
+    for (const s of segments) queue.add(s);
+    await queue.drain();
+    expect(queue.text).toBe(expected);
+    expect(onText).toHaveBeenLastCalledWith({ final: expected, draft: "" });
+  });
+
+  it("puts a space between pieces only where the language uses one", () => {
+    expect(separator("Fix", "the test")).toBe(" ");
+    expect(separator("修复", "测试")).toBe("");
+    // Kana, the long vowel mark, full-width punctuation and a Han character outside the BMP.
+    expect(separator("テスト", "を直して")).toBe("");
+    expect(separator("サーバー", "を")).toBe("");
+    expect(separator("测试。", "修复")).toBe("");
+    expect(separator("修复", "（测试）")).toBe("");
+    expect(separator("𠀀", "测试")).toBe("");
+    expect(separator("ທົດສອບ", "ແກ້")).toBe("");
+    // Where scripts meet, the space stays.
+    expect(separator("修复", "React")).toBe(" ");
+    expect(separator("React", "组件")).toBe(" ");
+    // Korean is written with spaces.
+    expect(separator("테스트를", "고쳐")).toBe(" ");
   });
 
   it("reports the first failure once and keeps the text of every segment that succeeded", async () => {

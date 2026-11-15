@@ -2,104 +2,40 @@ import {
   type ArchiveSessionResponse,
   describeUnpushedWork,
   type HandoffSessionRequest,
-  type ProviderInfo,
   type Session,
   type UnpushedWork,
 } from "@codeden/contracts";
 import { useMutation } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { isReview } from "@/lib/fork-origin";
-import { useTranscriptsStore } from "@/stores/transcripts";
 import { useUiStore } from "@/stores/ui";
 import { useClient } from "./api";
 import { copyWithFeedback, notifyCopyFailed } from "./copy";
 import { saveMarkdown } from "./download";
 import { platform } from "./platform";
-import { useSnapshotData } from "./queries";
+import { useProject, useSnapshotData } from "./queries";
+import {
+  canReview,
+  canStop,
+  forkBlocked,
+  forkSupported,
+  notARepoReason,
+  useHandoffBlocked,
+  useReviewBlocked,
+} from "./session-availability";
 
-/** Sessions that can be stopped from a menu: ones with a turn running or a question open. */
-export const canStop = (session: Pick<Session, "status">) =>
-  session.status === "running" || session.status === "waiting";
-
-const NOT_STARTED = new Set<Session["status"]>(["created", "queued", "starting"]);
-
-/**
- * Whether the Fork action applies to a session at all: an agent session on a provider that
- * reports `capabilities.fork` (Principle 5: never the provider's name).
- */
-export const forkSupported = (session: Session, provider: ProviderInfo | undefined) =>
-  session.role === "agent" && provider?.capabilities.fork === true;
-
-/**
- * Why a session that supports forking can't be forked right now, or null when it can (the
- * server checks the same, §9).
- */
-export function forkBlocked(session: Session): string | null {
-  if (session.status === "waiting") return "Answer what it's waiting on first";
-  if (canStop(session)) return "Wait for the running turn to finish";
-  if (NOT_STARTED.has(session.status)) return "The session hasn't started yet";
-  if (!session.resumeToken) return "No conversation to fork yet";
-  if (!session.branch) return "Only sessions on a git branch can be forked";
-  return null;
-}
-
-/**
- * Why an agent session can't be handed off right now, or null when it can (the server checks
- * the same, §9). Unlike a fork it needs no provider capability and no resume token, but it
- * needs work: `turns` is how many turns the session has had, as the server counts them
- * (subagents' included); undefined when not known here, and then the server decides.
- */
-export function handoffBlocked(session: Session, turns: number | undefined): string | null {
-  if (session.status === "waiting") return "Answer what it's waiting on first";
-  if (canStop(session)) return "Wait for the running turn to finish";
-  if (NOT_STARTED.has(session.status)) return "The session hasn't started yet";
-  if (!session.branch) return "Only sessions on a git branch can be handed off";
-  if (turns === 0) return "Nothing to hand off yet";
-  return null;
-}
-
-/**
- * How many turns a session has had, from its loaded transcript (the session on screen): the
- * turns loaded plus the earlier root turns still on the server; undefined when it isn't loaded.
- */
-export function useTurnCount(sessionId: string): number | undefined {
-  return useTranscriptsStore((s) => {
-    const transcript = s.byId[sessionId];
-    return transcript ? Object.keys(transcript.turns).length + transcript.earlierTurns : undefined;
-  });
-}
-
-/** `handoffBlocked` for a session, with its turn count from the loaded transcript. */
-export function useHandoffBlocked(session: Session): string | null {
-  return handoffBlocked(session, useTurnCount(session.id));
-}
-
-/**
- * Whether "Review with another agent" applies to a session at all (§9): agent sessions, except
- * reviews themselves (a read-only review has no changes of its own).
- */
-export const canReview = (session: Pick<Session, "role" | "forkedFrom">) =>
-  session.role === "agent" && !isReview(session.forkedFrom);
-
-/**
- * Why a session's changes can't be reviewed right now, or null when they can (the server checks
- * the same, §9): as for a handoff, it needs a branch and some work, and no turn running or
- * waiting. `turns` is undefined when not known here, and then the server decides.
- */
-export function reviewBlocked(session: Session, turns: number | undefined): string | null {
-  if (session.status === "waiting") return "Answer what it's waiting on first";
-  if (canStop(session)) return "Wait for the running turn to finish";
-  if (NOT_STARTED.has(session.status)) return "The session hasn't started yet";
-  if (!session.branch) return "Only sessions on a git branch can be reviewed";
-  if (turns === 0) return "No changes to review yet";
-  return null;
-}
-
-/** `reviewBlocked` for a session, with its turn count from the loaded transcript. */
-export function useReviewBlocked(session: Session): string | null {
-  return reviewBlocked(session, useTurnCount(session.id));
-}
+export {
+  canReview,
+  canStop,
+  forkBlocked,
+  forkSupported,
+  handoffBlocked,
+  NOT_A_REPO_ACTION_REASON,
+  reviewBlocked,
+  useHandoffBlocked,
+  useReviewBlocked,
+  useTurnCount,
+} from "./session-availability";
 
 /**
  * Hand a session off (§9): a new session on the chosen provider with this one's code and a
@@ -212,7 +148,7 @@ export function announceArchive(
 /**
  * Fork a session (§9): at its latest moment, or from a finished turn of its own ("Fork from
  * here"), then open the fork. `canFork` says whether the provider can fork at all, `blocked`
- * why it can't right now (null when it can).
+ * why it can't right now (null when it can), `notARepo` that it never can in this project.
  */
 export function useForkSession(session: Session) {
   const client = useClient();
@@ -237,10 +173,13 @@ export function useForkSession(session: Session) {
     (s) => s.runner.providers.find((p) => p.id === session.provider),
     undefined,
   );
+  const project = useProject(session.projectId);
   const canFork = forkSupported(session, provider);
   return {
     canFork,
-    blocked: canFork ? (fork.isPending ? "Forking…" : forkBlocked(session)) : null,
+    blocked: canFork ? (fork.isPending ? "Forking…" : forkBlocked(session, project)) : null,
+    /** The project folder isn't a git repository, so no fork can be made there (§9). */
+    notARepo: notARepoReason(project) !== null,
     /** A fork is under way (its "Forking the session…" toast is showing). */
     pending: fork.isPending,
     /** Fork at the latest moment, or through the end of `turnId`. */

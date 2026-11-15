@@ -31,24 +31,57 @@ function stayLine(n: number): string {
   return n === 1 ? "1 item that waits on you stays" : `${n} items that wait on you stay`;
 }
 
+/** `ids` split into requests the server accepts (at most {@link INBOX_BULK_MAX} each). */
+function batches(ids: string[]): string[][] {
+  const out: string[][] = [];
+  for (let i = 0; i < ids.length; i += INBOX_BULK_MAX) out.push(ids.slice(i, i + INBOX_BULK_MAX));
+  return out;
+}
+
 /** Undo from the toast: reopens exactly what the dismiss closed (`POST /api/inbox/restore`). */
-function undo(client: CodeDenClient, ids: string[], what: (n: number) => string) {
-  client.restoreInbox(ids).then(
-    (res) => toast.success(`Restored ${what(res.restored)}`),
-    (e: Error) => toast.error("Couldn't undo the dismiss", { description: e.message }),
-  );
+async function undo(client: CodeDenClient, ids: string[], what: (n: number) => string) {
+  let restored = 0;
+  try {
+    for (const batch of batches(ids)) restored += (await client.restoreInbox(batch)).restored;
+    toast.success(`Restored ${what(restored)}`);
+  } catch (e) {
+    toast.error("Couldn't undo the dismiss", { description: (e as Error).message });
+  }
+}
+
+/** What a bulk dismiss did, over all its requests; `error` when a later request failed. */
+interface BulkResult {
+  dismissed: number;
+  ids: string[];
+  kept: number;
+  error?: Error;
 }
 
 /**
- * Dismiss several items in one request (§11.1), then a toast with **Undo** for
- * {@link UNDO_MS}. Undo needs nothing from the component, so it still works once the dismissed
- * items (and this button with them) are gone. `what` names the items: "6 notices".
+ * Dismiss several items (§11.1), then a toast with **Undo** for {@link UNDO_MS}. More than
+ * {@link INBOX_BULK_MAX} go in several requests, so every item counted is dismissed. Undo needs
+ * nothing from the component, so it still works once the dismissed items (and this button with
+ * them) are gone. `what` names the items: "6 notices".
  */
 export function useBulkDismiss(what: (n: number) => string) {
   const client = useClient();
   return useMutation({
-    mutationFn: (items: InboxItem[]) =>
-      client.dismissInbox(items.slice(0, INBOX_BULK_MAX).map((i) => i.id)),
+    mutationFn: async (items: InboxItem[]): Promise<BulkResult> => {
+      const total: BulkResult = { dismissed: 0, ids: [], kept: 0 };
+      for (const batch of batches(items.map((i) => i.id))) {
+        try {
+          const res = await client.dismissInbox(batch);
+          total.dismissed += res.dismissed;
+          total.ids.push(...res.ids);
+          total.kept += res.kept;
+        } catch (e) {
+          // Some already went: keep their Undo rather than only reporting the failure.
+          if (total.ids.length === 0) throw e;
+          return { ...total, error: e as Error };
+        }
+      }
+      return total;
+    },
     onError: (e: Error) => toast.error("Couldn't dismiss them", { description: e.message }),
     onSuccess: (res) => {
       if (res.dismissed === 0) {
@@ -57,9 +90,18 @@ export function useBulkDismiss(what: (n: number) => string) {
         });
         return;
       }
+      const action = { label: "Undo", onClick: () => void undo(client, res.ids, what) };
+      if (res.error) {
+        toast.error(`Dismissed ${what(res.dismissed)}, then couldn't dismiss the rest`, {
+          description: res.error.message,
+          action,
+          duration: UNDO_MS,
+        });
+        return;
+      }
       toast.success(`Dismissed ${what(res.dismissed)}`, {
         description: res.kept > 0 ? `${stayLine(res.kept)}.` : undefined,
-        action: { label: "Undo", onClick: () => undo(client, res.ids, what) },
+        action,
         duration: UNDO_MS,
       });
     },

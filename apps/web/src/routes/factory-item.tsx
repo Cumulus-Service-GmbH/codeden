@@ -18,6 +18,7 @@ import { capText } from "@/components/factory/item-cost";
 import {
   CheckRow,
   CostValue,
+  EarlierSessions,
   InvestigationCard,
   ItemActions,
   SessionLink,
@@ -302,6 +303,7 @@ export function FactoryItemPage({ projectId, itemId }: { projectId: string; item
             <Fact label="Reviewer">
               <SessionLink id={item.reviewerSessionId} label={item.reviewerProvider ?? "session"} />
             </Fact>
+            <EarlierSessions item={item} />
             <Fact label="Revise rounds">{item.attempts}</Fact>
             <Fact label="Cost">
               <CostValue cost={cost} />

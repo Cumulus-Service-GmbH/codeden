@@ -14,6 +14,7 @@ import {
   canStop,
   forkBlocked,
   forkSupported,
+  NOT_A_REPO_ACTION_REASON,
   type SessionActions,
   sessionLink,
   useForkSession,
@@ -257,6 +258,56 @@ describe("useSessionActions", () => {
     expect(forkBlocked({ ...idle, status: "starting" })).toMatch(/hasn't started/);
     expect(forkBlocked({ ...idle, resumeToken: null })).toMatch(/No conversation/);
     expect(forkBlocked({ ...idle, branch: null })).toMatch(/git branch/);
+  });
+
+  it("never forks in a project whose folder isn't a git repository, and says so first (#424)", () => {
+    const idle: Session = {
+      ...session("s-search"),
+      role: "agent",
+      status: "idle",
+      resumeToken: "claude-1",
+      branch: "codeden/search",
+    };
+    const notGit = { isGitRepo: false };
+    expect(forkBlocked(idle, notGit)).toBe(NOT_A_REPO_ACTION_REASON);
+    // A folder that isn't a repository won't change when the turn ends: that reason comes first.
+    expect(forkBlocked({ ...idle, status: "running" }, notGit)).toBe(NOT_A_REPO_ACTION_REASON);
+    expect(forkBlocked({ ...idle, status: "waiting" }, notGit)).toBe(NOT_A_REPO_ACTION_REASON);
+    expect(forkBlocked({ ...idle, branch: null }, notGit)).toBe(NOT_A_REPO_ACTION_REASON);
+    // A git project, or one not loaded yet, is as before.
+    expect(forkBlocked(idle, { isGitRepo: true })).toBeNull();
+    expect(forkBlocked({ ...idle, status: "running" }, undefined)).toMatch(/running turn/);
+  });
+
+  it("lists Fork, Hand off and Review disabled with the reason in a non-git project (#424)", async () => {
+    const base = createMockClient();
+    const client = {
+      ...base,
+      getSnapshot: async () => {
+        const snapshot = await base.getSnapshot();
+        const projects = snapshot.projects.map((p) => ({ ...p, isGitRepo: false }));
+        return { ...snapshot, projects };
+      },
+    };
+    // A finished agent session that has a branch: in a git project all three could run.
+    const target: Session = { ...session("s-search"), status: "idle", resumeToken: "codex-1" };
+    let latest: SessionActions | undefined;
+    renderWithClient(
+      <Probe
+        target={target}
+        onActions={(a) => {
+          latest = a;
+        }}
+      />,
+      client,
+      { withRouter: true },
+    );
+    await waitFor(() => expect(latest?.handoffBlocked).toBe(NOT_A_REPO_ACTION_REASON));
+    expect(latest?.canFork).toBe(true);
+    expect(latest?.forkBlocked).toBe(NOT_A_REPO_ACTION_REASON);
+    expect(latest?.canHandoff).toBe(true);
+    expect(latest?.canReview).toBe(true);
+    expect(latest?.reviewBlocked).toBe(NOT_A_REPO_ACTION_REASON);
   });
 
   it("offers Compact now only where the provider can compact, and only between turns", () => {

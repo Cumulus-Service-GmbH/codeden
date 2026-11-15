@@ -10,6 +10,7 @@ import {
   FactoryStatus,
   FactoryTuning,
   FactoryTuningPatch,
+  isRetiredLesson,
   LESSON_BRIEF_DELAY_MS,
   LESSON_MAX,
   LESSONS_PER_VERDICT,
@@ -93,6 +94,28 @@ describe("factory lessons", () => {
     for (const text of cleanLessons(["y".repeat(5_000)])) {
       expect(text.length).toBeLessThanOrEqual(LESSON_MAX);
     }
+  });
+
+  it("retire advice to clear CodeDen's internal variables before tests (#422)", () => {
+    const retired = [
+      "Unset CODEDEN_HOME and CODEDEN_DEPS_INSTALLER before running tests.",
+      "Run the suite with env -u CODEDEN_DEPS_INSTALLER -u CODEDEN_HOME pnpm test.",
+      "On Windows, Remove-Item Env:CODEDEN_* before pnpm test.",
+      "Agent sessions inherit CODEDEN_DEPS_INSTALLER; unset it before running provider tests.",
+      "Clear the inherited CODEDEN* variables so vitest uses its temp homes.",
+    ];
+    for (const text of retired) expect(isRetiredLesson(text), text).toBe(true);
+    for (const text of [
+      "Don't remove the CODEDEN_* filter in agentEnv().",
+      "Run the focused test file before the whole suite.",
+      "Unset NODE_OPTIONS before running tests.",
+      "Tests that need CODEDEN_HOME set it themselves.",
+    ]) {
+      expect(isRetiredLesson(text), text).toBe(false);
+    }
+    expect(cleanLessons([retired[0] as string, "Add a changelog fragment."])).toEqual([
+      "Add a changelog fragment.",
+    ]);
   });
 
   it("verdicts carry at most three lessons; ones stored before lessons existed parse", () => {

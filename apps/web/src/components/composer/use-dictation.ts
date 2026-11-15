@@ -5,6 +5,7 @@ import { useClient } from "@/lib/api";
 import { matchesCombo, shortcut } from "@/lib/shortcuts";
 import { createCloudStt } from "@/lib/voice/cloud-stt";
 import { stt as browserStt, type SpeechToText } from "@/lib/voice/engines";
+import { separator } from "@/lib/voice/segment-queue";
 
 /** `listening` while the microphone is on; `finishing` while the last text is still coming. */
 export type DictationPhase = "idle" | "listening" | "finishing";
@@ -102,8 +103,9 @@ export function useDictation({
   const start = () => {
     if (!engine.supported || phaseRef.current !== "idle") return;
     // Text goes after what was typed before dictating, into the draft that was open then.
-    const base = baseText ? `${baseText.trimEnd()} ` : "";
-    const write = onText;
+    const typed = baseText.trimEnd();
+    const write = (dictated: string) =>
+      onText(typed ? typed + separator(typed, dictated) + dictated : dictated);
     move("listening");
     setDraft("");
     setPending(0);
@@ -114,7 +116,7 @@ export function useDictation({
       onText: (text) => {
         setDraft(text.draft);
         if (text.final || text.draft) setHeard(true);
-        if (text.final) write(base + text.final);
+        if (text.final) write(text.final);
       },
       onLevel: (value) => level.set(value),
       onPending: setPending,

@@ -520,6 +520,12 @@ export const FactoryLoop = z.object({
   /** The drain in progress ("Finish current work, then stop"); null when none runs. */
   drain: FactoryDrain.nullable().default(null),
   /**
+   * When the one-time sweep archived the failed factory sessions that earlier versions left
+   * behind after replacing them (issue #411); null until the first tick after the upgrade has
+   * run it. Later failures are archived as they are replaced, or with their finished item.
+   */
+  failedSessionsSweptAt: Timestamp.nullable().default(null),
+  /**
    * The last tick that changed the loop. A tick that changes nothing else saves nothing, so
    * this can be older than the last tick (`FactoryStatus.lastTickAt` has that).
    */

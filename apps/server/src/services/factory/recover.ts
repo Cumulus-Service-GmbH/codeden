@@ -8,6 +8,7 @@ import {
 import { errorMessage } from "../errors";
 import { isTransientRunnerError, isTurnRunningError } from "../sessions/outbox-holds";
 import { CI_KICK_NUDGE } from "./ci-kick";
+import { letGoReviewer } from "./cleanup";
 import type { FactoryContext } from "./context";
 import { markStuck } from "./outcomes";
 import { continuePrompt } from "./prompts-integration";
@@ -188,8 +189,9 @@ async function recoverOne(
       // A builder that is gone is no PR agent any more: conflicts and CI go to an integrator.
       builderSessionId: builder ? i.builderSessionId : null,
       // A dead reviewer is let go; a fresh one takes whatever review is still owed (the
-      // whole review, or only a pending re-check, with the earlier verdict kept).
-      reviewerSessionId: reviewerDead ? null : i.reviewerSessionId,
+      // whole review, or only a pending re-check, with the earlier verdict kept). The dead one
+      // is archived once the fresh one has started (`cleanup.ts`).
+      ...(reviewerDead ? letGoReviewer(i) : {}),
       note: "Back in verification after a failure outside its code",
       // A fresh CI clock: the head is timed again from now. CI that never started is started
       // again by the verify step (`ci-kick.ts`).
