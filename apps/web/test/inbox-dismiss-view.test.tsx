@@ -1,6 +1,7 @@
+import { INBOX_BULK_MAX, type InboxItem } from "@codeden/contracts";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { UNDO_MS } from "@/components/inbox/bulk-dismiss";
+import { DismissView, UNDO_MS } from "@/components/inbox/bulk-dismiss";
 import { createMockClient } from "@/lib/api/mock";
 import { startRealtime } from "@/lib/realtime";
 import { InboxPage } from "@/routes/inbox";
@@ -128,4 +129,97 @@ describe("dismiss the inbox view (#407)", () => {
     await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
     expect(dismiss).not.toHaveBeenCalled();
   });
+
+  it("dismisses every notice it counts, even more than one request takes (#418)", async () => {
+    const client = createMockClient();
+    const dismiss = vi
+      .spyOn(client, "dismissInbox")
+      .mockImplementation(async (ids) => ({ dismissed: ids.length, ids, kept: 0 }));
+    const restore = vi
+      .spyOn(client, "restoreInbox")
+      .mockImplementation(async (ids) => ({ restored: ids.length, ids }));
+    renderWithClient(<DismissView items={manyNotices(INBOX_BULK_MAX + 5)} />, client);
+
+    // What the button says it dismisses is exactly what gets sent, each request within the cap.
+    const n = await confirmDismiss();
+    await waitFor(() => expect(toast.success).toHaveBeenCalled());
+    const sent = dismiss.mock.calls.flatMap(([ids]) => ids);
+    for (const [ids] of dismiss.mock.calls) expect(ids.length).toBeLessThanOrEqual(INBOX_BULK_MAX);
+    expect(new Set(sent).size).toBe(n);
+    expect(sent.length).toBe(n);
+
+    const [message, opts] = toast.success.mock.calls[0] as [
+      string,
+      { action: { onClick: () => void } },
+    ];
+    expect(message).toBe(`Dismissed ${n} notices`);
+
+    // Undo reopens all of them, in requests the server accepts.
+    opts.action.onClick();
+    await waitFor(() => expect(toast.success).toHaveBeenCalledWith(`Restored ${n} notices`));
+    for (const [ids] of restore.mock.calls) expect(ids.length).toBeLessThanOrEqual(INBOX_BULK_MAX);
+    expect(restore.mock.calls.flatMap(([ids]) => ids).sort()).toEqual([...sent].sort());
+  });
+
+  it("keeps Undo for what went when a later request fails (#418)", async () => {
+    const client = createMockClient();
+    vi.spyOn(client, "dismissInbox")
+      .mockImplementationOnce(async (ids) => ({ dismissed: ids.length, ids, kept: 0 }))
+      .mockRejectedValueOnce(new Error("The server is not reachable"));
+    const restore = vi
+      .spyOn(client, "restoreInbox")
+      .mockImplementation(async (ids) => ({ restored: ids.length, ids }));
+    renderWithClient(<DismissView items={manyNotices(INBOX_BULK_MAX + 5)} />, client);
+
+    await confirmDismiss();
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    expect(toast.success).not.toHaveBeenCalled();
+    const [message, opts] = toast.error.mock.calls[0] as [
+      string,
+      { description: string; action: { onClick: () => void } },
+    ];
+    expect(message).toBe(`Dismissed ${INBOX_BULK_MAX} notices, then couldn't dismiss the rest`);
+    expect(opts.description).toBe("The server is not reachable");
+    opts.action.onClick();
+    await waitFor(() =>
+      expect(toast.success).toHaveBeenCalledWith(`Restored ${INBOX_BULK_MAX} notices`),
+    );
+    expect(restore.mock.calls.flatMap(([ids]) => ids)).toHaveLength(INBOX_BULK_MAX);
+  });
 });
+
+/** `n` open notices (nothing in them waits on the user). */
+function manyNotices(n: number): InboxItem[] {
+  const at = new Date(0).toISOString();
+  return Array.from({ length: n }, (_, i) => ({
+    id: `n-${i}`,
+    kind: "message",
+    status: "open",
+    priority: "normal",
+    notify: "needs_you",
+    title: `Notice ${i}`,
+    body: null,
+    projectId: null,
+    sessionId: null,
+    threadId: null,
+    itemId: null,
+    requestId: null,
+    issue: null,
+    pr: null,
+    automationRunId: null,
+    createdAt: at,
+    updatedAt: at,
+    resolvedAt: null,
+    resolution: null,
+  }));
+}
+
+/** Click "Dismiss N" and confirm it; answers N. */
+async function confirmDismiss(): Promise<number> {
+  const button = await screen.findByRole("button", { name: /^Dismiss \d+$/ });
+  const n = Number(button.textContent?.match(/\d+/)?.[0]);
+  fireEvent.click(button);
+  const dialog = await screen.findByRole("alertdialog");
+  fireEvent.click(within(dialog).getByRole("button", { name: `Dismiss ${n}` }));
+  return n;
+}
