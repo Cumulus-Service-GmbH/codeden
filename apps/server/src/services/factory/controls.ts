@@ -2,6 +2,7 @@ import type { FactoryLimits, FactoryLoop, Project } from "@codeden/contracts";
 import { badRequest, conflict } from "../errors";
 import type { FactoryContext } from "./context";
 import { hasBudget } from "./policy";
+import { specPending } from "./spec-approval";
 import { readVision } from "./vision";
 
 /** Switching modes and the kill switch (§10.1). */
@@ -31,11 +32,14 @@ export function assertCanEnter(
 
 /**
  * Stop now: stop every factory session of the project and put work that hadn't opened a PR back
- * in the queue. The loop record is the caller's to save (`stoppedLoop`). Returns the stopped ids.
+ * in the queue. A spec waiting for a person's approval (`spec-approval.ts`) keeps waiting where it
+ * is, with its inbox item: its builder is stopped, and their decision resumes it. The loop record
+ * is the caller's to save (`stoppedLoop`). Returns the stopped ids.
  */
 export async function stopWork(ctx: FactoryContext, projectId: string): Promise<string[]> {
   const stopped = await ctx.sessions.stopAll(projectId);
   for (const item of ctx.store.items(projectId, ["building", "verifying"])) {
+    if (item.stage === "building" && specPending(item)) continue;
     ctx.store.updateItem(item.id, (i) =>
       i.stage === "building" && !i.pr
         ? { ...i, stage: "backlog", builderSessionId: null, note: "Stopped by the kill switch" }

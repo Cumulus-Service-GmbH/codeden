@@ -13,6 +13,7 @@ import { type FactoryContext, factoryNotice, raiseInbox } from "./context";
 import { stoppedLoop, stopWork } from "./controls";
 import { awaitedProvider } from "./provider-wait";
 import { recoverable } from "./recover";
+import { unverifiedRevert } from "./revert-watch";
 import { specPending } from "./spec-approval";
 import { mayAutoMerge } from "./trust";
 
@@ -69,6 +70,8 @@ function stillInFlight(
 ): boolean {
   // A spec waiting for a person's approval is theirs to move, like a PR only they merge.
   if (item.stage === "building" && specPending(item)) return false;
+  // A revert whose CI on the default branch never reported: the user was asked to look.
+  if (unverifiedRevert(item)) return false;
   if (MOVING.includes(item.stage)) return !waitsForPersonsMerge(item, facts.limits);
   if (item.stage === "backlog") return queued;
   if (item.stage !== "failed" || !recoverable(item)) return false;

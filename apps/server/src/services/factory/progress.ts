@@ -10,6 +10,7 @@ import { baseBranchOf } from "./rebase";
 import { rebuildFailed, unreplacedOriginal } from "./rebuild";
 import { recordMainFailure, revertLanded } from "./revert";
 import { regressionInboxId, regressionPausePrefix, revertBlocked } from "./revert-blocked";
+import { awaitRevertCi, revertStillRed } from "./revert-watch";
 import { advanceSpec } from "./spec-approval";
 import { builderOpenPr, holdEarlyPr } from "./spec-early-pr";
 import { REVERTED_AT, revertedAt } from "./stats";
@@ -153,6 +154,9 @@ export async function advanceWatching(
   const age = ctx.now().getTime() - Date.parse(item.mergedAt ?? item.updatedAt);
   const timedOut = age > loop.tuning.watchTimeoutMin * 60_000;
   if (state === "success") return landed();
+  // Only a green run ends a regression: a revert waits for one, and the user hears when it doesn't come.
+  if (item.source === "revert" && (state === "none" || state === "pending"))
+    return awaitRevertCi(ctx, project, loop, item, state, age);
   if (state === "none")
     return age > ctx.ciGraceMs || !loop.tuning.requireCi
       ? done("No CI ran on the default branch")
@@ -200,19 +204,7 @@ async function regression(
     consecutiveFailures: loop.consecutiveFailures + 1,
     fastMergeHold: `CI on ${branch} failed after #${prNumber} merged`,
   };
-  if (item.source === "revert") {
-    ctx.store.updateItem(item.id, (i) => ({
-      ...i,
-      stage: "merged",
-      note: "CI still fails after the revert",
-      finishedAt: at,
-    }));
-    return pauseLoop(
-      ctx,
-      next,
-      `CI on ${branch} still fails after the automatic revert #${prNumber}`,
-    );
-  }
+  if (item.source === "revert") return revertStillRed(ctx, project, next, item);
   // What failed on the merge goes back to the builder with its revise round (`revert.ts`).
   const failed = await recordMainFailure(ctx, project, item);
   const revertPr = await ctx.github

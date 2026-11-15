@@ -108,7 +108,7 @@ With every check green:
 
 After an automatic merge the factory watches CI on the default branch for up to **120 minutes**:
 
-- **Green**, or no CI after 10 minutes, or still running after 120 minutes: the work counts as merged.
+- **Green**, or no CI after 10 minutes, or still running after 120 minutes: the work counts as merged. A revert waits for green (see below).
 - **Red**: a regression. The factory opens a revert pull request, counts a failure, pauses the loop and raises an inbox item.
 
 **The revert** has its own merge rules, so nobody has to merge it by hand:
@@ -123,6 +123,13 @@ Once the revert merged and CI on the default branch is green again:
 
 - the regression's inbox item is resolved, and the loop resumes by itself;
 - the reverted work goes back to its builder as a revise round, with the checks that failed on the default branch. The item's note says so ("Revise round 1 after the revert: CI on main failed after #42 merged (test); reverted in #43"). The builder brings its change back on top of the default branch, fixes it and opens a new pull request. This happens once per item: reverted a second time, it stays reverted.
+
+Only a green run on the revert's merge commit resumes the loop by itself. When CI on the default branch doesn't say green there, the loop stays paused and you hear it in the regression's inbox item:
+
+- **No CI after 10 minutes, or still running after 120 minutes:** the factory checks once more 10 minutes later. Still nothing, and the item becomes "main is red or unverified after revert #43: CI didn't report" (or "didn't finish"). The revert is still watched, so a late green run resumes the loop and sends the work back as above.
+- **Red:** the revert didn't fix it. The item becomes "main is still red after revert #43: CI fails on its merge commit (test)".
+
+Get the default branch green and **Resume** the loop: the reverted work goes back to its builder then, once, as if CI had turned green.
 
 **A revert that can't merge** (CI red on the revert too, conflicts that still aren't resolved after 3 requests, other failed checks, or the agent writing it giving up) stops there. You get one inbox item, "main is red and the revert can't merge: CI failed on the revert too (test)", and the loop stays paused until you get the default branch green and resume it.
 

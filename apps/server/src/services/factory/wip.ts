@@ -78,13 +78,40 @@ export function finishesOpenWork(ctx: FactoryContext, item: FactoryItem): boolea
   return repairsMain(item) || ownedPr(ctx, item) !== null;
 }
 
+/** A building item that will open a PR, so takes room: not a spec waiting for a person. */
+function takesRoom(ctx: FactoryContext, item: FactoryItem): boolean {
+  return item.specApproval?.state !== "pending" && !finishesOpenWork(ctx, item);
+}
+
 /**
  * Builds from the queue that haven't opened their PR yet: each will, so each takes room. A spec
  * waiting for a person's approval (`spec-approval.ts`) doesn't, so specs nobody looked at never
- * stop the factory; once approved it takes room again before it is built.
+ * stop the factory; once approved it takes room again (ahead of the queue) before it is built.
  */
 export function unopenedBuilds(ctx: FactoryContext, projectId: string): number {
+  return ctx.store.items(projectId, ["building"]).filter((i) => takesRoom(ctx, i)).length;
+}
+
+/** An approved spec whose builder hasn't been sent the Implement step yet. */
+function approvedUnsent(item: FactoryItem): boolean {
+  return item.specApproval?.state === "approved" && !item.specApproval.sentAt;
+}
+
+/** The order approved specs are sent in: oldest approval first. */
+function approvalOrder(item: FactoryItem): string {
+  return `${item.specApproval?.decidedAt ?? ""}|${item.createdAt}|${item.id}`;
+}
+
+/**
+ * The unopened builds ahead of an approved spec that waits to be sent (`spec-approval.ts`): those
+ * already on their way to a PR, and the specs approved before it that wait too. Neither the spec
+ * itself nor those approved after it count, so approved specs never hold each other up: they are
+ * sent oldest first, as many as there is room for.
+ */
+export function buildsAhead(ctx: FactoryContext, projectId: string, item: FactoryItem): number {
+  const mine = approvalOrder(item);
   return ctx.store
     .items(projectId, ["building"])
-    .filter((i) => i.specApproval?.state !== "pending" && !finishesOpenWork(ctx, i)).length;
+    .filter((i) => i.id !== item.id && takesRoom(ctx, i))
+    .filter((i) => !approvedUnsent(i) || approvalOrder(i) < mine).length;
 }
