@@ -20,11 +20,17 @@ const win: RiskContext = {
   platform: "win32",
   home: "C:\\Users\\me",
   tempRoots: ["C:\\Users\\me\\AppData\\Local\\Temp"],
+  codedenHome: "C:\\Users\\me\\.codeden",
 };
 
 const action = (command: string, ctx: RiskContext = win) => {
   const r = classifyCommand(command, ctx);
   return r.risky ? r.action : null;
+};
+/** True when the command asks as reaching CodeDen's own home, which asks at every level. */
+const guarded = (command: string) => {
+  const r = classifyCommand(command, win);
+  return r.risky && r.codeden === true;
 };
 
 describe("cmd for loops (#499)", () => {
@@ -44,8 +50,24 @@ describe("cmd for loops (#499)", () => {
       "for /f \"tokens=*\" %i in ('cmd /c set AWS') do @echo %i",
       "for /f \"tokens=*\" %i in ('printenv GITHUB_TOKEN') do @echo %i",
       'cmd /c "for /f "tokens=*" %i in (\'set AWS\') do @echo %i"',
+      // The loop runs its command through `cmd /c`, which drops a leading `"` and the last one.
+      'for /f "tokens=*" %i in (\'"set AWS"\') do @echo %i',
+      'for /f "tokens=*" %i in (\'  "set AWS"  \') do @echo %i',
+      'for /f "tokens=*" %i in (\'"set AWS" ^| findstr KEY\') do @echo %i',
+      'for /f "tokens=*" %i in (\'"type .env"\') do @echo %i',
     ]) {
       expect(action(cmd), cmd).toBe("secrets");
+    }
+    expect(action("cmd /c '\"set AWS\"'", { ...win, shell: "powershell" })).toBe("secrets");
+  });
+
+  it("asks when the loop reads CodeDen's own credentials", () => {
+    for (const cmd of [
+      "for /f %i in ('type C:\\Users\\me\\.codeden\\install-token') do @echo %i",
+      "for /f %i in ('\"type C:\\Users\\me\\.codeden\\install-token\"') do @echo %i",
+      "for /f %i in (C:\\Users\\me\\.codeden\\install-token) do @echo %i",
+    ]) {
+      expect(guarded(cmd), cmd).toBe(true);
     }
   });
 
@@ -74,6 +96,7 @@ describe("cmd for loops (#499)", () => {
   it("keeps loops that print no values running freely", () => {
     for (const cmd of [
       "for /f \"tokens=*\" %i in ('git rev-parse HEAD') do @echo %i",
+      "for /f %i in ('\"C:\\Program Files\\Git\\bin\\git.exe\" rev-parse HEAD') do @echo %i",
       "for /f \"delims=\" %i in ('dir /b') do @echo %i",
       "for /f %i in ('set /a 1+2') do @echo %i",
       'for /f "tokens=1,2 delims=." %a in ("1.2") do @echo %a',

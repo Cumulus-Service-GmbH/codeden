@@ -32,10 +32,23 @@ export function inlineScripts(bin: string, args: string[]): InlineScript[] {
   }
   if (bin === "cmd") {
     const flag = args.findIndex((a) => /^\/[ck]$/i.test(a));
-    return flag >= 0 ? [{ text: args.slice(flag + 1).join(" "), dialect: "auto" }] : [];
+    if (flag < 0) return [];
+    return cmdForms(args.slice(flag + 1).join(" ")).map((text) => ({ text, dialect: "auto" }));
   }
   if (bin === "for") return forLoop(args);
   return [];
+}
+
+/**
+ * The forms `cmd /c` may run a command line in. When it starts with `"` (after spaces), cmd drops
+ * that quote and the last one on the line, keeping only one quoted program path with spaces as
+ * written (`"C:\Program Files\x.exe" arg`), so `"set AWS"` runs `set AWS`. Both forms are given.
+ */
+function cmdForms(text: string): string[] {
+  const line = text.trim();
+  if (!line.startsWith('"')) return [text];
+  const last = line.lastIndexOf('"');
+  return [text, last > 0 ? line.slice(1, last) + line.slice(last + 1) : line.slice(1)];
 }
 
 /** The `(…)` set of a `for` loop, maybe with `do` written right after it: `('set')do`. */
@@ -50,33 +63,36 @@ const QUOTED_COMMAND = /^(['`])([\s\S]*)\1$/;
  * `usebackq`) or from a string (`("a b")`, or `('a b')` with `usebackq`). The lexer keeps the set
  * as written, so the command is parsed here; files are read as `type` reads them. Text in single
  * quotes or backquotes counts as a command whatever the switches and options say, so they can't
- * hide one. cmd's `^` escapes (`'set AWS ^| findstr KEY'`) are taken out. A POSIX `for`
- * (`for f in *.txt; do`) has no `(…)` set and runs its body as commands of their own.
+ * hide one. The loop runs it through `cmd /c`, which drops a leading `"` and the last one
+ * (`('"set AWS"')` runs `set AWS`; `cmdForms`). cmd's `^` escapes (`'set AWS ^| findstr KEY'`) are
+ * taken out. A POSIX `for` (`for f in *.txt; do`) has no `(…)` set and runs its body as commands
+ * of their own.
  */
 function forLoop(args: string[]): InlineScript[] {
   const lower = args.map((a) => a.toLowerCase());
   const at = lower.findIndex((w, i) => w === "in" && SET.test(args[i + 1] ?? ""));
   const set = SET.exec(args[at + 1] ?? "");
   if (at < 0 || !set) return [];
-  const scripts: InlineScript[] = [];
   const options = lower.slice(0, at);
   const lines = options.some((o) => o.startsWith("/f"));
-  const read = loopInput((set[1] as string).trim(), lines, options.join(" ").includes("usebackq"));
-  if (read) scripts.push({ text: read, dialect: "auto", feeds: true });
+  const usebackq = options.join(" ").includes("usebackq");
+  const scripts: InlineScript[] = loopInput((set[1] as string).trim(), lines, usebackq).map(
+    (text) => ({ text, dialect: "auto", feeds: true }),
+  );
   const body = set[2] ? args.slice(at + 2) : doBody(args.slice(at + 2));
   if (body.length > 0) scripts.push({ text: uncaret(body.join(" ")), dialect: "auto" });
   return scripts;
 }
 
 /**
- * What a loop's set runs or reads, as a command line: its quoted command, or `type` reading the
- * files a `for /f` set names. A plain `for` only names its items.
+ * What a loop's set runs or reads, as command lines: its quoted command in each form `cmd /c` may
+ * run it in, or `type` reading the files a `for /f` set names. A plain `for` only names its items.
  */
-function loopInput(set: string, lines: boolean, usebackq: boolean): string | undefined {
+function loopInput(set: string, lines: boolean, usebackq: boolean): string[] {
   const command = QUOTED_COMMAND.exec(set);
-  if (command) return uncaret(command[2] as string);
-  if (!lines || set === "" || (set.startsWith('"') && !usebackq)) return undefined;
-  return `type ${uncaret(set)}`;
+  if (command) return cmdForms(uncaret(command[2] as string));
+  if (!lines || set === "" || (set.startsWith('"') && !usebackq)) return [];
+  return [`type ${uncaret(set)}`];
 }
 
 /** The words of the command after `do`: `do @echo %i`, or `do(set AWS)` written together. */
