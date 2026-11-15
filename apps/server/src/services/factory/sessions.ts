@@ -1,6 +1,7 @@
 import {
   type DiscoveryArea,
   type FactoryItem,
+  type ModelInfo,
   type Session,
   StartSessionRequest,
   type StartSessionRequestInit,
@@ -133,6 +134,11 @@ export class FactorySessions {
     if (cached.runnable) return cached;
     await this.deps.availability.detectNow();
     return this.runnable(provider, { ignoreFailures: true });
+  }
+
+  /** The models a provider lists (aliases with the full ids they run), from the runner. */
+  models(provider: string): ModelInfo[] {
+    return this.deps.runner.providers().find((p) => p.id === provider)?.models ?? [];
   }
 
   /** The provider's name for notes ("Codex"), from the runner's provider list. */

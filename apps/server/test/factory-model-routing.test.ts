@@ -1,5 +1,12 @@
-import type { FactoryLoop, FactoryTuningPatch, Session, WorkType } from "@codeden/contracts";
+import type {
+  FactoryLoop,
+  FactoryTuningPatch,
+  ModelInfo,
+  Session,
+  WorkType,
+} from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
+import { modelMatches } from "../src/services/factory/agent-choice";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
 import { factorySteps } from "./support/factory-steps";
 
@@ -176,5 +183,72 @@ describe("factory model routing: the scout and its area reviewers (#384)", () =>
     expect(second.scout.id).toBe(first.scout.id);
     expect(second.lens.id).toBe(first.lens.id);
     expect(env.archived).toEqual([]);
+  });
+
+  it.each([
+    ["with the full id it runs", { id: "haiku", label: "Haiku", resolvedId: "claude-haiku-5-5" }],
+    ["before the model list says what it runs", { id: "haiku", label: "Haiku" }],
+  ])("reuses sessions on an alias once they report its full id (%s)", async (_, haiku) => {
+    // Claude Code lists `haiku`; a session started on it reports `claude-haiku-5-5` once the CLI
+    // starts, and the session's model becomes that.
+    await darkFactory({ scoutProvider: "claude", scoutModel: "haiku" });
+    env.models.claude = [
+      { id: "default", label: "Default", isDefault: true, efforts: [] },
+      { id: "opus", label: "Opus", resolvedId: "claude-opus-5-5", efforts: [] },
+      { ...haiku, efforts: [] },
+    ];
+    const first = await roundWithUxReviewer();
+    for (const s of [first.scout, first.lens]) {
+      expect(s.model).toBe("haiku");
+      env.repo.update(s.id, (cur) => ({ ...cur, model: "claude-haiku-5-5" }));
+    }
+    saveLoop((l) => ({ scout: { ...l.scout, lastRoundAt: minutesAgo(7 * 60) } }));
+    const second = await roundWithUxReviewer();
+    expect(second.scout.id).toBe(first.scout.id);
+    expect(second.lens.id).toBe(first.lens.id);
+    expect(env.archived).toEqual([]);
+  });
+
+  it("uses a busy session once more instead of leaving it running unarchived", async () => {
+    await darkFactory({});
+    const first = await roundWithUxReviewer();
+    saveLoop((l) => ({
+      tuning: { ...l.tuning, scoutProvider: "codex", scoutModel: "gpt-5.5-mini" },
+      scout: { ...l.scout, lastRoundAt: minutesAgo(7 * 60) },
+    }));
+    // A person messaged the scout: it is in a turn when the round starts.
+    await env.setStatus(first.scout.id, "running");
+    await tick();
+    expect(loop().scout.sessionId).toBe(first.scout.id);
+    expect(env.archived).toEqual([]);
+  });
+});
+
+describe("modelMatches (#384)", () => {
+  const claude: ModelInfo[] = [
+    { id: "default", label: "Default", isDefault: true, efforts: [] },
+    { id: "opus", label: "Opus", resolvedId: "claude-opus-5-5", efforts: [] },
+    { id: "sonnet", label: "Sonnet 4.6", efforts: [] },
+    { id: "haiku", label: "Haiku", efforts: [] },
+  ];
+
+  it("matches the chosen id, the full id an alias runs, and the provider's default", () => {
+    expect(modelMatches([], "gpt-5.5-mini", "gpt-5.5-mini")).toBe(true);
+    expect(modelMatches(claude, "opus", "claude-opus-5-5")).toBe(true);
+    // A versioned label the full id ends with, as the model picker matches it.
+    expect(modelMatches(claude, "sonnet", "claude-sonnet-4-6")).toBe(true);
+    // An alias without a version, named as a word of the full id.
+    expect(modelMatches(claude, "haiku", "claude-haiku-5-5")).toBe(true);
+    expect(modelMatches(claude, "default", "claude-opus-5-5")).toBe(true);
+  });
+
+  it("tells another model apart", () => {
+    expect(modelMatches(claude, "opus", "claude-haiku-5-5")).toBe(false);
+    // The alias now runs a newer model than the session.
+    expect(modelMatches(claude, "opus", "claude-opus-4-1")).toBe(false);
+    expect(modelMatches(claude, "haiku", "claude-sonnet-4-6")).toBe(false);
+    expect(modelMatches(claude, "haiku", null)).toBe(false);
+    // A versioned id is never matched by its words: `gpt-5.5` is not `gpt-5.5-mini`.
+    expect(modelMatches([], "gpt-5.5", "gpt-5.5-mini")).toBe(false);
   });
 });

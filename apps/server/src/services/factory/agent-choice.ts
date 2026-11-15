@@ -1,4 +1,4 @@
-import type { FactoryItem, FactoryTuning, Project, Session } from "@codeden/contracts";
+import type { FactoryItem, FactoryTuning, ModelInfo, Project, Session } from "@codeden/contracts";
 import { earliestUntil, untilText } from "./availability";
 import type { FactoryContext } from "./context";
 
@@ -95,15 +95,51 @@ export function chooseAgent(
  * Whether a long-lived scout or area reviewer session should be replaced by a fresh one before
  * its next round: the settings name a provider (not `auto`, which reuses any session as it always
  * has) and the session doesn't run where a new one would start, on another provider or, when a
- * model is set, another model. A model left to the provider's default matches any (sessions keep
- * the default they resolved to). Compared with the choice rather than the settings, so while the
- * chosen provider is unavailable a session on the fallback is kept instead of replaced each round.
+ * model is set, another model (`modelMatches`, given the models its provider lists). A model left
+ * to the provider's default matches any (sessions keep the default they resolved to). Compared
+ * with the choice rather than the settings, so while the chosen provider is unavailable a session
+ * on the fallback is kept instead of replaced each round.
  */
 export function needsFreshSession(
   session: Pick<Session, "provider" | "model">,
   { wanted, choice }: ScoutAgent,
+  models: readonly ModelInfo[],
 ): boolean {
   if (wanted.provider === "auto" || "waiting" in choice || choice.provider === "auto") return false;
   if (session.provider !== choice.provider) return true;
-  return choice.model !== null && session.model !== choice.model;
+  return choice.model !== null && !modelMatches(models, choice.model, session.model);
+}
+
+/** The model id that stands for "the provider's default model", like no model at all. */
+const DEFAULT_MODEL_ID = "default";
+
+/** Lowercase words of an id or a name: `claude-opus-5-5` and `Opus 5.5` → `claude opus 5 5`. */
+const words = (s: string) =>
+  s
+    .toLowerCase()
+    .replace(/[\s_\-.]+/g, " ")
+    .trim();
+
+/**
+ * Whether a session runs the model `chosen` names. A session's stored model doesn't stay the id
+ * it started with: a provider that lists aliases (Claude Code's `haiku`) reports the full id once
+ * the session starts (`claude-haiku-5-5`), and the session takes it. So it matches the chosen id
+ * itself; the full id that alias runs today (`ModelInfo.resolvedId`); else, as the model picker
+ * does, a versioned label the full id ends with ("Haiku 4.5" for `claude-haiku-4-5`); else, for
+ * an alias without a version (before the provider's model list is known), a full id that names
+ * it as one of its words. `default`, like no model, is the provider's default, which any matches.
+ */
+export function modelMatches(
+  models: readonly ModelInfo[],
+  chosen: string,
+  actual: string | null,
+): boolean {
+  if (chosen === DEFAULT_MODEL_ID || actual === chosen) return true;
+  if (!actual) return false;
+  const entry = models.find((m) => m.id === chosen);
+  if (entry?.resolvedId) return entry.resolvedId === actual;
+  const id = words(actual);
+  const label = words(entry?.label ?? "");
+  if (/\d/.test(label) && (id === label || id.endsWith(` ${label}`))) return true;
+  return !/\d/.test(chosen) && id.split(" ").includes(words(chosen));
 }

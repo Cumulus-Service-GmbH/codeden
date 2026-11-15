@@ -23,7 +23,8 @@ import {
 import {
   LENS_START_TIMEOUT_MS,
   type LensBrief,
-  reusableScoutSession,
+  retireScoutSession,
+  scoutSessionPlan,
   startPlannedLenses,
 } from "./scout-lenses";
 import { keepScoutReports } from "./scout-merge";
@@ -98,8 +99,9 @@ export async function advanceScout(
   if (wipOf(ctx, project, loop).holding) return loop;
   // The scout comes last for a free agent: after reviews, fixes, rebases and builds.
   const agent = scoutAgent(ctx, project, loop.tuning);
-  const reuse = reusableScoutSession(ctx, loop.scout.sessionId, agent);
+  const { reuse, replaces } = scoutSessionPlan(ctx, loop.scout.sessionId, agent);
   if (!claimSlot(ctx, project, "scout", SCOUT_SLOT, { wake: reuse?.id })) return loop;
+  retireScoutSession(ctx, replaces);
   try {
     return { ...loop, scout: await startRound(ctx, project, loop, now, agent, reuse) };
   } catch (error) {
@@ -183,11 +185,12 @@ export async function runScoutNow(
   const blocked = scoutNowBlocker(project, loop, scoutNowFacts(ctx, project, loop));
   if (blocked) throw conflict(blocked, SCOUT_UNAVAILABLE);
   const agent = scoutAgent(ctx, project, loop.tuning);
-  const reuse = reusableScoutSession(ctx, loop.scout.sessionId, agent);
+  const { reuse, replaces } = scoutSessionPlan(ctx, loop.scout.sessionId, agent);
   if (!reuse && "waiting" in agent.choice) {
     const why = agent.choice.waiting.replace(/^Waiting: /, "");
     throw conflict(`The scout's session couldn't start: ${why}.`, SCOUT_UNAVAILABLE);
   }
+  retireScoutSession(ctx, replaces);
   const scout = await startRound(ctx, project, loop, ctx.now(), agent, reuse);
   if (!scout.round) throw conflict("The scout's session couldn't start.", SCOUT_UNAVAILABLE);
   // As the next tick derives it: a round with nothing further along is "discovering".

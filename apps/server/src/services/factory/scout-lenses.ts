@@ -8,6 +8,7 @@ import type {
 import { errorMessage } from "../errors";
 import { needsFreshSession, type ScoutAgent } from "./agent-choice";
 import type { FactoryContext } from "./context";
+import { isBusy } from "./sessions";
 import { claimSlot, SCOUT_SLOT } from "./slots";
 
 /**
@@ -52,11 +53,12 @@ export async function startPlannedLenses(
   const waiting: DiscoveryArea[] = [];
   const failed: DiscoveryArea[] = [];
   for (const lens of plan.lenses.filter((l) => plan.pending.includes(l.area))) {
-    const reuse = reusableScoutSession(ctx, lensSessions[lens.area], agent);
+    const { reuse, replaces } = scoutSessionPlan(ctx, lensSessions[lens.area], agent);
     if (!claimSlot(ctx, project, "scout", SCOUT_SLOT, { wake: reuse?.id })) {
       waiting.push(lens.area);
       continue;
     }
+    retireScoutSession(ctx, replaces);
     const text = brief(lens, !reuse);
     const sessionId = await startLens(ctx, project.id, lens.area, text, reuse, agent.choice);
     if (!sessionId) {
@@ -85,23 +87,40 @@ export async function startPlannedLenses(
   };
 }
 
+/** What happens to the scout's or an area reviewer's long-lived session this round. */
+export interface ScoutSessionPlan {
+  /** The session to wake with the round's brief; none: a fresh session starts. */
+  reuse: Session | undefined;
+  /** A session a fresh one replaces, archived once the round has an agent (`retireScoutSession`). */
+  replaces: Session | undefined;
+}
+
 /**
  * The scout's or an area reviewer's long-lived session to use again this round, if any. One that
  * no longer runs where the settings ask (`needsFreshSession`: they name another provider or
- * model) is archived, which leaves a busy one alone, so a fresh session starts on the chosen
- * provider and model instead.
+ * model) is replaced by a fresh session on the chosen provider and model. A busy one (a person
+ * messaged it) is used once more and replaced at a later round that finds it idle, so it is never
+ * left running and unarchived.
  */
-export function reusableScoutSession(
+export function scoutSessionPlan(
   ctx: FactoryContext,
   sessionId: string | null | undefined,
   agent: ScoutAgent,
-): Session | undefined {
+): ScoutSessionPlan {
   const session = ctx.sessions.reusable(sessionId);
-  if (!session || !needsFreshSession(session, agent)) return session;
+  const models = session ? ctx.sessions.models(session.provider) : [];
+  if (!session || isBusy(session) || !needsFreshSession(session, agent, models)) {
+    return { reuse: session, replaces: undefined };
+  }
+  return { reuse: undefined, replaces: session };
+}
+
+/** Archive the session a fresh one replaces (`ScoutSessionPlan.replaces`), if any. */
+export function retireScoutSession(ctx: FactoryContext, session: Session | undefined): void {
+  if (!session) return;
   const was = `${session.provider}${session.model ? ` (${session.model})` : ""}`;
   ctx.log?.(`factory: ${session.title ?? session.id} ran on ${was}; a fresh session replaces it`);
   ctx.archiveSessions([session.id]);
-  return undefined;
 }
 
 /** Start a new area reviewer, or wake the idle one (not awaited); its session id, or null. */
