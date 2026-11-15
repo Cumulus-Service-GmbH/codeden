@@ -56,7 +56,7 @@ export const SHORTCUTS: Shortcut[] = [
 
 export const isMac = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform);
 
-/** Human label for a combo, e.g. `Ctrl Shift L` or `⌘ ⇧ L`. */
+/** Human label for a combo, e.g. `Ctrl Shift L`, `⌘ ⇧ L` or `Ctrl Shift Space`. */
 export function formatCombo(combo: string): string {
   return combo
     .split("+")
@@ -64,8 +64,8 @@ export function formatCombo(combo: string): string {
       if (part === "mod") return isMac ? "⌘" : "Ctrl";
       if (part === "shift") return isMac ? "⇧" : "Shift";
       if (part === "alt") return isMac ? "⌥" : "Alt";
-      if (part === "enter") return "Enter";
-      return part.length === 1 ? part.toUpperCase() : part;
+      // Combos store keys in lowercase (`l`, `enter`, `space`, `f5`); labels capitalise them.
+      return part.charAt(0).toUpperCase() + part.slice(1);
     })
     .join(" ");
 }

@@ -203,7 +203,7 @@ describe("push-to-talk", () => {
     };
     renderComposer(engine, withPushToTalk(COMBO));
     // The shortcut shows on the button once Settings have loaded.
-    await screen.findByRole("button", { name: /· hold Ctrl Shift space$/ });
+    await screen.findByRole("button", { name: /· hold Ctrl Shift Space$/ });
 
     fireEvent.keyDown(window, held);
     expect(engine.start).toHaveBeenCalledTimes(1);
