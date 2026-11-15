@@ -13,9 +13,9 @@ import type { ProcessSupervisor } from "../process/supervisor";
  * server's request: `check.run` runs a command in the session's folder and answers with how it
  * ended and the end of its output; `check.cancel` (and `session.stop`) kills it. A check ends
  * when its own process exits, taking what it left running in the background with it
- * (`RunShellOptions.endTree`); its timeout and `check.cancel` always end it and free the
- * session's slot. The server decides what runs, from the checks it froze on the session;
- * nothing here reads `.codeden/project.json`.
+ * (`RunShellOptions.endTree`, which its result doesn't wait for); its timeout and `check.cancel`
+ * always end it and free the session's slot. The server decides what runs, from the checks it
+ * froze on the session; nothing here reads `.codeden/project.json`.
  */
 export class CheckRunner {
   private readonly running = new Map<string, AbortController>();

@@ -28,7 +28,8 @@ export interface RunShellOptions {
   signal?: AbortSignal;
   /**
    * Once the command's own process exits, also kill whatever it left running (a server or
-   * watcher started in the background), instead of leaving it be.
+   * watcher started in the background), instead of leaving it be. The result doesn't wait for
+   * that: it may come a moment before they are gone.
    */
   endTree?: boolean;
 }
@@ -92,7 +93,7 @@ export class ProcessSupervisor {
    * Run a shell command line, streaming combined output. Never rejects for exit codes. It
    * finishes when its output closes, or shortly after its own process exits while something it
    * started keeps the output open (`OUTPUT_GRACE_MS`), so a process left in the background can't
-   * hold it up; with `endTree`, only once what it left running is killed. The timeout and
+   * hold it up; `endTree` kills those meanwhile, without holding it up either. The timeout and
    * `signal` kill the whole tree, also once the shell has exited.
    */
   runShell(command: string, opts: RunShellOptions): Promise<RunShellResult> {
@@ -109,10 +110,7 @@ export class ProcessSupervisor {
       let timedOut = false;
       let cancelled = false;
       let exited = false;
-      let closed = false;
       let exitCode: number | null = null;
-      /** `endTree` after the shell exited: the run ends once it is done. */
-      let ending: Promise<void> | undefined;
       let settled = false;
       let grace: NodeJS.Timeout | undefined;
       const settle = () => {
@@ -170,14 +168,14 @@ export class ProcessSupervisor {
         exited = true;
         life.endedAt = Date.now();
         exitCode = code;
-        if (!opts.endTree) return closeAfter(OUTPUT_GRACE_MS);
-        ending = endTree();
-        void ending.then(() => (closed ? settle() : closeAfter(OUTPUT_GRACE_MS)));
+        // Not awaited: finding what it left running lists every process, on Windows a PowerShell
+        // CIM query of a second or two, which a command that left nothing must not wait for.
+        if (opts.endTree) void endTree();
+        closeAfter(OUTPUT_GRACE_MS);
       });
       child.once("close", (code) => {
-        closed = true;
         exitCode = code ?? exitCode;
-        if (!ending) settle();
+        settle();
       });
     });
   }
