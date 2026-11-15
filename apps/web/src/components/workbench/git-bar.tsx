@@ -12,13 +12,15 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { useClient } from "@/lib/api";
+import { isNotGitRepo } from "@/lib/session-workspace";
 import { useLayoutStore } from "@/stores/layout";
 import { useAskForPullRequest, usePullRequestOffer } from "./open-pr";
 import { PrRequestedButton, PushToastPrAction } from "./open-pr-controls";
 
 /**
  * The session folder's git status, polled. Fails with `not_a_repo` (`isNotGitRepo`) when the
- * session runs in place in a folder that isn't a git repository.
+ * session runs in place in a folder that isn't a git repository; polling stops then, and the
+ * next mount (opening the tab again) asks again.
  */
 export function useGitStatus(sessionId: string) {
   const client = useClient();
@@ -26,7 +28,7 @@ export function useGitStatus(sessionId: string) {
     queryKey: ["git-status", sessionId],
     queryFn: () => client.gitStatus(sessionId),
     retry: false,
-    refetchInterval: 15_000,
+    refetchInterval: (query) => (isNotGitRepo(query.state.error) ? false : 15_000),
   });
 }
 
