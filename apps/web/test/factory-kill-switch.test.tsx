@@ -18,7 +18,7 @@ vi.mock("sonner", () => ({ toast }));
 
 const at = "2026-11-14T08:00:00.000Z";
 const project = { id: "p-app", name: "app" } as Project;
-const pixel = { available: false, on: false, set: () => {} };
+const view = { available: false, mode: "board" as const, set: () => {} };
 
 const status = (patch: Partial<FactoryStatus> = {}): FactoryStatus =>
   FactoryStatus.parse({
@@ -57,7 +57,7 @@ function renderHeader(f: FactoryStatus) {
   const resume = vi.fn(async () => ({}) as never);
   client.factory.resume = resume;
   renderWithClient(
-    <ViewHeader project={project} f={f} needsPerson={0} failed={0} pixel={pixel} />,
+    <ViewHeader project={project} f={f} needsPerson={0} failed={0} view={view} />,
     client,
     { withRouter: true },
   );

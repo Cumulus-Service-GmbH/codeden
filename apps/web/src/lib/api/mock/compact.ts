@@ -26,7 +26,7 @@ export function scriptedCompaction(world: MockWorld, sessionId: string, onDone: 
         wait: 0,
         run: () => {
           world.updateSession(sessionId, { status: "running" });
-          world.emitAgent(sessionId, { type: "turn.started", ...ids });
+          world.emitAgent(sessionId, { type: "turn.started", ...ids, kind: "compact" });
           notice("compacting", "Compacting the conversation to free up context…");
         },
       },

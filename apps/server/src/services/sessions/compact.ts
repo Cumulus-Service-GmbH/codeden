@@ -7,8 +7,9 @@ import type { SessionRepo } from "./repo";
 
 /**
  * "Compact now" (`POST /api/sessions/:id/compact`): the provider summarizes the conversation to
- * free up context, as a turn of its own (`ProviderCapabilities.compact`). Its progress arrives as
- * ordinary turn and notice events, and messages sent meanwhile queue behind it.
+ * free up context, as a turn of its own (`ProviderCapabilities.compact`), marked `kind: "compact"`.
+ * Its progress arrives as ordinary turn and notice events, and messages sent meanwhile queue
+ * behind it, also those meant to steer it (a compaction can't be steered).
  */
 
 const BUSY = new Set(["running", "waiting"]);
@@ -48,6 +49,24 @@ export function compactRefusal(
     return conflict("Messages are waiting to be sent: compact once they have run.", "turn_running");
   }
   return null;
+}
+
+/** Whether the session's latest root turn is a compaction that is still running. */
+export function compactionRunning(
+  repo: Pick<SessionRepo, "rootTurnIds" | "turn">,
+  session: Session,
+): boolean {
+  const last = repo.rootTurnIds(session).at(-1);
+  const turn = last ? repo.turn(session.id, last) : null;
+  return turn?.status === "running" && turn.kind === "compact";
+}
+
+/** The answer to a steer that arrives during a compaction (the runner says the same). */
+export function compactingRefusal(): ServiceError {
+  return conflict(
+    "The conversation is being compacted, so there is no turn to steer. Send the message instead: it waits in the queue and goes once the compaction ends.",
+    "compacting",
+  );
 }
 
 export interface CompactContext {

@@ -1,4 +1,5 @@
-import { COLS, ROWS, type Tile, tileId, walkable } from "./floor";
+import type { Tile } from "../scene/stations";
+import { COLS, ROWS, tileId, walkable } from "./floor";
 
 /**
  * Walking on the floor (#264): shortest paths over walkable tiles (breadth-first, four

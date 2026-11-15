@@ -57,7 +57,9 @@ function TurnFooter({
       <div className="h-px flex-1 bg-border/70" />
       {turn.status === "failed" ? (
         <span className="flex items-center gap-1 text-status-failed">
-          <OctagonX className="size-3" /> Turn failed{turn.error ? ` · ${turn.error.message}` : ""}
+          <OctagonX className="size-3" />
+          {turn.kind === "compact" ? "Compaction failed" : "Turn failed"}
+          {turn.error ? ` · ${turn.error.message}` : ""}
         </span>
       ) : turn.status === "interrupted" ? (
         <span className="flex items-center gap-1">
