@@ -7,7 +7,7 @@ import {
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import { builderWanted, chooseAgent } from "./agent-choice";
-import { archiveFinished } from "./cleanup";
+import { archiveFinished, sweepFailedSessions } from "./cleanup";
 import { settleClosedIssues } from "./closed-issues";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { advanceDrain } from "./drain";
@@ -131,8 +131,10 @@ export async function runTick(
   await fileDueFollowUps(ctx, project).catch((error: unknown) =>
     ctx.log?.(`factory: filing follow-ups: ${errorMessage(error)}`),
   );
-  // Finished work gives back its sessions and worktrees, also while paused.
+  // Finished work gives back its sessions and worktrees, also while paused; once after the
+  // upgrade, so do the failed sessions earlier versions left behind (#411).
   archiveFinished(ctx, projectId);
+  loop = sweepFailedSessions(ctx, projectId, loop);
   // Requests to approve a spec that waits for nothing any more are resolved.
   settleSpecInbox(ctx, projectId);
   // The one "N merges to spot-check" item follows the merges set aside and the checks recorded.

@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import type { FactoryItem, Session } from "@codeden/contracts";
+import { agentEventToNewEvent, type FactoryItem, type Session } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { FACTORY_STARTER } from "../src/services/factory/sessions";
 import { sampleSession } from "./helpers";
@@ -17,7 +17,7 @@ import { factorySteps } from "./support/factory-steps";
 
 let env: FactoryEnv;
 afterEach(() => env?.close());
-const { item, enable, backlogItem, openPr, review } = factorySteps(() => env);
+const { item, enable, backlogItem, openPr, review, verifying } = factorySteps(() => env);
 
 const TOO_OLD = "Gemini CLI 0.36.0 is older than 0.68.0, the oldest CodeDen supports.";
 
@@ -38,6 +38,25 @@ function refusedOpen(sessionId: string) {
     status: "failed",
     startError: { code: "open_failed", message: TOO_OLD, kind: "setup" },
   }));
+}
+
+/** The session's turn fails on its provider's usage limit; it waits idle for a retry. */
+function hitsUsageLimit(sessionId: string) {
+  const T = `t-${sessionId}`;
+  const retryAt = new Date(Date.now() + 30 * 60_000).toISOString();
+  env.store.append(
+    [
+      { type: "thread.started", thread: { id: T } } as const,
+      { type: "turn.started", threadId: T, turnId: "u1" } as const,
+      {
+        type: "turn.failed",
+        threadId: T,
+        turnId: "u1",
+        error: { message: "Usage limit", kind: "usage_limit", retryAt },
+      } as const,
+    ].map((e) => agentEventToNewEvent(sessionId, e)),
+  );
+  env.repo.update(sessionId, (s) => ({ ...s, status: "idle" }));
 }
 
 /**
@@ -81,6 +100,50 @@ async function mergeAndClean(id: string, replacement: string) {
   expect(item(id).sessionsArchivedAt).not.toBeNull();
 }
 
+const old = "2026-11-14T16:00:00.000Z";
+const meta = { workspaceMode: "worktree", workspaceFallback: null, forced: null } as const;
+
+/** A factory session as an earlier version left it (in a worktree of its own by default). */
+function factorySession(id: string, patch: Partial<Session>): string {
+  const worktree = join(env.dir, "wt", id);
+  env.repo.create(
+    {
+      ...sampleSession,
+      id,
+      projectId: env.project.id,
+      role: "agent",
+      startedBy: FACTORY_STARTER,
+      status: "completed",
+      cwd: worktree,
+      worktreePath: worktree,
+      createdAt: old,
+      updatedAt: old,
+      ...patch,
+    },
+    { ...meta, queuedBehind: [] },
+  );
+  return id;
+}
+
+/** An item as an earlier version left it. */
+function oldItem(patch: Partial<FactoryItem>): FactoryItem {
+  const created = env.factory.data.createItem({
+    projectId: env.project.id,
+    workKey: `issue:${patch.issue?.number ?? 1}`,
+    title: patch.title ?? "Old work",
+    summary: "From before",
+    source: "issue",
+    stage: "merged",
+  });
+  return env.factory.data.updateItem(created.id, (i) => ({ ...i, ...patch }), { touch: false });
+}
+
+const pr = (number: number) => ({
+  number,
+  url: `https://github.com/acme/app/pull/${number}`,
+  state: "merged" as const,
+});
+
 describe("failed factory sessions are archived (#411)", () => {
   it("archives a failed reviewer once its replacement has started", async () => {
     const { id, failed, replacement } = await replacedReviewer();
@@ -89,6 +152,25 @@ describe("failed factory sessions are archived (#411)", () => {
     // The replacement keeps working, and the item still knows the failed session.
     expect(session(replacement).archivedAt).toBeNull();
     expect(item(id).sessionIds).toEqual(expect.arrayContaining([failed, replacement]));
+  });
+
+  it("archives a reviewer stopped at its usage limit only once a fresh one has started", async () => {
+    env = createFactoryEnv();
+    enable();
+    const { id } = await verifying("pending");
+    const first = reviewerOf(id);
+    hitsUsageLimit(first);
+    await tick();
+    // The factory stopped it and let it go; nothing has replaced it yet, so it stays.
+    expect(session(first).status).toBe("stopped");
+    expect(item(id).reviewerSessionId).toBeNull();
+    expect(session(first).archivedAt).toBeNull();
+    await tick();
+    const fresh = reviewerOf(id);
+    expect(fresh).toBeTruthy();
+    expect(fresh).not.toBe(first);
+    expect(session(first).archivedAt).not.toBeNull();
+    expect(session(fresh).archivedAt).toBeNull();
   });
 
   it("archives an item's failed sessions when it merges, wherever they worked", async () => {
@@ -102,59 +184,50 @@ describe("failed factory sessions are archived (#411)", () => {
     expect(session(failed).archivedAt).not.toBeNull();
     expect(session(failed).worktreeRemovedAt).not.toBeNull();
   });
+
+  it("archives a finished item's failed sessions it never recorded as earlier ones", async () => {
+    env = createFactoryEnv();
+    enable();
+    await tick(); // The one-time sweep is done: this is the cleanup of a finished item.
+    // In flight during the upgrade: an earlier version let its failed reviewer go without
+    // recording it. The reviewer that approved worked in the builder's worktree; the failed one
+    // in a worktree of its own.
+    const builder = factorySession("b-260", { workKey: "issue:260", status: "idle" });
+    const worktree = session(builder).worktreePath as string;
+    const reviewer = factorySession("r-261", {
+      workKey: "factory:review:261",
+      status: "idle",
+      cwd: worktree,
+      worktreePath: null,
+    });
+    const failed = factorySession("x-261", { workKey: "factory:review:261", status: "failed" });
+    const merged = oldItem({
+      workKey: "issue:260",
+      stage: "merged",
+      pr: pr(261),
+      builderSessionId: builder,
+      reviewerSessionId: reviewer,
+      sessionIds: [builder, failed, reviewer],
+      finishedAt: old,
+    });
+    await tick();
+    expect(item(merged.id).sessionsArchivedAt).not.toBeNull();
+    expect([...env.archived].sort()).toEqual([builder, failed, reviewer].sort());
+    // The builder goes last, so its worktree isn't kept for a session still shown in it.
+    expect(env.archived.at(-1)).toBe(builder);
+    expect(session(failed).worktreeRemovedAt).not.toBeNull();
+  });
 });
 
 describe("the one-time sweep of failed sessions left from before (#411)", () => {
-  const old = "2026-11-14T16:00:00.000Z";
-  const meta = { workspaceMode: "worktree", workspaceFallback: null, forced: null } as const;
-
-  /** A factory session as an earlier version left it. */
-  function factorySession(id: string, patch: Partial<Session>): string {
-    const worktree = join(env.dir, "wt", id);
-    env.repo.create(
-      {
-        ...sampleSession,
-        id,
-        projectId: env.project.id,
-        role: "agent",
-        startedBy: FACTORY_STARTER,
-        status: "completed",
-        cwd: worktree,
-        worktreePath: worktree,
-        createdAt: old,
-        updatedAt: old,
-        ...patch,
-      },
-      { ...meta, queuedBehind: [] },
-    );
-    return id;
-  }
-
-  /** An item as an earlier version left it, its cleanup already done. */
-  function oldItem(patch: Partial<FactoryItem>): FactoryItem {
-    const created = env.factory.data.createItem({
-      projectId: env.project.id,
-      workKey: `issue:${patch.issue?.number ?? 1}`,
-      title: patch.title ?? "Old work",
-      summary: "From before",
-      source: "issue",
-      stage: "merged",
-    });
-    return env.factory.data.updateItem(created.id, (i) => ({ ...i, ...patch }), { touch: false });
-  }
-
   it("archives superseded failed sessions and leaves an item's current failed one", async () => {
     env = createFactoryEnv();
     enable();
-    const pr = (number: number) => ({
-      number,
-      url: `https://github.com/acme/app/pull/${number}`,
-      state: "merged" as const,
-    });
-    // A merged item: its builder and the reviewer that approved were archived with it, but
-    // the reviewer that failed on its provider before was missed.
+    // A merged item: its builder and the reviewer that approved were archived with it (someone
+    // restored the builder since, which stopped it), but the reviewer that failed on its
+    // provider before was missed.
     const merged = {
-      builder: factorySession("m-builder", { workKey: "issue:243", archivedAt: old }),
+      builder: factorySession("m-builder", { workKey: "issue:243", status: "stopped" }),
       reviewer: factorySession("m-reviewer", { workKey: "factory:review:244", archivedAt: old }),
       failed: factorySession("m-failed", { workKey: "factory:review:244", status: "failed" }),
     };
@@ -195,5 +268,12 @@ describe("the one-time sweep of failed sessions left from before (#411)", () => 
     expect(session(merged.failed).archivedAt).not.toBeNull();
     expect(session(stuck.failed).archivedAt).not.toBeNull();
     expect(session(stuck.builder).archivedAt).toBeNull();
+    expect(session(merged.builder).archivedAt).toBeNull();
+    // Once: a later start leaves what someone restored since alone.
+    expect(env.factory.data.loop(env.project.id)?.failedSessionsSweptAt).not.toBeNull();
+    env.repo.update(merged.failed, (s) => ({ ...s, archivedAt: null }));
+    env.restart();
+    await tick();
+    expect(session(merged.failed).archivedAt).toBeNull();
   });
 });
