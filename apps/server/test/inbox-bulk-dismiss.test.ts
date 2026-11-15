@@ -59,8 +59,13 @@ const statusOf = (id: string) => server.services.inbox.get(id).status;
 
 let n = 0;
 function put(id: string, extra: Partial<InboxItem> = {}): InboxItem {
+  return server.services.inbox.put(item(id, extra));
+}
+
+/** An open item for project p1, created a second after the one before. */
+function item(id: string, extra: Partial<InboxItem> = {}): InboxItem {
   const at = new Date(Date.UTC(2026, 10, 15, 9, 0, n++)).toISOString();
-  return server.services.inbox.put({
+  return {
     id,
     kind: "message",
     status: "open",
@@ -81,7 +86,7 @@ function put(id: string, extra: Partial<InboxItem> = {}): InboxItem {
     resolvedAt: null,
     resolution: null,
     ...extra,
-  });
+  };
 }
 
 /** Notices anyone may clear, and the items that wait on the user. */
@@ -141,6 +146,24 @@ describe("inbox bulk dismiss", () => {
     // The regression is a failed run too, but it waits on the user.
     expect(res).toEqual({ dismissed: 1, ids: ["failed"], kept: 1 });
     expect(statusOf("decision")).toBe("open");
+  });
+
+  it("by kinds reaches matching items older than the newest open ones (#417)", async () => {
+    put("old-failed", { kind: "run_failed", notify: "failure" });
+    // More newer open items of another kind than one list of the inbox holds.
+    const newer = Array.from({ length: INBOX_BULK_MAX }, (_, i) => item(`msg${i}`));
+    server.services.store.append(
+      newer.map((it) => ({
+        type: "inbox.created" as const,
+        sessionId: null,
+        payload: { item: it },
+      })),
+    );
+
+    const res = await dismiss({ filter: { kinds: ["run_failed"] } });
+    expect(res).toEqual({ dismissed: 1, ids: ["old-failed"], kept: 0 });
+    expect(statusOf("old-failed")).toBe("dismissed");
+    expect(statusOf("msg0")).toBe("open");
   });
 
   it("by ids skips what waits on the user, ids that aren't open and repeats", async () => {
