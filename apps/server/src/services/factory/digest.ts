@@ -252,10 +252,19 @@ export function spotCheckLine(s: DigestSpotChecks | undefined): string | null {
 
 /**
  * "Review follow-ups: 3 held for the scout, 1 filed, 2 dropped (duplicates, older than 14 days or
- * over the cap of 50), 1 dismissed; 7 held now."; null when there was nothing to say.
+ * over the cap of 50), 1 dismissed; 7 held now."; null when there was nothing to say. Without the
+ * scout's held list (nothing held that day or now, none dropped from it: a software factory, or a
+ * dark factory whose scout runs no rounds) it doesn't mention holding: "Review follow-ups: 1 filed."
  */
 export function followUpLine(f: DigestFollowUps | undefined): string | null {
   if (!f || f.held + f.filed + f.dropped + f.dismissed + f.waiting === 0) return null;
+  if (f.held + f.waiting + f.dropped === 0) {
+    const parts = [
+      ...(f.filed > 0 ? [`${f.filed} filed`] : []),
+      ...(f.dismissed > 0 ? [`${f.dismissed} dismissed`] : []),
+    ];
+    return `Review follow-ups: ${parts.join(", ")}.`;
+  }
   const parts = [
     `${f.held} held for the scout`,
     `${f.filed} filed`,
