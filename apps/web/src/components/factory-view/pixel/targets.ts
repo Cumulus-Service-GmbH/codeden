@@ -1,10 +1,10 @@
 import type { CSSProperties } from "react";
+import type { SceneAgent } from "../scene/agents";
+import type { BayCrate } from "../scene/repair-bay";
+import type { Scene } from "../scene/scene-model";
 import type { ViewCard } from "../stages";
-import type { SceneAgent } from "./agents";
 import { bayCrateRect, ticketRect } from "./draw";
 import { agentRect, type Rect, SCENE_H, SCENE_W } from "./floor";
-import type { BayCrate } from "./repair-bay";
-import type { Scene } from "./scene-model";
 
 /**
  * Everything on the floor the pointer can hover and the keyboard can reach (#264): each ticket

@@ -7,11 +7,12 @@ import { useChatColumn, useNow, useWide } from "@/components/factory-view/hooks"
 import { ItemSheet } from "@/components/factory-view/item-sheet";
 import { PipelineBoard } from "@/components/factory-view/pipeline-board";
 import { type PixelChat, PixelScene } from "@/components/factory-view/pixel/pixel-scene";
-import { usePixelMode } from "@/components/factory-view/pixel/use-pixel-mode";
 import { QuickChat } from "@/components/factory-view/quick-chat";
 import { type SessionInfo, type ViewCard, viewPipeline } from "@/components/factory-view/stages";
 import { StatsStrip } from "@/components/factory-view/stats-strip";
 import { ViewHeader } from "@/components/factory-view/view-header";
+import { useViewMode } from "@/components/factory-view/view-mode";
+import { FloorScene } from "@/components/on-demand";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -80,6 +81,7 @@ export function FactoryViewPage({ projectId }: { projectId: string }) {
           progress: s.progress?.text ?? null,
           progressAt: s.progress?.at ?? null,
           provider: names.get(s.provider) ?? s.provider,
+          providerId: s.provider,
           model: s.model,
           workKey: s.workKey,
         },
@@ -93,13 +95,17 @@ export function FactoryViewPage({ projectId }: { projectId: string }) {
   const chatColumn = useChatColumn();
   const [chatOpen, setChatOpen] = useChatOpen();
   const [chatSheet, setChatSheet] = useState(false);
-  const pixel = usePixelMode();
-  // Pixel mode: the chat is a terminal in the scene, docked where the column would be, or
-  // opened over the scene on narrower screens.
-  const [pixelOverlay, setPixelOverlay] = useState(false);
-  const pixelChat: PixelChat = chatColumn
+  const view = useViewMode();
+  // Floor mode falls back to the board, for this visit, when WebGL can't start or is lost.
+  const [noWebgl, setNoWebgl] = useState(false);
+  const floor = view.mode === "floor" && !noWebgl;
+  // The scenes (Floor, Pixel) fill the space; the chat is a terminal in them, docked where the
+  // column would be, or opened over the scene on narrower screens.
+  const scene = floor || view.mode === "pixel";
+  const [sceneOverlay, setSceneOverlay] = useState(false);
+  const sceneChat: PixelChat = chatColumn
     ? { docked: true, open: chatOpen, setOpen: setChatOpen }
-    : { docked: false, open: pixelOverlay, setOpen: setPixelOverlay };
+    : { docked: false, open: sceneOverlay, setOpen: setSceneOverlay };
   // The open card by id, so its sheet follows the card as it moves.
   const [selected, setSelected] = useState<ViewCard | null>(null);
   const current = useMemo(() => {
@@ -163,12 +169,12 @@ export function FactoryViewPage({ projectId }: { projectId: string }) {
           f={f}
           needsPerson={pipeline.needsPerson}
           failed={pipeline.failed}
-          pixel={pixel}
+          view={view}
         />
         <div className="flex min-h-0 flex-1">
-          {pixel.on ? (
-            // Pixel mode: the floor fills the space; its gauge and counter board stand in for
-            // the figures, and the PM chat is part of it.
+          {scene ? (
+            // The scenes fill the space; their gauge and counter board stand in for the
+            // figures, and the PM chat is part of them.
             <main
               className={
                 wide
@@ -176,15 +182,28 @@ export function FactoryViewPage({ projectId }: { projectId: string }) {
                   : "flex min-h-0 min-w-0 flex-1 flex-col p-3 pb-16"
               }
             >
-              <PixelScene
-                f={f}
-                pipeline={pipeline}
-                sessions={sessions}
-                projectId={projectId}
-                now={now}
-                onOpen={setSelected}
-                chat={pixelChat}
-              />
+              {floor ? (
+                <FloorScene
+                  f={f}
+                  pipeline={pipeline}
+                  sessions={sessions}
+                  projectId={projectId}
+                  now={now}
+                  onOpen={setSelected}
+                  chat={sceneChat}
+                  onUnsupported={() => setNoWebgl(true)}
+                />
+              ) : (
+                <PixelScene
+                  f={f}
+                  pipeline={pipeline}
+                  sessions={sessions}
+                  projectId={projectId}
+                  now={now}
+                  onOpen={setSelected}
+                  chat={sceneChat}
+                />
+              )}
             </main>
           ) : (
             <main
@@ -196,11 +215,20 @@ export function FactoryViewPage({ projectId }: { projectId: string }) {
                   : "flex min-h-0 min-w-0 flex-1 flex-col gap-3 overflow-y-auto p-3 pb-20"
               }
             >
+              {view.mode === "floor" && noWebgl && (
+                <p
+                  role="status"
+                  className="text-xs text-muted-foreground"
+                  data-testid="factory-view-floor-unsupported"
+                >
+                  Factory floor needs WebGL; showing the board.
+                </p>
+              )}
               <StatsStrip f={f} />
               <PipelineBoard f={f} pipeline={pipeline} now={now} onOpen={setSelected} />
             </main>
           )}
-          {chatColumn && chatOpen && !pixel.on && (
+          {chatColumn && chatOpen && !scene && (
             <aside
               className="flex w-[340px] shrink-0 flex-col border-l border-border bg-surface/40 2xl:w-[400px]"
               aria-label="Project manager chat"
@@ -208,15 +236,11 @@ export function FactoryViewPage({ projectId }: { projectId: string }) {
               <QuickChat projectId={projectId} onCollapse={() => setChatOpen(false)} />
             </aside>
           )}
-          {wide && !(chatColumn && (chatOpen || pixel.on)) && (
+          {wide && !(chatColumn && (chatOpen || scene)) && (
             <button
               type="button"
               onClick={() =>
-                pixel.on
-                  ? setPixelOverlay(true)
-                  : chatColumn
-                    ? setChatOpen(true)
-                    : setChatSheet(true)
+                scene ? setSceneOverlay(true) : chatColumn ? setChatOpen(true) : setChatSheet(true)
               }
               className="flex w-10 shrink-0 flex-col items-center gap-2 border-l border-border py-3 text-2xs text-muted-foreground hover:bg-muted/50 hover:text-foreground"
               aria-label="Show the PM chat"
@@ -230,13 +254,13 @@ export function FactoryViewPage({ projectId }: { projectId: string }) {
         {!wide && (
           <Button
             className="fixed right-4 bottom-4 z-10 rounded-full shadow-lg"
-            onClick={() => (pixel.on ? setPixelOverlay(true) : setChatSheet(true))}
+            onClick={() => (scene ? setSceneOverlay(true) : setChatSheet(true))}
             data-testid="factory-view-chat-open"
           >
             <MessageSquare /> PM chat
           </Button>
         )}
-        {!chatColumn && !pixel.on && (
+        {!chatColumn && !scene && (
           // Narrower screens: the chat slides in from the right (tablets in landscape, small
           // laptops) or up from the bottom (phones, portrait tablets).
           <Sheet open={chatSheet} onOpenChange={setChatSheet}>

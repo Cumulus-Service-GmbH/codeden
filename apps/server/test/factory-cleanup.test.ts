@@ -3,6 +3,7 @@ import type { FactoryItem, ReviewVerdictInit, Session } from "@codeden/contracts
 import { ReviewVerdict } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { SessionArchiver, type SessionArchiverDeps } from "../src/services/factory/cleanup";
+import { CLEAN_REVIEW } from "../src/services/factory/review-environment";
 import { FACTORY_STARTER } from "../src/services/factory/sessions";
 import { VIEW_ITEMS } from "../src/services/factory/store";
 import { sampleSession } from "./helpers";
@@ -185,6 +186,45 @@ describe("archiving finished factory work (§10.1)", () => {
     // Reviewers go first, so the builder's worktree isn't kept for a session still in it.
     expect(env.archived.at(-1)).toBe(builder);
     expect(session(lensId).archivedAt).toBeNull();
+  });
+
+  it("archives a reviewer that was stopped and replaced, from a worktree of its own (#438)", async () => {
+    env = createFactoryEnv();
+    enable();
+    const it1 = backlogItem();
+    // The item's reviews run in a clean worktree on the PR's head, not the builder's.
+    env.factory.data.updateItem(it1.id, (i) => ({
+      ...i,
+      nudges: { ...i.nudges, [CLEAN_REVIEW]: new Date().toISOString() },
+    }));
+    const verifying = await toVerifying(it1);
+    expect(verifying.stage).toBe("verifying");
+    const builder = verifying.builderSessionId as string;
+    const first = verifying.reviewerSessionId as string;
+    expect(session(first).worktreePath).toBeTruthy();
+    expect(session(first).worktreePath).not.toBe(session(builder).worktreePath);
+
+    // Someone stops the reviewer (its last turn didn't fail): it is let go...
+    await env.setStatus(first, "stopped");
+    await tick();
+    expect(item(it1.id).reviewerSessionId).toBeNull();
+    // ...as an earlier session of the item, like any other reviewer let go.
+    expect([...item(it1.id).earlierSessionIds, ...env.archived]).toContain(first);
+    // ...and a fresh one takes over, approves, and the PR merges.
+    await tick();
+    const second = item(it1.id).reviewerSessionId as string;
+    expect(second).toBeTruthy();
+    expect(second).not.toBe(first);
+    env.factory.submitReview(session(second), ReviewVerdict.parse(APPROVE));
+    await env.setStatus(second, "idle");
+    await tick();
+    await tick();
+    expect(item(it1.id).stage).toBe("merged");
+    expect(item(it1.id).sessionsArchivedAt).not.toBeNull();
+
+    // Every session of the item is archived, the stopped reviewer's own worktree included.
+    expect([...env.archived].sort()).toEqual([builder, first, second].sort());
+    expect(session(first).worktreeRemovedAt).not.toBeNull();
   });
 
   it("archives the earlier attempt's sessions after a retry once their turn is over", async () => {

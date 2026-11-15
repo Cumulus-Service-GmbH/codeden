@@ -7,19 +7,25 @@ import type { SessionRepo } from "./repo";
 
 /**
  * "Compact now" (`POST /api/sessions/:id/compact`): the provider summarizes the conversation to
- * free up context, as a turn of its own (`ProviderCapabilities.compact`). Its progress arrives as
- * ordinary turn and notice events, and messages sent meanwhile queue behind it.
+ * free up context, as a turn of its own (`ProviderCapabilities.compact`), marked `kind: "compact"`.
+ * Its progress arrives as ordinary turn and notice events, and messages sent meanwhile queue
+ * behind it, also those meant to steer it (a compaction can't be steered).
  */
 
 const BUSY = new Set(["running", "waiting"]);
 const NOT_STARTED = new Set(["created", "queued", "starting"]);
 
-/** What else is under way for the session: a turn on its way, messages waiting. */
+/** What else is under way for the session: a turn on its way, messages waiting, checks. */
 export interface CompactBusy {
   /** A turn (or another compaction) is on its way to the runner. */
   delivering: boolean;
   /** Messages waiting in the session's queue. */
   queued: number;
+  /**
+   * The project's checks are running after the last turn (§9). A compaction would end their run
+   * and lose what they report, and its own turn must not start another round (#412).
+   */
+  checking?: boolean;
 }
 
 /**
@@ -44,10 +50,34 @@ export function compactRefusal(
   if (BUSY.has(session.status) || busy.delivering) {
     return conflict("A turn is running: compact once it ends.", "turn_running");
   }
+  if (busy.checking) {
+    return conflict(
+      "The project's checks are running: compact once they finish.",
+      "checks_running",
+    );
+  }
   if (busy.queued > 0) {
     return conflict("Messages are waiting to be sent: compact once they have run.", "turn_running");
   }
   return null;
+}
+
+/** Whether the session's latest root turn is a compaction that is still running. */
+export function compactionRunning(
+  repo: Pick<SessionRepo, "rootTurnIds" | "turn">,
+  session: Session,
+): boolean {
+  const last = repo.rootTurnIds(session).at(-1);
+  const turn = last ? repo.turn(session.id, last) : null;
+  return turn?.status === "running" && turn.kind === "compact";
+}
+
+/** The answer to a steer that arrives during a compaction (the runner says the same). */
+export function compactingRefusal(): ServiceError {
+  return conflict(
+    "The conversation is being compacted, so there is no turn to steer. Send the message instead: it waits in the queue and goes once the compaction ends.",
+    "compacting",
+  );
 }
 
 export interface CompactContext {

@@ -412,8 +412,9 @@ export type SendMessageResponse = z.infer<typeof SendMessageResponse>;
  * `POST /api/sessions/:id/compact` ("Compact now"): the provider compacts the conversation as a
  * turn of its own (`ProviderCapabilities.compact`). Its progress arrives as ordinary turn and
  * notice events; messages sent meanwhile queue behind it. 409 `turn_running` while a turn runs or
- * messages wait, `unsupported` when the provider can't compact on demand, `not_started` and
- * `archived` for sessions with no conversation to compact.
+ * messages wait, `checks_running` while the project's checks run after a turn (§9),
+ * `unsupported` when the provider can't compact on demand, `not_started` and `archived` for
+ * sessions with no conversation to compact.
  */
 export const CompactSessionResponse = z.object({ status: z.literal("compacting") });
 export type CompactSessionResponse = z.infer<typeof CompactSessionResponse>;

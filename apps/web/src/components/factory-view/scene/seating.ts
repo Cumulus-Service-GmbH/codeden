@@ -1,13 +1,14 @@
 import type { SceneAgent } from "./agents";
-import { STATIONS, type StationId, type Tile, tileId } from "./floor";
+import { type StationId, type StationTable, sameTile, type Tile } from "./stations";
 
 /**
- * Who sits where (#264). Every agent gets a seat at the station for its step; a session keeps
- * its seat while its station stays the same, so nothing jumps between refreshes. New agents
+ * Who sits where (#264, #420). Every agent gets a seat at the station for its step; a session
+ * keeps its seat while its station stays the same, so nothing jumps between refreshes. New agents
  * take the first free seat; when the seats are full they wait on the station's queue tiles, in
  * order, and past those they only count toward the station's "+N". Seats and queue tiles are
- * distinct tiles, so two agents never share one. Pure: the result depends only on the previous
- * seating and the agents.
+ * distinct tiles, so two agents never share one. The floor plan is passed in: pixel mode's fixed
+ * stations, or Floor mode's layout, which grows so there is always a seat and `more` stays empty.
+ * Pure: the result depends only on the previous seating, the agents and the plan.
  */
 
 export interface Seat {
@@ -32,35 +33,45 @@ export interface SeatRequest {
   station: StationId;
 }
 
-export function assignSeats(prev: Seating | null, agents: readonly SeatRequest[]): Seating {
+const keyOf = (t: Tile) => `${t.c},${t.r}`;
+
+export function assignSeats(
+  prev: Seating | null,
+  agents: readonly SeatRequest[],
+  stations: StationTable,
+): Seating {
   const seats = new Map<string, Seat>();
-  const taken = new Set<number>();
+  const taken = new Set<string>();
   const more: Partial<Record<StationId, number>> = {};
   const want = agents.map((a, order) => ({ key: a.key, station: a.station, order }));
   const place = (key: string, seat: Seat) => {
     seats.set(key, seat);
-    taken.add(tileId(seat.tile));
+    taken.add(keyOf(seat.tile));
   };
+  const isSeat = (station: StationId, t: Tile) =>
+    stations[station].seats.some((s) => sameTile(s, t));
 
-  // Seated agents whose station didn't change keep their seat.
+  // Seated agents whose station didn't change keep their seat (while the plan still has it).
   for (const w of want) {
     const was = prev?.seats.get(w.key);
-    if (was && !was.queued && was.station === w.station) place(w.key, was);
+    if (was && !was.queued && was.station === w.station && isSeat(w.station, was.tile))
+      place(w.key, was);
   }
 
   // Then the queue, in its order (the first in line gets a freed seat first), then newcomers.
   const queuePos = (w: (typeof want)[number]) => {
     const was = prev?.seats.get(w.key);
     if (!was?.queued || was.station !== w.station) return Number.POSITIVE_INFINITY;
-    return STATIONS[w.station].queue.findIndex((t) => tileId(t) === tileId(was.tile));
+    const pos = stations[w.station].queue.findIndex((t) => sameTile(t, was.tile));
+    return pos < 0 ? Number.POSITIVE_INFINITY : pos;
   };
   const rest = want
     .filter((w) => !seats.has(w.key))
     .map((w) => ({ ...w, pos: queuePos(w) }))
     .sort((a, b) => (a.pos === b.pos ? a.order - b.order : a.pos - b.pos));
   for (const w of rest) {
-    const station = STATIONS[w.station];
-    const free = (t: Tile) => !taken.has(tileId(t));
+    const station = stations[w.station];
+    const free = (t: Tile) => !taken.has(keyOf(t));
     const seat = station.seats.find(free);
     if (seat) {
       place(w.key, { station: w.station, tile: seat, queued: false });
@@ -81,7 +92,7 @@ export function sameSeating(a: Seating, b: Seating): boolean {
   if (a.seats.size !== b.seats.size) return false;
   for (const [key, s] of a.seats) {
     const t = b.seats.get(key);
-    if (!t || t.station !== s.station || t.queued !== s.queued || tileId(t.tile) !== tileId(s.tile))
+    if (!t || t.station !== s.station || t.queued !== s.queued || !sameTile(t.tile, s.tile))
       return false;
   }
   const stations = new Set([...Object.keys(a.more), ...Object.keys(b.more)]) as Set<StationId>;

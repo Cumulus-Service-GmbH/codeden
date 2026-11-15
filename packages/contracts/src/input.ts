@@ -68,8 +68,9 @@ export const UserInput = z.object({
   relayedForUser: z.boolean().optional(),
   /**
    * Set by CodeDen on the message that sends failing checks back to the agent (§9 Project
-   * checks): the automatic round it starts, counted from 1. The next run counts on from it, and
-   * any other message starts the count again. Absent on every other message.
+   * checks): the automatic round it starts, counted from 1, saved on the session as
+   * `SessionChecks.round` when it is sent. CodeDen's other messages keep the count; anyone
+   * else's starts it again. Absent on every other message.
    */
   checksRound: z.int().positive().optional(),
 });

@@ -54,19 +54,22 @@ export function reduceAgentEvent(
     case "thread.started":
       onThreadStarted(d, sessionId, event, ts);
       break;
-    case "turn.started":
+    case "turn.started": {
+      const existing = d.getTurn(sessionId, event.turnId);
       d.putTurn({
-        ...(d.getTurn(sessionId, event.turnId) ?? { usage: null, error: null }),
+        ...(existing ?? { usage: null, error: null }),
         id: event.turnId,
         threadId: event.threadId,
         sessionId,
         status: "running",
-        startedAt: d.getTurn(sessionId, event.turnId)?.startedAt ?? ts,
+        startedAt: existing?.startedAt ?? ts,
         completedAt: null,
         forkPoint: null,
+        kind: event.kind ?? existing?.kind ?? null,
       });
       if (isRootThread(d, sessionId, event.threadId)) setStatus(d, sessionId, "running", ts);
       break;
+    }
     case "turn.completed":
     case "turn.failed":
     case "turn.interrupted":
@@ -160,7 +163,9 @@ function onTurnEnded(
     setStatus(d, sessionId, event.reason === "runner_restart" ? "interrupted" : "idle", ts);
   } else {
     const current = d.getSession(sessionId)?.session;
-    if (current && awaitsRetryDecision(current, event.error)) {
+    // A failed compaction leaves the conversation as it was: the session stays idle with the
+    // turn's error, and nothing continues or retries it (compacting again is up to the user).
+    if (turn?.kind === "compact" || (current && awaitsRetryDecision(current, event.error))) {
       setStatus(d, sessionId, "idle", ts);
       return;
     }

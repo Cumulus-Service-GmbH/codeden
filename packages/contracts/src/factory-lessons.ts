@@ -90,10 +90,24 @@ function cutLesson(text: string): string {
   return `${kept}…`;
 }
 
+/** CodeDen's internal variables as a lesson names them: `CODEDEN_HOME`, `CODEDEN_*`, `CODEDEN*`. */
+const INTERNAL_VARIABLE = /\bCODEDEN(_[A-Z_]+|_?\*)/;
+const CLEARS = /\b(unset|clear|remove|delete|drop|strip)\b|\benv\s+-u\b/i;
+const TESTS = /\b(tests?|suites?|vitest)\b/i;
+
+/**
+ * Whether a lesson is advice that was right once and is wrong now, which no brief carries and no
+ * review records again: clearing CodeDen's internal variables before running tests (#422). Agent
+ * sessions don't inherit them since #191, and checking for them stalled agents on an approval.
+ */
+export function isRetiredLesson(text: string): boolean {
+  return INTERNAL_VARIABLE.test(text) && CLEARS.test(text) && TESTS.test(text);
+}
+
 /**
  * The lessons a reviewer submitted, as stored with its verdict: trimmed and on one line, secrets
- * masked, each cut to `LESSON_MAX`, repeats and empty ones dropped, at most
- * `LESSONS_PER_VERDICT`. A verdict is never rejected over its lessons.
+ * masked, each cut to `LESSON_MAX`, repeats, empty and retired ones (`isRetiredLesson`) dropped,
+ * at most `LESSONS_PER_VERDICT`. A verdict is never rejected over its lessons.
  */
 export function cleanLessons(raw: readonly string[]): string[] {
   const kept: string[] = [];
@@ -101,7 +115,7 @@ export function cleanLessons(raw: readonly string[]): string[] {
   for (const entry of raw) {
     const text = cutLesson(redactSecrets(entry.trim().replace(/\s+/g, " ")));
     const key = lessonKey(text);
-    if (!key || keys.has(key)) continue;
+    if (!key || keys.has(key) || isRetiredLesson(text)) continue;
     keys.add(key);
     kept.push(text);
     if (kept.length === LESSONS_PER_VERDICT) break;

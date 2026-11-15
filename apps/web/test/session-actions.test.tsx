@@ -327,6 +327,8 @@ describe("useSessionActions", () => {
     expect(compactBlocked({ ...idle, status: "waiting" })).toMatch(/waiting on/);
     expect(compactBlocked({ ...idle, status: "queued" })).toMatch(/hasn't started/);
     expect(compactBlocked({ ...idle, resumeToken: null })).toMatch(/No conversation/);
+    // The project's checks running after the last turn (#412).
+    expect(compactBlocked(idle, true)).toMatch(/checks to finish/);
   });
 
   it("forks through the client and opens the new session", async () => {

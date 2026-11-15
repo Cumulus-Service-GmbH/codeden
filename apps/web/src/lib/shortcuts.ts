@@ -89,7 +89,8 @@ export function matchesCombo(
   }
   if (wantShift !== e.shiftKey) return false;
   if (/^[0-9]$/.test(key)) return e.code === `Digit${key}` || e.key === key;
-  return e.key.toLowerCase() === key;
+  // Combos name the space bar `space` (as recorded in Settings); its key is " ".
+  return (e.key === " " ? "space" : e.key.toLowerCase()) === key;
 }
 
 export function shortcut(id: ShortcutId): Shortcut {

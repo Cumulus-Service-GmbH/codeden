@@ -5,7 +5,7 @@ import {
   type FactoryWorkItem,
   type ScoutStatus,
 } from "@codeden/contracts";
-import type { AgentInputs } from "@/components/factory-view/pixel/agents";
+import type { AgentInputs } from "@/components/factory-view/scene/agents";
 import { type SessionInfo, viewPipeline } from "@/components/factory-view/stages";
 
 /** Builders for the pixel mode tests (#209, #264): work items, PR entries, a status. */

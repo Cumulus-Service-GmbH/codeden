@@ -1,14 +1,14 @@
 import { FactoryLimits, type FactoryStatus } from "@codeden/contracts";
 import { describe, expect, it } from "vitest";
 import { STATIONS } from "@/components/factory-view/pixel/floor";
+import { sceneEvents } from "@/components/factory-view/pixel/transitions";
 import {
   budgetGauge,
   type Scene,
-  sceneEvents,
   sceneOf,
   sceneSummary,
-} from "@/components/factory-view/pixel/scene-model";
-import { sameSeating } from "@/components/factory-view/pixel/seating";
+} from "@/components/factory-view/scene/scene-model";
+import { sameSeating } from "@/components/factory-view/scene/seating";
 import type { SessionInfo } from "@/components/factory-view/stages";
 import { inputs, minutesAgo, prEntry, prRef, running, status, w } from "./pixel-fixtures";
 
@@ -66,7 +66,7 @@ function sceneFor(patch: Partial<FactoryStatus> = {}, prev: Scene | null = null)
     mode: "software_factory",
     ...patch,
   });
-  return sceneOf(inputs(f, sessions), prev?.seating ?? null);
+  return sceneOf(inputs(f, sessions), prev?.seating ?? null, () => STATIONS);
 }
 
 describe("pixel mode's scene (#264)", () => {
