@@ -188,11 +188,16 @@ export function DetailsPanel({ session }: { session: Session }) {
             <span className="text-2xs text-muted-foreground">from {session.baseBranch}</span>
           </Row>
         )}
-        {session.worktreePath && (
+        {session.worktreePath ? (
           <Row label="Worktree">
             <code className="font-mono text-[11.5px] text-muted-foreground">
               {session.worktreePath}
             </code>
+          </Row>
+        ) : (
+          // Runs in place: in the project folder, or the folder it was started in.
+          <Row label="Folder">
+            <code className="font-mono text-[11.5px] text-muted-foreground">{session.cwd}</code>
           </Row>
         )}
         {session.scope.paths && (

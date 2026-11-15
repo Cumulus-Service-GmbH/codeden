@@ -12,12 +12,29 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { useClient } from "@/lib/api";
+import { isNotGitRepo } from "@/lib/session-workspace";
 import { useLayoutStore } from "@/stores/layout";
 import { useAskForPullRequest, usePullRequestOffer } from "./open-pr";
 import { PrRequestedButton, PushToastPrAction } from "./open-pr-controls";
 
 /**
- * Branch, ahead/behind and uncommitted count for the session worktree, with commit, push and
+ * The session folder's git status, polled. Fails with `not_a_repo` (`isNotGitRepo`) when the
+ * session runs in place in a folder that isn't a git repository; polling stops then, and the
+ * next mount (opening the tab again) asks again.
+ */
+export function useGitStatus(sessionId: string) {
+  const client = useClient();
+  return useQuery({
+    queryKey: ["git-status", sessionId],
+    queryFn: () => client.gitStatus(sessionId),
+    retry: false,
+    refetchInterval: (query) => (isNotGitRepo(query.state.error) ? false : 15_000),
+  });
+}
+
+/**
+ * Branch, ahead/behind and uncommitted count for the session's folder (its worktree, or the
+ * project folder it runs in place in), with commit, push and
  * **Open PR** (asks the agent; "PR requested" until the PR is open or the turn that carried the
  * request ends without one) or the session's open PR (§9).
  */
@@ -29,12 +46,7 @@ export function GitBar({ sessionId, title }: { sessionId: string; title: string 
   const offer = usePullRequestOffer(sessionId);
   const askForPr = useAskForPullRequest(sessionId);
   const openTab = useLayoutStore((s) => s.openRightTab);
-  const status = useQuery({
-    queryKey: ["git-status", sessionId],
-    queryFn: () => client.gitStatus(sessionId),
-    retry: false,
-    refetchInterval: 15_000,
-  });
+  const status = useGitStatus(sessionId);
   const refresh = () => {
     void queryClient.invalidateQueries({ queryKey: ["git-status", sessionId] });
     void queryClient.invalidateQueries({ queryKey: ["diff", sessionId] });
@@ -124,7 +136,7 @@ export function GitBar({ sessionId, title }: { sessionId: string; title: string 
           <DialogHeader>
             <DialogTitle>Commit changes</DialogTitle>
             <DialogDescription>
-              Stages all {changed} changed file{changed === 1 ? "" : "s"} in the session worktree.
+              Stages all {changed} changed file{changed === 1 ? "" : "s"} in the session's folder.
             </DialogDescription>
           </DialogHeader>
           <Textarea

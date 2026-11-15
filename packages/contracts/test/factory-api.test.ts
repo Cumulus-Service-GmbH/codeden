@@ -400,6 +400,26 @@ describe("factory API contracts (§10.1)", () => {
     expect(drainText(2)).toBe("Draining: 2 items in flight");
   });
 
+  it("round-trips when the loop swept failed sessions left from before (#411)", () => {
+    const base = {
+      projectId: "p1",
+      state: "idle",
+      pausedReason: null,
+      consecutiveFailures: 0,
+      day: "2026-11-15",
+      mergesToday: 0,
+      lastDigestDay: null,
+      enabledAt: ts,
+      lastTickAt: null,
+      updatedAt: ts,
+    };
+    // A loop saved before the sweep existed hasn't run it yet.
+    expect(FactoryLoop.parse(base).failedSessionsSweptAt).toBeNull();
+    const swept = FactoryLoop.parse({ ...base, failedSessionsSweptAt: ts });
+    expect(FactoryLoop.parse(JSON.parse(JSON.stringify(swept)))).toEqual(swept);
+    expect(swept.failedSessionsSweptAt).toBe(ts);
+  });
+
   it("round-trips review follow-ups on verdicts and merged items (#339)", () => {
     const base = {
       verdict: "approve",

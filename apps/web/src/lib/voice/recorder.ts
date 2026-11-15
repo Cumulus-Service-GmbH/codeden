@@ -1,18 +1,12 @@
-/** Microphone recording with `MediaRecorder`, shared by server-side dictation and the tests. */
+/**
+ * Microphone recording with `MediaRecorder`, for the local Whisper test in Settings. Dictation
+ * itself captures live samples instead (`mic-capture.ts`), to transcribe while the user speaks.
+ */
 
 function pickMimeType(): string | undefined {
   if (typeof MediaRecorder === "undefined") return undefined;
   return ["audio/webm;codecs=opus", "audio/webm", "audio/ogg;codecs=opus", "audio/mp4"].find((t) =>
     MediaRecorder.isTypeSupported(t),
-  );
-}
-
-/** True when this browser can record the microphone. */
-export function canRecord(): boolean {
-  return (
-    typeof navigator !== "undefined" &&
-    Boolean(navigator.mediaDevices?.getUserMedia) &&
-    typeof MediaRecorder !== "undefined"
   );
 }
 

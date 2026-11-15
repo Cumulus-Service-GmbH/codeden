@@ -8,6 +8,7 @@ import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/
 import { RightPanel } from "@/components/workbench/right-panel";
 import { TerminalDrawer } from "@/components/workbench/terminal-drawer";
 import { useSession, useSnapshot } from "@/lib/queries";
+import { hasRightPanel } from "@/lib/session-workspace";
 import { useViewport } from "@/lib/viewport";
 import { DRAWER, RIGHT, SIDEBAR, useLayoutStore } from "@/stores/layout";
 import { useUiStore } from "@/stores/ui";
@@ -53,8 +54,8 @@ export function AppShell() {
   const viewport = useViewport();
   const setNavOpen = useUiStore((s) => s.setNavOpen);
   const sessionId = useCurrentSessionId();
-  // The workbench panel belongs to sessions that own a worktree.
-  const hasWorkbench = Boolean(useSession(sessionId)?.worktreePath);
+  // Every agent session has the panel, in a worktree or in place (#409).
+  const hasWorkbench = hasRightPanel(useSession(sessionId));
   useGlobalShortcuts();
   useFirstRunRedirect();
   const inlineSidebar = !viewport.drawerNav;

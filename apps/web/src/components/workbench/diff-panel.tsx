@@ -35,6 +35,7 @@ import {
 import { relatedSessions } from "@/lib/fork-origin";
 import { ageShort } from "@/lib/format";
 import { useSession, useSnapshotData } from "@/lib/queries";
+import { isNotGitRepo } from "@/lib/session-workspace";
 import { cn } from "@/lib/utils";
 import { type ReviewComment, sessionComments, useDiffReviewStore } from "@/stores/diff-review";
 import { useResolvedTheme } from "@/stores/theme";
@@ -47,7 +48,7 @@ import {
   useCommentButtonLabels,
   useReviewAnchors,
 } from "./diff-review";
-import { GitBar } from "./git-bar";
+import { GitBar, useGitStatus } from "./git-bar";
 
 const noFiles: DiffFile[] = [];
 const noComments: CommentAnchor[] = [];
@@ -117,6 +118,8 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
     queryFn: () => client.getDiff(sessionId, scope),
     retry: false,
   });
+  // A session running in place in a folder without git has no diff, changes or comparison.
+  const notGitRepo = isNotGitRepo(useGitStatus(sessionId).error);
   const restore = useMutation({
     mutationFn: (paths?: string[]) => {
       const target = restoreTarget(scope);
@@ -172,6 +175,18 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
     frame = requestAnimationFrame(find);
     return () => cancelAnimationFrame(frame);
   }, [reveal]);
+
+  if (notGitRepo) {
+    return (
+      <div className="flex h-full flex-col" data-testid="diff-panel">
+        <EmptyState icon={<FileDiff />} title="Not a git repository" className="h-full">
+          No diff to show: this session runs in{" "}
+          <code className="font-mono text-[12px] break-all">{session?.cwd ?? "its folder"}</code>,
+          which isn't a git repository, so CodeDen can't track its changes.
+        </EmptyState>
+      </div>
+    );
+  }
 
   return (
     <div className="flex h-full flex-col" data-testid="diff-panel">

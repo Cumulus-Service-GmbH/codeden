@@ -123,7 +123,9 @@ export function toServiceError(error: unknown): ServiceError {
     code === "no_turn" ||
     code === "turn_running" ||
     code === "dialog_open" ||
-    code === "no_dialog"
+    code === "no_dialog" ||
+    // A git request for a session that runs in place in a folder without git (#409).
+    code === "not_a_repo"
   ) {
     return new ServiceError(409, code, message);
   }

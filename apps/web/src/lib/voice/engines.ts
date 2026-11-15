@@ -3,12 +3,37 @@
  * The browser implementations are the defaults.
  */
 
+/** One dictation update: the running transcript, split into settled text and text in progress. */
+export interface DictationText {
+  /** Settled text, in order. It goes into the composer's draft. */
+  final: string;
+  /**
+   * Text still in progress, shown muted after the draft: interim words that may still change,
+   * or segments that came back ahead of one still being transcribed.
+   */
+  draft: string;
+}
+
 export interface SpeechToText {
   readonly supported: boolean;
-  /** Start listening. `onText` receives the running transcript (interim + final). */
+  /**
+   * How text arrives while the user speaks: `interim` word by word (revised as it goes), or
+   * `segments` phrase by phrase, after each short pause.
+   */
+  readonly live: "interim" | "segments";
+  /** True when the last text can arrive after `stop()` (segments still being transcribed). */
+  readonly finishesAfterStop: boolean;
+  /**
+   * Start listening. `onText` receives the running transcript of this dictation. `onEnd` runs
+   * once, after the last text; `onError` may come before it.
+   */
   start(opts: {
     language?: string | null;
-    onText: (text: string, final: boolean) => void;
+    onText: (text: DictationText) => void;
+    /** The microphone's input level (RMS, 0..1), from engines that can measure it. */
+    onLevel?: (level: number) => void;
+    /** How many segments are being transcribed. */
+    onPending?: (count: number) => void;
     onEnd: () => void;
     onError: (message: string) => void;
   }): void;
@@ -97,6 +122,8 @@ export function createBrowserStt(): SpeechToText {
     get supported() {
       return browserSttAvailability() === "available";
     },
+    live: "interim",
+    finishesAfterStop: false,
     start({ language, onText, onEnd, onError }) {
       if (!Ctor) {
         onError(BROWSER_STT_UNAVAILABLE);
@@ -107,15 +134,16 @@ export function createBrowserStt(): SpeechToText {
       rec.continuous = true;
       rec.interimResults = true;
       let finalText = "";
+      let interim = "";
       rec.onresult = (e) => {
-        let interim = "";
+        interim = "";
         for (let i = e.resultIndex; i < e.results.length; i++) {
           const r = e.results[i];
           if (!r) continue;
           if (r.isFinal) finalText += r[0].transcript;
           else interim += r[0].transcript;
         }
-        onText((finalText + interim).trim(), interim === "");
+        onText({ final: finalText.trim(), draft: interim.trim() });
       };
       rec.onerror = (e) => {
         if (SERVICE_ERRORS.has(e.error)) {
@@ -127,6 +155,9 @@ export function createBrowserStt(): SpeechToText {
       };
       rec.onend = () => {
         rec = null;
+        // Interim words the service never finalised are kept, not lost.
+        if (interim.trim()) onText({ final: (finalText + interim).trim(), draft: "" });
+        interim = "";
         onEnd();
       };
       rec.start();

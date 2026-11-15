@@ -1,7 +1,8 @@
 import type { SttEngine, SttResponse } from "@codeden/contracts";
 import type { CodeDenClient } from "@/lib/api";
 import type { SpeechToText } from "./engines";
-import { canRecord, type Recording, startRecording } from "./recorder";
+import { canCapture, startMicCapture } from "./mic-capture";
+import { createSegmentedStt } from "./segmented-stt";
 import { toWhisperWav } from "./wav";
 
 /** `en-US` -> `en` (server engines take ISO 639-1 hints). */
@@ -11,8 +12,8 @@ export function languageHint(language: string | null | undefined): string | unde
 }
 
 /**
- * Send a recording to `/api/stt`. Local Whisper takes 16 kHz mono WAV, so the clip is
- * decoded and converted in the browser first; the cloud engines take it as recorded.
+ * Send a recording to `/api/stt` (the Settings test). Local Whisper takes 16 kHz mono WAV, so
+ * the clip is decoded and converted in the browser first; the cloud engines take it as recorded.
  */
 export async function transcribeRecording(
   client: CodeDenClient,
@@ -25,37 +26,15 @@ export async function transcribeRecording(
 }
 
 /**
- * Server-side dictation (§11.3): records the microphone with `MediaRecorder` while active,
- * then sends the clip to `/api/stt` (ElevenLabs Scribe, OpenAI or local Whisper) and
- * delivers the transcript once.
+ * Server-side dictation (§11.3) with ElevenLabs Scribe, OpenAI or local Whisper: the microphone
+ * is split into segments on short pauses and each one goes to `/api/stt` as soon as it ends, so
+ * text appears while the user speaks.
  */
 export function createCloudStt(client: CodeDenClient, engine: SttEngine): SpeechToText {
-  let recording: Promise<Recording | null> | null = null;
-  return {
-    supported: canRecord(),
-    start({ language, onText, onEnd, onError }) {
-      const started = startRecording().catch((error: unknown) => {
-        onError(error instanceof Error ? error.message : String(error));
-        onEnd();
-        return null;
-      });
-      recording = started;
-      void started.then(async (rec) => {
-        if (!rec) return;
-        const audio = await rec.stopped;
-        if (recording === started) recording = null;
-        if (audio.size === 0) return onEnd();
-        try {
-          const res = await transcribeRecording(client, audio, engine, language);
-          if (res.text.trim()) onText(res.text.trim(), true);
-        } catch (e) {
-          onError(e instanceof Error ? e.message : String(e));
-        }
-        onEnd();
-      });
-    },
-    stop() {
-      void recording?.then((rec) => rec?.stop());
-    },
-  };
+  return createSegmentedStt({
+    supported: canCapture(),
+    capture: startMicCapture,
+    transcribe: async (wav, language) =>
+      (await client.voice.stt(wav, { engine, language: languageHint(language) })).text,
+  });
 }

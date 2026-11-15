@@ -81,14 +81,22 @@ export interface DecodedAudio {
   getChannelData(channel: number): Float32Array;
 }
 
+/**
+ * Mono 16 kHz WAV from mono samples at any rate, cut to the local engine's longest clip. The
+ * cloud engines take it too, so live dictation sends every segment this way.
+ */
+export function samplesToWhisperWav(mono: Float32Array, sampleRate: number): Blob {
+  const resampled = resample(mono, sampleRate, LOCAL_STT_SAMPLE_RATE);
+  const samples = resampled.subarray(0, LOCAL_STT_MAX_SECONDS * LOCAL_STT_SAMPLE_RATE);
+  return new Blob([encodeWav16(samples, LOCAL_STT_SAMPLE_RATE)], { type: "audio/wav" });
+}
+
 /** Mono 16 kHz WAV from decoded audio, cut to the local engine's longest clip. */
 export function decodedToWhisperWav(audio: DecodedAudio): Blob {
   const channels = Array.from({ length: audio.numberOfChannels }, (_, i) =>
     audio.getChannelData(i),
   );
-  const mono = resample(downmix(channels), audio.sampleRate, LOCAL_STT_SAMPLE_RATE);
-  const samples = mono.subarray(0, LOCAL_STT_MAX_SECONDS * LOCAL_STT_SAMPLE_RATE);
-  return new Blob([encodeWav16(samples, LOCAL_STT_SAMPLE_RATE)], { type: "audio/wav" });
+  return samplesToWhisperWav(downmix(channels), audio.sampleRate);
 }
 
 /** Decode a `MediaRecorder` clip (WebM, Ogg or MP4) and convert it for local Whisper. */
