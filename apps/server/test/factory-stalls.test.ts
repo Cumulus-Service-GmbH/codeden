@@ -127,15 +127,16 @@ describe("a PR GitHub refuses to merge", () => {
   });
 
   it("leaves the queue after 3 refused updates with the default branch", async () => {
-    env = createFactoryEnv();
+    // The strict policy brings every PR that is behind up to date before it merges.
+    env = createFactoryEnv({ limits: { mergePolicy: "strict" } });
     await enable();
     const { a, b } = await twoQueued();
     // A merges; B is behind main now, and GitHub refuses to bring it up to date.
-    await tick();
-    expect(env.gh.merges.map((m) => m.number)).toEqual([a.pr.ref.number]);
     env.gh.updateBranch = async () => {
       throw new ServiceError(403, "github_forbidden", "Resource not accessible by integration");
     };
+    await tick();
+    expect(env.gh.merges.map((m) => m.number)).toEqual([a.pr.ref.number]);
     for (let n = 0; n < 4; n++) await tick();
     expect(item(b.id)).toMatchObject({
       stage: "failed",
@@ -170,14 +171,15 @@ describe("GitHub not answering properly", () => {
     });
     expect(Object.keys(item(a.id).nudges).filter((k) => k.startsWith("refused_"))).toEqual([]);
     expect(failedNotices(a.id)).toEqual([]);
-    expect(env.gh.merges).toEqual([]);
+    // B never waited on it: it merged on the first tick.
+    expect(env.gh.merges.map((m) => m.number)).toEqual([b.pr.ref.number]);
 
-    // GitHub answers again: A merges first, then B (brought up to date with main) in its turn.
+    // GitHub answers again: A merges too, on its own CI.
     attempts.fail = false;
     await tick();
-    expect(env.gh.merges.map((m) => m.number)).toEqual([a.pr.ref.number]);
+    expect(env.gh.merges.map((m) => m.number)).toEqual([b.pr.ref.number, a.pr.ref.number]);
     expect(item(a.id).stage).toBe("watching");
-    expect(item(b.id).stage).toBe("verifying");
+    expect(env.gh.updates).toEqual([]);
   });
 });
 

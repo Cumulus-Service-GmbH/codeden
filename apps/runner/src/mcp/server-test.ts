@@ -69,6 +69,8 @@ class TailBuffer {
  */
 export async function testMcpServer(opts: McpServerTestOptions): Promise<McpServerTestResult> {
   const started = performance.now();
+  // Before a stdio server is spawned: tells what it started from an earlier process's (`treeIn`).
+  const life = { startedAt: Date.now() };
   const elapsed = () => Math.round(performance.now() - started);
   const timeoutMs = opts.timeoutMs ?? MCP_TEST_DEFAULT_TIMEOUT_MS;
   const env = opts.env ?? childEnv();
@@ -152,7 +154,8 @@ export async function testMcpServer(opts: McpServerTestOptions): Promise<McpServ
   } catch (error) {
     return fail(error);
   } finally {
-    const stopTree = opts.stopTree ?? ((pid: number) => killTreeAndOrphans(pid, 1_000));
+    const stopTree =
+      opts.stopTree ?? ((pid: number) => killTreeAndOrphans(pid, life, { graceMs: 1_000 }));
     await stop(client, stdio?.pid ?? null, stopTree);
     if (stdio?.pid) opts.supervisor?.release(stdio.pid);
   }

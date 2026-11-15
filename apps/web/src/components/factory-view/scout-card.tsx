@@ -1,6 +1,7 @@
 import type { ScoutStatus } from "@codeden/contracts";
 import { Link } from "@tanstack/react-router";
 import { Check, Radar } from "lucide-react";
+import { HeldFollowUps } from "@/components/factory/held-follow-ups";
 import { AREA_LABEL } from "@/components/factory/meta";
 import { until } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -12,8 +13,11 @@ const PHASE_LABEL: Record<ScoutStatus["phase"], string> = {
   filing: "Filing issues",
 };
 
-/** The dark factory's scout on the Intake stage: its round, its area reviewers, its findings. */
-export function ScoutCard({ scout }: { scout: ScoutStatus }) {
+/**
+ * The dark factory's scout on the Intake stage: its round, its area reviewers, its findings and
+ * the review follow-ups held for it.
+ */
+export function ScoutCard({ scout, projectId }: { scout: ScoutStatus; projectId: string }) {
   const active = scout.phase !== "idle";
   return (
     <div
@@ -77,6 +81,7 @@ export function ScoutCard({ scout }: { scout: ScoutStatus }) {
           ))}
         </ul>
       )}
+      <HeldFollowUps projectId={projectId} held={scout.heldFollowUps} className="mt-1 block" />
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  type DigestFollowUps,
   type DigestLesson,
   type DigestSpotChecks,
   type FactoryDigest,
@@ -8,6 +9,8 @@ import {
   type FactoryLoop,
   factoryNeed,
   factoryNeedLabel,
+  HELD_FOLLOW_UP_DAYS,
+  HELD_FOLLOW_UPS_MAX,
   type InboxItem,
   type Project,
   SPOT_CHECK_WINDOW_DAYS,
@@ -16,6 +19,7 @@ import {
 import type { InboxService } from "../inbox-service";
 import { budgetSpend, type FactoryContext, factoryNotice, raiseInbox } from "./context";
 import { drainLine } from "./drain";
+import { digestFollowUps } from "./follow-ups-held";
 import { digestLessons } from "./lessons";
 import { prInboxIds } from "./merge";
 import { localDay } from "./policy";
@@ -35,7 +39,8 @@ export async function writeDigest(
   loop: FactoryLoop,
   day: string,
 ): Promise<FactoryDigest> {
-  const items = ctx.store.items(project.id).filter((i) => localDay(new Date(i.updatedAt)) === day);
+  const all = ctx.store.items(project.id);
+  const items = all.filter((i) => localDay(new Date(i.updatedAt)) === day);
   const digest = buildDigest({
     projectId: project.id,
     projectName: project.name,
@@ -50,6 +55,8 @@ export async function writeDigest(
     draining: drainLine(ctx, project.id, loop),
     spotChecks: digestSpotChecks(ctx, project.id, day),
     lessons: digestLessons(ctx, project.id, day),
+    // Every item: a follow-up of a merge weeks ago may have expired today.
+    followUps: digestFollowUps(all, day),
     now: ctx.now(),
   });
   ctx.store.saveDigest(digest);
@@ -131,6 +138,8 @@ export function buildDigest(opts: {
   spotChecks?: DigestSpotChecks;
   /** Lessons first learned during the day (`digestLessons`); none by default. */
   lessons?: DigestLesson[];
+  /** Review follow-ups held, filed and dropped during the day (`digestFollowUps`). */
+  followUps?: DigestFollowUps;
   now?: Date;
 }): FactoryDigest {
   const shipped = opts.items
@@ -207,6 +216,7 @@ export function buildDigest(opts: {
       problems30d: 0,
     },
     lessons: opts.lessons ?? [],
+    followUps: opts.followUps ?? { held: 0, filed: 0, dropped: 0, dismissed: 0, waiting: 0 },
     createdAt: (opts.now ?? new Date()).toISOString(),
   };
   return {
@@ -238,6 +248,25 @@ export function spotCheckLine(s: DigestSpotChecks | undefined): string | null {
       ? `none checked in the last ${SPOT_CHECK_WINDOW_DAYS} days`
       : `over ${SPOT_CHECK_WINDOW_DAYS} days a person found a problem in ${s.problems30d} of ${s.checked30d} checked merge${s.checked30d === 1 ? "" : "s"} (${share}%)`;
   return `Spot-checks: ${today}, ${s.outstanding} outstanding; ${window}.`;
+}
+
+/**
+ * "Review follow-ups: 3 held for the scout, 1 filed, 2 dropped (duplicates, older than 14 days or
+ * over the cap of 50), 1 dismissed; 7 held now."; null when there was nothing to say.
+ */
+export function followUpLine(f: DigestFollowUps | undefined): string | null {
+  if (!f || f.held + f.filed + f.dropped + f.dismissed + f.waiting === 0) return null;
+  const parts = [
+    `${f.held} held for the scout`,
+    `${f.filed} filed`,
+    ...(f.dropped > 0
+      ? [
+          `${f.dropped} dropped (duplicates, older than ${HELD_FOLLOW_UP_DAYS} days or over the cap of ${HELD_FOLLOW_UPS_MAX})`,
+        ]
+      : []),
+    ...(f.dismissed > 0 ? [`${f.dismissed} dismissed`] : []),
+  ];
+  return `Review follow-ups: ${parts.join(", ")}; ${f.waiting} held now.`;
 }
 
 /** "from #3": the issue of the work whose review taught it, else its pull request. */
@@ -296,6 +325,8 @@ export function renderDigest(
   lines.push("", `Spend: ${budget}`);
   const spot = spotCheckLine(d.spotChecks);
   if (spot) lines.push("", spot);
+  const followUps = followUpLine(d.followUps);
+  if (followUps) lines.push("", followUps);
   lines.push("", `Waiting on you (${d.waiting.length}):`);
   for (const w of d.waiting) lines.push(`- ${w.title}`);
   if (d.waiting.length === 0) lines.push("- nothing");

@@ -422,33 +422,48 @@ describe("stopping a stdio server", () => {
   });
 
   it("kills descendants listed before the tree, then the process group on POSIX", async () => {
-    const run = async (platform: NodeJS.Platform, descendants: Promise<number[]>) => {
+    const rows = [
+      { pid: 11, ppid: 10, startedAt: 2_000 },
+      { pid: 12, ppid: 11, startedAt: 2_100 },
+    ];
+    const run = async (platform: NodeJS.Platform, table: () => Promise<typeof rows>) => {
       const calls: string[] = [];
-      await killTreeAndOrphans(10, 500, {
-        platform,
-        listDescendants: async (pid) => {
-          calls.push(`list ${pid}`);
-          return descendants;
+      await killTreeAndOrphans(
+        10,
+        { startedAt: 1_500 },
+        {
+          graceMs: 500,
+          ops: {
+            platform,
+            table: () => {
+              calls.push("list");
+              return table();
+            },
+            isAlive: () => true,
+            now: () => 3_000,
+            killTree: async (pid) => {
+              calls.push(`kill ${pid}`);
+            },
+            killProcess: (pid) => calls.push(`end ${pid}`),
+            killGroup: (pid) => calls.push(`group ${pid}`),
+          },
         },
-        killTree: async (pid) => {
-          calls.push(`kill ${pid}`);
-        },
-        killGroup: (pid) => calls.push(`group ${pid}`),
-      });
+      );
       return calls;
     };
-    expect(await run("linux", Promise.resolve([11, 12]))).toEqual([
-      "list 10",
+    expect(await run("linux", async () => rows)).toEqual([
+      "list",
       "kill 10",
       "kill 11",
       "kill 12",
       "group 10",
     ]);
-    // Windows has no process groups: children of an exited process are found by parent id.
-    expect(await run("win32", Promise.resolve([11]))).toEqual(["list 10", "kill 10", "kill 11"]);
+    // Windows has no process groups: the process is ended first, then each one found by
+    // parent id (checked by start time), on its own.
+    expect(await run("win32", async () => rows)).toEqual(["end 10", "list", "end 11", "end 12"]);
     // A failed listing still kills the tree.
-    expect(await run("darwin", Promise.reject(new Error("ps failed")))).toEqual([
-      "list 10",
+    expect(await run("darwin", () => Promise.reject(new Error("ps failed")))).toEqual([
+      "list",
       "kill 10",
       "group 10",
     ]);

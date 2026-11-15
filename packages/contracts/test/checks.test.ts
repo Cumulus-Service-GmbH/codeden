@@ -52,6 +52,12 @@ describe("project checks contracts", () => {
     expect(
       Session.safeParse({ ...sampleSession, checks: { ...checks, maxRounds: 11 } }).success,
     ).toBe(false);
+    // The round count lives beside them (#412).
+    const counted = { ...checks, round: 3, capReached: true };
+    expect(roundTrip(Session, { ...sampleSession, checks: counted }).checks).toEqual(counted);
+    expect(Session.safeParse({ ...sampleSession, checks: { ...checks, round: 0 } }).success).toBe(
+      false,
+    );
   });
 
   it("turns the loop on when a session starts and with PATCH", () => {

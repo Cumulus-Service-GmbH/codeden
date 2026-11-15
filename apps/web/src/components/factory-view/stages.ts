@@ -40,7 +40,7 @@ export const VIEW_STAGES = [
   {
     id: "merge",
     label: "Merge queue",
-    hint: "Every check passed and auto-merge is on: they merge one at a time, in this order. Pull requests a person merges wait in Needs you.",
+    hint: "Every check passed and auto-merge is on: they merge in this order, seconds apart. Pull requests a person merges wait in Needs you.",
   },
   {
     id: "merged",
@@ -91,6 +91,8 @@ export interface SessionInfo {
   progressAt?: string | null;
   /** The provider's display name ("Claude Code"), else its id. */
   provider?: string;
+  /** The provider's id ("claude"), for presentation tables such as logos and tones. */
+  providerId?: string;
   model?: string | null;
   /** What the session works on (`factory:review:59`, `factory:integrate:53`, `issue:142`). */
   workKey?: string;

@@ -16,7 +16,20 @@ import {
   type WorkSummary,
   type WorkspaceRequest,
 } from "@codeden/contracts";
-import { and, asc, type Column, desc, eq, gt, inArray, lt, or, type SQL, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  type Column,
+  desc,
+  eq,
+  gt,
+  inArray,
+  isNull,
+  lt,
+  or,
+  type SQL,
+  sql,
+} from "drizzle-orm";
 import type { Db } from "../../db/client";
 import { rowToItemRecord, rowToSession, rowToTurn } from "../../db/rows";
 import { automationRuns, checkpoints, items, sessions, turns } from "../../db/schema";
@@ -192,6 +205,28 @@ export class SessionRepo {
       .where(
         or(sql`${key(sessions.cwd)} = ${target}`, sql`${key(sessions.worktreePath)} = ${target}`),
       )
+      .all()
+      .map(rowToSession);
+  }
+
+  /**
+   * A project's agent sessions in `status` that aren't archived, newest first. Not capped like
+   * `list` (whose cap archived sessions count toward): a one-time cleanup must see each one,
+   * however many sessions came after it.
+   */
+  unarchivedAgents(projectId: string, status: Session["status"][]): Session[] {
+    return this.db
+      .select()
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.projectId, projectId),
+          eq(sessions.role, "agent"),
+          inArray(sessions.status, status),
+          isNull(sessions.archivedAt),
+        ),
+      )
+      .orderBy(desc(sessions.createdAt))
       .all()
       .map(rowToSession);
   }

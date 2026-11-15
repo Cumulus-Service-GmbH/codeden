@@ -114,6 +114,19 @@ export async function advanceBuilding(
 }
 
 /**
+ * Watched merges in the order they landed, so each is judged after the ones before it on the
+ * same tick. Merges made on one pass of the queue can share a timestamp: the later one carries
+ * more `merged_after_` marks (one per merge still watched when it landed).
+ */
+export function inMergeOrder(items: FactoryItem[]): FactoryItem[] {
+  const stacked = (i: FactoryItem) =>
+    Object.keys(i.nudges).filter((k) => k.startsWith(MERGED_AFTER)).length;
+  return [...items].sort(
+    (a, b) => (a.mergedAt ?? "").localeCompare(b.mergedAt ?? "") || stacked(a) - stacked(b),
+  );
+}
+
+/**
  * Watching (§10.1 step 6): after a merge, CI on the default branch decides. A regression opens
  * an automatic revert PR (through the same merge checks), pauses the loop, holds fast merges
  * until CI on the default branch is green again, and asks the user. Merges that stacked on an

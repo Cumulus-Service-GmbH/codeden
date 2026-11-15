@@ -2,7 +2,7 @@ import { z } from "zod";
 import { GitHubIssueRef, GitHubPrRef, Id, ProviderId, Timestamp } from "./common";
 import { AutonomyMode, FactoryLimits, FactoryLoopState, MergePath } from "./factory";
 import { FactoryItemCost } from "./factory-cost";
-import { FactoryFollowUp, ReviewFollowUps } from "./factory-follow-ups";
+import { DigestFollowUps, FactoryFollowUp, ReviewFollowUps } from "./factory-follow-ups";
 import {
   DigestLesson,
   FactoryLesson,
@@ -577,6 +577,8 @@ export const FactoryDigest = z.object({
   spotChecks: DigestSpotChecks.prefault({}),
   /** Lessons the factory learned during the day; each is listed in one digest only. */
   lessons: z.array(DigestLesson).default([]),
+  /** Review follow-ups the day held for the scout, filed and dropped (#435). */
+  followUps: DigestFollowUps.prefault({}),
   text: z.string(),
   createdAt: Timestamp,
 });

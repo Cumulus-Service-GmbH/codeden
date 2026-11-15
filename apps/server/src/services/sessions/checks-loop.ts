@@ -13,13 +13,13 @@ import {
   type Session,
   type UserInput,
 } from "@codeden/contracts";
-import { and, asc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { Db } from "../../db/client";
 import { items } from "../../db/schema";
 import type { EventStore } from "../../events/store";
 import { errorMessage } from "../errors";
 import type { RunnerPort } from "../runner-port";
-import { cardMessage, checksMessage, failingChecks, loopSkipReason, roundOf } from "./checks";
+import { cardMessage, checksMessage, failingChecks, loopSkipReason } from "./checks";
 import type { SessionRepo } from "./repo";
 
 /** Added to a check's own timeout before CodeDen stops waiting for the runner's answer. */
@@ -54,11 +54,15 @@ interface ActiveRun {
  * checks one by one on its runner, in its working directory, and shows them as a card in that
  * turn. When some fail and rounds are left, it sends them to the agent in a `codeden` message,
  * which starts the next round; when all pass, or the rounds run out, the session stays idle.
- * Stop, a new message, stopping or archiving the session end a run (`cancel`). Runs live in
- * memory: after a restart, cards left running are marked interrupted.
+ * The round count is the session's (`SessionChecks.round`, kept by `SessionService` as messages
+ * go out), so turns CodeDen starts itself never add rounds. Stop, a new message, stopping or
+ * archiving the session end a run (`cancel`). Runs live in memory: after a restart, cards left
+ * running are marked interrupted, and their checks are cancelled on the runner once it's ready.
  */
 export class ChecksLoop {
   private readonly runs = new Map<string, ActiveRun>();
+  /** Sessions whose check a restart may have left running on their runner (`settleLeftovers`). */
+  private readonly leftovers = new Set<string>();
   private unsubscribe: (() => void) | undefined;
   private stopped = false;
 
@@ -117,20 +121,25 @@ export class ChecksLoop {
     }
   }
 
-  /** Run the checks after a completed turn, when the session keeps going until they pass. */
+  /**
+   * Run the checks after a completed turn, when the session keeps going until they pass. The
+   * round is the session's count (`SessionChecks.round`), whatever started the turn; once the
+   * loop stopped at its cap, no turn runs them again until the count starts again (#412).
+   */
   private async afterTurn(sessionId: string, event: AgentEventOf<"turn.completed">): Promise<void> {
     if (this.stopped || this.runs.has(sessionId)) return;
     const session = this.deps.repo.find(sessionId)?.session;
-    if (!session?.checks || session.rootThreadId !== event.threadId) return;
+    const checks = session?.checks;
+    if (!session || !checks || session.rootThreadId !== event.threadId) return;
     if (loopSkipReason(session) || this.deps.hasPendingMessage(sessionId)) return;
-    const round = roundOf(this.turnItems(sessionId, event.turnId));
+    if (checks.capReached) return;
     const run: ActiveRun = {
       threadId: event.threadId,
       turnId: event.turnId,
       data: {
-        round,
-        maxRounds: session.checks.maxRounds,
-        checks: session.checks.commands.map((c) => ({
+        round: checks.round ?? 0,
+        maxRounds: checks.maxRounds,
+        checks: checks.commands.map((c) => ({
           command: c.command,
           status: "pending",
           exitCode: null,
@@ -206,7 +215,13 @@ export class ChecksLoop {
     }
     const maxRounds = session.checks?.maxRounds ?? run.data.maxRounds;
     run.data.maxRounds = maxRounds;
-    if (run.data.round >= maxRounds) return this.end(sessionId, run, "cap_reached");
+    if (run.data.round >= maxRounds) {
+      // For good: no turn CodeDen starts itself runs the checks again (#412).
+      this.deps.repo.update(sessionId, (s) =>
+        s.checks ? { ...s, checks: { ...s.checks, capReached: true } } : s,
+      );
+      return this.end(sessionId, run, "cap_reached");
+    }
     const round = run.data.round + 1;
     const text = checksMessage(run.data, round);
     this.end(sessionId, run, "continuing");
@@ -278,17 +293,11 @@ export class ChecksLoop {
     }
   }
 
-  private turnItems(sessionId: string, turnId: string): Item[] {
-    return this.deps.db
-      .select()
-      .from(items)
-      .where(and(eq(items.sessionId, sessionId), eq(items.turnId, turnId)))
-      .orderBy(asc(items.position))
-      .all()
-      .map((r) => r.data);
-  }
-
-  /** Cards a restart left running: their checks ended with the process that ran them. */
+  /**
+   * Cards a restart left running are marked interrupted. The runner outlives the server, so a
+   * check may still run there, holding the session's check slot: it is cancelled once the
+   * runner is connected again.
+   */
   private settleLeftovers(): void {
     const rows = this.deps.db
       .select()
@@ -296,12 +305,36 @@ export class ChecksLoop {
       .where(and(eq(items.kind, "notice"), eq(items.status, "in_progress")))
       .all()
       .filter((r) => r.data.kind === "notice" && r.data.code === CHECK_RUN_NOTICE);
+    const sessions = new Set<string>();
     for (const row of rows) {
       const item = row.data;
       const parsed = item.kind === "notice" ? CheckRunData.safeParse(item.data) : undefined;
       if (!parsed?.success) continue;
       const run: ActiveRun = { threadId: row.threadId, turnId: row.turnId, data: parsed.data };
       this.end(row.sessionId, run, "interrupted");
+      sessions.add(row.sessionId);
+    }
+    for (const sessionId of sessions) this.leftovers.add(sessionId);
+    this.onRunnerReady();
+  }
+
+  /** A runner is connected and ready: cancel there the checks a restart left running. */
+  onRunnerReady(): void {
+    for (const sessionId of [...this.leftovers]) void this.cancelLeftover(sessionId);
+  }
+
+  private async cancelLeftover(sessionId: string): Promise<void> {
+    // A run started since is this server's own: it is never cancelled here.
+    if (this.stopped || this.runs.has(sessionId)) {
+      this.leftovers.delete(sessionId);
+      return;
+    }
+    try {
+      await this.deps.runnerOf(sessionId).request({ name: "check.cancel", sessionId }, 15_000);
+      this.leftovers.delete(sessionId);
+    } catch (error) {
+      // Not connected yet: tried again when a runner is ready.
+      this.deps.log?.(`checks for ${sessionId}: cancel after restart: ${errorMessage(error)}`);
     }
   }
 }

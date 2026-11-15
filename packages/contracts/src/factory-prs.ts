@@ -28,8 +28,10 @@ export type FactoryFailureKind = z.infer<typeof FactoryFailureKind>;
  * A factory PR's state, as the panel shows it:
  * - `checking`: the merge checks are running (the review, tests, evidence);
  * - `waiting_ci`: CI is running, or yet to start, on the head commit;
- * - `queued`: every check passed and it waits for its turn to merge;
- * - `updating`: at the head of the queue, being brought up to date with the default branch;
+ * - `queued`: every check passed and it is about to merge (or is held: a pause, the daily
+ *   merge limit, an earlier PR it is tested on top of);
+ * - `updating`: being brought up to date with the default branch, to be re-tested before it
+ *   merges;
  * - `rebasing`: it has merge conflicts and an agent is rebasing it;
  * - `rebuilding`: it kept conflicting, so its work is being redone from the default branch;
  *   the new PR replaces it;

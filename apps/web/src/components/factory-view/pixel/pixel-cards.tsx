@@ -1,15 +1,15 @@
 import type { FactoryWorkItem } from "@codeden/contracts";
 import { Link } from "@tanstack/react-router";
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { useRetryItem } from "@/components/factory/use-retry-item";
 import { platform } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import type { AgentCardModel } from "../scene/agent-card";
+import type { SceneAgent } from "../scene/agents";
+import type { BayCrate } from "../scene/repair-bay";
 import { cardNumber, cardStateLabel, type ViewCard } from "../stages";
-import type { AgentCardModel } from "./agent-card";
-import type { SceneAgent } from "./agents";
 import { STATUS_COLOUR } from "./draw-agents";
 import { type Rect, SCENE_H, SCENE_W } from "./floor";
-import type { BayCrate } from "./repair-bay";
 
 /**
  * The pixel mode's cards (#264), in the scene's own style: what an agent is doing on hover or
@@ -17,9 +17,29 @@ import type { BayCrate } from "./repair-bay";
  * They stay open while the pointer is on the thing or the card, so their buttons can be used.
  */
 
+/** Where a card goes: by the thing on the pixel scene, or at a position its caller worked out. */
+export type CardPlace = { anchor: Rect } | { style: CSSProperties };
+
+/** The card's position beside a thing on the pixel scene (scene pixels, as percentages). */
+function besideAnchor(anchor: Rect): CSSProperties {
+  // Below the thing when it's near the top; anchored to its side near the left and right edges.
+  const below = anchor.y < SCENE_H * 0.45;
+  const centre = anchor.x + anchor.w / 2;
+  const align = centre < 90 ? "left" : centre > SCENE_W - 90 ? "right" : "centre";
+  const x = align === "left" ? anchor.x : align === "right" ? anchor.x + anchor.w : centre;
+  const shiftX = align === "left" ? "0" : align === "right" ? "-100%" : "-50%";
+  return {
+    left: `${(x / SCENE_W) * 100}%`,
+    top: below
+      ? `calc(${((anchor.y + anchor.h) / SCENE_H) * 100}% + 2px)`
+      : `calc(${(anchor.y / SCENE_H) * 100}% - 2px)`,
+    transform: `translate(${shiftX}, ${below ? "0" : "-100%"})`,
+  };
+}
+
 function PixelCard({
   id,
-  anchor,
+  place,
   children,
   onEnter,
   onLeave,
@@ -27,31 +47,19 @@ function PixelCard({
   label,
 }: {
   id?: string;
-  anchor: Rect;
+  place: CardPlace;
   children: ReactNode;
   onEnter: () => void;
   onLeave: () => void;
   testId: string;
   label: string;
 }) {
-  // Below the thing when it's near the top; anchored to its side near the left and right edges.
-  const below = anchor.y < SCENE_H * 0.45;
-  const centre = anchor.x + anchor.w / 2;
-  const align = centre < 90 ? "left" : centre > SCENE_W - 90 ? "right" : "centre";
-  const x = align === "left" ? anchor.x : align === "right" ? anchor.x + anchor.w : centre;
-  const shiftX = align === "left" ? "0" : align === "right" ? "-100%" : "-50%";
   return (
     <section
       id={id}
       aria-label={label}
       className="absolute z-20 w-72 max-w-[80%] border-2 border-[#1a1c2c] bg-[#fff8e7] font-mono text-[11px] leading-snug text-[#1a1c2c] shadow-[3px_3px_0_#1a1c2c]"
-      style={{
-        left: `${(x / SCENE_W) * 100}%`,
-        top: below
-          ? `calc(${((anchor.y + anchor.h) / SCENE_H) * 100}% + 2px)`
-          : `calc(${(anchor.y / SCENE_H) * 100}% - 2px)`,
-        transform: `translate(${shiftX}, ${below ? "0" : "-100%"})`,
-      }}
+      style={"anchor" in place ? besideAnchor(place.anchor) : place.style}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
       onFocus={onEnter}
@@ -71,7 +79,7 @@ export function AgentCardView({
   id,
   agent,
   card,
-  anchor,
+  place,
   onEnter,
   onLeave,
   onOpenItem,
@@ -80,7 +88,8 @@ export function AgentCardView({
   id?: string;
   agent: SceneAgent;
   card: AgentCardModel;
-  anchor: Rect;
+  /** Beside its figure on the pixel scene, or where the caller puts it (Floor mode's roster). */
+  place: CardPlace;
   onEnter: () => void;
   onLeave: () => void;
   /** Its latest activities (the thought bubbles' history). */
@@ -91,7 +100,7 @@ export function AgentCardView({
   return (
     <PixelCard
       id={id}
-      anchor={anchor}
+      place={place}
       onEnter={onEnter}
       onLeave={onLeave}
       testId="factory-view-pixel-card"
@@ -194,7 +203,7 @@ export function BayCardView({
   return (
     <PixelCard
       id={id}
-      anchor={anchor}
+      place={{ anchor }}
       onEnter={onEnter}
       onLeave={onLeave}
       testId="factory-view-pixel-bay-card"

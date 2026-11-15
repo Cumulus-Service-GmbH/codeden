@@ -25,7 +25,8 @@ import { jsonBody, queryOf } from "./validate";
  * the reason when no round can start. `kill-switch` takes `mode` (`now`, the default, or
  * `drain`: finish the work in flight, then stop); `factory/resume` also cancels a drain.
  * `DELETE factory/lessons/:lessonId` forgets a lesson (404 `lesson_not_found`).
- * `follow-ups/file` is "File issue" for one review follow-up of a merged item.
+ * `follow-ups/file` is "File issue" for one review follow-up of a merged item (and "File now" on
+ * the scout's held list); `follow-ups/dismiss` drops a held one (409 `follow_up_filed` once filed).
  * `items/:itemId/spec` approves a feature's spec or asks for changes (409 `spec_not_pending`
  * unless it waits for approval).
  * `factory/scorecard?days=7|30|90` (30 by default) is the scorecard by builder and reviewer.
@@ -113,6 +114,16 @@ export function projectFactoryRoutes(s: AppServices) {
       async (c) => {
         const id = c.req.param("id");
         const item = await f.fileFollowUp(id, c.req.param("itemId"), c.req.valid("json").index);
+        return c.json<FactoryItemResponse>(await f.itemResponse(id, item));
+      },
+    )
+    .post(
+      "/:id/factory/items/:itemId/follow-ups/dismiss",
+      jsonBody(FactoryFileFollowUpRequest),
+      async (c) => {
+        const id = c.req.param("id");
+        const itemId = c.req.param("itemId");
+        const item = await f.dismissFollowUp(id, itemId, c.req.valid("json").index);
         return c.json<FactoryItemResponse>(await f.itemResponse(id, item));
       },
     );

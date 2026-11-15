@@ -186,6 +186,26 @@ describe("dismiss the inbox view (#407)", () => {
     );
     expect(restore.mock.calls.flatMap(([ids]) => ids)).toHaveLength(INBOX_BULK_MAX);
   });
+
+  it("names what stays when a later request fails, as the success toast does (#444)", async () => {
+    const client = createMockClient();
+    // The server keeps 3 of the first batch because they now wait on the user (they changed after
+    // the view loaded), then the second request fails.
+    vi.spyOn(client, "dismissInbox")
+      .mockImplementationOnce(async (ids) => ({
+        dismissed: ids.length - 3,
+        ids: ids.slice(3),
+        kept: 3,
+      }))
+      .mockRejectedValueOnce(new Error("The server is not reachable"));
+    renderWithClient(<DismissView items={manyNotices(INBOX_BULK_MAX + 5)} />, client);
+
+    await confirmDismiss();
+    await waitFor(() => expect(toast.error).toHaveBeenCalled());
+    const [message, opts] = toast.error.mock.calls[0] as [string, { description: string }];
+    expect(message).toBe(`Dismissed ${INBOX_BULK_MAX - 3} notices, then couldn't dismiss the rest`);
+    expect(opts.description).toBe("The server is not reachable. 3 items that wait on you stay.");
+  });
 });
 
 /** `n` open notices (nothing in them waits on the user). */

@@ -103,12 +103,12 @@ export const PR_STATE_LABEL: Record<FactoryPrState, { label: string; tone: Tone;
   queued: {
     label: "Queued",
     tone: "waiting",
-    help: "Every check passed. The factory merges one pull request at a time, oldest approved first.",
+    help: "Every check passed. The factory merges every pull request that is ready, oldest approved first, seconds apart.",
   },
   updating: {
     label: "Updating",
     tone: "running",
-    help: "Next to merge, but behind the default branch: GitHub merges the default branch in, then CI runs on the new head. No agent is needed.",
+    help: "Behind the default branch and due a re-test: GitHub merges the default branch in, then CI runs on the new head. No agent is needed.",
   },
   rebasing: {
     label: "Rebasing",

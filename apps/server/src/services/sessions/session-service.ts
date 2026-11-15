@@ -40,7 +40,7 @@ import {
   toServiceError,
 } from "../runner-port";
 import type { UtilityService } from "../utility";
-import { freezeChecks } from "./checks";
+import { freezeChecks, roundAfter, withRound } from "./checks";
 import { compactingRefusal, compactionRunning, compactRefusal, startCompaction } from "./compact";
 import { derivePurpose, deriveWorkKey, findConflicts } from "./conflicts";
 import { planFork } from "./fork";
@@ -84,6 +84,8 @@ export interface SessionServiceDeps extends RunnerDeps {
 export interface CheckRuns {
   /** End the session's check run; true when one was running. */
   cancel(sessionId: string, outcome: "stopped" | "superseded"): Promise<boolean>;
+  /** Whether checks are running for the session now. */
+  isRunning(sessionId: string): boolean;
 }
 
 /** Preferred providers when the choice is `auto` (first ready one wins). */
@@ -396,14 +398,16 @@ export class SessionService {
 
   /**
    * "Compact now" (`./compact`): the provider compacts the conversation as a turn of its own.
-   * Refused while a turn runs or messages wait, on providers without `capabilities.compact`, and
-   * for sessions with no conversation yet or archived. Messages sent meanwhile queue behind it.
+   * Refused while a turn runs, checks run or messages wait, on providers without
+   * `capabilities.compact`, and for sessions with no conversation yet or archived. Messages sent
+   * meanwhile queue behind it.
    */
   async compact(id: string): Promise<CompactSessionResponse> {
     const session = this.deps.repo.get(id);
     const refusal = compactRefusal(session, this.provider(session.provider, id), {
       delivering: this.delivering.has(id),
       queued: this.deps.outbox.count(id),
+      checking: this.checkRuns?.isRunning(id) ?? false,
     });
     if (refusal) throw refusal;
     this.delivering.add(id);
@@ -542,6 +546,7 @@ export class SessionService {
     try {
       // A new message takes over from a check run; the loop's own message comes after its run.
       await this.checkRuns?.cancel(session.id, "superseded");
+      this.countChecksRound(session.id, raw, from);
       const decorated = this.inputDecorator?.(session, raw, from) ?? { input: raw };
       try {
         await this.deliver(session, this.forRunner(session, decorated.input));
@@ -556,6 +561,16 @@ export class SessionService {
       // this delivery in flight and skipped, so nothing else would send what queued up.
       if (this.deps.outbox.count(session.id) > 0) this.flushIfSettled(session.id);
     }
+  }
+
+  /** The checks loop's round count follows a message on its way to the session (`roundAfter`). */
+  private countChecksRound(id: string, input: UserInput, from: QueueSender): void {
+    const round = roundAfter(input, from);
+    if (round === undefined) return;
+    this.deps.repo.update(id, (s) => {
+      const checks = s.checks && withRound(s.checks, round);
+      return checks && checks !== s.checks ? { ...s, checks } : s;
+    });
   }
 
   /**

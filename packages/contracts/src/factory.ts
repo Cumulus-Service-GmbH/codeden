@@ -41,23 +41,23 @@ const GithubLogin = z
   .pipe(z.string().regex(/^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})(?:\[bot\])?$/, "Not a GitHub login"));
 
 /**
- * How the merge queue (§10.1) handles a PR at its head that is behind the default branch:
- * - `fast` (default): merge it on its own green CI when the commits it is missing from the
- *   default branch touch none of its files and no dependency-sensitive file (lockfiles, the root
- *   `package.json`, workspace, CI, TypeScript and build config, migrations, shared barrels)
- *   changed on either side. Otherwise, or while CI on the default branch is red, it takes the
- *   strict path.
+ * How the merge queue (§10.1) handles a queued PR that is behind the default branch:
+ * - `fast` (default): merge it on its own green CI whenever GitHub can merge it (GitHub reports
+ *   conflicts, and CI on the default branch is watched after every merge). It takes the strict
+ *   path only when it and the commits it is missing both changed dependency files (lockfiles,
+ *   manifests such as `package.json`, workspace files) or both changed migrations, while CI on
+ *   the default branch is red, or when branch protection wants it up to date.
  * - `strict`: always bring it up to date with the default branch (GitHub's update-branch), wait
- *   for CI on the new head, then merge.
+ *   for CI on the new head, then merge; one PR at a time.
  */
 export const MergePolicy = z.enum(["fast", "strict"]);
 export type MergePolicy = z.infer<typeof MergePolicy>;
 
 /**
  * How the merge queue merged a PR (`FactoryItem.mergePath`):
- * - `current`: it was already up to date with the default branch when its turn came;
- * - `fast`: it was behind and merged on its own CI (no overlap with the new commits);
- * - `retested`: the queue brought it up to date and it merged once CI passed on the new head.
+ * - `current`: it was already up to date with the default branch when it merged;
+ * - `fast`: it was behind and merged on its own CI;
+ * - `retested`: the queue brought it up to date, and it merged after CI ran on the new head.
  */
 export const MergePath = z.enum(["current", "fast", "retested"]);
 export type MergePath = z.infer<typeof MergePath>;

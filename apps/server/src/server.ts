@@ -206,7 +206,10 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
       if (stream.kind === "pty.output") terminals.onStream(stream);
       else browserBridge.onStream(stream);
     },
-    onReady: (runnerId) => void services.recovery.onRunnerReady(runnerId),
+    onReady: (runnerId) => {
+      services.checksLoop.onRunnerReady();
+      void services.recovery.onRunnerReady(runnerId);
+    },
     requestTimeoutFloorMs: opts.runnerRequestTimeoutFloorMs,
     log,
   });

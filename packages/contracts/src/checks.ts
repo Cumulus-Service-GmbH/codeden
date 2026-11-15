@@ -29,6 +29,17 @@ export const SessionChecks = z.object({
   untilPass: z.boolean(),
   /** Automatic rounds before CodeDen stops and leaves the session idle. */
   maxRounds: CheckRounds,
+  /**
+   * Automatic rounds CodeDen has sent since the count last started (absent: none). Only a
+   * message from someone other than CodeDen, or switching the loop on, starts it again; turns
+   * CodeDen starts itself (Compact now, an automatic "continue") keep it.
+   */
+  round: z.int().positive().optional(),
+  /**
+   * The checks still failed after the last round (`maxRounds`): the loop stopped, and runs no
+   * checks after any turn until the count starts again.
+   */
+  capReached: z.boolean().optional(),
 });
 export type SessionChecks = z.infer<typeof SessionChecks>;
 
@@ -91,7 +102,7 @@ export type CheckRunOutcome = z.infer<typeof CheckRunOutcome>;
  * run has its `outcome`.
  */
 export const CheckRunData = z.object({
-  /** Automatic rounds before this run: 0 after a turn someone else's message started. */
+  /** Automatic rounds before this run (`SessionChecks.round` when it started). */
   round: z.int().nonnegative(),
   maxRounds: CheckRounds,
   checks: z.array(CheckResult).min(1),

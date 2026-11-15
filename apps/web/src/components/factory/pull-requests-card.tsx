@@ -28,7 +28,7 @@ export function PullRequestsCard({
         Pull requests
         <span
           className="font-normal text-muted-foreground/80"
-          title="With auto-merge on, the factory merges one pull request at a time, oldest approved first, bringing each up to date with the default branch first."
+          title="With auto-merge on, the factory merges every pull request that passed its checks, oldest approved first. One that is behind the default branch merges on its own CI unless it has to be re-tested first."
         >
           · merge queue {queued > 0 ? `${queued} waiting` : "empty"}
         </span>

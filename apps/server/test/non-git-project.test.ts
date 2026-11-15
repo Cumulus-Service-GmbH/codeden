@@ -1,7 +1,12 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { CreateProjectResponse, type Session, StartSessionResponse } from "@codeden/contracts";
+import {
+  CheckpointList,
+  CreateProjectResponse,
+  type Session,
+  StartSessionResponse,
+} from "@codeden/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { sameRealPath } from "../src/services/projects/detect";
 import { type Harness, startHarness, waitUntil } from "./support/harness";
@@ -66,6 +71,54 @@ describe("a new session in a project that isn't a git repository", () => {
     expect(sameRealPath(session.cwd, folder)).toBe(true);
     expect((await h.detail(id)).startMeta?.workspaceMode).toBe("repo_root");
     expect(notARepoItems(id)).toEqual([]);
+  });
+
+  it("says its folder isn't a git repository when asked for checkpoints and diffs (#426)", async () => {
+    const res = await h.api("POST", "/sessions", {
+      projectId,
+      provider: "fake",
+      input: { text: "Write a verse" },
+    });
+    const started = StartSessionResponse.parse(res.body);
+    if (started.status !== "started") throw new Error(started.status);
+    const id = started.sessionId;
+    expect((await settled(id)).status).toBe("idle");
+    // The agent's change, in the project folder itself.
+    writeFileSync(join(folder, "verse.txt"), "la la la\n");
+
+    // No checkpoints are written outside a git repository; the list says so by being empty.
+    const listed = await h.api("GET", `/sessions/${id}/checkpoints`);
+    expect(listed.status).toBe(200);
+    expect(CheckpointList.parse(listed.body).checkpoints).toEqual([]);
+
+    // Diffs, restore and git all need a git repository. Each says that's why it can't answer,
+    // never "no checkpoints yet" (there never will be) nor git's own "fatal: ..." from the runner.
+    const asks: Array<[string, "GET" | "POST", string, unknown?]> = [
+      ["all changes", "POST", `/sessions/${id}/diff`, { kind: "session" }],
+      ["uncommitted", "POST", `/sessions/${id}/diff`, { kind: "uncommitted" }],
+      ["restore", "POST", `/sessions/${id}/restore`, { index: 0 }],
+      ["git status", "GET", `/sessions/${id}/git/status`],
+      ["commit", "POST", `/sessions/${id}/git/commit`, { message: "Add a verse" }],
+      ["push", "POST", `/sessions/${id}/git/push`, {}],
+    ];
+    const answers = [];
+    for (const [what, method, path, body] of asks) {
+      const r = await h.api(method, path, body);
+      answers.push({ what, status: r.status, body: r.body });
+    }
+    expect(answers).toEqual(
+      asks.map(([what]) => ({
+        what,
+        status: 409,
+        body: {
+          error: expect.objectContaining({
+            code: "not_a_repo",
+            message: expect.stringContaining("is not a git repository"),
+          }),
+        },
+      })),
+    );
+    expect(existsSync(join(folder, "verse.txt"))).toBe(true);
   });
 
   it("refuses a worktree when the session is created, with not_a_repo", async () => {

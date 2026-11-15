@@ -68,10 +68,13 @@ export async function defaultBranch(cwd: string): Promise<string | null> {
   return currentBranch(cwd);
 }
 
+/** The checked-out branch, null when HEAD is detached. Throws `not_a_repo` outside git. */
 export async function currentBranch(cwd: string): Promise<string | null> {
   try {
     return (await gitText(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"])) || null;
-  } catch {
+  } catch (error) {
+    // Not "detached": a folder outside git has no HEAD at all (a push says so, #426).
+    if (error instanceof CommandError && error.code === "not_a_repo") throw error;
     return null; // detached
   }
 }

@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { Id, Timestamp } from "./common";
+import { HeldFollowUp } from "./factory-follow-ups";
 
 /**
  * The software factory's pipelines (§10.1): every piece of work is classified as a bug, a
@@ -437,6 +438,11 @@ export const ScoutStatus = z.object({
    * in plain words; null when it can.
    */
   runNowBlockedBy: z.string().nullable().default(null),
+  /**
+   * Review follow-ups of merged PRs held for the scout's next rounds (#435), in the order its
+   * brief lists them: by severity, then oldest first. At most `HELD_FOLLOW_UPS_MAX`.
+   */
+  heldFollowUps: z.array(HeldFollowUp).default([]),
 });
 export type ScoutStatus = z.infer<typeof ScoutStatus>;
 

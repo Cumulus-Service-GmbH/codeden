@@ -55,6 +55,7 @@ import * as decisions from "./decisions";
 import { writeDigest } from "./digest";
 import { advanceDrain, drainInboxId, drainStatus, startDrain } from "./drain";
 import { fileFollowUp } from "./follow-ups";
+import { dismissFollowUp } from "./follow-ups-held";
 import type { FactoryGithub } from "./github-port";
 import { itemCosts } from "./item-cost";
 import { allowLargeChange } from "./large-change";
@@ -89,6 +90,11 @@ export interface FactoryOptions {
   autoTick?: boolean;
   /** How long CI may take to start on a new head commit before it counts as never started (default 10 minutes). */
   ciGraceMs?: number;
+  /**
+   * How long the merge queue gives GitHub to work out the next pull request after a merge moved
+   * the default branch, before it reads it again (default 2 s; 0 in tests: no waiting).
+   */
+  settleMs?: number;
   now?: () => Date;
 }
 
@@ -111,6 +117,14 @@ export interface FactoryServiceDeps {
   archiveSession: (sessionId: string) => Promise<unknown>;
   options?: FactoryOptions;
   log?: (message: string) => void;
+}
+
+/** Resolve after `ms` (at once for 0); the timer never keeps the process alive. */
+function wait(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms).unref?.();
+  });
 }
 
 /**
@@ -168,6 +182,8 @@ export class FactoryService {
       archiveSessions: (ids) => this.archiver.push(ids),
       slots: new SlotBoard(),
       prFiles: new PrFiles(),
+      upToDateRequired: new Set(),
+      settle: () => wait(deps.options?.settleMs ?? 2_000),
       setKillSwitch: (projectId, on) => this.writeKillSwitch(projectId, on),
       now: deps.options?.now ?? (() => new Date()),
       ciGraceMs: deps.options?.ciGraceMs ?? 10 * 60_000,
@@ -535,8 +551,9 @@ export class FactoryService {
   }
 
   /**
-   * "File issue": file one review follow-up of a merged item as an issue, labelled and linked to
-   * its PR (or link it to the open issue with the same title). Filing it again changes nothing.
+   * "File issue" (and "File now" on the scout's held list): file one review follow-up of a merged
+   * item as an issue, labelled and linked to its PR (or link it to the open issue with the same
+   * title). Filing it again changes nothing.
    */
   fileFollowUp(projectId: string, itemId: string, index: number): Promise<FactoryItem> {
     return this.serialize(projectId, "file follow-up", () =>
@@ -546,6 +563,16 @@ export class FactoryService {
         this.item(projectId, itemId),
         index,
       ),
+    );
+  }
+
+  /**
+   * "Dismiss" on the scout's held list: the review follow-up leaves it without an issue (the
+   * item keeps it, so "File issue" can still file it). 409 `follow_up_filed` once it has one.
+   */
+  dismissFollowUp(projectId: string, itemId: string, index: number): Promise<FactoryItem> {
+    return this.serialize(projectId, "dismiss follow-up", () =>
+      dismissFollowUp(this.ctx, this.item(projectId, itemId), index),
     );
   }
 

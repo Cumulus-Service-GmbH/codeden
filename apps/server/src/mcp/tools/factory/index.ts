@@ -64,7 +64,16 @@ export const factoryStatus = defineTool({
         note: p.note,
       })),
       recent: s.recent.slice(0, 10).map(brief),
-      scout: s.scout,
+      // Up to 50 review follow-ups can be held for the scout: the count and the first few.
+      scout: s.scout && {
+        ...s.scout,
+        heldFollowUps: s.scout.heldFollowUps.slice(0, 10).map((h) => ({
+          title: h.title,
+          severity: h.severity,
+          pr: h.pr?.number ?? null,
+        })),
+        heldFollowUpCount: s.scout.heldFollowUps.length,
+      },
     };
   },
 });

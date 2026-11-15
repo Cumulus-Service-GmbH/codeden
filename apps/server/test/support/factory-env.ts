@@ -317,7 +317,7 @@ export function createFactoryEnv(
           worktreeRemovedAt: s.worktreePath ? at : null,
         }));
       },
-      options: { autoTick: false, now: () => env.now(), ciGraceMs: 60_000 },
+      options: { autoTick: false, now: () => env.now(), ciGraceMs: 60_000, settleMs: 0 },
     });
   env.factory = build();
   env.restart = () => {
