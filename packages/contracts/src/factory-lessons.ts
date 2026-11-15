@@ -92,16 +92,35 @@ function cutLesson(text: string): string {
 
 /** CodeDen's internal variables as a lesson names them: `CODEDEN_HOME`, `CODEDEN_*`, `CODEDEN*`. */
 const INTERNAL_VARIABLE = /\bCODEDEN(_[A-Z_]+|_?\*)/;
-const CLEARS = /\b(unset|clear|remove|delete|drop|strip)\b|\benv\s+-u\b/i;
+/** A verb that clears a variable: `unset`, `Remove-Item`, `env -u` and the like. */
+const CLEAR_VERB = String.raw`(?:\b(?:unset|clear|remove|delete|drop|strip)\b|\benv\s+-u\b)`;
+const CLEARS = new RegExp(CLEAR_VERB, "i");
 const TESTS = /\b(tests?|suites?|vitest)\b/i;
+/**
+ * A clearing verb negated right before it ("don't remove", "never strip", "no need to unset",
+ * "you don't have to clear"), which warns against clearing. Not when the negation is part of a
+ * condition ("if you don't unset it, tests fail"), and not "don't forget to unset".
+ */
+const NEGATED_CLEAR = new RegExp(
+  String.raw`(?<!\b(?:if|when)\s+(?:[\w'’]+\s+){0,2})\b(?:not|never|don['’]?t|doesn['’]t|shouldn['’]t|mustn['’]t|needn['’]t|no need to)(?:\s+(?:ever|even|just|\w+ly))?(?:\s+(?:need|have|try|bother)\s+to)?\s+${CLEAR_VERB}`,
+  "gi",
+);
+/** A clearing verb whose object is the filter that keeps the variables out ("remove the CODEDEN_* filter"). */
+const CLEARS_FILTER = new RegExp(
+  String.raw`${CLEAR_VERB}\s+(?:\S+\s+){0,3}?(?:filter|guard)s?\b`,
+  "gi",
+);
 
 /**
  * Whether a lesson is advice that was right once and is wrong now, which no brief carries and no
  * review records again: clearing CodeDen's internal variables before running tests (#422). Agent
  * sessions don't inherit them since #191, and checking for them stalled agents on an approval.
+ * A lesson that guards them instead ("don't remove the CODEDEN_* filter from vitest.config.ts")
+ * is kept (#450): a negated clearing verb, or one aimed at the filter, doesn't count.
  */
 export function isRetiredLesson(text: string): boolean {
-  return INTERNAL_VARIABLE.test(text) && CLEARS.test(text) && TESTS.test(text);
+  if (!INTERNAL_VARIABLE.test(text) || !TESTS.test(text)) return false;
+  return CLEARS.test(text.replace(NEGATED_CLEAR, "").replace(CLEARS_FILTER, ""));
 }
 
 /**

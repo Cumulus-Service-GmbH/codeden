@@ -118,6 +118,28 @@ describe("factory lessons", () => {
     ]);
   });
 
+  it("keep lessons that guard the CODEDEN_* filters, even when they name tests (#450)", () => {
+    const guards = [
+      "Don't remove the CODEDEN_* filter from vitest.config.ts.",
+      "Do not delete the CODEDEN_* guard in agent-env.test.ts.",
+      "Never strip the CODEDEN_HOME filter from agentEnv(); its tests depend on it.",
+      "Don't drop CODEDEN_* from the vitest config's env filter.",
+      "If you remove the CODEDEN_* filter from vitest.config.ts, test workers inherit CodeDen's home.",
+      "No need to unset CODEDEN_HOME before running tests.",
+      "You don't have to clear CODEDEN_* before pnpm test; agent sessions never inherit them.",
+    ];
+    expect(guards.filter((text) => isRetiredLesson(text))).toEqual([]);
+    expect(cleanLessons(guards)).toEqual(guards.slice(0, LESSONS_PER_VERDICT));
+    // Advice to clear them is still retired, negation or filter nearby or not.
+    const stale = [
+      "Don't forget to unset CODEDEN_HOME before running tests.",
+      "Tests fail if you don't unset CODEDEN_DEPS_INSTALLER first.",
+      "Don't run the suite before you remove Env:CODEDEN_*.",
+      "Get-ChildItem Env: -Filter CODEDEN_* | Remove-Item before pnpm test.",
+    ];
+    expect(stale.filter((text) => !isRetiredLesson(text))).toEqual([]);
+  });
+
   it("verdicts carry at most three lessons; ones stored before lessons existed parse", () => {
     const old = ReviewVerdict.parse(verdict);
     expect(old.lessons).toEqual([]);
