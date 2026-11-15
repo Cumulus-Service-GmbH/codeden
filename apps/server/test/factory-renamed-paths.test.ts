@@ -163,19 +163,19 @@ describe("the size check counts a rename out of reviewed code", () => {
 });
 
 describe("the fast merge path counts a rename's old path", () => {
-  it("re-tests a PR that moves a CI workflow out of .github/", () => {
+  it("re-tests a PR that moves a migration out of its folder when main added one", () => {
     const verdict = fastMergeVerdict({
       branch: "main",
       hold: null,
       pr: {
-        files: ["docs/ci.yml"],
-        renamedFrom: [".github/workflows/ci.yml"],
+        files: ["docs/old-schema.sql"],
+        renamedFrom: ["db/migrations/001_init.sql"],
         mergeState: "clean",
       },
-      main: { behind: 1, files: ["src/other.ts"], complete: true },
+      main: { behind: 1, files: ["db/migrations/002_users.sql"], complete: true },
     });
     expect(verdict).toMatchObject({ fast: false });
-    expect(verdict.fast ? "" : verdict.reason).toContain(".github/workflows/ci.yml");
+    expect(verdict.fast ? "" : verdict.reason).toContain("db/migrations/001_init.sql");
   });
 });
 

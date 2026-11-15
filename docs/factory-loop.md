@@ -1,6 +1,6 @@
 # How the factory loop works
 
-What the software factory and the dark factory do between the events you see: when work starts, why pull requests merge one at a time, what "Loop building" means, and what still comes to you. Every number here is the default; most can be changed in the factory **Settings**. For the full reference (every setting, merge check and API route) see [The software factory and the dark factory](software-factory.md).
+What the software factory and the dark factory do between the events you see: when work starts, how pull requests merge, what "Loop building" means, and what still comes to you. Every number here is the default; most can be changed in the factory **Settings**. For the full reference (every setting, merge check and API route) see [The software factory and the dark factory](software-factory.md).
 
 ```text
  Issue: yours, a trusted author's
@@ -36,7 +36,7 @@ One pass, in order:
 2. **A new day.** At midnight (local time) it writes the daily digest, resets today's merge count, and lifts a pause caused by the daily budget.
 3. **Tidy up.** Work whose issue was closed on GitHub is settled, and work that failed for a reason outside its code (a session that died, a provider that dropped out) is put back.
 4. **Per-item cap.** With a per-item cap set, work that has spent it stops: its running sessions are stopped and it waits for you (see [Spend per item](#spend-per-item)).
-5. **Move every item one step:** CI watched on the default branch after a merge, builds, reviews and merge checks, then **at most one step of the merge queue**.
+5. **Move every item one step:** CI watched on the default branch after a merge, builds, reviews and merge checks, then **the merge queue**: every pull request that is ready merges.
 6. **Clean up.** Pull requests replaced by newer ones are closed, and finished work's sessions are archived.
 7. **Budget.** If today's spend reached the daily budget, the loop pauses.
 8. **Intake.** New issues become work items, and up to 3 per pass are sorted into a pipeline.
@@ -135,18 +135,26 @@ Get the default branch green and **Resume** the loop: the reverted work goes bac
 
 ## The merge queue
 
-With auto-merge on, a pull request whose checks all pass doesn't merge on the spot. It joins a queue, and the factory merges **one pull request at a time**:
+With auto-merge on, a pull request whose checks all pass joins a queue, and on every pass the factory merges **every pull request that is ready**, seconds apart:
 
 - **Order:** a revert goes first, then the pull request whose checks passed first.
-- **Only the head of the queue acts.** The others say "queued to merge (number 2 in line)".
-- **Behind the default branch?** The factory asks GitHub to update the head pull request (**Update branch**, pinned to its current head commit). No agent is needed, and no new review while the pull request's own changes stay the same; only when the default branch changed lines right next to them does the reviewer look at the new head first. CI then runs on the new head.
-- **Merged on a later pass** once CI on that head is green: a squash merge, again pinned to the head commit, at most one per pass. Right before the merge the factory checks again that the review's approval covers that exact commit. If the head moved, nothing merges until the new commits are reviewed.
+- **Ready** means CI is green on its head commit, the review's approval covers that exact commit, and GitHub reports no merge conflict. The factory checks all three again right before each merge. If the head moved, nothing merges until the new commits are reviewed.
+- **Behind the default branch?** It merges anyway, on its own green CI, the way it would if you merged it on GitHub yourself. GitHub reports a conflict when the two changes can't be combined, and CI on the default branch is watched after every merge (see [Watching main after a merge](#watching-main-after-a-merge)).
+- **A pull request that waits doesn't hold up the others.** One whose CI is still running, or that waits for a re-review or a rebase, is passed over, and the ready ones behind it merge.
+- **Seconds apart.** Each merge is a squash merge pinned to the head commit. After one, GitHub needs a moment to work out the next pull request against the new default branch, so the factory waits a couple of seconds and reads it again.
 - **Held** while the loop is paused and when today's merges reached **Auto-merges per day** (5), reverts excepted, and while a kill switch is on.
 
-**Why one at a time?** Every merge changes the default branch. A pull request that passed CI against the old default branch hasn't been tested against the new one, so each pull request is updated and tested on top of the one before it. Merging several at once could merge two changes that each pass alone but break together.
+**When is a pull request re-tested first?** Only when merging on its own CI could hide a clash that Git can't see:
 
-**How long a merge takes.** About one CI run of your repository, plus up to 30 seconds for the next pass to see it: the head is updated, CI runs, the next pass merges it. With a 10-minute CI, five queued pull requests take about 50 minutes.
+- **Two dependency changes, or two migrations.** The pull request and the commits it is missing both changed dependency files (a lockfile, a `package.json`), or both changed database migrations. Git merges those without a conflict, but the result can be broken, so the pull request is tested on top of the other change.
+- **The default branch is red.** Until CI there is green again, nothing merges on top of it untested.
+- **Branch protection requires up-to-date branches**, or **Merge policy** is set to **Strict**. In both cases every pull request is re-tested, one at a time.
 
+To re-test, the factory asks GitHub to update the pull request (**Update branch**, pinned to its current head commit). No agent is needed, and no new review while the pull request's own changes stay the same; only when the default branch changed lines right next to them does the reviewer look at the new head first. CI runs on the new head and the pull request merges once it is green. Its note says why: "Re-testing against main (it and main both changed database migrations ...)". The other pull requests keep merging meanwhile. One that changes the same kind of files waits for it ("merges after #12") and is then tested on top of it.
+
+**How long a merge takes.** Seconds after the last check passes, plus up to 30 seconds for the next pass to see it. Five pull requests that are ready together merge within about a minute. A re-test adds one CI run of your repository, for that pull request only.
+
+**What if two changes pass alone but break together?** Then CI on the default branch fails after the merge. The factory reverts the merge that broke it, pauses until the default branch is green again, and sends the work back to its builder (see [Watching main after a merge](#watching-main-after-a-merge)). That is rare, and it costs far less than testing every pull request twice.
 **Merge conflicts** aren't a queue problem. The pull request's builder is asked to rebase and resolve them (this isn't a revise round), up to 3 times. If it still conflicts, the work is rebuilt once from the latest default branch.
 
 ## Agent slots and priority
@@ -315,7 +323,7 @@ The limits that shape the loop:
 - **Scout round.** One pass of the scout: plan, review, file issues.
 - **Revise round.** The builder fixing what the reviewer or a failed check asked for, on the same branch.
 - **Merge check.** One of the checks a pull request must pass before it merges: protected areas, size, CI, review, tests, test results, security, screenshots.
-- **Merge queue.** Pull requests that passed every check, merged one at a time.
+- **Merge queue.** Pull requests that passed every check, merged in order, seconds apart.
 - **Escalated.** Touches a protected area, so only you merge it.
 - **Stopped.** Work that ended without merging: not reproduced, declined, out of revise rounds or dismissed. Retry runs it again.
 - **Stuck.** Work the factory can't settle by itself; it's in your inbox.

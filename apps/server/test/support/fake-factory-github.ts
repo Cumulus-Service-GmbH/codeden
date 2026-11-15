@@ -72,6 +72,18 @@ export class FakeFactoryGithub implements FactoryGithub {
    * `behind` (unless the test pins `pr.mergeState`) and GitHub refuses to merge it (405).
    */
   requireUpToDate = false;
+  /**
+   * How many reads of each other open PR report `mergeable: "unknown"` after a merge moved main:
+   * GitHub works a PR out against the new base in the background (default 0: at once).
+   */
+  settleReads = 0;
+  /** Reads left per PR number before it reports its mergeability again (`settleReads`). */
+  private unsettled = new Map<number, number>();
+  /**
+   * How many more merges GitHub turns down with "Base branch was modified" (its answer to a
+   * merge sent right after another one, before it caught up).
+   */
+  baseMovedRefusals = 0;
   /** `mainSince` calls, in order. */
   compares: number[] = [];
   githubProjects = new Set<string>();
@@ -371,7 +383,15 @@ export class FakeFactoryGithub implements FactoryGithub {
         : this.requireUpToDate && behind
           ? "behind"
           : "clean");
-    return { ...pr, ref: { ...pr.ref }, files: [...pr.files], mergeState };
+    const waits = this.unsettled.get(number) ?? 0;
+    if (waits > 0) this.unsettled.set(number, waits - 1);
+    return {
+      ...pr,
+      ref: { ...pr.ref },
+      files: [...pr.files],
+      mergeState: waits > 0 ? "unknown" : mergeState,
+      mergeable: waits > 0 ? "unknown" : pr.mergeable,
+    };
   }
 
   async evidence(_projectId: string, prNumber: number): Promise<PrEvidence> {
@@ -388,6 +408,17 @@ export class FakeFactoryGithub implements FactoryGithub {
     if (this.requireUpToDate && pr.baseSha !== this.main.sha)
       // Like GitHub through `toGithubError`: a 405 becomes `github_not_allowed`.
       throw new ServiceError(409, "github_not_allowed", "Head branch is out of date");
+    if (this.baseMovedRefusals > 0) {
+      this.baseMovedRefusals--;
+      throw new ServiceError(
+        409,
+        "github_not_allowed",
+        "GitHub: Base branch was modified. Review and try the merge again.",
+      );
+    }
+    for (const other of this.prs.values())
+      if (other !== pr && other.ref.state === "open")
+        this.unsettled.set(other.ref.number, this.settleReads);
     pr.ref = { ...pr.ref, state: "merged" };
     const sha = `merge${number}`;
     this.merges.push({ number, sha, title: opts.title });

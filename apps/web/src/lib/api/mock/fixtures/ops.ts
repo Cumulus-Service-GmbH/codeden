@@ -227,7 +227,7 @@ export function factoryFor(
         pr: sf.pr(58, "A11y fixes", "open"),
         state: "updating",
         queuePosition: 1,
-        note: "Next to merge: updating it with main (1 commit behind), then CI runs on the new head",
+        note: "Re-testing against main (it and main both changed dependency files (package.json; on main: pnpm-lock.yaml)): updating it (1 commit behind), then CI runs on the new head",
       },
       {
         itemId: "fw-15",
@@ -235,7 +235,7 @@ export function factoryFor(
         pr: sf.pr(61, "Wishlist", "open"),
         state: "queued",
         queuePosition: 2,
-        note: "Every check passed; queued to merge (number 2 in line)",
+        note: "Every check passed; merges after #58 (both change dependency files, so it is tested on top of it)",
       },
       {
         itemId: "fw-13",

@@ -148,7 +148,20 @@ const REFUSAL_CODES = new Set([
  * against a PR in the merge queue; the rest is tried again on the next tick.
  */
 export function githubRefused(error: unknown): boolean {
+  if (baseJustMoved(error)) return false;
   return error instanceof ServiceError && REFUSAL_CODES.has(error.code);
+}
+
+/** GitHub's answer to a merge sent while it still works out the PR against a base that moved. */
+const BASE_MOVED = /base branch was modified/i;
+
+/**
+ * Whether GitHub turned a merge down only because the default branch moved a moment ago (the
+ * merge before it in the queue): it hasn't worked out the PR against the new base yet. Never a
+ * refusal: the same merge goes through seconds later.
+ */
+export function baseJustMoved(error: unknown): boolean {
+  return BASE_MOVED.test(errorMessage(error));
 }
 
 /**
@@ -157,16 +170,19 @@ export function githubRefused(error: unknown): boolean {
  */
 export const MERGED_AFTER = "merged_after_";
 
-/** What GitHub said when it didn't merge the queue's head; `refusal` when it refused it. */
+/**
+ * What GitHub said when it didn't merge a queued PR; `refusal` when it refused it, `settling`
+ * when it only hasn't caught up with the default branch moving (`baseJustMoved`).
+ */
 export interface MergeFailed {
   failed: string;
   refusal: boolean;
+  settling: boolean;
 }
 
 /**
- * Squash-merge the head of the merge queue, recording how it got there (`path`). When GitHub
- * doesn't merge it, nothing changes here: what it said comes back, and the queue counts the
- * refusals (`queue.ts`).
+ * Squash-merge a queued PR, recording how it got there (`path`). When GitHub doesn't merge it,
+ * nothing changes here: what it said comes back, and the queue counts the refusals (`queue.ts`).
  */
 export async function autoMerge(
   ctx: FactoryContext,
@@ -185,11 +201,13 @@ export async function autoMerge(
       sha: null,
       error: errorMessage(error),
       refusal: githubRefused(error),
+      settling: baseJustMoved(error),
     }));
   if (!res.merged) {
     // A 200 with `merged: false` is GitHub's own answer.
-    if (!("error" in res)) return { failed: "GitHub did not merge it", refusal: true };
-    return { failed: res.error, refusal: res.refusal };
+    if (!("error" in res))
+      return { failed: "GitHub did not merge it", refusal: true, settling: false };
+    return { failed: res.error, refusal: res.refusal, settling: res.settling };
   }
   const at = ctx.now().toISOString();
   // Merges whose CI on main is still running: a failure is theirs to answer first.

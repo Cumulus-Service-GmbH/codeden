@@ -2,28 +2,26 @@ import type { FactoryLoop, Project } from "@codeden/contracts";
 import { type FactoryContext, raiseInbox } from "./context";
 import type { FactoryPr, MainSince } from "./github-port";
 import { matchesGlob } from "./globs";
-import { changedPaths } from "./policy";
+import { changedPaths, isTestFile } from "./policy";
 import { isLockfile } from "./size";
 
 /**
  * The merge queue's fast path (§10.1, `MergePolicy` `fast`). A queued PR that is behind the
- * default branch merges on its own green CI, without being brought up to date first, when the
- * commits it is missing touch none of its files: GitHub's merge commit combines them. Files
- * whose change can break code they don't touch (dependencies, CI, TypeScript and build config,
- * migrations, shared barrels) count as overlapping whichever side changed them, so semantic
- * clashes in shared plumbing are still re-tested. Anything uncertain takes the strict path.
+ * default branch merges on its own green CI, without being brought up to date first, whenever
+ * GitHub can merge it: GitHub reports conflicts, and CI on the default branch is watched after
+ * every merge (a merge that breaks it is reverted). It is re-tested first only when the PR and
+ * the commits it is missing both changed files of a kind Git merges cleanly but that still
+ * clash (`ClashGroup`: two dependency changes, two migrations), while CI on the default branch
+ * is red, or when branch protection wants it up to date.
  */
 
-/** Root files that change how every package installs, builds or runs. */
+/** Root files that change how every package installs. */
 const ROOT_FILES = new Set([
   "pnpm-workspace.yaml",
   ".npmrc",
   ".nvmrc",
   ".node-version",
   ".tool-versions",
-  "turbo.json",
-  "nx.json",
-  "lerna.json",
   "deno.json",
   "deno.jsonc",
   "go.work",
@@ -49,32 +47,64 @@ const MANIFESTS = new Set([
   "build.gradle.kts",
 ]);
 
-/** Build, test and lint config by base name: `vite.config.ts`, `tsconfig.base.json`, ... */
-const CONFIG_NAME =
-  /^(?:tsconfig|jsconfig)(?:\.[\w-]+)*\.json$|^(?:vite|vitest|vitest\.workspace|tsdown|tsup|webpack|rollup|esbuild|babel|next|nuxt|svelte|astro|remix|playwright|jest|eslint|postcss|tailwind|drizzle|turbo)\.config\.[cm]?[jt]s$|^(?:\.babelrc|\.swcrc|biome\.jsonc?|requirements(?:[-.][\w-]+)?\.txt)$/i;
+/** Python requirement files: `requirements.txt`, `requirements-dev.txt`. */
+const REQUIREMENTS = /^requirements(?:[-.][\w-]+)?\.txt$/i;
 
-/** Globs for CI, migrations and shared barrels (`globs.ts` syntax). */
-const SENSITIVE_GLOBS = [
-  ".github/workflows/**",
-  ".github/actions/**",
-  ".gitlab-ci.yml",
-  ".circleci/**",
+/** Globs for database migrations and schemas (`globs.ts` syntax). */
+const MIGRATION_GLOBS = [
   "**/migrations/**",
   "**/migration/**",
   "**/drizzle/**",
   "*migration*",
   "*.prisma",
-  "packages/*/src/index.*",
-  "packages/*/index.*",
 ];
 
-/** Whether a change to `path` can break code that doesn't touch it, so it always re-tests. */
-export function isMergeSensitive(path: string): boolean {
+/**
+ * Kinds of files where two changes that Git merges without a conflict can still break each
+ * other, so a PR is tested on top of the other change before it merges:
+ * - `dependencies`: lockfiles, dependency manifests and the files that say how packages install
+ *   (two dependency changes can leave a lockfile that no longer installs);
+ * - `migrations`: database migrations and schemas (two migrations made from the same state).
+ */
+export type ClashGroup = "dependencies" | "migrations";
+
+const CLASH_LABEL: Record<ClashGroup, string> = {
+  dependencies: "dependency files",
+  migrations: "database migrations",
+};
+
+/** "dependency files", "database migrations": how a clash group reads in a note. */
+export function clashLabel(group: ClashGroup): string {
+  return CLASH_LABEL[group];
+}
+
+/** The clash group a file belongs to; null for every other file (tests of migrations included). */
+export function clashGroup(path: string): ClashGroup | null {
   const normalized = path.replace(/\\/g, "/").replace(/^\.\//, "");
   const name = normalized.split("/").at(-1) ?? "";
-  if (ROOT_FILES.has(normalized) || isLockfile(normalized)) return true;
-  if (MANIFESTS.has(name.toLowerCase()) || CONFIG_NAME.test(name)) return true;
-  return SENSITIVE_GLOBS.some((g) => matchesGlob(normalized, g));
+  if (ROOT_FILES.has(normalized) || isLockfile(normalized)) return "dependencies";
+  if (MANIFESTS.has(name.toLowerCase()) || REQUIREMENTS.test(name)) return "dependencies";
+  if (isTestFile(normalized)) return null;
+  return MIGRATION_GLOBS.some((g) => matchesGlob(normalized, g)) ? "migrations" : null;
+}
+
+/** The clash groups a list of changed files touches. */
+export function clashGroups(paths: readonly string[]): Set<ClashGroup> {
+  const groups = new Set<ClashGroup>();
+  for (const path of paths) {
+    const group = clashGroup(path);
+    if (group) groups.add(group);
+  }
+  return groups;
+}
+
+/** The first clash group both sets have; null when they share none. */
+export function sharedClashGroup(
+  a: ReadonlySet<ClashGroup>,
+  b: ReadonlySet<ClashGroup>,
+): ClashGroup | null {
+  for (const group of a) if (b.has(group)) return group;
+  return null;
 }
 
 /** Whether the PR may merge on its own CI, or why it takes the strict path. */
@@ -95,9 +125,13 @@ function some(paths: string[]): string {
 }
 
 /**
- * The fast path's verdict for a queue head that is behind the default branch (`main`: what
+ * The fast path's verdict for a queued PR that is behind the default branch (`main`: what
  * changed there since the PR's merge base). Every other check already passed on the PR's own
- * head. `hold` is the loop's `fastMergeHold`.
+ * head, and GitHub reported no conflicts. `hold` is the loop's `fastMergeHold`.
+ *
+ * GitHub's merge state only sends it down the strict path when it names something a merge
+ * can't get past (`behind`, `blocked`, `draft`, `dirty`). `unstable` and `unknown` lag behind
+ * the checks the factory read itself, so the merge is tried and GitHub's answer decides.
  */
 export function fastMergeVerdict(input: {
   branch: string;
@@ -114,27 +148,19 @@ export function fastMergeVerdict(input: {
       reason: `branch protection requires it to be up to date with ${branch}`,
       protection: true,
     };
-  if (state !== "clean" && state !== "has_hooks")
+  if (state === "blocked" || state === "draft" || state === "dirty")
     return { fast: false, reason: `GitHub reports its merge state as ${state}` };
   const mine = changedPaths(pr);
   if (!main.complete || (pr.changedFiles ?? 0) > pr.files.length)
     return { fast: false, reason: "too many changed files to compare" };
-  const sensitive = mine.filter(isMergeSensitive);
-  if (sensitive.length > 0)
-    return {
-      fast: false,
-      reason: `it changes ${some(sensitive)}, and dependency, build and migration files always re-test`,
-    };
-  const theirs = main.files.filter(isMergeSensitive);
-  if (theirs.length > 0)
-    return {
-      fast: false,
-      reason: `${some(theirs)} changed on ${branch}, and dependency, build and migration files always re-test`,
-    };
-  const changed = new Set(main.files);
-  const overlap = mine.filter((f) => changed.has(f));
-  if (overlap.length > 0) return { fast: false, reason: `overlaps in ${some(overlap)}` };
-  return { fast: true };
+  const group = sharedClashGroup(clashGroups(mine), clashGroups(main.files));
+  if (!group) return { fast: true };
+  const here = mine.filter((f) => clashGroup(f) === group);
+  const there = main.files.filter((f) => clashGroup(f) === group);
+  return {
+    fast: false,
+    reason: `it and ${branch} both changed ${clashLabel(group)} (${some(here)}; on ${branch}: ${some(there)})`,
+  };
 }
 
 /**

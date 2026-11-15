@@ -89,6 +89,11 @@ export interface FactoryOptions {
   autoTick?: boolean;
   /** How long CI may take to start on a new head commit before it counts as never started (default 10 minutes). */
   ciGraceMs?: number;
+  /**
+   * How long the merge queue gives GitHub to work out the next pull request after a merge moved
+   * the default branch, before it reads it again (default 2 s; 0 in tests: no waiting).
+   */
+  settleMs?: number;
   now?: () => Date;
 }
 
@@ -111,6 +116,14 @@ export interface FactoryServiceDeps {
   archiveSession: (sessionId: string) => Promise<unknown>;
   options?: FactoryOptions;
   log?: (message: string) => void;
+}
+
+/** Resolve after `ms` (at once for 0); the timer never keeps the process alive. */
+function wait(ms: number): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms).unref?.();
+  });
 }
 
 /**
@@ -168,6 +181,8 @@ export class FactoryService {
       archiveSessions: (ids) => this.archiver.push(ids),
       slots: new SlotBoard(),
       prFiles: new PrFiles(),
+      upToDateRequired: new Set(),
+      settle: () => wait(deps.options?.settleMs ?? 2_000),
       setKillSwitch: (projectId, on) => this.writeKillSwitch(projectId, on),
       now: deps.options?.now ?? (() => new Date()),
       ciGraceMs: deps.options?.ciGraceMs ?? 10 * 60_000,

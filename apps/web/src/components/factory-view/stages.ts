@@ -40,7 +40,7 @@ export const VIEW_STAGES = [
   {
     id: "merge",
     label: "Merge queue",
-    hint: "Every check passed and auto-merge is on: they merge one at a time, in this order. Pull requests a person merges wait in Needs you.",
+    hint: "Every check passed and auto-merge is on: they merge in this order, seconds apart. Pull requests a person merges wait in Needs you.",
   },
   {
     id: "merged",
