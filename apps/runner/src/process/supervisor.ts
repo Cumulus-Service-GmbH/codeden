@@ -1,7 +1,7 @@
 import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process";
 import { isInside } from "../util/paths";
 import { childEnv } from "./env";
-import { isAlive, killTree, listDescendants } from "./tree";
+import { isAlive, killTree, killTreeAndOrphans, listDescendants } from "./tree";
 
 /** A process the runner started (or adopted, like a pty shell). */
 export interface TrackedProcess {
@@ -19,7 +19,20 @@ export interface RunShellOptions {
   label?: string;
   /** Kill the process tree when this aborts; the result says `cancelled`. */
   signal?: AbortSignal;
+  /**
+   * Once the command's own process exits, also kill whatever it left running (a server or
+   * watcher started in the background), instead of leaving it be.
+   */
+  endTree?: boolean;
 }
+
+/**
+ * How long a command's output may stay open once its process has exited, while something it
+ * started still holds it: then it is closed and the command counts as finished.
+ */
+const OUTPUT_GRACE_MS = 1_000;
+/** How long after a kill the command may take to exit before it counts as finished anyway. */
+const KILLED_GRACE_MS = 10_000;
 
 export interface RunShellResult {
   exitCode: number | null;
@@ -68,7 +81,13 @@ export class ProcessSupervisor {
     return child;
   }
 
-  /** Run a shell command line, streaming combined output. Never rejects for exit codes. */
+  /**
+   * Run a shell command line, streaming combined output. Never rejects for exit codes. It
+   * finishes when its output closes, or shortly after its own process exits while something it
+   * started keeps the output open (`OUTPUT_GRACE_MS`), so a process left in the background can't
+   * hold it up; with `endTree`, only once what it left running is killed. The timeout and
+   * `signal` kill the whole tree, also once the shell has exited.
+   */
   runShell(command: string, opts: RunShellOptions): Promise<RunShellResult> {
     return new Promise((resolveResult) => {
       const child = this.spawn(command, [], {
@@ -80,34 +99,75 @@ export class ProcessSupervisor {
       });
       let timedOut = false;
       let cancelled = false;
+      let exited = false;
+      let closed = false;
+      let exitCode: number | null = null;
+      /** `endTree` after the shell exited: the run ends once it is done. */
+      let ending: Promise<void> | undefined;
+      let settled = false;
+      let grace: NodeJS.Timeout | undefined;
+      const settle = () => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        clearTimeout(grace);
+        opts.signal?.removeEventListener("abort", onAbort);
+        resolveResult({ exitCode, timedOut, ...(cancelled ? { cancelled } : {}) });
+      };
+      /** Stop waiting for the output after `ms`, reading what has already arrived first. */
+      const closeAfter = (ms: number) => {
+        if (settled) return;
+        clearTimeout(grace);
+        grace = setTimeout(
+          () =>
+            setImmediate(() => {
+              if (settled) return;
+              child.stdout?.destroy();
+              child.stderr?.destroy();
+              settle();
+            }),
+          ms,
+        );
+      };
+      // The shell, what runs under it, and what lost its parent there (`killTreeAndOrphans`).
+      const endTree = () =>
+        child.pid === undefined
+          ? Promise.resolve()
+          : killTreeAndOrphans(child.pid, 2_000).catch(() => undefined);
+      const kill = () => {
+        void endTree().then(() => closeAfter(exited ? OUTPUT_GRACE_MS : KILLED_GRACE_MS));
+      };
       const timer = setTimeout(
         () => {
           timedOut = true;
-          if (child.pid !== undefined) void killTree(child.pid);
+          kill();
         },
         opts.timeoutMs ?? 30 * 60_000,
       );
       const onAbort = () => {
         cancelled = true;
-        if (child.pid !== undefined) void killTree(child.pid);
+        kill();
       };
       if (opts.signal?.aborted) onAbort();
       else opts.signal?.addEventListener("abort", onAbort, { once: true });
-      const done = () => {
-        clearTimeout(timer);
-        opts.signal?.removeEventListener("abort", onAbort);
-      };
       const onData = (data: Buffer) => opts.onOutput?.(data.toString("utf8"));
       child.stdout?.on("data", onData);
       child.stderr?.on("data", onData);
       child.once("error", (error) => {
-        done();
         opts.onOutput?.(`${error.message}\n`);
-        resolveResult({ exitCode: null, timedOut, ...(cancelled ? { cancelled } : {}) });
+        settle();
+      });
+      child.once("exit", (code) => {
+        exited = true;
+        exitCode = code;
+        if (!opts.endTree) return closeAfter(OUTPUT_GRACE_MS);
+        ending = endTree();
+        void ending.then(() => (closed ? settle() : closeAfter(OUTPUT_GRACE_MS)));
       });
       child.once("close", (code) => {
-        done();
-        resolveResult({ exitCode: code, timedOut, ...(cancelled ? { cancelled } : {}) });
+        closed = true;
+        exitCode = code ?? exitCode;
+        if (!ending) settle();
       });
     });
   }
