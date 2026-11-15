@@ -2,7 +2,7 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { docsOnly } from "../src/services/factory/checks";
-import { isMergeSensitive } from "../src/services/factory/fast-merge";
+import { clashGroup } from "../src/services/factory/fast-merge";
 import { isDocFile, isLicenseFile, isNonCodeFile } from "../src/services/factory/policy";
 import { VISION_TEMPLATE } from "../src/services/factory/vision";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
@@ -260,7 +260,7 @@ describe("fast merge: dependency manifests and lock files always re-test", () =>
     "go.sum",
     "services/api/go.mod",
     "Cargo.lock",
-  ])("treats %s as merge-sensitive", (path) => {
-    expect(isMergeSensitive(path)).toBe(true);
+  ])("treats %s as a dependency file for the merge queue", (path) => {
+    expect(clashGroup(path)).toBe("dependencies");
   });
 });

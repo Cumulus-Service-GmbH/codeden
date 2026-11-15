@@ -18,8 +18,8 @@ import { briefLessons } from "./lessons";
 import { openPrFiles, scheduleOrder } from "./overlap";
 import { advanceOwned } from "./owned";
 import { budgetExceeded, localDay, mayBuild, queueOrder } from "./policy";
-import { advanceBuilding, advanceWatching } from "./progress";
-import { advanceQueue } from "./queue";
+import { advanceBuilding, advanceWatching, inMergeOrder } from "./progress";
+import { advanceQueue } from "./queue-pass";
 import { closeReplacedPrs } from "./rebuild";
 import { recoverInfraFailures } from "./recover";
 import { reviseAfterReverts } from "./revert";
@@ -101,10 +101,11 @@ export async function runTick(
   // Items already in flight move on even while paused (merges stay blocked, reverts excepted).
   // Watch merges first, then builds, then verification, so a PR found while building is
   // verified in the same step and a fresh merge is watched from the next one. Then the merge
-  // queue takes one step (at most one merge per tick), and the PRs of failed and escalated
+  // queue merges every PR that is ready (`queue-pass.ts`), and the PRs of failed and escalated
   // items, which wait for a person, are kept free of conflicts.
   for (const stage of ["watching", "building", "verifying", ...OWNED_STAGES] as const) {
-    for (const item of ctx.store.items(projectId, [stage])) {
+    const inStage = ctx.store.items(projectId, [stage]);
+    for (const item of stage === "watching" ? inMergeOrder(inStage) : inStage) {
       loop = await step(ctx, item, loop, () => {
         if (stage === "building") return advanceBuilding(ctx, project, loop, item);
         if (stage === "verifying") return advanceVerifying(ctx, project, loop, item);

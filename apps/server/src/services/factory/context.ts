@@ -60,6 +60,16 @@ export interface FactoryContext {
   slots: SlotBoard;
   /** Files changed by the factory's open PRs as last read, for overlap-aware scheduling. */
   prFiles: PrFiles;
+  /**
+   * Projects whose branch protection wants pull requests up to date before they merge, as the
+   * merge queue last saw (in memory): there every PR is re-tested, one at a time (`queue.ts`).
+   */
+  upToDateRequired: Set<string>;
+  /**
+   * Give GitHub a moment to work out the next queued PR against a default branch that just
+   * moved (the merge before it), so merges follow each other within seconds (`queue.ts`).
+   */
+  settle: () => Promise<void>;
   /** Turn a project's kill switch on or off (a `project.updated` event); no-op when it is already. */
   setKillSwitch: (projectId: string, on: boolean) => void;
   now: () => Date;

@@ -3,10 +3,11 @@ import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
 import { APPROVE, factorySteps } from "./support/factory-steps";
 
 /**
- * The merge queue (§10.1, Merge): with auto-merge on, approved PRs merge one at a time, oldest
- * approved first. The head of the queue is brought up to date with main through GitHub's
- * update-branch (no agent) and merges once CI passes on the new head. A conflict an agent
- * resolves after the approval is re-checked by the reviewer, the resolution only.
+ * The merge queue (§10.1, Merge): with auto-merge on, approved PRs merge oldest approved first.
+ * Under the strict policy each one is brought up to date with main through GitHub's
+ * update-branch (no agent) and merges once CI passes on the new head, one at a time. A conflict
+ * an agent resolves after the approval is re-checked by the reviewer, the resolution only.
+ * (`factory-fast-merge.test.ts` covers the default policy, where ready PRs merge together.)
  */
 
 let env: FactoryEnv;
@@ -23,8 +24,8 @@ function pause() {
 }
 
 describe("the merge queue", () => {
-  it("merges approved PRs one at a time, oldest approved first, updating the next with main", async () => {
-    env = createFactoryEnv();
+  it("re-tests approved PRs one at a time under the strict policy, oldest approved first", async () => {
+    env = createFactoryEnv({ limits: { mergePolicy: "strict" } });
     await enable();
     const a = await verifying("success", "Add a counter", 3);
     const b = await verifying("success", "Add a timer", 4);
@@ -41,20 +42,17 @@ describe("the merge queue", () => {
       [b.id, "queued", 2],
     ]);
 
+    // The oldest approval merges. Main moved, so B is behind: GitHub merges main into it (no
+    // agent), its head pinned.
+    const before = b.pr.headSha as string;
     env.factory.resume(env.project.id);
     await tick();
-    // One merge per tick, the oldest approval first.
     expect(env.gh.merges.map((m) => m.number)).toEqual([a.pr.ref.number]);
     expect(item(b.id).stage).toBe("verifying");
-
-    // Main moved, so B is behind: GitHub merges main into it (no agent), its head pinned.
-    const before = b.pr.headSha as string;
-    await tick();
     expect(env.gh.updates).toEqual([{ number: b.pr.ref.number, expectedHeadSha: before }]);
     expect(await prEntry(b.id)).toMatchObject({ state: "updating", queuePosition: 1 });
-    expect(env.gh.merges).toHaveLength(1);
 
-    // CI runs on the new head: it waits at the head of the queue until CI passes.
+    // CI runs on the new head: it waits in the queue until CI passes.
     await tick();
     expect(await prEntry(b.id)).toMatchObject({ state: "waiting_ci", queuePosition: 1 });
     expect(env.gh.merges).toHaveLength(1);

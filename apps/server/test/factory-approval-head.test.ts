@@ -87,10 +87,10 @@ describe("an approval covers one head commit", () => {
   });
 
   it("keeps the approval when the merge queue only brings the PR up to date with main", async () => {
-    env = createFactoryEnv();
+    // Under the strict policy the queue brings a PR that is behind up to date (update-branch).
+    env = createFactoryEnv({ limits: { mergePolicy: "strict" } });
     await enable();
     const { id, pr } = await verifying("pending");
-    // Main changed a file the PR changes too: the queue takes the strict path (update-branch).
     env.gh.pushMain(["src/counter.ts"]);
     review(id);
     await tick();

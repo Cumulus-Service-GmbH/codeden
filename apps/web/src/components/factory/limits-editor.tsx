@@ -77,13 +77,13 @@ const SELECT =
 
 /** What each merge policy does with a queued pull request that is behind the default branch. */
 const MERGE_POLICY_HELP: Record<MergePolicy, string> = {
-  fast: "A pull request behind the default branch merges on its own green CI when the new commits there touch none of its files. Overlaps, dependency, build and migration files, and a red default branch re-test first.",
+  fast: "A pull request behind the default branch merges on its own green CI as long as GitHub reports no conflict. It is re-tested first only when it and the new commits both changed dependency files or both changed migrations, or while the default branch is red.",
   strict:
-    "A pull request behind the default branch is always brought up to date and waits for CI to pass again before it merges.",
+    "A pull request behind the default branch is always brought up to date and waits for CI to pass again before it merges, one pull request at a time.",
 };
 
 const MERGE_POLICY_HINT =
-  "Re-testing every pull request after each merge costs a full CI run per merge. Fast skips it when nothing the pull request changed moved; CI on the default branch is still watched after every merge, and a merge that breaks it is reverted.";
+  "Re-testing every pull request after each merge costs a full CI run per merge, so pull requests wait minutes instead of seconds. Fast skips it: GitHub reports conflicts, CI on the default branch is still watched after every merge, and a merge that breaks it is reverted.";
 
 /** True when the limits carry the daily budget factory modes require. */
 export function hasBudget(limits: FactoryLimits): boolean {
@@ -146,7 +146,7 @@ export function LimitsEditor({
             value={limits.mergePolicy}
             onChange={(e) => onChange({ ...limits, mergePolicy: e.target.value as MergePolicy })}
           >
-            <option value="fast">Fast: merge on its own CI when nothing it changed moved</option>
+            <option value="fast">Fast: merge on its own CI unless GitHub reports a conflict</option>
             <option value="strict">Strict: always re-test against the default branch</option>
           </select>
         </Field>
