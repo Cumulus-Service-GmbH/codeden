@@ -1,16 +1,20 @@
 import { type RefObject, useEffect, useMemo, useRef, useState } from "react";
-import type { AgentInputs } from "./agents";
+import type { AgentInputs } from "../scene/agents";
+import { type Scene, sceneOf } from "../scene/scene-model";
+import type { Seating } from "../scene/seating";
 import { drawScene } from "./draw";
-import { SCENE_H, SCENE_W } from "./floor";
+import { SCENE_H, SCENE_W, STATIONS } from "./floor";
 import { FloorMotion, stillFigures } from "./motion";
-import { type Scene, sceneEvents, sceneOf } from "./scene-model";
-import type { Seating } from "./seating";
+import { sceneEvents } from "./transitions";
 
 /**
  * About 12 frames a second while someone walks or a moment plays; the idle animations (typing,
  * bubbles, the belt) only change every other frame, so those frames aren't painted at all.
  */
 const FRAME_MS = 1000 / 12;
+
+/** Pixel mode's floor plan is fixed: past its seats and queues, agents count toward "+N". */
+const PIXEL_PLAN = () => STATIONS;
 
 /**
  * The scene for the live state, its seats following the previous scene's, so agents keep their
@@ -20,7 +24,7 @@ export function useFloorScene(inputs: AgentInputs): Scene {
   const seating = useRef<Seating | null>(null);
   const { f, pipeline, sessions, pmSessionId } = inputs;
   return useMemo(() => {
-    const scene = sceneOf({ f, pipeline, sessions, pmSessionId }, seating.current);
+    const scene = sceneOf({ f, pipeline, sessions, pmSessionId }, seating.current, PIXEL_PLAN);
     seating.current = scene.seating;
     return scene;
   }, [f, pipeline, sessions, pmSessionId]);

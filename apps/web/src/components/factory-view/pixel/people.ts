@@ -1,4 +1,4 @@
-import type { AgentRole } from "./agents";
+import type { AgentRole } from "../scene/agents";
 import { PALETTE, paint } from "./sprites";
 
 /**

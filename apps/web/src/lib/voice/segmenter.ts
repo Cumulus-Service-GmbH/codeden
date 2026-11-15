@@ -4,9 +4,10 @@
  * synchronous: push mono samples in, get finished segments back.
  *
  * Speech is told from silence by the energy (RMS) of each short frame, against a threshold that
- * follows the room's noise floor. A segment keeps a short lead-in before its first speech and a
- * short tail after its last, so words aren't clipped. One with too little speech is dropped, so
- * silence and clicks never reach Whisper, which tends to invent text for silence.
+ * follows the room's noise floor, seeded from the first audio so a noisy room isn't taken for
+ * speech while the floor learns it. A segment keeps a short lead-in before its first speech and
+ * a short tail after its last, so words aren't clipped. One with too little speech is dropped,
+ * so silence and clicks never reach Whisper, which tends to invent text for silence.
  */
 
 export interface SegmenterOptions {
@@ -44,6 +45,17 @@ const NOISE_RATIO = 2.5;
 const NOISE_RISE_MS = 10_000;
 /** How far back a forced cut looks for the quietest frame, in ms. */
 const CUT_SEARCH_MS = 2_000;
+/**
+ * The first audio, in ms, seeds the noise floor with its median energy. The floor would
+ * otherwise rise from zero for seconds, and a room louder than `minThreshold` would count as
+ * speech until it caught up.
+ */
+const SEED_MS = 200;
+/**
+ * The seed is at most this, so speech already under way when the microphone opens is still
+ * heard (its threshold is at most 2.5 x 0.02 = 0.05 RMS). A louder room is learned from there.
+ */
+const SEED_MAX = 0.02;
 
 export interface Segmenter {
   /** Add samples; returns the segments they finished (usually none). */
@@ -94,11 +106,14 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
   const maxFrames = Math.max(frames(o.maxSegmentMs), pauseFrames + 1);
   const cutSearchFrames = Math.min(frames(CUT_SEARCH_MS), maxFrames - 1);
   const noiseRise = Math.min(1, o.frameMs / NOISE_RISE_MS);
+  const seedFrames = frames(SEED_MS);
 
   let partial = new Float32Array(frameLength);
   let partialLength = 0;
   let noise = 0;
   let level = 0;
+  /** The first frames, held until they seed the noise floor; null once it is seeded. */
+  let seed: Omit<Frame, "speech">[] | null = [];
   /** Recent silent frames while no segment is open: the next segment's lead-in. */
   let leadIn: Frame[] = [];
   /** The open segment; empty when none is open. */
@@ -127,13 +142,12 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
     return speech >= minSpeechFrames ? concat(done) : null;
   };
 
-  const frame = (samples: Float32Array): Float32Array | null => {
-    const r = rms(samples);
-    level = Math.min(1, r);
+  /** Judge one frame against the floor; returns the segment it finished, if any. */
+  const step = (samples: Float32Array, r: number, learn: boolean): Float32Array | null => {
     const speech = r > Math.max(o.minThreshold, noise * NOISE_RATIO);
     // The floor drops to quiet frames at once and rises slowly, so it follows the room (the
     // quiet between words), not the voice.
-    noise = r < noise ? noise + (r - noise) * 0.5 : noise + (r - noise) * noiseRise;
+    if (learn) noise = r < noise ? noise + (r - noise) * 0.5 : noise + (r - noise) * noiseRise;
     const f: Frame = { samples, speech, rms: r };
     if (open.length === 0) {
       if (!speech) {
@@ -150,6 +164,32 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
     return null;
   };
 
+  /** Seed the floor from the held frames, then judge them against it. */
+  const seedFloor = (out: Float32Array[]) => {
+    const held = seed ?? [];
+    seed = null;
+    const sorted = held.map((f) => f.rms).sort((a, b) => a - b);
+    noise = Math.min(SEED_MAX, sorted[Math.floor(sorted.length / 2)] ?? 0);
+    // They are the seed, so they don't move the floor again.
+    for (const f of held) {
+      const segment = step(f.samples, f.rms, false);
+      if (segment) out.push(segment);
+    }
+  };
+
+  const frame = (samples: Float32Array, out: Float32Array[]) => {
+    const r = rms(samples);
+    level = Math.min(1, r);
+    // A microphone still starting up sends exact zeros: silence that says nothing of the room.
+    if (seed && (seed.length > 0 || r > 0)) {
+      seed.push({ samples, rms: r });
+      if (seed.length >= seedFrames) seedFloor(out);
+      return;
+    }
+    const segment = step(samples, r, true);
+    if (segment) out.push(segment);
+  };
+
   return {
     get level() {
       return level;
@@ -163,20 +203,18 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
         partialLength += take;
         i += take;
         if (partialLength === frameLength) {
-          const segment = frame(partial);
+          frame(partial, out);
           partial = new Float32Array(frameLength);
           partialLength = 0;
-          if (segment) out.push(segment);
         }
       }
       return out;
     },
     flush() {
       const out: Float32Array[] = [];
-      if (partialLength > 0 && open.length > 0) {
-        const segment = frame(partial.slice(0, partialLength));
-        if (segment) out.push(segment);
-      }
+      // Stopped before the floor was seeded: seed it from what was heard.
+      if (seed) seedFloor(out);
+      if (partialLength > 0 && open.length > 0) frame(partial.slice(0, partialLength), out);
       partial = new Float32Array(frameLength);
       partialLength = 0;
       if (open.length > 0) {

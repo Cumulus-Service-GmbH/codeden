@@ -7,6 +7,7 @@ import type {
   GitPushRequest,
   GitPushResponse,
   GitStatusResponse,
+  Project,
   RestoreFilesRequest,
   RestoreFilesResponse,
   Session,
@@ -14,8 +15,9 @@ import type {
 import { asc, eq } from "drizzle-orm";
 import type { Db } from "../../db/client";
 import { checkpoints } from "../../db/schema";
-import { badRequest, conflict, notFound } from "../errors";
+import { badRequest, conflict, notFound, type ServiceError } from "../errors";
 import type { GitBroker } from "../git-broker";
+import { sameRealPath } from "../projects/detect";
 import type { ProjectService } from "../projects/project-service";
 import { type RunnerDeps, type RunnerPort, runnerForSession, toServiceError } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
@@ -48,6 +50,36 @@ export class WorkbenchService {
   /** The runner that hosts the session's worktree. */
   private runner(sessionId: string): RunnerPort {
     return runnerForSession(this.deps, sessionId);
+  }
+
+  /**
+   * Why a session has no checkpoints. The runner writes none in a folder that isn't a git
+   * repository (§9), so a session in the folder of such a project (`Project.isGitRepo`) never
+   * gets any: 409 `not_a_repo`, as its git requests answer. Otherwise they are still to come
+   * (409 `no_checkpoints`). A worktree or a sandbox's clone is a git repository whatever the
+   * project folder is.
+   */
+  private noCheckpoints(session: Session): ServiceError {
+    const project = this.inProjectFolder(session);
+    if (project && !project.isGitRepo) {
+      return conflict(
+        `${workdir(session)} is not a git repository, so CodeDen keeps no checkpoints of this session`,
+        "not_a_repo",
+      );
+    }
+    return conflict("This session has no checkpoints yet", "no_checkpoints");
+  }
+
+  /** The session's project when the session runs in the project folder itself. */
+  private inProjectFolder(session: Session): Project | null {
+    if (session.worktreePath || !session.projectId || !this.deps.projects) return null;
+    let project: Project;
+    try {
+      project = this.deps.projects.get(session.projectId);
+    } catch {
+      return null; // a removed project
+    }
+    return sameRealPath(session.cwd, project.path) ? project : null;
   }
 
   checkpoints(sessionId: string): Checkpoint[] {
@@ -86,9 +118,7 @@ export class WorkbenchService {
     if (scope.kind === "compare") {
       return { scope, turns, ...(await this.compare(session, cwd, scope.sessionId)) };
     }
-    if (all.length === 0) {
-      throw conflict("This session has no checkpoints yet", "no_checkpoints");
-    }
+    if (all.length === 0) throw this.noCheckpoints(session);
     let from: number;
     let to: number | undefined;
     if (scope.kind === "session") {

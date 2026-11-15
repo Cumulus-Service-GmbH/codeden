@@ -1,3 +1,6 @@
+import type { BayCrate } from "../scene/repair-bay";
+import type { Scene } from "../scene/scene-model";
+import type { StationId } from "../scene/stations";
 import { drawAgents } from "./draw-agents";
 import { fill, floorLayer } from "./draw-floor";
 import {
@@ -13,14 +16,11 @@ import {
   SCENE_W,
   SHIP_DOOR,
   STATIONS,
-  type StationId,
   TILE,
   WALL_H,
 } from "./floor";
 import { pixelText, shadowText, textWidth } from "./font";
 import type { Figure, Fx } from "./motion";
-import type { BayCrate } from "./repair-bay";
-import type { Scene } from "./scene-model";
 import { type GlyphName, glyph, INK, prop } from "./sprites";
 
 /**

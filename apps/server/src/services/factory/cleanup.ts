@@ -171,7 +171,8 @@ const DONE_STAGES: FactoryItemStage[] = ["merged", "rejected", "reverted"];
  * tick after the upgrade, every one whose item has moved on is archived: the item finished, or
  * a later session became its current builder or reviewer. A failed session that is still the
  * current builder or reviewer of an item in play (a failed item included) stays, since it needs
- * attention. Recorded on the loop (`failedSessionsSweptAt`), so it runs once.
+ * attention. Recorded on the loop (`failedSessionsSweptAt`), so it runs once: it reads every
+ * failed or stopped session not archived yet, however many sessions came after it.
  */
 export function sweepFailedSessions(
   ctx: FactoryContext,
@@ -180,7 +181,7 @@ export function sweepFailedSessions(
 ): FactoryLoop {
   if (loop.failedSessionsSweptAt) return loop;
   const failed = ctx.repo
-    .list({ projectId, role: "agent", status: ["failed", "stopped"] })
+    .unarchivedAgents(projectId, ["failed", "stopped"])
     .filter((s) => archivable(s) && endedInFailure(ctx, s));
   const archive = new Set<string>();
   if (failed.length > 0) {
