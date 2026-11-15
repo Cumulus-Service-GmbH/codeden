@@ -504,19 +504,63 @@ export type ResolveInboxRequest = z.infer<typeof ResolveInboxRequest>;
 export const RetryInboxResponse = z.object({ item: InboxItem });
 export type RetryInboxResponse = z.infer<typeof RetryInboxResponse>;
 
+/** Most items one bulk dismiss or restore covers (ids sent, or open items a filter matches). */
+export const INBOX_BULK_MAX = 1000;
+
 /**
- * `POST /api/inbox/dismiss`: dismiss several items at once (the inbox's "Dismiss all" for
- * failed runs). Approvals and questions are skipped: they need an answer. Ids that aren't open
- * are ignored.
+ * Which open items a bulk dismiss covers when it isn't given ids: the list's own filters
+ * (`ListInboxQuery`, open items only), narrowed to some kinds (an inbox tab's groups).
  */
-export const DismissInboxRequest = z.object({
-  ids: z.array(Id).min(1).max(1000),
-  note: z.string().max(2000).optional(),
+export const InboxDismissFilter = z.object({
+  projectId: Id.optional(),
+  sessionId: Id.optional(),
+  kinds: z.array(InboxItemKind).min(1).optional(),
 });
+export type InboxDismissFilter = z.infer<typeof InboxDismissFilter>;
+
+/**
+ * `POST /api/inbox/dismiss`: dismiss several items in one request (the inbox's "Dismiss N" for
+ * the current view, and a group's "Dismiss all"). Give either `ids` (at most
+ * {@link INBOX_BULK_MAX}) or a `filter`, not both. Items that wait on the user
+ * (`inboxWaitsOnYou`) are never dismissed this way, and ids that aren't open are ignored. Each
+ * dismissed item's resolution is `{ bulk: true, note? }`, which `POST /api/inbox/restore` undoes.
+ */
+export const DismissInboxRequest = z
+  .object({
+    ids: z.array(Id).min(1).max(INBOX_BULK_MAX).optional(),
+    filter: InboxDismissFilter.optional(),
+    note: z.string().max(2000).optional(),
+  })
+  .refine((r) => (r.ids === undefined) !== (r.filter === undefined), {
+    message: "Give either ids or a filter",
+  });
 export type DismissInboxRequest = z.infer<typeof DismissInboxRequest>;
 
-export const DismissInboxResponse = z.object({ dismissed: z.int().nonnegative() });
+/**
+ * What a bulk dismiss did: how many items it dismissed and which (for Undo), and how many open
+ * items in its scope it left because they wait on the user.
+ */
+export const DismissInboxResponse = z.object({
+  dismissed: z.int().nonnegative(),
+  ids: z.array(Id).default([]),
+  kept: z.int().nonnegative().default(0),
+});
 export type DismissInboxResponse = z.infer<typeof DismissInboxResponse>;
+
+/**
+ * `POST /api/inbox/restore`: undo a bulk dismiss. Reopens the given items that a bulk dismiss
+ * closed and that are still dismissed; anything since re-raised, settled or dismissed by hand
+ * is left as it is.
+ */
+export const RestoreInboxRequest = z.object({ ids: z.array(Id).min(1).max(INBOX_BULK_MAX) });
+export type RestoreInboxRequest = z.infer<typeof RestoreInboxRequest>;
+
+/** How many items a restore reopened, and which. */
+export const RestoreInboxResponse = z.object({
+  restored: z.int().nonnegative(),
+  ids: z.array(Id),
+});
+export type RestoreInboxResponse = z.infer<typeof RestoreInboxResponse>;
 
 /** `GET /api/inbox/counts`: the sidebar badge numbers. */
 export const InboxCounts = z.object({

@@ -12,12 +12,18 @@ import {
   HANDOFF_NOTE_MAX,
   HandoffSessionRequest,
   HandoffSessionResponse,
+  INBOX_BULK_MAX,
+  type InboxItem,
+  type InboxItemKind,
+  inboxWaitsOnYou,
   ListSessionsQuery,
   LoginCommandResponse,
   LoginToolId,
   REVIEW_FOCUS_MAX,
   RefreshModelsResponse,
   ReorderProjectsRequest,
+  RestoreInboxRequest,
+  RestoreInboxResponse,
   RetryInboxResponse,
   ReviewSessionRequest,
   ReviewSessionResponse,
@@ -59,7 +65,78 @@ describe("api schemas", () => {
     expect(res.item.attempts).toBe(1);
     expect(roundTrip(DismissInboxRequest, { ids: ["a", "b"] }).ids).toEqual(["a", "b"]);
     expect(DismissInboxRequest.safeParse({ ids: [] }).success).toBe(false);
-    expect(roundTrip(DismissInboxResponse, { dismissed: 2 }).dismissed).toBe(2);
+    // An older server's answer still reads: no ids, nothing kept.
+    expect(roundTrip(DismissInboxResponse, { dismissed: 2 })).toEqual({
+      dismissed: 2,
+      ids: [],
+      kept: 0,
+    });
+  });
+
+  it("takes ids or a filter for a bulk dismiss, and ids for its undo (#407)", () => {
+    const byFilter = roundTrip(DismissInboxRequest, {
+      filter: { projectId: "p1", kinds: ["run_failed", "message"] },
+      note: "clean-up",
+    });
+    expect(byFilter.filter?.kinds).toEqual(["run_failed", "message"]);
+    expect(roundTrip(DismissInboxRequest, { filter: {} }).filter).toEqual({});
+    // Exactly one of the two.
+    expect(DismissInboxRequest.safeParse({}).success).toBe(false);
+    expect(DismissInboxRequest.safeParse({ ids: ["a"], filter: {} }).success).toBe(false);
+    expect(DismissInboxRequest.safeParse({ filter: { kinds: [] } }).success).toBe(false);
+    expect(DismissInboxRequest.safeParse({ filter: { kinds: ["nope"] } }).success).toBe(false);
+    // The cap.
+    const ids = (n: number) => Array.from({ length: n }, (_, i) => `inbox:${i}`);
+    expect(DismissInboxRequest.safeParse({ ids: ids(INBOX_BULK_MAX) }).success).toBe(true);
+    expect(DismissInboxRequest.safeParse({ ids: ids(INBOX_BULK_MAX + 1) }).success).toBe(false);
+
+    const res = roundTrip(DismissInboxResponse, { dismissed: 2, ids: ["a", "b"], kept: 3 });
+    expect(res).toEqual({ dismissed: 2, ids: ["a", "b"], kept: 3 });
+
+    expect(roundTrip(RestoreInboxRequest, { ids: ["a", "b"] }).ids).toEqual(["a", "b"]);
+    expect(RestoreInboxRequest.safeParse({ ids: [] }).success).toBe(false);
+    expect(RestoreInboxRequest.safeParse({ ids: ids(INBOX_BULK_MAX + 1) }).success).toBe(false);
+    expect(roundTrip(RestoreInboxResponse, { restored: 1, ids: ["a"] })).toEqual({
+      restored: 1,
+      ids: ["a"],
+    });
+  });
+
+  it("holds back from a bulk dismiss only the items that wait on the user (#407)", () => {
+    const item = (kind: InboxItemKind, extra: Partial<InboxItem> = {}) => ({
+      ...sampleInboxItem,
+      kind,
+      priority: "normal" as const,
+      notify: "factory" as const,
+      ...extra,
+    });
+    for (const kind of [
+      "question",
+      "approval",
+      "spec_approval",
+      "setup_change",
+      "conflict",
+      "triage",
+    ] as const) {
+      expect(inboxWaitsOnYou(item(kind)), kind).toBe(true);
+    }
+    for (const kind of [
+      "pr_review",
+      "run_failed",
+      "message",
+      "automation_result",
+      "spot_check",
+      "cleanup_failed",
+    ] as const) {
+      expect(inboxWaitsOnYou(item(kind)), kind).toBe(false);
+      expect(inboxWaitsOnYou(item(kind, { notify: "needs_you" })), kind).toBe(false);
+    }
+    // High priority for a person: a regression, a paused loop, a decision flagged needsHuman.
+    expect(inboxWaitsOnYou(item("run_failed", { priority: "high", notify: "failure" }))).toBe(true);
+    expect(inboxWaitsOnYou(item("message", { priority: "high", notify: "needs_you" }))).toBe(true);
+    // High priority but the factory's own activity, or low priority for a person: notices.
+    expect(inboxWaitsOnYou(item("message", { priority: "high", notify: "factory" }))).toBe(false);
+    expect(inboxWaitsOnYou(item("message", { priority: "low", notify: "needs_you" }))).toBe(false);
   });
 
   it("names the open conflict a start replaces", () => {

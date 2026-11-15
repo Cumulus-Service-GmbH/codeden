@@ -24,6 +24,7 @@ import {
   RemoteImageGrant,
   ReorderProjectsResponse,
   RestoreFilesResponse,
+  RestoreInboxResponse,
   RetryInboxResponse,
   ReviewSessionResponse,
   remoteImagePath,
@@ -171,8 +172,8 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
       post(`/inbox/${enc(id)}/resolve`, resolution, (v) => InboxItem.parse(v)),
     retryInbox: (id) =>
       post(`/inbox/${enc(id)}/retry`, undefined, (v) => RetryInboxResponse.parse(v).item),
-    dismissInbox: (ids) =>
-      post("/inbox/dismiss", { ids }, (v) => DismissInboxResponse.parse(v).dismissed),
+    dismissInbox: (ids) => post("/inbox/dismiss", { ids }, (v) => DismissInboxResponse.parse(v)),
+    restoreInbox: (ids) => post("/inbox/restore", { ids }, (v) => RestoreInboxResponse.parse(v)),
 
     createProject: (input) => post("/projects", input, (v) => CreateProjectResponse.parse(v)),
     updateProject: (id, patch) =>

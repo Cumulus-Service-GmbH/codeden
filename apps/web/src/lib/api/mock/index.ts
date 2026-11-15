@@ -17,6 +17,7 @@ import { startFactoryDemo } from "./factory-demo";
 import { mockFeatureApis } from "./feature-apis";
 import { makeSession } from "./fixtures/helpers";
 import { setupChecks } from "./fixtures/ops";
+import { mockInboxBulkApi } from "./inbox-bulk";
 import { type Script, scriptedTurn, uid } from "./live";
 import { mockOrchestration } from "./orchestration";
 import { mockProjectApi } from "./projects";
@@ -427,18 +428,7 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
       }
       return client.resolveInbox(itemId, { status: "resolved", note: "retry" });
     },
-    async dismissInbox(itemIds) {
-      let dismissed = 0;
-      for (const id of itemIds) {
-        const item = world.snapshot.inbox.find((i) => i.id === id);
-        if (item?.status !== "open" || item.kind === "approval" || item.kind === "question")
-          continue;
-        await client.resolveInbox(id, { status: "dismissed" });
-        dismissed++;
-      }
-      return dismissed;
-    },
-
+    ...mockInboxBulkApi(world),
     ...mockProjectApi(world),
     automations: mockAutomationsApi(world),
     factory: mockFactoryApi(world),

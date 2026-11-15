@@ -99,6 +99,33 @@ export function inboxAttempts(item: Pick<InboxItem, "attempts">): number {
 }
 
 /**
+ * Kinds that ask the user for an answer or a decision before work goes on: approvals, questions
+ * (an MCP server's form is a question too), factory specs, changed setup commands, start
+ * conflicts and triage decisions.
+ */
+const ANSWER_KINDS: ReadonlySet<InboxItemKind> = new Set([
+  "question",
+  "approval",
+  "spec_approval",
+  "setup_change",
+  "conflict",
+  "triage",
+]);
+
+/**
+ * The item waits on the user, so the inbox's bulk dismiss (`POST /api/inbox/dismiss`) never
+ * touches it; it can still be dismissed one at a time. True for the kinds that need an answer,
+ * and for high-priority items a person has to act on (`notify` `needs_you` or `failure`): a
+ * regression or a revert that can't merge, a paused factory loop, stuck work, a factory decision
+ * flagged `needsHuman`, an escalated pull request, a budget or usage limit passed. Everything
+ * else (ready-for-review notices, failed runs, factory decisions, digests, results) is a notice.
+ */
+export function inboxWaitsOnYou(item: Pick<InboxItem, "kind" | "priority" | "notify">): boolean {
+  if (ANSWER_KINDS.has(item.kind)) return true;
+  return item.priority === "high" && (item.notify === "needs_you" || item.notify === "failure");
+}
+
+/**
  * The resolution of an item CodeDen closed by itself, never a person: a `run_failed` item the
  * factory handles (`factory`: it restarts the work, on another provider when this one can't
  * run), or one whose work moved on (`codeden`: the session ran again, another session of the same

@@ -265,7 +265,6 @@ export const inboxItems: InboxItem[] = [
   inbox({
     id: "ib-failed",
     kind: "run_failed",
-    priority: "high",
     notify: "failure",
     title: "Dependency updates failed",
     body: "pnpm install hit a peer conflict: @tanstack/react-query@6 needs react@^19.2.",

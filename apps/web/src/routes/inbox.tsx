@@ -1,15 +1,15 @@
 import type { InboxItem } from "@codeden/contracts";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, CheckCheck, Inbox } from "lucide-react";
 import { useEffect, useState } from "react";
-import { toast } from "sonner";
 import { EmptyState, SectionLabel } from "@/components/common/bits";
+import { DismissView, useBulkDismiss } from "@/components/inbox/bulk-dismiss";
 import { FOCUSED_ENTRY, InboxEntry, inboxEntryId } from "@/components/inbox/inbox-entry";
 import { ConflictCard } from "@/components/project/conflict-card";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useClient } from "@/lib/api";
-import { groupInbox, type InboxFilter, inboxCounts } from "@/lib/inbox";
+import { groupInbox, type InboxFilter, inboxCounts, splitForDismiss } from "@/lib/inbox";
 import { useSnapshot } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { PageHeader } from "./page-header";
@@ -26,20 +26,22 @@ const FILTERS: { id: InboxFilter; label: string }[] = [
   { id: "problems", label: "Problems" },
 ];
 
-/** Bulk clean-up of a group (§11.1): dismiss every item in it at once. */
-function DismissAll({ items, what }: { items: InboxItem[]; what: string }) {
-  const client = useClient();
-  const dismiss = useMutation({
-    mutationFn: () => client.dismissInbox(items.map((i) => i.id)),
-    onError: (e: Error) => toast.error(`Couldn't dismiss the ${what}`, { description: e.message }),
-    onSuccess: (n) => toast.success(`Dismissed ${n} ${what}`),
-  });
+const failedRuns = (n: number) => `${n} failed run${n === 1 ? "" : "s"}`;
+
+/**
+ * Bulk clean-up of the failed runs group (§11.1): dismiss the ones that don't wait on you at
+ * once, with Undo. Shown while at least two would go.
+ */
+function DismissFailedRuns({ items }: { items: InboxItem[] }) {
+  const dismiss = useBulkDismiss(failedRuns);
+  const notices = splitForDismiss(items).dismiss;
+  if (notices.length < 2) return null;
   return (
     <Button
       size="sm"
       variant="ghost"
       className="ml-auto h-6 px-2 text-2xs text-muted-foreground"
-      onClick={() => dismiss.mutate()}
+      onClick={() => dismiss.mutate(notices)}
       disabled={dismiss.isPending}
     >
       Dismiss all
@@ -115,12 +117,20 @@ export function InboxPage({ focusItemId }: { focusItemId?: string }) {
     return () => cancelAnimationFrame(frame);
   }, [focusItemId, focusRendered]);
 
+  // "Dismiss N" acts on what the view lists: the active tab's groups. Its conflicts stay.
+  const viewItems = body === "list" ? groups.flatMap((g) => g.items) : NO_ITEMS;
+  const viewConflicts =
+    body === "list" && showConflicts
+      ? conflictList.map((c) => ({ id: c.id, title: `Already running: ${c.request.purpose}` }))
+      : [];
+
   return (
     <>
       <PageHeader
         icon={<Inbox />}
         title="Inbox"
         meta={countKnown("all") ? `${counts.all} waiting on you` : "Loading…"}
+        actions={<DismissView items={viewItems} alsoStaying={viewConflicts} />}
       />
       <div className="min-h-0 flex-1 overflow-y-auto scroll-thin">
         <div className="mx-auto w-full max-w-3xl px-4 py-5 sm:px-6 sm:py-6">
@@ -192,9 +202,7 @@ export function InboxPage({ focusItemId }: { focusItemId?: string }) {
                     <SectionLabel>
                       {g.title} · {g.items.length}
                     </SectionLabel>
-                    {g.id === "run_failed" && g.items.length > 1 && (
-                      <DismissAll items={g.items} what="failed runs" />
-                    )}
+                    {g.id === "run_failed" && <DismissFailedRuns items={g.items} />}
                   </div>
                   <div className="space-y-5">
                     {g.items.map((item) => (

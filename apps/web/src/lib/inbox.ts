@@ -1,4 +1,4 @@
-import type { InboxItem, InboxItemKind } from "@codeden/contracts";
+import { type InboxItem, type InboxItemKind, inboxWaitsOnYou } from "@codeden/contracts";
 
 export type InboxFilter = "all" | "asks" | "reviews" | "problems";
 
@@ -40,6 +40,20 @@ export function groupInbox(items: InboxItem[], filter: InboxFilter = "all"): Inb
         ),
     }))
     .filter((g) => g.items.length > 0);
+}
+
+/**
+ * A view's items split for the bulk dismiss (§11.1): the notices it dismisses, and the items that
+ * wait on the user (`inboxWaitsOnYou`), which stay. The server applies the same rule.
+ */
+export function splitForDismiss(items: InboxItem[]): { dismiss: InboxItem[]; stay: InboxItem[] } {
+  const dismiss: InboxItem[] = [];
+  const stay: InboxItem[] = [];
+  for (const item of items) {
+    if (item.status !== "open") continue;
+    (inboxWaitsOnYou(item) ? stay : dismiss).push(item);
+  }
+  return { dismiss, stay };
 }
 
 /** Count per filter tab. */

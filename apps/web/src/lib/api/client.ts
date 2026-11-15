@@ -10,6 +10,7 @@ import type {
   DiffResult,
   DiffScope,
   DisconnectGithubResponse,
+  DismissInboxResponse,
   ExecutionBackendsResponse,
   ForkSessionRequest,
   ForkSessionResponse,
@@ -34,6 +35,7 @@ import type {
   ResolveConflictResponse,
   RestoreFilesRequest,
   RestoreFilesResponse,
+  RestoreInboxResponse,
   ReviewSessionRequest,
   ReviewSessionResponse,
   Role,
@@ -213,8 +215,13 @@ export interface CodeDenClient {
    * one more attempt); resolves with the resolved item when it starts.
    */
   retryInbox(itemId: string): Promise<InboxItem>;
-  /** Dismiss several items at once (approvals and questions are skipped); how many were. */
-  dismissInbox(itemIds: string[]): Promise<number>;
+  /**
+   * Dismiss several items in one request. Items that wait on the user (`inboxWaitsOnYou`) and
+   * ids that aren't open are skipped; the answer lists the ones dismissed, for Undo.
+   */
+  dismissInbox(itemIds: string[]): Promise<DismissInboxResponse>;
+  /** Undo a bulk dismiss: reopen those of `itemIds` it closed that are still dismissed. */
+  restoreInbox(itemIds: string[]): Promise<RestoreInboxResponse>;
 
   // Projects, automations (§10), factory.
   createProject(input: CreateProjectRequest): Promise<CreateProjectResponse>;

@@ -1,11 +1,16 @@
 import {
+  type DismissInboxResponse,
+  INBOX_BULK_MAX,
   type InboxCounts,
+  type InboxDismissFilter,
   type InboxItem,
   type InboxSettlement,
   inboxAttempts,
+  inboxWaitsOnYou,
   type JsonValue,
   type ListInboxQuery,
   type ResolveInboxRequest,
+  type RestoreInboxResponse,
   type RuntimeResponse,
   type Session,
 } from "@codeden/contracts";
@@ -144,25 +149,87 @@ export class InboxService {
   }
 
   /**
-   * Dismiss open items at once (the inbox's bulk clean-up). Approvals and questions are left:
-   * they need an answer. Returns how many were dismissed.
+   * Dismiss open items at once (the inbox's bulk clean-up), given by id or by the list's
+   * filters, in one transaction. Items that wait on the user (`inboxWaitsOnYou`) are left and
+   * counted as `kept`; the rest are closed like a hand dismissal (`inbox.updated`), with
+   * `{ bulk: true }` so `restoreMany` can undo it.
    */
-  dismissMany(ids: readonly string[], note?: string): number {
-    let dismissed = 0;
+  dismissMany(
+    scope: { ids: readonly string[] } | { filter: InboxDismissFilter },
+    note?: string,
+  ): DismissInboxResponse {
+    const now = new Date().toISOString();
+    const resolution: JsonValue = note ? { bulk: true, note } : { bulk: true };
+    const closed: InboxItem[] = [];
+    let kept = 0;
+    for (const item of this.inScope(scope)) {
+      if (inboxWaitsOnYou(item)) kept++;
+      else closed.push(closedItem(item, "dismissed", resolution, now));
+    }
+    this.appendUpdates(closed);
+    return { dismissed: closed.length, ids: closed.map((i) => i.id), kept };
+  }
+
+  /**
+   * Undo a bulk dismiss: reopen the given items a bulk dismiss closed, in one transaction. One
+   * since re-raised, settled or dismissed by hand is left as it is, so exactly the dismissed set
+   * comes back.
+   */
+  restoreMany(ids: readonly string[]): RestoreInboxResponse {
+    const now = new Date().toISOString();
+    const reopened: InboxItem[] = [];
     for (const id of new Set(ids)) {
       const item = this.find(id);
-      if (item?.status !== "open") continue;
-      if (item.kind === "approval" || item.kind === "question") continue;
-      this.close(item, "dismissed", note ? { note } : null);
-      dismissed++;
+      if (item?.status !== "dismissed" || !bulkDismissed(item) || inboxWaitsOnYou(item)) continue;
+      reopened.push({
+        ...item,
+        status: "open",
+        resolution: null,
+        resolvedAt: null,
+        updatedAt: now,
+      });
     }
-    return dismissed;
+    this.appendUpdates(reopened);
+    return { restored: reopened.length, ids: reopened.map((i) => i.id) };
+  }
+
+  /** Append `inbox.updated` for each item, all in one batch. */
+  private appendUpdates(items: InboxItem[]): void {
+    if (items.length === 0) return;
+    this.store.append(
+      items.map((item) => ({
+        type: "inbox.updated" as const,
+        sessionId: item.sessionId,
+        payload: { item },
+      })),
+    );
+  }
+
+  /** The open items a bulk dismiss covers: the ids given, or the newest a filter matches. */
+  private inScope(scope: { ids: readonly string[] } | { filter: InboxDismissFilter }) {
+    if ("ids" in scope) {
+      return [...new Set(scope.ids)]
+        .slice(0, INBOX_BULK_MAX)
+        .map((id) => this.find(id))
+        .filter((item): item is InboxItem => item?.status === "open");
+    }
+    const { projectId, sessionId, kinds } = scope.filter;
+    const wanted = kinds ? new Set(kinds) : null;
+    return this.list({ projectId, sessionId })
+      .filter((item) => !wanted || wanted.has(item.kind))
+      .slice(0, INBOX_BULK_MAX);
   }
 
   /** Close an open item CodeDen settled by itself, with a short note on why (`InboxSettlement`). */
   settle(item: InboxItem, settlement: InboxSettlement): InboxItem {
     return this.close(item, "resolved", settlement);
   }
+}
+
+/** The item was closed by a bulk dismiss (`dismissMany`), not one at a time. */
+function bulkDismissed(item: InboxItem): boolean {
+  const r = item.resolution;
+  return typeof r === "object" && r !== null && !Array.isArray(r) && r.bulk === true;
 }
 
 /** `item` closed now with `status` and `resolution` (append it as `inbox.updated`). */

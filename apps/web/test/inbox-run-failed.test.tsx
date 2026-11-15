@@ -78,7 +78,11 @@ describe("failed runs in the inbox (#275)", () => {
       await screen.findByText("Failed runs · 2");
       fireEvent.click(screen.getByRole("button", { name: "Dismiss all" }));
       await waitFor(() => expect(screen.queryByText(/Failed runs/)).toBeNull());
-      expect(toast.success).toHaveBeenCalledWith("Dismissed 2 failed runs");
+      // With Undo, as the header's bulk dismiss (#407).
+      expect(toast.success).toHaveBeenCalledWith(
+        "Dismissed 2 failed runs",
+        expect.objectContaining({ action: expect.objectContaining({ label: "Undo" }) }),
+      );
       const snapshot = await client.getSnapshot();
       expect(snapshot.inbox.filter((i) => i.kind === "run_failed").map((i) => i.status)).toEqual([
         "dismissed",
