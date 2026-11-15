@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { stoppedAction, stoppedKind, stoppedLabel } from "@/components/factory/stopped-items";
-import { repairBay } from "@/components/factory-view/pixel/repair-bay";
+import { repairBay } from "@/components/factory-view/scene/repair-bay";
 import { viewPipeline } from "@/components/factory-view/stages";
 import { minutesAgo, NOW, prEntry, prRef, status, w } from "./pixel-fixtures";
 

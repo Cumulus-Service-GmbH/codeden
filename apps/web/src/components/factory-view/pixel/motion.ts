@@ -1,6 +1,8 @@
-import type { SceneAgent } from "./agents";
-import { PICKUP, personAt, STATIONS, type Tile, tileId } from "./floor";
-import type { Scene, Transition } from "./scene-model";
+import type { SceneAgent } from "../scene/agents";
+import type { Scene } from "../scene/scene-model";
+import type { Tile } from "../scene/stations";
+import { PICKUP, personAt, STATIONS, tileId } from "./floor";
+import type { Transition } from "./transitions";
 import {
   arrived,
   GIVE_UP_AFTER,

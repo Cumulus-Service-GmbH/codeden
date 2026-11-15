@@ -146,3 +146,63 @@ const providerLogos: Readonly<Record<string, ComponentType<LogoProps>>> = {
 export function providerLogo(provider: string): ComponentType<LogoProps> | undefined {
   return Object.hasOwn(providerLogos, provider) ? providerLogos[provider] : undefined;
 }
+
+/** One path of a provider's mark on its 24×24 grid. */
+export interface MarkPath {
+  d: string;
+  /** Its own colour, or null to take the surrounding text colour (monochrome marks). */
+  fill: string | null;
+  evenOdd: boolean;
+}
+
+const providerMarks: Readonly<Record<string, readonly MarkPath[]>> = {
+  claude: [{ d: claudePath, fill: "#D97757", evenOdd: false }],
+  codex: [{ d: codexPath, fill: null, evenOdd: true }],
+  opencode: [{ d: openCodePath, fill: null, evenOdd: true }],
+  cursor: [{ d: cursorPath, fill: null, evenOdd: true }],
+  gemini: [
+    { d: geminiChevronPath, fill: null, evenOdd: false },
+    { d: geminiFramePath, fill: null, evenOdd: true },
+  ],
+};
+
+/**
+ * The paths of a provider's bundled mark (the same ones the logos draw), for drawing it on a
+ * canvas; `undefined` when there is none and callers draw the monogram.
+ */
+export function providerMark(provider: string): readonly MarkPath[] | undefined {
+  return Object.hasOwn(providerMarks, provider) ? providerMarks[provider] : undefined;
+}
+
+/** Monogram hues for providers without a bundled logo. */
+const monogramHue: Readonly<Record<string, number>> = { fake: 300 };
+
+/** The hue of a provider's monogram tile: its own, else one hashed from its id. */
+export function providerHue(provider: string): number {
+  if (Object.hasOwn(monogramHue, provider)) return monogramHue[provider] as number;
+  return provider ? (provider.charCodeAt(0) * 37) % 360 : 0;
+}
+
+/** An OKLCH colour: lightness 0..1, chroma, hue in degrees. */
+export interface Tone {
+  l: number;
+  c: number;
+  h: number;
+}
+
+const providerTones: Readonly<Record<string, Tone>> = {
+  claude: { l: 0.7, c: 0.11, h: 45 },
+  gemini: { l: 0.7, c: 0.1, h: 265 },
+  codex: { l: 0.93, c: 0.005, h: 260 },
+  cursor: { l: 0.42, c: 0.01, h: 260 },
+  opencode: { l: 0.62, c: 0.02, h: 250 },
+};
+
+/**
+ * A provider's body tone on the Factory floor (#420): its own clay colour, else a soft one at its
+ * monogram hue. Presentation only, like the logos: nothing may branch on it.
+ */
+export function providerTone(provider: string): Tone {
+  if (Object.hasOwn(providerTones, provider)) return providerTones[provider] as Tone;
+  return { l: 0.72, c: 0.09, h: providerHue(provider) };
+}

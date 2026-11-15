@@ -26,10 +26,14 @@ const HEAVY: { name: string; matches: (dep: string) => boolean }[] = [
   { name: "charts (recharts)", matches: (d) => isPackage(d, "recharts") },
   { name: "the code editor (@codemirror/*)", matches: (d) => d.startsWith("@codemirror/") },
   {
-    name: "the Factory view and its pixel mode",
+    name: "the Factory view and its scenes",
     matches: (d) =>
-      d === "src/routes/factory-view.tsx" || d.startsWith("src/components/factory-view/pixel/"),
+      d === "src/routes/factory-view.tsx" ||
+      d.startsWith("src/components/factory-view/pixel/") ||
+      d.startsWith("src/components/factory-view/scene/") ||
+      d.startsWith("src/components/factory-view/floor/"),
   },
+  { name: "the 3D factory floor (three)", matches: (d) => isPackage(d, "three") },
 ];
 
 function isPackage(dep: string, pkg: string): boolean {

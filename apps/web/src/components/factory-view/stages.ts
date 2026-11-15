@@ -91,6 +91,8 @@ export interface SessionInfo {
   progressAt?: string | null;
   /** The provider's display name ("Claude Code"), else its id. */
   provider?: string;
+  /** The provider's id ("claude"), for presentation tables such as logos and tones. */
+  providerId?: string;
   model?: string | null;
   /** What the session works on (`factory:review:59`, `factory:integrate:53`, `issue:142`). */
   workKey?: string;

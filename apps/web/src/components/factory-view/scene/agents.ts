@@ -3,11 +3,11 @@ import { AREA_LABEL } from "@/components/factory/meta";
 import type { SessionInfo, ViewCard, ViewPipeline } from "../stages";
 
 /**
- * Pixel mode's agents (#264): who works on the factory floor right now, in which role, on which
- * step and in which state. One agent per live work item (its builder, reviewer, or the agent
- * rebasing its pull request), plus the PM and, in a dark factory, the scout and its area
- * reviewers. Pure, so the mapping is unit-tested; the floor plan seats them and `draw*.ts`
- * paints them.
+ * The factory floor's agents (#264, #420), for pixel mode and Floor mode: who works on the floor
+ * right now, in which role, on which step and in which state. One agent per live work item (its
+ * builder, reviewer, or the agent rebasing its pull request), plus the PM and, in a dark
+ * factory, the scout and its area reviewers. Pure, so the mapping is unit-tested; each mode's
+ * floor plan seats them and its painter draws them.
  */
 
 export type AgentRole = "builder" | "reviewer" | "rebaser" | "integrator" | "scout" | "area" | "pm";
@@ -54,7 +54,10 @@ export interface SceneAgent {
   blockedOn: BlockedOn | null;
   /** Its session failed, or its item did: drawn slumped. */
   failed: boolean;
+  /** The provider's display name. */
   provider: string | null;
+  /** The provider's id, for its logo and tone (presentation only). */
+  providerId: string | null;
   model: string | null;
   progress: string | null;
   /** Since when it is in its current step. */
@@ -185,6 +188,7 @@ export function sceneAgents({ f, pipeline, sessions, pmSessionId }: AgentInputs)
     return {
       session: s,
       provider: s?.provider ?? null,
+      providerId: s?.providerId ?? null,
       model: s?.model ?? null,
       progress: s?.progress ?? null,
     };
@@ -225,6 +229,7 @@ export function sceneAgents({ f, pipeline, sessions, pmSessionId }: AgentInputs)
     blockedOn: null,
     failed: pm.session?.status === "failed",
     provider: pm.provider,
+    providerId: pm.providerId,
     model: pm.model,
     progress: pm.progress,
     since: null,
@@ -247,6 +252,7 @@ export function sceneAgents({ f, pipeline, sessions, pmSessionId }: AgentInputs)
     blockedOn: null,
     failed: false,
     provider: sc.provider,
+    providerId: sc.providerId,
     model: sc.model,
     progress: sc.progress,
     since: scout.lastRoundAt,
@@ -267,6 +273,7 @@ export function sceneAgents({ f, pipeline, sessions, pmSessionId }: AgentInputs)
       blockedOn: lens.reported || lens.active ? null : "agent",
       failed: false,
       provider: a.provider,
+      providerId: a.providerId,
       model: a.model,
       progress: a.progress,
       since: null,
