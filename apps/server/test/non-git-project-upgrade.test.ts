@@ -119,7 +119,23 @@ async function startSession(projectId: string, workspace?: { mode: "worktree" })
   return { status: res.status, body: res.body, mode: detail.startMeta?.workspaceMode };
 }
 
+/** What the UI reads about a project: the snapshot (the New session view), then `GET /projects`. */
+async function readIsGitRepo(projectId: string) {
+  const snapshot = (await api("GET", "/snapshot")).body as { projects: unknown[] };
+  const projects = (await api("GET", "/projects")).body as unknown[];
+  const find = (list: unknown[]) =>
+    list.map((p) => Project.parse(p)).find((p) => p.id === projectId)?.isGitRepo;
+  return { snapshot: find(snapshot.projects), list: find(projects) };
+}
+
 describe("right after upgrading, before the start-up check reaches the project", () => {
+  it("reports a plain folder as not a git repository from the first request (#454)", async () => {
+    await startUpgraded();
+    // The New session view reads this: `true` would say the session gets its own worktree.
+    expect(await readIsGitRepo("p1")).toEqual({ snapshot: false, list: false });
+    expect(await readIsGitRepo("p2")).toEqual({ snapshot: true, list: true });
+  });
+
   it("runs a new session in a plain folder in the project folder", async () => {
     await startUpgraded();
     // Still `true`, as the migration left it: the check hasn't reached the project yet.
