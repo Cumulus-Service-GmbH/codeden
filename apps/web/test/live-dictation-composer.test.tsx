@@ -235,7 +235,7 @@ describe("push-to-talk", () => {
       stop: vi.fn(),
     };
     renderComposer(engine, withPushToTalk("space"));
-    await screen.findByRole("button", { name: /· hold space$/ });
+    await screen.findByRole("button", { name: /· hold Space$/ });
 
     textbox().focus();
     // fireEvent returns false when a handler called preventDefault (the space isn't typed).
@@ -260,7 +260,7 @@ describe("push-to-talk", () => {
       stop: vi.fn(),
     };
     renderComposer(engine, withPushToTalk(COMBO));
-    await screen.findByRole("button", { name: /· hold Ctrl Shift space$/ });
+    await screen.findByRole("button", { name: /· hold Ctrl Shift Space$/ });
 
     fireEvent.click(mic());
     textbox().focus();
