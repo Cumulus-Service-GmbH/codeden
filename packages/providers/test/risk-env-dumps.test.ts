@@ -90,6 +90,14 @@ describe("environment dumps beyond printenv (#447)", () => {
       'python -c "import os; print(os.environ)"',
       'python3 -c "import os; print(dict(os.environ))"',
       'python3 -c "import os; print(os.environ.items())"',
+      'python3 -c "import os\nfor k, v in os.environ.items(): print(k, v)"',
+      'python3 -c "import os; [print(k, v) for k, v in os.environ.items()]"',
+      "python3 -c \"import os; print('\\n'.join(f'{k}={v}' for k, v in os.environ.items()))\"",
+      'python3 -c "import os; [print(v) for v in os.environ.values()]"',
+      'python3 -c "import os\nfor k in os.environ.copy(): print(k)"',
+      'python3 -c "import os\nfor k in os.environ: print(k, os.environ[k])"',
+      'python3 -c "import os\nfor k in os.environ.keys(): print(os.environ.get(k))"',
+      'python3 -c "import os\nfor k in os.environ: print(k, os.getenv(k))"',
     ]) {
       expect(action(cmd, posix), cmd).toBe("secrets");
     }
@@ -130,6 +138,9 @@ describe("environment dumps beyond printenv (#447)", () => {
       "node -e \"console.log('CI' in process.env)\"",
       "python -c \"import os; print(os.environ.get('HOME'))\"",
       'python -c "import os; print(sorted(os.environ.keys()))"',
+      "python -c \"import os; print('CI' in os.environ)\"",
+      'python3 -c "import os\nfor k in os.environ: print(k)"',
+      "python3 -c \"import os; print(os.environ['HOME'], os.getenv('PATH', ''))\"",
       'grep -rn "process.env" src',
       "rg 'os.environ' .",
       "ls /proc/self/",

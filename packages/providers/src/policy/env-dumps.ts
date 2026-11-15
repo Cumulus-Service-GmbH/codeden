@@ -28,12 +28,35 @@ const PYTHONS = /^(python[\d.]*|py|pypy[\d.]*)$/;
 const JS_ENV =
   /(?<!\bin\s+|Object\.keys\(\s*)\b(?:process|Bun)\.env\b(?!\s*(?:\??\.\s*[A-Za-z_$]|\[\s*(["'`])\w*\1\s*\]))|\bDeno\.env\.toObject\b/;
 
+/** `os.environ` (or `os.environb`) in Python code. */
+const PY_ENVIRON = /\bos\.environb?\b/g;
 /**
- * `os.environ` used whole (`print(os.environ)`, `dict(os.environ)`, `os.environ.items()`). Not
- * whole: one variable (`os.environ["NAME"]`, `os.environ.get(…)`), its names
- * (`os.environ.keys()`) or a membership test (`"NAME" in os.environ`).
+ * What may follow `os.environ` without printing every value: one variable by a literal name
+ * (`["NAME"]`, `.get("NAME")`) or the names (`.keys()`).
  */
-const PY_ENV = /(?<!\bin\s+)\bos\.environb?\b(?!\s*(?:\[\s*(["'])\w*\1\s*\]|\.(?:get|keys)\s*\())/;
+const PY_ONE_OR_NAMES = /^\s*(?:\[\s*(["'])\w*\1\s*\]|\.get\s*\(\s*(["'])\w*\2|\.keys\s*\()/;
+/** `os.getenv(…)` with a name that isn't a literal: `os.getenv(k)` in a loop over the names. */
+const PY_GETENV_ANY = /\bos\.getenvb?\s*\(\s*(?!["')])/;
+
+/**
+ * True when Python code uses `os.environ` whole (`print(os.environ)`, `dict(os.environ)`,
+ * `for k, v in os.environ.items()`) or looks a variable up by a name that isn't a literal
+ * (`os.environ[k]`, `os.environ.get(k)`, `os.getenv(k)`). Not whole: one variable by name, the
+ * names (`os.environ.keys()`), a membership test (`"NAME" in os.environ`) and a loop over the
+ * names (`for k in os.environ:`).
+ */
+function pythonDumps(code: string): boolean {
+  if (PY_GETENV_ANY.test(code)) return true;
+  for (const match of code.matchAll(PY_ENVIRON)) {
+    const before = code.slice(0, match.index);
+    const after = code.slice(match.index + match[0].length);
+    if (PY_ONE_OR_NAMES.test(after)) continue;
+    // `in os.environ` on its own tests or iterates names; `in os.environ.items()` doesn't.
+    if (/\bin\s+$/.test(before) && !/^\s*[.[]/.test(after)) continue;
+    return true;
+  }
+  return false;
+}
 
 /** .NET's `[Environment]::GetEnvironmentVariables()`, as a statement or a value assigned. */
 const DOTNET_ENV =
@@ -53,7 +76,7 @@ export function dumpsEnvironment(bin: string, args: string[]): boolean {
   if (listsEnvironment(bin, args)) return true;
   if (!DATA.has(bin) && [bin, ...args].some((w) => DOTNET_ENV.test(w))) return true;
   if (JS_RUNTIMES.has(bin)) return args.some((a) => JS_ENV.test(a));
-  if (PYTHONS.test(bin)) return args.some((a) => PY_ENV.test(a));
+  if (PYTHONS.test(bin)) return args.some(pythonDumps);
   return false;
 }
 
