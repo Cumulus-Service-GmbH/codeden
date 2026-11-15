@@ -6,5 +6,7 @@ export default defineConfig({
     // test can reach a live agent or the utility model. Live tests opt in explicitly.
     // Nor the npm registry (update check).
     env: { CODEDEN_BUILTIN_PROVIDERS: "0", CODEDEN_UPDATE_CHECK: "0" },
+    // `CODEDEN_TEST_CLOCK=hh:mm` starts the system clock at that time of day (does nothing unset).
+    setupFiles: ["./test/support/clock-setup.ts"],
   },
 });

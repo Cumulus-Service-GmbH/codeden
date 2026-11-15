@@ -143,7 +143,8 @@ describe("factory loop state machine (§10.1)", () => {
   });
 
   it("pauses on the daily budget and resumes the next day", async () => {
-    env = createFactoryEnv();
+    // Late in the day, on purpose: the clock crosses midnight below.
+    env = createFactoryEnv({ startAt: new Date(2026, 0, 15, 23, 30) });
     enable();
     env.spend = { usd: 10, tokens: 0 };
     backlogItem();
@@ -153,11 +154,11 @@ describe("factory loop state machine (§10.1)", () => {
     expect(loop.state).toBe("paused");
     expect(loop.pausedReason).toMatch(/daily budget/);
     env.spend = { usd: 0, tokens: 0 };
-    env.clock.offsetMs = 24 * 3_600_000;
+    env.clock.offsetMs = 60 * 60_000;
     await tick();
     expect(env.factory.data.loopOrNew(env.project.id).state).toBe("building");
     // The day that ended got its digest.
-    expect(env.factory.data.digests(env.project.id)).toHaveLength(1);
+    expect(env.factory.data.digests(env.project.id).map((d) => d.day)).toEqual(["2026-01-15"]);
   });
 
   it("counts factory sessions against the budget by default, or the whole project", async () => {

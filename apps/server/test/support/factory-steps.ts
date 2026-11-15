@@ -120,7 +120,7 @@ export function factorySteps(env: () => FactoryEnv) {
 
   /**
    * As if `OWNED_RECHECK_MS` had passed since the loop last read an owned item's PR (sessions
-   * stamp real time, so the test clock isn't moved past the agent's turns).
+   * stamp the process clock, so the test clock isn't moved past the agent's turns).
    */
   const readAgainSoon = (id: string) => {
     const at = new Date(Date.now() - OWNED_RECHECK_MS - 1).toISOString();

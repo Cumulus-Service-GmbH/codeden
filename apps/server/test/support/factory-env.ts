@@ -13,6 +13,7 @@ import {
   type StartSessionRequest,
   type StartSessionResponse,
 } from "@codeden/contracts";
+import { vi } from "vitest";
 import { type Database, openDatabase } from "../../src/db/client";
 import { EventStore } from "../../src/events/store";
 import type { Exec, ExecResult } from "../../src/services/exec";
@@ -29,10 +30,12 @@ import type { SessionService } from "../../src/services/sessions/session-service
 import { SettingsStore } from "../../src/settings-store";
 import { sampleSession } from "../helpers";
 import { FakeFactoryGithub } from "./fake-factory-github";
+import { runClockFrom, TEST_START } from "./test-clock";
 
 /**
  * The factory loop over a real SQLite database and event log, with a scripted session service
- * (sessions are rows the test moves through statuses), a scripted GitHub and a fixed clock.
+ * (sessions are rows the test moves through statuses), a scripted GitHub and a clock that starts
+ * at a fixed instant (`TEST_START`, mid-morning local time, whatever time CI runs at).
  * No runner, no providers: the state machine and its limits are what is under test.
  */
 export interface FactoryEnv {
@@ -82,7 +85,10 @@ export interface FactoryEnv {
   rateLimits: RateLimitReading[];
   /** The utility model's answer to the "Identify type" call (null: no model). */
   model: (system: string, prompt: string) => Promise<string | null>;
-  /** Shift of the factory clock against real time (day rollover, CI grace). */
+  /**
+   * Shift of the factory clock (`now`) against the process clock (day rollover, CI grace).
+   * Sessions, items and events are stamped by the process clock, which isn't shifted.
+   */
   clock: { offsetMs: number };
   now: () => Date;
   /** Set a session's status a few ms later (so `updatedAt` moves past earlier nudges). */
@@ -90,12 +96,23 @@ export interface FactoryEnv {
   /** Recreate the service over the same database (a server restart). */
   restart: () => FactoryService;
   updateProject: (patch: Partial<Project>) => Project;
+  /** Close the database and put back the process clock. */
   close: () => void;
 }
 
 export function createFactoryEnv(
-  opts: { limits?: Partial<FactoryLimits>; providers?: string[] } = {},
+  opts: {
+    limits?: Partial<FactoryLimits>;
+    providers?: string[];
+    /**
+     * Where the process clock starts (default `TEST_START`); day-boundary tests start near
+     * midnight. A test that already fakes `Date` (`vi.useFakeTimers`) keeps its own clock.
+     */
+    startAt?: Date;
+  } = {},
 ): FactoryEnv {
+  // Before anything is stamped: the project, its events and every session run on this clock.
+  const restoreClock = vi.isFakeTimers() ? () => {} : runClockFrom(opts.startAt ?? TEST_START);
   const dir = mkdtempSync(join(tmpdir(), "codeden-factory-"));
   const db = openDatabase(join(dir, "codeden.db"));
   const store = new EventStore(db.db);
@@ -318,6 +335,7 @@ export function createFactoryEnv(
     env.factory.stop();
     db.close();
     rmSync(dir, { recursive: true, force: true });
+    restoreClock();
   };
   return env;
 }

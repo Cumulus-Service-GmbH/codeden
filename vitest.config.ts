@@ -104,6 +104,36 @@ const PROCESS_HEAVY = { testTimeout: 120_000, hookTimeout: 120_000 };
  */
 const SPAWNS_PROCESSES = { testTimeout: 40_000, hookTimeout: 60_000 };
 
+/**
+ * Suites whose clock moves hours ahead must not depend on the time of day CI runs at (#379). A
+ * sample of the factory, budget and digest suites runs again with the system clock started just
+ * before and just after local midnight (`CODEDEN_TEST_CLOCK`, `apps/server/test/support/
+ * clock-setup.ts`). The factory test env runs its own clock from a fixed instant; the rest must
+ * hold at any time of day. In-process suites only (a runner process keeps the real clock), and
+ * none that pin their own clock (`vi.setSystemTime`).
+ */
+const CLOCK_SAMPLE = [
+  "test/factory-loop.test.ts",
+  "test/factory-policy.test.ts",
+  "test/factory-scout.test.ts",
+  "test/factory-reviewer-fallback.test.ts",
+  "test/factory-stalls.test.ts",
+  "test/factory-conflicts.test.ts",
+  "test/factory-unattended.test.ts",
+  "test/factory-run-failed-inbox.test.ts",
+  "test/orchestration-digest.test.ts",
+];
+const AROUND_MIDNIGHT = ["23:50", "00:05"].map((at) => ({
+  extends: "./apps/server/vitest.config.ts",
+  test: {
+    name: `@codeden/server (clock ${at})`,
+    root: "apps/server",
+    include: CLOCK_SAMPLE,
+    env: { CODEDEN_TEST_CLOCK: at },
+    ...SPAWNS_PROCESSES,
+  },
+}));
+
 /** The fast suites: `pnpm test`, CI and the release run these. */
 const FAST = [
   "packages/*",
@@ -154,6 +184,7 @@ const FAST = [
       ...PROCESS_HEAVY,
     },
   },
+  ...AROUND_MIDNIGHT,
 ];
 
 /**
