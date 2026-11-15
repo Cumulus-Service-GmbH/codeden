@@ -97,10 +97,24 @@ You choose who builds and who reviews under **Agents** in the [settings](#settin
 | **First pass** | The share of merges that needed no revise round (no failed review or check) and weren't reverted |
 | **Revise rounds** | Revise rounds per finished item |
 | **Reverted** | Merges reverted because CI on the default branch failed after them. In the reviewer view, these are approvals that let a regression through |
+| **Spot-checks** | Merges a person [spot-checked](#spot-checks), and how many of them had a problem |
 | **Cost / merge** | What the finished work cost, failures included, divided by the merges. Each item's cost counts every session that worked on it, with the same "≈" and API-equivalent labels as its [cost](usage-and-costs.md) |
 | **To merge** | The median time from the factory taking the issue in to its merge |
 
 Each item counts for the builder and reviewer of its last attempt, with the model their sessions ran ("default model" when the provider reported none). A **Retry** starts the count afresh. Failures outside the work (a session that died, CI that never started), rejected and escalated work, and the factory's own revert PRs don't count. Docs-only changes with no agent review appear as **No review**. A row of two or three items says little, so look at **Finished** before comparing rates.
+
+### Spot-checks
+
+In a dark factory, most of the code that merges has not been read by a person. The reviewer, the scorecard and the lessons are agents judging agents. **Spot-checks** set some of what merged aside for a quick look by a person, and record what they find, so you know how often a person still finds a problem.
+
+- **What is set aside.** **Spot-check share of automatic merges** in the settings is the share of pull requests the factory merges by itself that you look at. Left empty, it is **10% in a dark factory** and **off in a software factory**; 0 turns spot-checks off. The pick is by work item and is the same every time for the same item. Raising the share keeps every merge a lower share picked. Two kinds of merge are always included, whoever merged them: work let in from an [untrusted author](#who-the-factory-works-for) (the factory never merges it, so it's picked when a person merges it on GitHub), and changes allowed past the size limit. The factory's own reverts never are. Merges from before you turned spot-checks on aren't picked.
+- **One inbox item, not one per merge.** You get one item per project, such as "3 merges to spot-check (Storefront)", listing the newest. It updates as merges are set aside or checked, and resolves when none is left. If you dismiss it, it stays dismissed until another merge is set aside.
+- **The Spot-checks list.** On the factory panel, each merge waiting for a look shows its item (a link to its page), why it was picked, when it merged, and the reviewer's verdict. **Open PR** shows the pull request and every changed file's diff without leaving CodeDen. Then:
+  - **Looks good** records the check.
+  - **Found a problem** asks what you found. The note is recorded on the item and, with **File a follow-up issue with this note** (on by default), filed as an issue labelled for the factory, which takes it on as new work. If GitHub doesn't take the issue, the problem is still recorded, and **File issue** tries again.
+  - A merge that was reverted before anyone checked it drops off the list; if the item merges again, it is picked again.
+- **What it tells you.** The list shows how many merges wait, and in how many of the merges checked over the last 30 days a person found a problem. The daily digest reports the same, with today's checks. The [scorecard](#the-scorecard) counts each check against the item's builder and reviewer. The item page shows its spot-check too.
+- **Nothing waits on it.** A merge waiting for a spot-check has merged. It holds up nothing: the merge counter, the queue, **PRs open at most**, a drain and the Factory view's **Needs you** lane all ignore it. Checks you never get to simply stay on the list.
 
 ### The Factory view
 
@@ -401,11 +415,12 @@ Settings are **enforced by the server**, never left to agent judgement. Open the
 | Protected paths | none | Added to the vision's protected areas |
 | Allow deploy and release changes (`allowDeploys`) | off | While off, deploy files (`.github/workflows/*deploy*`, `*release*`, `*publish*`, `Dockerfile`, `fly.toml`, `vercel.json`, `netlify.toml`) are protected |
 
-**Tuning.** **Approve specs before building**, **PRs open at most**, the **Merge checks**, **Agents** and (in a dark factory) **The scout** sections of the settings cover every knob below except `areas` and `idleGraceMin`, which are set through the API's `tuning` field. Saving changes only the knobs you send; the rest keep their saved values.
+**Tuning.** **Spot-check share of automatic merges**, **Approve specs before building**, **PRs open at most**, the **Merge checks**, **Agents** and (in a dark factory) **The scout** sections of the settings cover every knob below except `areas` and `idleGraceMin`, which are set through the API's `tuning` field. Saving changes only the knobs you send; the rest keep their saved values.
 
 | Setting | In the settings | Default |
 |---|---|---|
 | `specApproval` | Approve specs before building (software factory only: a feature's spec [waits for you](#approve-specs-before-building) after Analyze) | `false` |
+| `spotCheckPercent` | Spot-check share of automatic merges (%), the share [set aside for a person's look](#spot-checks); empty: the default, `0`: off | `null` (10 in a dark factory, 0 otherwise) |
 | `maxOpenPrs` | PRs open at most (the [work-in-progress limit](#finish-before-starting); empty: the same as Agents at once) | `null` (Agents at once) |
 | `maxChangedLines` / `maxChangedFiles` | Merge checks: Largest change (lines) / Most files changed | `5000` / no limit (`null` turns either off) |
 | `maxFixAttempts` | Merge checks: Revise rounds (after a review asking for changes or a failed check; then the item fails) | `2` |
@@ -469,7 +484,7 @@ In both factory modes the loop is the only intake for issues. Automations trigge
 
 - **Auto-merge merges to your default branch.** Merge checks reduce risk; they don't remove it. Use branch protection and real CI, and start with auto-merge off.
 - **It spends real money or quota.** Set a daily budget you're comfortable losing on a bad day; subscription users spend their plan's limits.
-- **Agents can be wrong in confident ways.** The reproduction, the analysis, the independent reviewer and tests help, but read the daily digest and spot-check what ships.
+- **Agents can be wrong in confident ways.** The reproduction, the analysis, the independent reviewer and tests help, but read the daily digest and [spot-check](#spot-checks) what ships.
 - **Protected areas are your safety net.** Put auth, payments, data migrations, infrastructure and licensing there.
 - **Keep your trusted-author list short.** Everyone on it can make the factory spend your budget.
 
@@ -489,6 +504,8 @@ Everything in the UI is also available over the local API (with the install toke
 | `POST /api/projects/:id/factory/items/:itemId/dismiss` | `{ reason? }`: mark a failed item without an open pull request rejected, with the reason (409 `pr_open` while its pull request is open) |
 | `POST /api/projects/:id/factory/items/:itemId/spec` | `{ decision: "approve" }` or `{ decision: "request_changes", feedback }`: decide on a feature's spec that [waits for approval](#approve-specs-before-building). The agent builds it, or revises its analysis with your feedback. 409 `spec_not_pending` when its spec doesn't wait |
 | `POST /api/projects/:id/factory/items/:itemId/follow-ups/file` | `{ index }`: **File issue** for one review follow-up of a merged item (its position in `followUps`), or link it to the open issue with the same title. Filing it again changes nothing; 400 `no_follow_up` when there is no such follow-up |
+| `POST /api/projects/:id/factory/items/:itemId/spot-check` | `{ verdict: "looks_good", note? }` or `{ verdict: "problem", note, fileIssue? }`: record a [spot-check](#spot-checks) of a merge. With `fileIssue` (the default) a problem is filed as a follow-up issue; the answer's `issueError` says why GitHub didn't take it (the verdict is recorded anyway). 409 `spot_check_not_pending` when no check waits. The panel status lists them in `spotChecks` |
+| `POST /api/projects/:id/factory/items/:itemId/spot-check/file-issue` | **File issue** for a spot-check problem recorded without its issue (409 `spot_check_not_problem` or `spot_check_issue_filed`) |
 | `DELETE /api/projects/:id/factory/lessons/:lessonId` | Forget a lesson: it leaves the briefs and is never learned again (404 `lesson_not_found`). The panel status lists the lessons in force in `lessons` |
 | `POST /api/projects/:id/kill-switch`, `POST /api/factory/kill-switch` | `{ on: true }` |
 | `POST /api/projects/:id/factory/resume` | Clear a pause |
