@@ -167,6 +167,38 @@ export class OpenCodeSession implements ProviderSession {
     }
   }
 
+  /**
+   * Compact the session now (`POST /api/session/:id/compact`): OpenCode queues a compaction and
+   * runs it as an execution of its own, which opens and ends the turn like a prompt's, with its
+   * `session.compaction.*` events as the notices. No user message.
+   */
+  async compact(): Promise<void> {
+    if (this.closed) throw new ProviderSessionError("closed", "Session is closed");
+    if (this.turnPending || this.mapper.currentTurnId) {
+      throw new ProviderSessionError("turn_running", "A turn is already running");
+    }
+    this.turnPending = true;
+    const turnId = `turn-${randomUUID()}`;
+    try {
+      const server = await this.ensureServer();
+      this.mapper.pendingTurnId = turnId;
+      await server.client.post(`/api/session/${seg(this.sessionId())}/compact`, {});
+      this.mapper.beginTurn(turnId);
+      this.flushNotice();
+    } catch (error) {
+      if (this.mapper.pendingTurnId === turnId) this.mapper.pendingTurnId = undefined;
+      if (this.mapper.currentTurnId === turnId) {
+        this.mapper.endTurn({
+          type: "failed",
+          message: errorMessage(error),
+          code: "compact_failed",
+        });
+      }
+      this.turnPending = false;
+      throw error;
+    }
+  }
+
   /** Delivered at the next step boundary of the running turn (`delivery: "steer"`). */
   async steer(input: UserInput): Promise<void> {
     const server = this.server;

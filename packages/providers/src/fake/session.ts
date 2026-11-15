@@ -11,6 +11,7 @@ import type {
 import { type ProviderSession, ProviderSessionError, type SessionConfigChange } from "../adapter";
 import { AsyncQueue } from "../async-queue";
 import type { FakeProviderOptions } from "./adapter";
+import { runCompaction } from "./compact";
 import { fakeMcpInput, fakeMcpResult } from "./mcp-result";
 import { type FakeTurn, proposePlan } from "./plan";
 
@@ -111,6 +112,21 @@ export class FakeSession implements ProviderSession {
 
   async interrupt(): Promise<void> {
     this.turn?.abort.abort();
+  }
+
+  /** Compact now: a scripted compaction turn (`./compact`). */
+  async compact(): Promise<void> {
+    if (this.events.isClosed) throw new ProviderSessionError("closed", "Session is closed");
+    if (this.turn) throw new ProviderSessionError("turn_running", "A turn is already running");
+    const turn: TurnState = {
+      threadId: this.rootThreadId,
+      turnId: this.nextId("turn"),
+      abort: new AbortController(),
+    };
+    this.turn = turn;
+    void runCompaction(this.planTurn(turn), turn.abort.signal).finally(() => {
+      if (this.turn === turn) this.turn = undefined;
+    });
   }
 
   async respond(requestId: string, response: RuntimeResponse): Promise<void> {

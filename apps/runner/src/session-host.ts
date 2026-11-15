@@ -167,6 +167,24 @@ export class SessionHost {
     await this.get(sessionId).session.interrupt();
   }
 
+  /** Compact the conversation now, as a turn of its own (`capabilities.compact`). */
+  async compact(sessionId: string): Promise<void> {
+    const hosted = this.get(sessionId);
+    if (!hosted.session.compact) {
+      throw new CommandError("unsupported", "This provider cannot compact a conversation");
+    }
+    await hosted.checkpointChain;
+    try {
+      await hosted.session.compact();
+    } catch (error) {
+      // As for a message: the server tells the user a turn is running.
+      if (error instanceof ProviderSessionError && error.code === "turn_running") {
+        throw new CommandError("turn_running", error.message);
+      }
+      throw error;
+    }
+  }
+
   /**
    * Model/effort for the next turn, the autonomy level and plan mode, when the provider can
    * change them live. Checks every requested setting before applying any.

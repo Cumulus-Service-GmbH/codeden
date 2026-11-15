@@ -22,7 +22,8 @@
   "skills": true,
   "liveAutonomy": false,
   "readOnly": true,
-  "vendorHistory": true
+  "vendorHistory": true,
+  "compact": true
  },
  "preamble": [],
  "turns": [

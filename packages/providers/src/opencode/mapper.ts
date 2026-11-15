@@ -42,6 +42,8 @@ export class OpenCodeEventMapper {
   private usage: TurnUsage | undefined;
   private model: string | undefined;
   private readonly open = new Map<string, { ctx: ThreadCtx; item: Item }>();
+  /** Running compactions' notice ids, by OpenCode session: the outcome replaces "compacting". */
+  private readonly compactions = new Map<string, string>();
   private readonly tools = new Map<string, ToolState & { session: string }>();
   private readonly subagents: OpenCodeSubagents;
   private todos: { id: string; ctx: ThreadCtx; item: ItemOf<"todo_list"> } | undefined;
@@ -127,9 +129,25 @@ export class OpenCodeEventMapper {
       case "session.step.failed":
         this.addUsage(event.data.sessionID, event.data.tokens, event.data.cost);
         return;
+      // One notice per compaction: its outcome replaces "compacting" (same id).
+      case "session.compaction.started":
+        this.notice(
+          event.data.sessionID,
+          "info",
+          "Compacting the conversation to free up context…",
+          "compacting",
+          this.compactionStarted(event.data.sessionID, event.data.inputID),
+        );
+        return;
       case "session.compaction.ended":
         this.addUsage(event.data.sessionID, event.data.tokens, event.data.cost);
-        this.notice(event.data.sessionID, "info", "Context compacted", "context_compacted");
+        this.notice(
+          event.data.sessionID,
+          "info",
+          "Context compacted",
+          "context_compacted",
+          this.compactionEnded(event.data.sessionID),
+        );
         return;
       case "session.compaction.failed":
         this.addUsage(event.data.sessionID, event.data.tokens, event.data.cost);
@@ -138,6 +156,7 @@ export class OpenCodeEventMapper {
           "warning",
           `Context compaction failed: ${event.data.error.message}`,
           "compaction_failed",
+          this.compactionEnded(event.data.sessionID),
         );
         return;
       case "session.retry.scheduled":
@@ -427,14 +446,36 @@ export class OpenCodeEventMapper {
     });
   }
 
-  private notice(session: string, level: "info" | "warning", message: string, code: string): void {
+  /** The id of a compaction's notice, shared by its outcome (`compactionEnded`). */
+  private compactionStarted(session: string, inputID: string | undefined): string {
+    const id = `compaction-${inputID ?? `${session}-${Date.now().toString(36)}`}`;
+    this.compactions.set(session, id);
+    return id;
+  }
+
+  /** The notice id of the session's running compaction, if it showed one. */
+  private compactionEnded(session: string): string | undefined {
+    const id = this.compactions.get(session);
+    this.compactions.delete(session);
+    return id;
+  }
+
+  private notice(
+    session: string,
+    level: "info" | "warning",
+    message: string,
+    code: string,
+    id?: string,
+  ): void {
     const ctx = this.ctxFor(session);
     if (!ctx) return;
     this.opts.emit({
       type: "item.completed",
       ...ctx,
       item: {
-        id: `${code}-${ctx.turnId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
+        id:
+          id ??
+          `${code}-${ctx.turnId}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
         kind: "notice",
         status: "completed",
         level,

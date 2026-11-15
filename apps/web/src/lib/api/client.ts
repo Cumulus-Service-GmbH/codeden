@@ -3,6 +3,7 @@ import type {
   ArchivedSessionsQueryInit,
   ArchiveSessionResponse,
   ClaudeSdkStatus,
+  CompactSessionResponse,
   ConflictRecord,
   CreateProjectRequest,
   CreateProjectResponse,
@@ -158,6 +159,11 @@ export interface CodeDenClient {
   getToolOutput(sessionId: string, itemId: string): Promise<ToolOutputResponse>;
   sendMessage(sessionId: string, input: UserInputInit, mode: SendMode): Promise<void>;
   interrupt(sessionId: string): Promise<void>;
+  /**
+   * "Compact now": the provider compacts the conversation as a turn of its own
+   * (`ProviderCapabilities.compact`). Rejects with 409 while a turn runs or messages wait.
+   */
+  compactSession(sessionId: string): Promise<CompactSessionResponse>;
   respond(sessionId: string, requestId: string, response: RuntimeResponse): Promise<void>;
   startSession(input: StartSessionRequestInit): Promise<StartSessionResponse>;
   stopSession(sessionId: string): Promise<void>;

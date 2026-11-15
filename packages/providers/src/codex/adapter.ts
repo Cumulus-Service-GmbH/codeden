@@ -51,6 +51,8 @@ const capabilities: ProviderCapabilities = {
   readOnly: true,
   // The Codex apps list every thread in the user's Codex home as their recents (`./history`).
   vendorHistory: true,
+  // `thread/compact/start` runs a compaction turn on the thread.
+  compact: true,
 };
 
 const CONFIGURED_MODEL = "The model configured in ~/.codex/config.toml";

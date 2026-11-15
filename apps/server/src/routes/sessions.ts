@@ -1,5 +1,6 @@
 import {
   ArchiveSessionRequest,
+  type CompactSessionResponse,
   EditQueuedMessageRequest,
   ForkSessionRequest,
   type ForkSessionResponse,
@@ -26,7 +27,7 @@ import { exportSessionTranscript } from "../services/sessions/transcript-export"
 import { jsonBody, queryOf } from "./validate";
 
 /**
- * `/api/sessions`: start (with conflict handling), message, steer, interrupt, respond, stop,
+ * `/api/sessions`: start (with conflict handling), message, steer, interrupt, compact, respond, stop,
  * fork, handoff, review, export as Markdown, archive (removes the worktree, §9), unarchive and the
  * queued-message tray. `installToken` is hidden from exports wherever it appears.
  */
@@ -61,6 +62,11 @@ export function sessionRoutes(s: AppServices, installToken: string) {
       .post("/:id/interrupt", async (c) => {
         await s.sessions.interrupt(c.req.param("id"));
         return c.json({ ok: true as const });
+      })
+      // "Compact now": the provider compacts the conversation as a turn of its own; 409 when it can't.
+      .post("/:id/compact", async (c) => {
+        const body: CompactSessionResponse = await s.sessions.compact(c.req.param("id"));
+        return c.json(body);
       })
       .post("/:id/respond", jsonBody(RespondRequest), async (c) => {
         await s.sessions.respond(c.req.param("id"), c.req.valid("json"));

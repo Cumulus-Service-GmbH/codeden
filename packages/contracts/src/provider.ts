@@ -58,6 +58,12 @@ export const ProviderCapabilities = z.object({
    * False or absent: it needs credentials.
    */
   credentialFree: z.boolean().optional(),
+  /**
+   * The conversation can be compacted on demand (`ProviderSession.compact`, the runner's
+   * `session.compact`): the provider summarizes its history to free up context, as a turn of its
+   * own. False or absent: only the provider's own automatic compaction runs.
+   */
+  compact: z.boolean().optional(),
 });
 export type ProviderCapabilities = z.infer<typeof ProviderCapabilities>;
 

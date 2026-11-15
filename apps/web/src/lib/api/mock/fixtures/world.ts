@@ -264,6 +264,7 @@ const caps = {
   mcp: true,
   skills: true,
   readOnly: true,
+  compact: true,
 };
 
 export const providers: ProviderInfo[] = [
@@ -442,6 +443,8 @@ export const providers: ProviderInfo[] = [
     displayName: "Cursor",
     capabilities: {
       ...caps,
+      // ACP has no compaction request: only the agent's own compaction runs.
+      compact: false,
       steer: false,
       rollback: false,
       fork: false,
@@ -468,6 +471,7 @@ export const providers: ProviderInfo[] = [
     displayName: "Gemini CLI",
     capabilities: {
       ...caps,
+      compact: false,
       steer: false,
       userQuestions: false,
       subagents: false,

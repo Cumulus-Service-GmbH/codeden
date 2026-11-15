@@ -10,6 +10,7 @@ import { ApiRequestError } from "../http";
 import { startAmbient } from "./ambient";
 import { mockArchivedPage } from "./archived";
 import { mockAutomationsApi } from "./automations";
+import { scriptedCompaction } from "./compact";
 import { mockExportSession } from "./export-session";
 import { mockFactoryApi } from "./factory";
 import { startFactoryDemo } from "./factory-demo";
@@ -164,6 +165,19 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
         });
       }
       world.updateSession(sessionId, { status: "idle" });
+    },
+    async compactSession(sessionId) {
+      const session = world.snapshot.sessions.find((s) => s.id === sessionId);
+      if (running.has(sessionId) || session?.status === "running") {
+        throw new ApiRequestError(409, "turn_running", "A turn is running: compact once it ends.");
+      }
+      const script = scriptedCompaction(world, sessionId, () => {
+        running.delete(sessionId);
+        const next = queue.shift(sessionId);
+        if (next) runTurn(sessionId, next.input.text);
+      });
+      running.set(sessionId, script.start());
+      return { status: "compacting" as const };
     },
     async respond(sessionId, requestId, response) {
       const script = respond(world, sessionId, requestId, response);

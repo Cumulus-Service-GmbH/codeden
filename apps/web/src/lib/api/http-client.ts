@@ -1,6 +1,7 @@
 import {
   ArchivedSessionsPage,
   ClaudeSdkStatus,
+  CompactSessionResponse,
   CreateProjectResponse,
   DiffResult,
   DisconnectGithubResponse,
@@ -136,6 +137,8 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
     async interrupt(id) {
       await post(`/sessions/${enc(id)}/interrupt`);
     },
+    compactSession: (id) =>
+      post(`/sessions/${enc(id)}/compact`, {}, (v) => CompactSessionResponse.parse(v)),
     async respond(id, requestId, response) {
       await post(`/sessions/${enc(id)}/respond`, { requestId, response });
     },

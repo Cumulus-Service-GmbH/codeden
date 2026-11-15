@@ -76,6 +76,8 @@ export function buildTranscript(
   return s;
 }
 
+const NOT_STARTED = new Set<Session["status"]>(["created", "queued", "starting"]);
+
 type SessionInit = Partial<Session> &
   Pick<Session, "id" | "role" | "status" | "provider" | "purpose" | "workKey">;
 
@@ -97,7 +99,8 @@ export function makeSession(init: SessionInit): Session {
     baseBranch: null,
     issue: null,
     pr: null,
-    resumeToken: null,
+    // A session that has run has its provider's conversation, as a real one does.
+    resumeToken: NOT_STARTED.has(init.status) ? null : `mock-${init.id}`,
     runnerId: "runner-local",
     automationRunId: null,
     rootThreadId: `t-${init.id.slice(2)}`,

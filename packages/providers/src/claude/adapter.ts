@@ -44,6 +44,7 @@ const capabilities: ProviderCapabilities = {
   // CodeDen's policy gates every tool call, so a change applies from the next one.
   liveAutonomy: true,
   readOnly: true,
+  compact: true,
 };
 
 const EFFORTS: ReasoningEffort[] = ["low", "medium", "high", "xhigh", "max"];

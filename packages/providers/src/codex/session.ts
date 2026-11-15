@@ -27,6 +27,7 @@ import type { ServerNotification } from "./protocol";
 import type { Model, TurnStartParams } from "./protocol/v2";
 import type { CodexRpc } from "./rpc";
 import { openCodexThread, startTurn } from "./thread-open";
+import { TurnStartWatch } from "./turn-start-watch";
 
 export interface CodexSessionConfig {
   executable: ResolvedCommand;
@@ -36,6 +37,8 @@ export interface CodexSessionConfig {
   interruptTimeoutMs?: number;
   /** How long archiving the thread may take before the session moves on (`ARCHIVE_TIMEOUT_MS`). */
   archiveTimeoutMs?: number;
+  /** How long `compact` waits for Codex to start its compaction turn (default 10 s). */
+  turnStartTimeoutMs?: number;
 }
 
 /** Re-exported for callers that know it from here. */
@@ -74,6 +77,8 @@ export class CodexSession implements ProviderSession {
   private parked: { rpc: CodexRpc; archived: Promise<boolean> } | undefined;
   /** The app-server that has the thread open, if any. */
   private openedOn: CodexRpc | undefined;
+  /** Root turns Codex starts (`turn/started` on the session's thread): `compact` waits on it. */
+  private readonly rootTurns = new TurnStartWatch();
 
   constructor(
     private readonly opts: SessionOptions,
@@ -155,6 +160,39 @@ export class CodexSession implements ProviderSession {
       this.turnPending = false;
       // No turn started (a failed start): the thread may be open again, so archive it.
       if (!this.mapper.currentTurnId) this.park();
+      throw error;
+    }
+  }
+
+  /**
+   * Compact the thread now (`thread/compact/start`): Codex runs it as a turn of its own, which
+   * arrives as `turn/started`, a `contextCompaction` item and `turn/completed`. Resolves once that
+   * turn has started; when Codex accepts the request but starts no turn in time, the session is
+   * free again and it rejects, so a compaction that never came can't hold the session.
+   */
+  async compact(): Promise<void> {
+    if (this.closed) throw new ProviderSessionError("closed", "Session is closed");
+    if (this.turnPending || this.mapper.currentTurnId) {
+      throw new ProviderSessionError("turn_running", "A turn is already running");
+    }
+    this.turnPending = true;
+    try {
+      const rpc = await this.ensureServer();
+      await this.unpark(rpc);
+      const before = this.rootTurns.count;
+      await rpc.request("thread/compact/start", { threadId: this.threadId() });
+      const timeoutMs = this.config.turnStartTimeoutMs ?? 10_000;
+      if (!(await this.rootTurns.startedSince(before, timeoutMs))) {
+        throw new ProviderSessionError(
+          "compact_failed",
+          "Codex didn't start compacting the thread",
+        );
+      }
+    } catch (error) {
+      if (!this.mapper.currentTurnId) {
+        this.turnPending = false;
+        this.park();
+      }
       throw error;
     }
   }
@@ -413,6 +451,9 @@ export class CodexSession implements ProviderSession {
       });
     }
     this.mapper.handle(n);
+    if (n.method === "turn/started" && n.params.threadId === this.mapper.codexThreadId) {
+      this.rootTurns.note();
+    }
   }
 
   private onExit(code: number | null, stderr: string, exited?: CodexRpc): void {

@@ -184,6 +184,9 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
     case "session.interrupt":
       await host.interrupt(command.sessionId);
       return {};
+    case "session.compact":
+      await host.compact(command.sessionId);
+      return {};
     case "session.respond":
       await host.respond(command);
       return {};

@@ -7,6 +7,7 @@ import { sessionMenuEntries } from "@/components/shell/sidebar/session-menu";
 import { forkableTurn } from "@/components/thread/fork-from-here";
 import { createMockClient } from "@/lib/api/mock";
 import { sessions as fixtureSessions } from "@/lib/api/mock/fixtures/sessions";
+import { compactBlocked, compactSupported } from "@/lib/compact-session";
 import {
   announceArchive,
   canPushFirst,
@@ -256,6 +257,25 @@ describe("useSessionActions", () => {
     expect(forkBlocked({ ...idle, status: "starting" })).toMatch(/hasn't started/);
     expect(forkBlocked({ ...idle, resumeToken: null })).toMatch(/No conversation/);
     expect(forkBlocked({ ...idle, branch: null })).toMatch(/git branch/);
+  });
+
+  it("offers Compact now only where the provider can compact, and only between turns", () => {
+    const idle: Session = { ...session("s-search"), status: "idle", resumeToken: "claude-1" };
+    const caps = (compact?: boolean) => ({ capabilities: { compact } }) as never;
+    expect(compactSupported(idle, caps(true))).toBe(true);
+    expect(compactSupported(idle, caps(false))).toBe(false);
+    expect(compactSupported(idle, caps())).toBe(false);
+    expect(compactSupported(idle, undefined)).toBe(false);
+    expect(compactSupported({ ...idle, archivedAt: "2026-11-15T10:00:00Z" }, caps(true))).toBe(
+      false,
+    );
+
+    expect(compactBlocked(idle)).toBeNull();
+    expect(compactBlocked({ ...idle, status: "stopped" })).toBeNull();
+    expect(compactBlocked({ ...idle, status: "running" })).toMatch(/running turn/);
+    expect(compactBlocked({ ...idle, status: "waiting" })).toMatch(/waiting on/);
+    expect(compactBlocked({ ...idle, status: "queued" })).toMatch(/hasn't started/);
+    expect(compactBlocked({ ...idle, resumeToken: null })).toMatch(/No conversation/);
   });
 
   it("forks through the client and opens the new session", async () => {

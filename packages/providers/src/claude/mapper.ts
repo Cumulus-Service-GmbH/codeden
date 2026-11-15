@@ -340,6 +340,10 @@ export class ClaudeEventMapper {
     } else if (msg.subtype === "task_notification") {
       this.subagents.onTaskNotification(msg);
     } else if (msg.subtype === "compact_boundary") {
+      // The context left after the compaction, when reported; the next turn reports it otherwise.
+      const post = (msg.compact_metadata as Raw | undefined)?.post_tokens;
+      if (typeof post === "number" && Number.isInteger(post) && post >= 0)
+        this.contextTokens = post;
       this.item(this.rootCtx(), "item.completed", compactedNotice(this.takeCompactNoticeId()));
     } else if (msg.subtype === "api_retry") {
       // One notice per run of retries, updated in place as the attempts go up.
@@ -354,6 +358,19 @@ export class ClaudeEventMapper {
         this.item(this.rootCtx(), "item.completed", notice);
       }
     }
+  }
+
+  /**
+   * Begin a root turn that compacts the conversation on request (`/compact`), with its
+   * "compacting" notice shown at once; the compaction's outcome replaces it. Returns the turn id.
+   */
+  beginCompaction(): string {
+    const turnId = this.beginTurn();
+    if (!this.compactNoticeId) {
+      this.compactNoticeId = this.newId();
+      this.item(this.rootCtx(), "item.completed", compactingNotice(this.compactNoticeId));
+    }
+    return turnId;
   }
 
   /** The id of the "compacting" notice to replace, or a fresh one. */

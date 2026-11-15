@@ -44,6 +44,9 @@ type InterruptibleQuery = {
   }): Promise<{ still_queued: string[]; cancelled?: string[] } | undefined>;
 };
 
+/** Claude Code's built-in command that compacts the conversation. */
+const COMPACT_COMMAND = "/compact";
+
 export interface ClaudeSessionConfig {
   executable: ResolvedCommand;
   /** Called with the CLI's model list once a session is initialized. */
@@ -199,6 +202,21 @@ export class ClaudeSession implements ProviderSession {
     const turnId = this.mapper.beginTurn();
     this.emitUserMessage(turnId, input);
     prompts.push(message);
+  }
+
+  /**
+   * Compact the conversation now: Claude Code's built-in `/compact`, sent as a turn of its own
+   * with no user message in the transcript. Its notices come from the CLI's `compacting` status
+   * and `compact_boundary` (or a failed `compact_result`).
+   */
+  async compact(): Promise<void> {
+    if (this.closed) throw new ProviderSessionError("closed", "Session is closed");
+    if (this.mapper.turnId)
+      throw new ProviderSessionError("turn_running", "A turn is already running");
+    const prompts = this.ensureQuery();
+    this.steered.clear();
+    this.mapper.beginCompaction();
+    prompts.push(toSdkUserMessage({ text: COMPACT_COMMAND, attachments: [] }));
   }
 
   /** Queue input into the running turn; the CLI folds it in at the next tool boundary. */

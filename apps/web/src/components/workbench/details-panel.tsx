@@ -1,11 +1,13 @@
 import type { ForkOrigin, Session, SessionChecks } from "@codeden/contracts";
 import { Link } from "@tanstack/react-router";
-import { Brain } from "lucide-react";
+import { Brain, FoldVertical } from "lucide-react";
 import type { ReactNode } from "react";
 import { ProviderMark } from "@/components/common/bits";
 import { AutonomyBadge } from "@/components/thread/autonomy";
+import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { SessionCostText } from "@/components/usage/session-cost";
+import { useCompactSession } from "@/lib/compact-session";
 import { forkOriginLabel, forkOriginText } from "@/lib/fork-origin";
 import { ago, compact, duration, statusLabel } from "@/lib/format";
 import { useSession } from "@/lib/queries";
@@ -86,11 +88,37 @@ function ForkedFromRow({ origin }: { origin: ForkOrigin }) {
 }
 
 /**
+ * "Compact now": the provider summarizes the conversation to free up context, as a turn of its
+ * own. Shown only where the provider can (`capabilities.compact`); disabled with the reason while
+ * it can't run.
+ */
+function CompactNow({ session }: { session: Session }) {
+  const action = useCompactSession(session);
+  if (!action.supported) return null;
+  return (
+    <Button
+      size="xs"
+      variant="ghost"
+      className="-my-1 text-muted-foreground"
+      onClick={action.compact}
+      disabled={action.blocked !== null}
+      title={
+        action.blocked ??
+        "Summarize the conversation to free up context. The agent keeps a summary of the work so far."
+      }
+      data-testid="compact-now"
+    >
+      <FoldVertical /> {action.pending ? "Compacting…" : "Compact now"}
+    </Button>
+  );
+}
+
+/**
  * How full the context window is, as the provider last reported it in this view, and the
  * session's cost from the usage ledger. A figure that wasn't reported shows as "—" (§12.6).
  */
-function ContextWindow({ sessionId }: { sessionId: string }) {
-  const usage = useTranscriptsStore((s) => s.byId[sessionId]?.usage ?? null);
+function ContextWindow({ session }: { session: Session }) {
+  const usage = useTranscriptsStore((s) => s.byId[session.id]?.usage ?? null);
   const used = usage?.contextTokens;
   const size = usage?.contextWindow;
   const pct = used !== undefined && size ? Math.min(100, (used / size) * 100) : null;
@@ -100,9 +128,12 @@ function ContextWindow({ sessionId }: { sessionId: string }) {
       : `${used !== undefined ? compact(used) : "—"} / ${size ? compact(size) : "—"} tokens`;
   return (
     <section className="space-y-2">
-      <h3 className="text-2xs font-medium tracking-wider text-muted-foreground uppercase">
-        Context window
-      </h3>
+      <div className="flex items-center justify-between gap-3">
+        <h3 className="text-2xs font-medium tracking-wider text-muted-foreground uppercase">
+          Context window
+        </h3>
+        <CompactNow session={session} />
+      </div>
       {pct !== null && (
         <div className="h-1.5 overflow-hidden rounded-full bg-muted">
           <div className="h-full rounded-full bg-primary" style={{ width: `${pct}%` }} />
@@ -110,7 +141,7 @@ function ContextWindow({ sessionId }: { sessionId: string }) {
       )}
       <div className="flex justify-between gap-3 text-2xs text-muted-foreground tabular-nums">
         <span title={pct === null ? "Not reported by the provider yet" : undefined}>{reading}</span>
-        <SessionCostText sessionId={sessionId} />
+        <SessionCostText sessionId={session.id} />
       </div>
     </section>
   );
@@ -171,7 +202,7 @@ export function DetailsPanel({ session }: { session: Session }) {
         )}
       </section>
 
-      <ContextWindow sessionId={session.id} />
+      <ContextWindow session={session} />
 
       <LoadedConfig sessionId={session.id} projectId={session.projectId} />
       <div className="flex items-center justify-between gap-3 text-[13px]">

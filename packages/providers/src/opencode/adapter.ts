@@ -41,6 +41,7 @@ const capabilities: ProviderCapabilities = {
   skills: false,
   liveAutonomy: true,
   readOnly: true,
+  compact: true,
 };
 
 export interface OpenCodeAdapterOptions {

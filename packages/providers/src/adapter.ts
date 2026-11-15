@@ -99,6 +99,13 @@ export interface ProviderSession {
   steer?(input: UserInput): Promise<void>;
   /** Stop the running turn; emits `turn.interrupted`. No-op when idle. */
   interrupt(): Promise<void>;
+  /**
+   * Compact the conversation now, as a turn of its own: `turn.started`, the provider's
+   * compaction notices ("Compacting the conversation…", then "Context compacted" or a failure),
+   * and the turn's end. Adds no user message. Rejects with a `turn_running` `ProviderSessionError`
+   * while a turn runs. Present exactly when `capabilities().compact`.
+   */
+  compact?(): Promise<void>;
   /** Answer an `approval_request` or `user_question` by its `requestId`. */
   respond(requestId: string, response: RuntimeResponse): Promise<void>;
   /**

@@ -307,6 +307,17 @@ function mcpResultText(content: unknown[]): string {
 
 /** The in-progress shape of an item when it starts (status forced to in_progress). */
 export function startedItem(item: ThreadItem, names: AgentNames = noNames): Item | undefined {
+  // While it runs, a compaction says so; its completion replaces this notice (same id).
+  if (item.type === "contextCompaction") {
+    return {
+      id: item.id,
+      kind: "notice",
+      status: "completed",
+      level: "info",
+      code: "compacting",
+      message: "Compacting the conversation to free up context…",
+    };
+  }
   const mapped = mapThreadItem(item, names);
   if (!mapped || mapped.kind === "user_message" || mapped.kind === "notice") return mapped;
   return { ...mapped, status: "in_progress" } as Item;

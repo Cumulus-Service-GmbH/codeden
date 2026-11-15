@@ -192,6 +192,12 @@ export const RunnerCommand = z.discriminatedUnion("name", [
   /** Inject input into the running turn (requires `capabilities.steer`). */
   z.object({ name: z.literal("session.steer"), sessionId: Id, input: UserInput }),
   z.object({ name: z.literal("session.interrupt"), sessionId: Id }),
+  /**
+   * Compact the conversation now, as a turn of its own (`capabilities.compact`): the provider
+   * summarizes its history to free up context. `turn_running` while a turn runs, `unsupported`
+   * when the provider can't compact on demand.
+   */
+  z.object({ name: z.literal("session.compact"), sessionId: Id }),
   /** Answer an approval request or user question. */
   z.object({
     name: z.literal("session.respond"),
@@ -437,6 +443,7 @@ export const RunnerCommandResults = {
   "session.send": Empty,
   "session.steer": Empty,
   "session.interrupt": Empty,
+  "session.compact": Empty,
   "session.respond": Empty,
   "session.stop": Empty,
   "session.configure": Empty,

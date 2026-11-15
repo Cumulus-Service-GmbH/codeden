@@ -197,14 +197,18 @@ export type OcEvent =
       type: "session.retry.scheduled";
       data: StepScoped<{ attempt: number; at?: number; error: OcError }>;
     }
-  | { type: "session.compaction.started"; data: SessionScoped<{ reason: string }> }
+  /** A compaction (`inputID`: the queued compaction request it runs, when it has one). */
+  | {
+      type: "session.compaction.started";
+      data: SessionScoped<{ reason: string; inputID?: string }>;
+    }
   | {
       type: "session.compaction.ended";
-      data: SessionScoped<{ reason: string; cost?: number; tokens?: OcTokens }>;
+      data: SessionScoped<{ reason: string; inputID?: string; cost?: number; tokens?: OcTokens }>;
     }
   | {
       type: "session.compaction.failed";
-      data: SessionScoped<{ error: OcError; cost?: number; tokens?: OcTokens }>;
+      data: SessionScoped<{ error: OcError; inputID?: string; cost?: number; tokens?: OcTokens }>;
     }
   | { type: "session.model.selected"; data: SessionScoped<{ model: OcModelRef }> }
   | { type: "shell.created"; data: { info: { id: string; command?: string; cwd?: string } } }

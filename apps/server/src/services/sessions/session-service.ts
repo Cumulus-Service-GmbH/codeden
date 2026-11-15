@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type {
   AutonomyLevel,
+  CompactSessionResponse,
   ForkSessionRequest,
   ForkSessionResponse,
   HandoffSessionRequest,
@@ -38,6 +39,7 @@ import {
 } from "../runner-port";
 import type { UtilityService } from "../utility";
 import { freezeChecks } from "./checks";
+import { compactRefusal, startCompaction } from "./compact";
 import { derivePurpose, deriveWorkKey, findConflicts } from "./conflicts";
 import { planFork } from "./fork";
 import { planHandoff } from "./handoff";
@@ -363,6 +365,32 @@ export class SessionService {
       .catch((e) => {
         throw toServiceError(e);
       });
+  }
+
+  /**
+   * "Compact now" (`./compact`): the provider compacts the conversation as a turn of its own.
+   * Refused while a turn runs or messages wait, on providers without `capabilities.compact`, and
+   * for sessions with no conversation yet or archived. Messages sent meanwhile queue behind it.
+   */
+  async compact(id: string): Promise<CompactSessionResponse> {
+    const session = this.deps.repo.get(id);
+    const refusal = compactRefusal(session, this.provider(session.provider, id), {
+      delivering: this.delivering.has(id),
+      queued: this.deps.outbox.count(id),
+    });
+    if (refusal) throw refusal;
+    this.delivering.add(id);
+    try {
+      await startCompaction(
+        { repo: this.deps.repo, launcher: this.deps.launcher, runnerOf: (s) => this.runnerOf(s) },
+        session,
+      );
+    } finally {
+      this.delivering.delete(id);
+      // Messages that arrived meanwhile go once the compaction is over (or didn't start).
+      if (this.deps.outbox.count(id) > 0) this.flushIfSettled(id);
+    }
+    return { status: "compacting" };
   }
 
   /** Answer a question or approval; `by` is who answered a question (the user or the PM). */
