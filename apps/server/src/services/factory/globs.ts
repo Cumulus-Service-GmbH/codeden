@@ -2,6 +2,8 @@
  * Small glob matcher for protected paths (§10.1): `**` matches any number of path segments,
  * `*` anything but `/`, `?` one character. Paths use forward slashes and are relative to the
  * repo root. A pattern without a slash matches the base name anywhere (`LICENSE`, `*.pem`).
+ * Matching ignores case: on Windows and macOS `.CODEDEN/x` and `.codeden/x` are the same file
+ * once checked out, so a protected path can't be reached by changing its case.
  */
 
 const cache = new Map<string, RegExp>();
@@ -28,7 +30,7 @@ function toRegExp(pattern: string): RegExp {
     else if (c === "?") out += "[^/]";
     else out += c.replace(/[.+^${}()|[\]\\]/g, "\\$&");
   }
-  const re = new RegExp(`^${out}$`);
+  const re = new RegExp(`^${out}$`, "i");
   cache.set(pattern, re);
   return re;
 }

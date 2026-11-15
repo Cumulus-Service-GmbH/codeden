@@ -85,6 +85,29 @@ describe("CodeDen's project config (#371)", () => {
     expect(levelAllows("full", verdict)).toBe(true);
   });
 
+  // #397: on Windows and macOS `.CodeDen/` is the same folder as `.codeden/`.
+  it("asks at Auto for a write to .CodeDen/project.json, in any case", () => {
+    for (const file of [".CodeDen/project.json", "/work/repo/.CODEDEN/Project.JSON"]) {
+      expect(classifyWrite(file, posix), file).toMatchObject({ risky: true });
+      expect(new ClaudePolicy("auto", posix).gate("Write", { file_path: file }).ask, file).toBe(
+        true,
+      );
+      const edit: AcpToolState = { toolCallId: "e", kind: "edit", locations: [{ path: file }] };
+      expect(new AcpPolicy("auto", posix).decide(edit).kind, file).toBe("ask");
+      expect(levelAllows("auto", classifyWrite(file, posix)), file).toBe(false);
+    }
+    for (const command of [
+      "echo x > .CodeDen/project.json",
+      "cp evil.json .CODEDEN/",
+      `node -e "require('fs').writeFileSync('.CodeDen/project.json', '{}')"`,
+    ]) {
+      expect(isConfigRisk(command), command).toBe(true);
+    }
+    expect(
+      isConfigRisk("Copy-Item evil.json .CodeDen\\project.json", { ...win, shell: "powershell" }),
+    ).toBe(true);
+  });
+
   it("leaves reads and the other files in .codeden alone", () => {
     for (const command of [
       "cat .codeden/project.json",

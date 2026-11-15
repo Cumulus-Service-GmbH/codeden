@@ -318,7 +318,7 @@ Every check must pass before a pull request is ready to merge. Results are recor
 
 | Check | Passes when |
 |---|---|
-| **Protected areas** | No changed path is under `.codeden/` or matches a protected glob, the vision file or a deploy file, and no protected topic is mentioned. A failure escalates the PR to you |
+| **Protected areas** | No changed path is under `.codeden/` or matches a protected glob, the vision file or a deploy file, and no protected topic is mentioned. Paths match whatever their case (`.CODEDEN/` counts as `.codeden/`), and a renamed or copied file counts under its old path as well as its new one. A failure escalates the PR to you |
 | **Size** | The change is within **Largest change** (`maxChangedLines`, default 5,000 added + deleted lines) and **Most files changed** (`maxChangedFiles`, no limit by default). Lockfiles and generated or vendored files (such as drizzle-kit's migration snapshots) don't count. The PM can allow a bigger change that can't be split |
 | **CI** | The PR's checks are green. While the PR has merge conflicts it waits for them to be rebased away (GitHub runs no CI on a conflicting PR). No checks on the head commit wait 10 minutes from when that head appeared, then count as "CI never started" (see [below](#failures-outside-the-work)), unless `requireCi` is off |
 | **Review** | The independent reviewer approves against the issue, the spec and the vision. Skipped for docs-only changes in the docs pipeline |
