@@ -221,31 +221,43 @@ export type PickerTab =
       lockedReason: string | null;
       /**
        * A locked provider the session can be handed off to (§9): `ready` opens the handoff
-       * dialog on click, `blocked` says why not now. Absent when no handoff is offered.
+       * dialog on click, `blocked` says why it can't. Absent when no handoff is offered.
        */
       handoff?: "ready" | "blocked";
     };
 export type ProviderTab = Extract<PickerTab, { kind: "provider" }>;
 
+/** Whether the session on screen can be handed off to another provider (§9). */
+export interface HandoffState {
+  /** Why a handoff can't run, or null when it can. */
+  blocked: string | null;
+  /**
+   * `blocked` won't lift on its own, such as a project folder that isn't a git repository: the
+   * tiles say the handoff can't be done, not that it is unavailable for now.
+   */
+  lasting?: boolean;
+}
+
 /** Why a provider is locked in this session, and whether a handoff to it is offered. */
 function lockedTab(
   provider: ProviderInfo,
   lockedProvider: string | undefined,
-  handoff: { blocked: string | null } | undefined,
+  handoff: HandoffState | undefined,
 ): Pick<ProviderTab, "lockedReason" | "handoff"> {
   if (!lockedProvider || provider.id === lockedProvider) return { lockedReason: null };
   const name = provider.displayName;
-  if (!handoff) {
-    return {
-      lockedReason: `${name} can't be used in this session. Start a new session to switch providers.`,
-    };
+  const newSession = "Start a new session to switch providers.";
+  if (!handoff) return { lockedReason: `${name} can't be used in this session. ${newSession}` };
+  if (!handoff.blocked) {
+    return { lockedReason: `Continue in a new ${name} session`, handoff: "ready" };
   }
-  return handoff.blocked
-    ? {
-        lockedReason: `Continue in a new ${name} session. Not available now: ${lowerFirst(handoff.blocked)}.`,
-        handoff: "blocked",
-      }
-    : { lockedReason: `Continue in a new ${name} session`, handoff: "ready" };
+  const reason = lowerFirst(handoff.blocked);
+  return {
+    lockedReason: handoff.lasting
+      ? `Can't hand off to ${name}: ${reason}. ${newSession}`
+      : `Continue in a new ${name} session. Not available now: ${reason}.`,
+    handoff: "blocked",
+  };
 }
 
 /**
@@ -257,7 +269,7 @@ export function providerTabs(
   providers: readonly ProviderInfo[],
   checks: readonly SetupCheck[] | undefined,
   lockedProvider: string | undefined,
-  opts: { favorites?: boolean; handoff?: { blocked: string | null } } = {},
+  opts: { favorites?: boolean; handoff?: HandoffState } = {},
 ): PickerTab[] {
   const tabs: PickerTab[] = providers.map((provider) => ({
     kind: "provider" as const,

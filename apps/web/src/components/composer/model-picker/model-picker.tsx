@@ -20,6 +20,7 @@ import {
   effectiveEffort,
   effortLevels,
   favoriteRows,
+  type HandoffState,
   type ModelChoice,
   type ModelRow,
   modelName,
@@ -48,9 +49,10 @@ export interface ModelPickerProps {
   lockedProvider?: string;
   /**
    * With `lockedProvider`: the other providers' tiles offer to continue the session in a new
-   * one on that provider (§9), opening `onHandoff`; `blocked` says why that can't run now.
+   * one on that provider (§9), opening `onHandoff`; `blocked` says why that can't run, and
+   * `lasting` that it won't lift on its own.
    */
-  handoff?: { blocked: string | null; onHandoff: (providerId: string) => void };
+  handoff?: HandoffState & { onHandoff: (providerId: string) => void };
   /** Offer effort levels beside the list (default true). */
   effort?: boolean;
   disabled?: boolean;
@@ -108,7 +110,7 @@ export function ModelPicker({
   const providers = withCustomModels(listed, custom);
   const tabs = providerTabs(providers, checks, lockedProvider, {
     favorites: true,
-    ...(handoff ? { handoff: { blocked: handoff.blocked } } : {}),
+    ...(handoff ? { handoff: { blocked: handoff.blocked, lasting: handoff.lasting } } : {}),
   });
   const openTabs = openProviderTabs(tabs);
   const tab: PickerTab | undefined = tabs.find((t) => t.id === tabId) ?? openTabs[0];

@@ -5,7 +5,7 @@ import { toast } from "sonner";
 import { AUTONOMY, supportsReadOnly } from "@/components/thread/autonomy";
 import { useClient } from "@/lib/api";
 import { snapshotKey, useSnapshotData } from "@/lib/queries";
-import { useHandoffBlocked } from "@/lib/session-actions";
+import { NOT_A_REPO_ACTION_REASON, useHandoffBlocked } from "@/lib/session-actions";
 import { useUiStore } from "@/stores/ui";
 import { ChecksToggle } from "./checks-toggle";
 import { ModelPicker } from "./model-picker/model-picker";
@@ -85,6 +85,8 @@ export function SessionOptions({ session, running }: { session: Session; running
           session.role === "agent"
             ? {
                 blocked: handoffBlocked,
+                // A folder that isn't a repository won't become one when a turn ends.
+                lasting: handoffBlocked === NOT_A_REPO_ACTION_REASON,
                 onHandoff: (provider) => setHandoff({ sessionId: session.id, provider }),
               }
             : undefined
