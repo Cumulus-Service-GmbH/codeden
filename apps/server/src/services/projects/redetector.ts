@@ -20,13 +20,19 @@ const TURN_ENDS = new Set(["agent.turn.completed", "agent.turn.failed", "agent.t
  * remote are detected again on demand (the UI's "Check again"), once for every project when
  * the server starts, and whenever an agent turn ends in a local-only project: the moment an
  * agent may have run `git init` or added a GitHub `origin`. One check per project at a time;
- * a turn that ends during a check queues one more.
+ * a turn that ends during a check queues one more. A session start doesn't wait for the
+ * background check to reach its project: it checks that project first (`current`).
  */
 export class ProjectRedetector {
   private unsubscribe: (() => void) | undefined;
   private stopped = true;
   private readonly running = new Map<string, Promise<RefreshProjectResponse>>();
   private readonly again = new Set<string>();
+  /**
+   * Projects stored before this start that no check has reached yet: what their records say
+   * about the folder may be out of date (an upgrade adds `isGitRepo` as true for all of them).
+   */
+  private readonly unchecked = new Set<string>();
 
   constructor(private readonly deps: ProjectRedetectorDeps) {}
 
@@ -34,7 +40,14 @@ export class ProjectRedetector {
   start(opts: { checkAll?: boolean } = {}): void {
     this.stopped = false;
     this.unsubscribe ??= this.deps.store.subscribe((events) => this.onEvents(events));
-    if (opts.checkAll !== false) setImmediate(() => void this.checkAll());
+    if (opts.checkAll === false) return;
+    try {
+      for (const project of this.deps.projects.list()) this.unchecked.add(project.id);
+    } catch (error) {
+      this.deps.log?.(`projects: listing for the start-up check: ${errorMessage(error)}`);
+      return;
+    }
+    setImmediate(() => void this.checkAll());
   }
 
   /**
@@ -65,26 +78,34 @@ export class ProjectRedetector {
       })
       .finally(() => {
         this.running.delete(projectId);
+        // Checked, even when the check failed: the record stays as it was.
+        this.unchecked.delete(projectId);
         if (this.again.delete(projectId)) this.afterTurn(projectId);
       });
     this.running.set(projectId, run);
     return run;
   }
 
-  /** Check every non-archived project, one at a time (on server start). Never throws. */
+  /**
+   * Resolves once the project's record is current for this start (#425): at once when a check
+   * has reached it since the server started (or it was added since, or there was no start-up
+   * check), else after checking it now, joining a check already running. A session start waits
+   * for it before it picks its workspace from `isGitRepo`. Never throws.
+   */
+  async current(projectId: string): Promise<void> {
+    if (this.stopped || !this.unchecked.has(projectId)) return;
+    await this.refresh(projectId).catch((error: unknown) =>
+      this.deps.log?.(`projects: checking ${projectId}: ${errorMessage(error)}`),
+    );
+  }
+
+  /** Check every project listed at start, one at a time (on server start). Never throws. */
   async checkAll(): Promise<void> {
-    if (this.stopped) return; // closed before the check began (the database may be closed)
-    let projects: ReturnType<ProjectService["list"]>;
-    try {
-      projects = this.deps.projects.list();
-    } catch (error) {
-      this.deps.log?.(`projects: listing for the start-up check: ${errorMessage(error)}`);
-      return;
-    }
-    for (const project of projects) {
-      if (this.stopped) return;
-      await this.refresh(project.id).catch((error: unknown) =>
-        this.deps.log?.(`projects: checking ${project.name}: ${errorMessage(error)}`),
+    for (const projectId of [...this.unchecked]) {
+      if (this.stopped) return; // closed (the database may be closed)
+      if (!this.unchecked.has(projectId)) continue; // a session start or a turn end checked it
+      await this.refresh(projectId).catch((error: unknown) =>
+        this.deps.log?.(`projects: checking ${projectId}: ${errorMessage(error)}`),
       );
     }
   }

@@ -15,6 +15,7 @@ import {
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { drainStatus } from "./drain";
 import { itemCosts } from "./item-cost";
+import { lessonsInForce } from "./lessons";
 import { localDay, queueOrder } from "./policy";
 import { ownedPr, pullRequests } from "./pr-status";
 import { recoverable } from "./recover";
@@ -144,7 +145,7 @@ export async function buildStatus(ctx: FactoryContext, projectId: string): Promi
     githubLogin,
     scout: project.autonomyMode === "dark_factory" ? scoutStatus(ctx, project, loop, spend) : null,
     visionExists: visionOf(project).exists,
-    lessons: ctx.store.lessons(projectId, LESSONS_IN_BRIEF),
+    lessons: lessonsInForce(ctx, projectId).slice(0, LESSONS_IN_BRIEF),
     spotChecks: spotCheckStatus(ctx, project, loop),
     lastDigest: ctx.store.digests(projectId, 1)[0] ?? null,
     // Kept in memory: an idle tick saves nothing (`FactoryStore.saveTick`).

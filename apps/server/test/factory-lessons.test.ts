@@ -1,6 +1,8 @@
+import { randomUUID } from "node:crypto";
 import {
   type FactoryItem,
   LESSON_BRIEF_DELAY_MS,
+  lessonKey,
   type ReviewVerdictInit,
 } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
@@ -12,6 +14,7 @@ import {
 } from "../src/services/factory/prompts";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
 import { APPROVE, factorySteps } from "./support/factory-steps";
+import { UNSET_ADVICE } from "./support/unset-advice";
 
 /**
  * The factory's lessons (§10.1, #326): reviewers record general rules with their verdicts, the
@@ -138,6 +141,47 @@ describe("factory lessons", () => {
     expect(res.recorded).toBe(false);
     expect(res.message).toMatch(/Kept 1 lesson for later builders and reviewers\.$/);
     expect(lessons()).toHaveLength(1);
+  });
+
+  it("never brief or learn a lesson to unset CodeDen's internal variables (#422)", async () => {
+    await start();
+    // Kept before agent sessions stopped inheriting them (#191, #210): stale now.
+    const stale = [
+      "Unset CODEDEN_HOME and CODEDEN_DEPS_INSTALLER before running tests.",
+      "Run the suite with env -u CODEDEN_DEPS_INSTALLER -u CODEDEN_HOME pnpm test.",
+      "On Windows, Remove-Item Env:CODEDEN_* before pnpm test so the suites use their temp homes.",
+    ];
+    for (const text of stale) expect(text).toMatch(UNSET_ADVICE);
+    const first = await verifying("success", "Add a counter", 3);
+    const at = new Date(env.now().getTime() - LESSON_BRIEF_DELAY_MS).toISOString();
+    for (const text of stale) {
+      env.factory.data.saveLesson({
+        id: randomUUID(),
+        projectId: env.project.id,
+        text,
+        key: lessonKey(text),
+        itemId: first.id,
+        prNumber: first.pr.ref.number,
+        reviewerProvider: null,
+        times: 1,
+        createdAt: at,
+        lastSeenAt: at,
+        removedAt: null,
+      });
+    }
+    // A reviewer who still believes it submits it again, beside a lesson that holds.
+    const res = await review(first.id, withLessons(stale[0] as string, CHANGELOG));
+    expect(res.message).toMatch(/Kept 1 lesson for later builders and reviewers\.$/);
+    expect(lessons().find((l) => l.text === stale[0])?.times).toBe(1);
+    aDayOld();
+
+    const second = await verifying("success", "Add a timer", 4);
+    for (const text of [brief("issue:4"), reviewBrief(second.pr.ref.number)]) {
+      expect(text).toContain(`- ${CHANGELOG}`);
+      expect(text).not.toMatch(UNSET_ADVICE);
+    }
+    const status = await env.factory.status(env.project.id);
+    expect(status.lessons.map((l) => l.text)).toEqual([CHANGELOG]);
   });
 
   it("ask for, keep and brief none with learning from reviews off", async () => {

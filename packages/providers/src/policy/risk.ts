@@ -10,6 +10,7 @@ import {
   touchesCodedenHome,
 } from "./codeden-home";
 import { binName, CD, DISCARD, unwrap } from "./command-words";
+import { type ListOutput, namesOnly } from "./env-names";
 import { classifyGit } from "./git";
 import { classifyInstall } from "./installs";
 import {
@@ -127,19 +128,30 @@ function firstInList(
 
 /**
  * Classify commands in order. A `cd` moves where later relative paths resolve; commands in
- * substitutions and subshells are classified too, without their `cd` leaking out.
+ * substitutions and subshells are classified too, without their `cd` leaking out. `output`: where
+ * the list's output goes, which decides whether an environment listing that keeps only the names
+ * is a dump (`./env-names`): substitutions hand theirs to another command, except a `(…).Name`
+ * group, which keeps only the names itself.
  */
-function classifyList(list: SimpleCommand[], ctx: RiskContext, depth: number): RiskAssessment {
+function classifyList(
+  list: SimpleCommand[],
+  ctx: RiskContext,
+  depth: number,
+  output: ListOutput = "shown",
+): RiskAssessment {
   if (pipesDownloadIntoInterpreter(list)) {
     return risky("network", "Pipes a downloaded script straight into a shell");
   }
+  const names = namesOnly(list, output);
   let here = ctx;
-  for (const cmd of list) {
-    for (const nested of cmd.nested) {
-      const result = classifyList(nested, here, depth);
+  for (const [i, cmd] of list.entries()) {
+    for (const [k, nested] of cmd.nested.entries()) {
+      const into = k === 0 && names.projections.has(i) ? "names" : "feeds";
+      const result = classifyList(nested, here, depth, into);
       if (result.risky) return result;
     }
-    const result = classifySimple(cmd, here, depth);
+    const shown = output === "shown" && list[i + 1]?.piped !== true;
+    const result = classifySimple(cmd, here, depth, { namesOnly: names.listings.has(i), shown });
     if (result.risky) return result;
     here = afterCd(cmd, here);
   }
@@ -192,7 +204,21 @@ function inlineScript(
   return undefined;
 }
 
-function classifySimple(cmd: SimpleCommand, ctx: RiskContext, depth: number): RiskAssessment {
+/**
+ * Where a simple command stands in its list. `namesOnly`: it lists the environment but only the
+ * names reach the agent (`./env-names`). `shown`: its output reaches the agent, not another command.
+ */
+interface Placement {
+  namesOnly: boolean;
+  shown: boolean;
+}
+
+function classifySimple(
+  cmd: SimpleCommand,
+  ctx: RiskContext,
+  depth: number,
+  at: Placement,
+): RiskAssessment {
   const { tokens, elevated } = unwrap(cmd.words);
   if (elevated) return risky("other", "Runs a command with elevated privileges");
   const bin = binName(tokens[0]);
@@ -201,7 +227,12 @@ function classifySimple(cmd: SimpleCommand, ctx: RiskContext, depth: number): Ri
 
   const script = inlineScript(bin, args);
   if (script && depth < MAX_DEPTH) {
-    const inner = classifyList(parseShell(script.text, script.dialect), ctx, depth + 1);
+    const inner = classifyList(
+      parseShell(script.text, script.dialect),
+      ctx,
+      depth + 1,
+      at.shown ? "shown" : "feeds",
+    );
     if (inner.risky) return inner;
   }
 
@@ -249,7 +280,9 @@ function classifySimple(cmd: SimpleCommand, ctx: RiskContext, depth: number): Ri
   const secret = secretArgument(bin, args, written, isSecretPath, pathsOf(cmd));
   if (secret) return risky("secrets", `Accesses the secrets file ${secret}`);
 
-  if (dumpsEnvironment(bin, args)) return risky("secrets", "Dumps environment variables");
+  if (!at.namesOnly && dumpsEnvironment(bin, args)) {
+    return risky("secrets", "Dumps environment variables");
+  }
   // CodeDen's project config: `sed -i`, `git checkout --` and inline code reach it too.
   return projectConfigCommand(cmd, ctx) ?? SAFE;
 }

@@ -1,7 +1,9 @@
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ComposerBox } from "@/components/composer/composer-box";
-import type { SpeechToText } from "@/lib/voice/engines";
+import type { CodeDenClient } from "@/lib/api/client";
+import { createMockClient } from "@/lib/api/mock";
+import { createBrowserStt, type SpeechToText } from "@/lib/voice/engines";
 import type { SamplesListener } from "@/lib/voice/mic-capture";
 import { createSegmentedStt } from "@/lib/voice/segmented-stt";
 import { getDraft, useComposerStore } from "@/stores/composer";
@@ -25,7 +27,7 @@ const KEY = "s-live-dictation";
 const textbox = () => screen.getByRole("textbox", { name: "Message" }) as HTMLTextAreaElement;
 const mic = () => screen.getByRole("button", { name: /^(Dictate|Stop dictation|Transcribing)/ });
 
-function renderComposer(engine: SpeechToText) {
+function renderComposer(engine: SpeechToText, client?: CodeDenClient) {
   return renderWithClient(
     <ComposerBox
       draftKey={KEY}
@@ -35,7 +37,21 @@ function renderComposer(engine: SpeechToText) {
     >
       <span />
     </ComposerBox>,
+    client,
   );
+}
+
+/** The mock client with a push-to-talk shortcut set in Settings > Voice. */
+function withPushToTalk(combo: string): CodeDenClient {
+  const client = createMockClient();
+  return {
+    ...client,
+    getSnapshot: async () => {
+      const s = await client.getSnapshot();
+      s.settings.voice.dictation.pushToTalkShortcut = combo;
+      return s;
+    },
+  };
 }
 
 beforeEach(() => {
@@ -110,6 +126,24 @@ describe("live dictation in the composer", () => {
     expect(screen.queryByTestId("dictation-strip")).toBeNull();
   });
 
+  it("adds no space between typed and dictated text in a language written without spaces", () => {
+    let handlers: Parameters<SpeechToText["start"]>[0] | undefined;
+    const engine: SpeechToText = {
+      supported: true,
+      live: "segments",
+      finishesAfterStop: false,
+      start: (o) => {
+        handlers = o;
+      },
+      stop: vi.fn(),
+    };
+    useComposerStore.getState().setText(KEY, "请修复");
+    renderComposer(engine);
+    fireEvent.click(mic());
+    act(() => handlers?.onText({ final: "不稳定的测试", draft: "" }));
+    expect(textbox().value).toBe("请修复不稳定的测试");
+  });
+
   it("waits for the last segments after stop, then keeps the text when an error ends dictation", () => {
     let handlers: Parameters<SpeechToText["start"]>[0] | undefined;
     const engine: SpeechToText = {
@@ -147,5 +181,104 @@ describe("live dictation in the composer", () => {
     renderComposer(engine);
     const button = screen.getByRole("button", { name: /^Dictation isn't available/ });
     expect((button as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("push-to-talk", () => {
+  // Ctrl+Shift+Space as the shortcut recorder in Settings > Voice saves it. Both modifier
+  // flags are set so the combo's `mod` matches on any platform.
+  const COMBO = "mod+shift+space";
+  const held = { key: " ", code: "Space", ctrlKey: true, metaKey: true, shiftKey: true };
+
+  it("starts on keydown and stops when the main key is released", async () => {
+    let handlers: Parameters<SpeechToText["start"]>[0] | undefined;
+    const engine: SpeechToText = {
+      supported: true,
+      live: "interim",
+      finishesAfterStop: false,
+      start: vi.fn<SpeechToText["start"]>((o) => {
+        handlers = o;
+      }),
+      stop: vi.fn(),
+    };
+    renderComposer(engine, withPushToTalk(COMBO));
+    // The shortcut shows on the button once Settings have loaded.
+    await screen.findByRole("button", { name: /· hold Ctrl Shift space$/ });
+
+    fireEvent.keyDown(window, held);
+    expect(engine.start).toHaveBeenCalledTimes(1);
+    expect(mic().getAttribute("aria-pressed")).toBe("true");
+    // Holding the keys repeats keydown; dictation doesn't restart.
+    fireEvent.keyDown(window, { ...held, repeat: true });
+    expect(engine.start).toHaveBeenCalledTimes(1);
+
+    act(() => handlers?.onText({ final: "the flaky test", draft: "" }));
+    // Letting go of a modifier first keeps listening; only the main key ends it.
+    fireEvent.keyUp(window, { key: "Shift", code: "ShiftLeft", ctrlKey: true, metaKey: true });
+    expect(engine.stop).not.toHaveBeenCalled();
+    expect(mic().getAttribute("aria-pressed")).toBe("true");
+    fireEvent.keyUp(window, { key: " ", code: "Space", ctrlKey: true, metaKey: true });
+    expect(engine.stop).toHaveBeenCalledTimes(1);
+    expect(mic().getAttribute("aria-pressed")).toBe("false");
+    expect(textbox().value).toBe("Fix the flaky test");
+    expect(getDraft(useComposerStore.getState(), KEY).text).toBe("Fix the flaky test");
+  });
+});
+
+describe("browser speech recognition in the composer", () => {
+  /** The browser's recognition, scripted: the test fires its results and its end. */
+  class FakeRecognition {
+    static last: FakeRecognition | null = null;
+    lang = "";
+    continuous = false;
+    interimResults = false;
+    stopped = false;
+    onresult: ((e: unknown) => void) | null = null;
+    onerror: ((e: unknown) => void) | null = null;
+    onend: (() => void) | null = null;
+    start() {
+      FakeRecognition.last = this;
+    }
+    stop() {
+      this.stopped = true;
+    }
+  }
+  const w = window as unknown as { SpeechRecognition?: unknown };
+  beforeEach(() => {
+    FakeRecognition.last = null;
+    w.SpeechRecognition = FakeRecognition;
+  });
+  afterEach(() => {
+    delete w.SpeechRecognition;
+  });
+
+  it("keeps interim words the service never finalised when recognition ends", () => {
+    renderComposer(createBrowserStt());
+    fireEvent.click(mic());
+    const rec = FakeRecognition.last;
+    expect(rec?.interimResults).toBe(true);
+
+    act(() =>
+      rec?.onresult?.({
+        resultIndex: 0,
+        results: {
+          length: 2,
+          0: { isFinal: true, 0: { transcript: "the flaky test" } },
+          1: { isFinal: false, 0: { transcript: " in checkout" } },
+        },
+      }),
+    );
+    // Interim words show muted, outside the draft.
+    expect(textbox().value).toBe("Fix the flaky test");
+    expect(screen.getByTestId("dictation-draft").textContent).toBe("in checkout");
+
+    fireEvent.click(mic());
+    expect(rec?.stopped).toBe(true);
+    // The browser ends recognition after stop without finalising them: they join the draft.
+    act(() => rec?.onend?.());
+    expect(textbox().value).toBe("Fix the flaky test in checkout");
+    expect(getDraft(useComposerStore.getState(), KEY).text).toBe("Fix the flaky test in checkout");
+    expect(screen.queryByTestId("dictation-strip")).toBeNull();
+    expect(mic().getAttribute("aria-pressed")).toBe("false");
   });
 });

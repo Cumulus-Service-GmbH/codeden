@@ -6,6 +6,7 @@ import {
   type ItemDelta,
   OUTPUT_PREVIEW_CHARS,
   type SessionSnapshot,
+  type TurnKind,
   type TurnStatus,
   type Usage,
 } from "@codeden/contracts";
@@ -19,6 +20,8 @@ export interface TurnState {
   error: ErrorInfo | null;
   /** Set when the conversation can be forked through this turn ("Fork from here", §9). */
   forkPoint?: string | null;
+  /** `compact` for a compaction ("Compact now"); absent or null: a work turn. */
+  kind?: TurnKind | null;
 }
 
 export interface ThreadState {
@@ -225,6 +228,7 @@ export function applyAgentEvent(
         startedAt: ts,
         completedAt: null,
         error: null,
+        kind: event.kind ?? null,
       };
       if (!state.rootThreadId) state.rootThreadId = event.threadId;
       break;
@@ -247,6 +251,7 @@ export function applyAgentEvent(
         completedAt: ts,
         error: event.type === "turn.failed" ? event.error : (turn?.error ?? null),
         forkPoint: event.forkPoint ?? null,
+        kind: turn?.kind ?? null,
       };
       break;
     }

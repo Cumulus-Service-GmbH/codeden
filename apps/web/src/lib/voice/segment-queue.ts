@@ -21,12 +21,32 @@ export interface SegmentQueue<T> {
   readonly failed: boolean;
 }
 
-/** Join transcribed pieces with single spaces, skipping empty ones. */
+/**
+ * Characters of scripts written without spaces between words (Chinese, Japanese, Thai, Lao,
+ * Khmer, Burmese), with the CJK and full-width punctuation they use. Script extensions also
+ * cover marks those scripts share, such as the Japanese long vowel mark.
+ */
+const SPACELESS =
+  "\\p{scx=Han}\\p{scx=Hiragana}\\p{scx=Katakana}\\p{scx=Thai}\\p{scx=Lao}\\p{scx=Khmer}\\p{scx=Myanmar}\\u3000-\\u303f\\uff01-\\uff60";
+const ENDS_SPACELESS = new RegExp(`[${SPACELESS}]$`, "u");
+const STARTS_SPACELESS = new RegExp(`^[${SPACELESS}]`, "u");
+
+/**
+ * What goes between two pieces of dictated text: nothing where both sides are in a script
+ * written without spaces (a pause there is not a word break), a single space otherwise.
+ */
+export function separator(before: string, after: string): string {
+  return ENDS_SPACELESS.test(before) && STARTS_SPACELESS.test(after) ? "" : " ";
+}
+
+/** Join transcribed pieces the way their language is written, skipping empty ones. */
 export function joinSegments(pieces: readonly string[]): string {
-  return pieces
-    .map((p) => p.trim())
-    .filter(Boolean)
-    .join(" ");
+  let text = "";
+  for (const piece of pieces) {
+    const p = piece.trim();
+    if (p) text = text ? text + separator(text, p) + p : p;
+  }
+  return text;
 }
 
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
