@@ -113,6 +113,7 @@ export class SessionLauncher {
    * and forgets it, so the next message starts over in a new one rather than anywhere else.
    */
   private async start(sessionId: string, opts: LaunchOptions): Promise<void> {
+    this.keepWorkspaceStart(sessionId, opts);
     const session = this.deps.repo.get(sessionId);
     const project = session.projectId ? this.deps.projects.get(session.projectId) : null;
     const sandboxes = this.deps.sandboxes;
@@ -149,14 +150,13 @@ export class SessionLauncher {
       branch: ws.branch,
       baseBranch: ws.baseBranch,
     }));
-    if (ws.fallback) {
-      const fallback = ws.fallback;
-      repo.setStartMeta(sessionId, (m) => ({
-        ...defaultMeta(opts.workspace),
-        ...m,
-        workspaceFallback: fallback,
-      }));
-    }
+    // Prepared: later starts open the session where it now is.
+    repo.setStartMeta(sessionId, (m) => ({
+      ...defaultMeta(opts.workspace),
+      ...m,
+      workspaceStart: null,
+      ...(ws.fallback ? { workspaceFallback: ws.fallback } : {}),
+    }));
     const brief = this.pendingBrief(sessionId);
     const input = brief ? withHandoffBrief(brief, opts.input) : opts.input;
     const result = await this.open(
@@ -181,15 +181,16 @@ export class SessionLauncher {
 
   /**
    * Re-open a session the runner no longer hosts (runner restart, stopped session) through the
-   * provider's resume token, optionally starting a turn. Throws on failure. A fork whose
-   * worktree was never made (its first start failed) gets it made now, as at its first start:
-   * it never runs anywhere else. A handoff whose brief no start delivered yet (§9) sends it now,
-   * ahead of `input`.
+   * provider's resume token, optionally starting a turn. Throws on failure. A session whose
+   * workspace was never prepared (its first start failed) gets it prepared now, as at its first
+   * start: a fork its worktree, any other session the workspace it asked for. It never runs in
+   * the project folder in its place. A handoff whose brief no start delivered yet (§9) sends it
+   * now, ahead of `input`.
    */
   async resume(session: Session, input?: UserInput): Promise<void> {
-    const forkStart = this.pendingForkStart(session);
-    if (forkStart) {
-      await this.start(session.id, { ...forkStart, ...(input ? { input } : {}) });
+    const unprepared = this.pendingForkStart(session) ?? this.pendingWorkspaceStart(session);
+    if (unprepared) {
+      await this.start(session.id, { ...unprepared, ...(input ? { input } : {}) });
       return;
     }
     // A container session whose start failed has none: it gets one now, never runs elsewhere.
@@ -373,6 +374,25 @@ export class SessionLauncher {
   private pendingForkStart(session: Session): ForkStart | null {
     if (session.worktreePath) return null;
     return this.deps.repo.find(session.id)?.startMeta?.forkStart ?? null;
+  }
+
+  /** The workspace a start asked for while it isn't prepared yet (`workspaceStart`). */
+  private pendingWorkspaceStart(session: Session): { workspace: WorkspaceRequest } | null {
+    const workspace = this.deps.repo.find(session.id)?.startMeta?.workspaceStart;
+    return workspace ? { workspace } : null;
+  }
+
+  /**
+   * Keep the workspace this start asks for until it is prepared (`workspaceStart`), before
+   * anything can fail. A fork keeps its own plan (`forkStart`).
+   */
+  private keepWorkspaceStart(sessionId: string, opts: LaunchOptions): void {
+    if (opts.fork) return;
+    this.deps.repo.setStartMeta(sessionId, (m) => ({
+      ...defaultMeta(opts.workspace),
+      ...m,
+      workspaceStart: opts.workspace,
+    }));
   }
 
   /**

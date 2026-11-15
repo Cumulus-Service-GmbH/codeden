@@ -21,6 +21,7 @@ import type {
   StartSessionResponse,
   UpdateSessionRequest,
   UserInput,
+  WorkspaceRequest,
 } from "@codeden/contracts";
 import type { SandboxService } from "../../execution/sandboxes";
 import type { McpTokenStore } from "../../mcp/tokens";
@@ -52,6 +53,7 @@ import type { Answerer, QuestionBroker } from "./questions";
 import { applyPendingConfig, updateSession } from "./reconfigure";
 import type { SessionRepo, StoredStartMeta } from "./repo";
 import { planReview } from "./review";
+import { startWorkspace } from "./start-workspace";
 
 export interface SessionServiceDeps extends RunnerDeps {
   repo: SessionRepo;
@@ -188,6 +190,8 @@ export class SessionService {
     if (!project && req.role !== "orchestrator") {
       throw badRequest("projectId is required for this role", "project_required");
     }
+    // Refused before the conflict check: a worktree that can't be made is never queued either.
+    const workspace = startWorkspace(req.workspace, project);
     const purpose = derivePurpose(req.purpose, req.input?.text);
     const workKey = deriveWorkKey({
       workKey: req.workKey,
@@ -227,20 +231,20 @@ export class SessionService {
     const queued = queuedBehind.length > 0;
     const session = this.buildSession(req, project, { purpose, workKey, scope, queued });
     const meta: StoredStartMeta = {
-      workspaceMode: req.workspace.mode,
+      workspaceMode: workspace.mode,
       workspaceFallback: null,
       forced,
       queuedBehind,
       // A pending start keeps its pasted images as artifacts, like a queued message.
       pending: queued
-        ? { input: req.input && this.externalize(session, req.input), workspace: req.workspace }
+        ? { input: req.input && this.externalize(session, req.input), workspace }
         : null,
     };
     repo.create(session, meta);
     if (queued) {
       return { status: "queued", sessionId: session.id, behind: queuedBehind };
     }
-    this.launchInBackground(session.id, req.input, req.workspace);
+    this.launchInBackground(session.id, req.input, workspace);
     return { status: "started", sessionId: session.id };
   }
 
@@ -610,7 +614,7 @@ export class SessionService {
   private launchInBackground(
     id: string,
     input: UserInput | undefined,
-    workspace: StartSessionRequest["workspace"],
+    workspace: WorkspaceRequest,
     fork?: LaunchFork,
   ) {
     const session = this.deps.repo.get(id);

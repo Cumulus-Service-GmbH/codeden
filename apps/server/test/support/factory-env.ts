@@ -142,6 +142,7 @@ export function createFactoryEnv(
     name: "app",
     slug: "app",
     path: repoDir,
+    isGitRepo: true,
     kind: "github",
     github: {
       owner: "acme",

@@ -138,6 +138,51 @@ describe("the New session draft", () => {
     expect(getDraft(useComposerStore.getState(), KEY).attachments).toHaveLength(1);
   });
 
+  it("runs in the project folder of a project that isn't a git repository (#408)", async () => {
+    const start = vi.fn<Start>(async () => ({ status: "started", sessionId: "s-new" }));
+    const base = clientWith(start);
+    const box = await openDraft({
+      ...base,
+      getSnapshot: async () => {
+        const snapshot = await base.getSnapshot();
+        const projects = snapshot.projects.map((p) =>
+          p.id === PROJECT ? { ...p, isGitRepo: false } : p,
+        );
+        return { ...snapshot, projects };
+      },
+    });
+    const trigger = await screen.findByRole("button", { name: "Workspace" });
+    expect(trigger.textContent).toBe("Project folder");
+    expect(screen.getByTestId("new-session").textContent).toContain("isn't a git repository");
+
+    // The worktree is offered, disabled, with the reason.
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    const worktree = await screen.findByRole("menuitem", { name: /New worktree/ });
+    expect(worktree.getAttribute("aria-disabled")).toBe("true");
+    expect(worktree.textContent).toContain(
+      "Not a git repository: sessions run in the project folder",
+    );
+    const folder = screen.getByRole("menuitem", { name: /Project folder/ });
+    expect(folder.textContent).toContain("C:\\Code\\storefront");
+    fireEvent.keyDown(folder, { key: "Escape" });
+
+    fireEvent.change(box, { target: { value: "Hey" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+    expect(start.mock.calls[0]?.[0]).toMatchObject({ workspace: { mode: "repo_root" } });
+  });
+
+  it("leaves the worktree to the server and shows no workspace picker in a git project", async () => {
+    const start = vi.fn<Start>(async () => ({ status: "started", sessionId: "s-new" }));
+    const box = await openDraft(clientWith(start));
+    expect(screen.queryByRole("button", { name: "Workspace" })).toBeNull();
+    expect(screen.getByTestId("new-session").textContent).toContain("its own worktree and branch");
+    fireEvent.change(box, { target: { value: "Hey" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() => expect(start).toHaveBeenCalledTimes(1));
+    expect(start.mock.calls[0]?.[0]).not.toHaveProperty("workspace");
+  });
+
   it("lists the project's `/` commands for the draft's provider before the session exists", async () => {
     const base = createMockClient();
     const list = vi.fn<CodeDenClient["listProjectSlashCommands"]>(async () => [

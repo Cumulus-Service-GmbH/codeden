@@ -64,8 +64,10 @@ export function NewSessionPage({ projectId }: { projectId: string }) {
       />
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
         <EmptyState icon={<MessageSquareDashed />} title="New session" className="flex-1">
-          Describe the task. The agent works in its own worktree and branch. Nothing is created
-          until you send.
+          {resolved.workspace === "repo_root"
+            ? "Describe the task. The agent works in the project folder itself: it isn't a git repository, so there is no worktree."
+            : "Describe the task. The agent works in its own worktree and branch."}{" "}
+          Nothing is created until you send.
         </EmptyState>
       </div>
       {start.conflict && (
@@ -89,6 +91,7 @@ export function NewSessionPage({ projectId }: { projectId: string }) {
             choice={draft.choice}
             resolved={resolved}
             checks={checks}
+            projectPath={project.path}
             onChange={(choice) => setChoice(projectId, choice)}
           />
         }

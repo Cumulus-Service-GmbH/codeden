@@ -38,6 +38,8 @@ export function projectToRow(p: Project): ProjectRow {
     name: p.name,
     slug: p.slug,
     path: p.path,
+    // Events written before the flag existed carry none: git, until the next detection.
+    isGitRepo: p.isGitRepo ?? true,
     defaultBranch: p.defaultBranch,
     defaultProvider: p.defaultProvider,
     defaultModel: p.defaultModel,

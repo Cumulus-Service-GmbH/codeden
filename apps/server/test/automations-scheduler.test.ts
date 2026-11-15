@@ -16,6 +16,7 @@ const project: Project = {
   name: "Widgets",
   slug: "widgets",
   path: "/tmp/widgets",
+  isGitRepo: true,
   defaultBranch: "main",
   defaultProvider: null,
   defaultModel: null,

@@ -21,6 +21,7 @@ const localProject = {
   name: "todo",
   slug: "todo",
   path: "/work/todo",
+  isGitRepo: false,
   defaultBranch: null,
   defaultProvider: null,
   autonomy: null,
@@ -42,7 +43,12 @@ const repo = (owner: string, name: string, url = `https://github.com/${owner}/${
   remoteUrl: url,
   defaultBranch: "main",
 });
-const githubProject = { ...localProject, kind: "github", github: repo("octo", "todo") } as Project;
+const githubProject = {
+  ...localProject,
+  kind: "github",
+  isGitRepo: true,
+  github: repo("octo", "todo"),
+} as Project;
 
 function detection(patch: Partial<ProjectDetection> = {}): ProjectDetection {
   return {
@@ -79,7 +85,7 @@ describe("reconcileProject", () => {
   it("records the default branch of a folder that became a git checkout", () => {
     const result = reconcileProject(localProject, detection(), facts);
     expect(result).toMatchObject({ changed: true, outcome: "git_detected" });
-    expect(result.project.defaultBranch).toBe("main");
+    expect(result.project).toMatchObject({ defaultBranch: "main", isGitRepo: true });
     const again = reconcileProject(result.project, detection(), facts);
     expect(again).toMatchObject({ changed: false, outcome: "unchanged" });
     expect(again.message).toBe("Still no GitHub remote on origin");
@@ -88,7 +94,7 @@ describe("reconcileProject", () => {
   it("explains a non-GitHub origin and a folder that is still not a checkout", () => {
     const gitlab = detection({ remoteUrl: "https://gitlab.com/octo/todo.git" });
     expect(
-      reconcileProject({ ...localProject, defaultBranch: "main" }, gitlab, facts),
+      reconcileProject({ ...localProject, defaultBranch: "main", isGitRepo: true }, gitlab, facts),
     ).toMatchObject({
       changed: false,
       message:
@@ -143,6 +149,29 @@ describe("reconcileProject", () => {
     expect(back.project.remoteWarning).toBeUndefined();
   });
 
+  it("follows a folder in and out of being a git repository (#408)", () => {
+    const git = { ...localProject, defaultBranch: "main", isGitRepo: true } as Project;
+    const none = detection({ isGitRepo: false, gitRoot: null, defaultBranch: null });
+    const gone = reconcileProject(git, none, { ...facts, gitDirPresent: false });
+    expect(gone).toMatchObject({ changed: true, outcome: "git_missing" });
+    expect(gone.message).toBe("Not a git repository: sessions run in the project folder");
+    expect(gone.project).toMatchObject({ isGitRepo: false, defaultBranch: "main", updatedAt: now });
+    expect(reconcileProject(gone.project, none, { ...facts, gitDirPresent: false })).toMatchObject({
+      changed: false,
+    });
+
+    // Back, with the default branch already known: only the flag changes.
+    const back = reconcileProject(gone.project, detection(), facts);
+    expect(back).toMatchObject({ changed: true, outcome: "git_detected" });
+    expect(back.message).toBe("Found a git repository: new sessions get their own worktree");
+    expect(back.project.isGitRepo).toBe(true);
+
+    // A GitHub project that lost its checkout keeps its coordinates and gets the warning.
+    const github = reconcileProject(githubProject, none, { ...facts, gitDirPresent: false });
+    expect(github).toMatchObject({ changed: true, outcome: "github_remote_missing" });
+    expect(github.project).toMatchObject({ kind: "github", isGitRepo: false });
+  });
+
   it("changes nothing when git fails or the folder sits inside another checkout", () => {
     const failed = detection({ isGitRepo: false, gitRoot: null });
     expect(reconcileProject(githubProject, failed, facts)).toMatchObject({ changed: false });
@@ -183,7 +212,7 @@ async function plainFolderProject(): Promise<{ id: string; folder: string }> {
   const folder = join(dir, "test-todo");
   mkdirSync(folder);
   const { project } = await service.create({ source: { type: "local", path: folder } });
-  expect(project).toMatchObject({ kind: "local", defaultBranch: null });
+  expect(project).toMatchObject({ kind: "local", defaultBranch: null, isGitRepo: false });
   return { id: project.id, folder };
 }
 
@@ -225,7 +254,16 @@ describe("ProjectService.refresh", () => {
     git(folder, "init", "-q", "-b", "trunk");
     const result = await service.refresh(id);
     expect(result).toMatchObject({ changed: true, outcome: "git_detected" });
-    expect(service.get(id)).toMatchObject({ kind: "local", defaultBranch: "trunk" });
+    expect(service.get(id)).toMatchObject({
+      kind: "local",
+      defaultBranch: "trunk",
+      isGitRepo: true,
+    });
+
+    // The checkout goes again: new sessions run in the folder.
+    rmSync(join(folder, ".git"), { recursive: true, force: true });
+    expect(await service.refresh(id)).toMatchObject({ changed: true, outcome: "git_missing" });
+    expect(service.get(id).isGitRepo).toBe(false);
   });
 
   it("follows a changed remote and forgets the old repository's issues", async () => {

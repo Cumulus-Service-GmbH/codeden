@@ -54,7 +54,8 @@ describe("api schemas", () => {
   it("fills start-session defaults", () => {
     const req = roundTrip(StartSessionRequest, { projectId: "p1", input: { text: "hi" } });
     expect(req.role).toBe("agent");
-    expect(req.workspace.mode).toBe("worktree");
+    // No mode: the server picks it from the project (a worktree in a git repository).
+    expect(req.workspace).toEqual({});
     expect(req.startedBy).toEqual({ kind: "user" });
     expect(req.input?.attachments).toEqual([]);
     expect(req.replacesConflict).toBeUndefined();

@@ -36,6 +36,15 @@ export function sameGithubRepo(
   );
 }
 
+const keeping =
+  (project: Project) =>
+  (outcome: ProjectRefreshOutcome, message: string): Reconciled => ({
+    project,
+    changed: false,
+    outcome,
+    message,
+  });
+
 /**
  * Apply what re-detecting a project's folder found (§9). Pure: the caller appends the event.
  *
@@ -44,25 +53,15 @@ export function sameGithubRepo(
  * - another GitHub repository (or URL) on `origin`: the coordinates follow it.
  * - a GitHub project without a GitHub `origin`: never downgraded; a `remoteWarning` is set and
  *   the user decides (restore the remote, or disconnect GitHub).
+ * - `isGitRepo` follows the folder, so its new sessions get worktrees or run in place. A `.git`
+ *   that git couldn't read changes nothing.
  */
 export function reconcileProject(
   project: Project,
   detected: ProjectDetection,
   facts: ReconcileFacts,
 ): Reconciled {
-  const keep = (outcome: ProjectRefreshOutcome, message: string): Reconciled => ({
-    project,
-    changed: false,
-    outcome,
-    message,
-  });
-  const update = (next: Project, outcome: ProjectRefreshOutcome, message: string): Reconciled => ({
-    project: { ...next, updatedAt: facts.now },
-    changed: true,
-    outcome,
-    message,
-  });
-
+  const keep = keeping(project);
   if (!detected.isGitRepo && facts.gitDirPresent) {
     return keep(
       "unchanged",
@@ -75,6 +74,33 @@ export function reconcileProject(
       `This folder is inside the git checkout at ${detected.gitRoot}; add that folder as a project to use its remote`,
     );
   }
+  const result = reconcileRemote(project, detected, facts);
+  const isGitRepo = detected.isGitRepo;
+  if (result.project.isGitRepo === isGitRepo) return result;
+  if (result.changed) return { ...result, project: { ...result.project, isGitRepo } };
+  return {
+    project: { ...project, isGitRepo, updatedAt: facts.now },
+    changed: true,
+    outcome: isGitRepo ? "git_detected" : "git_missing",
+    message: isGitRepo
+      ? "Found a git repository: new sessions get their own worktree"
+      : "Not a git repository: sessions run in the project folder",
+  };
+}
+
+/** The kind, GitHub coordinates and default branch, from a detection of the project's own folder. */
+function reconcileRemote(
+  project: Project,
+  detected: ProjectDetection,
+  facts: ReconcileFacts,
+): Reconciled {
+  const keep = keeping(project);
+  const update = (next: Project, outcome: ProjectRefreshOutcome, message: string): Reconciled => ({
+    project: { ...next, updatedAt: facts.now },
+    changed: true,
+    outcome,
+    message,
+  });
 
   const gh = detected.github;
   if (project.kind === "github") {

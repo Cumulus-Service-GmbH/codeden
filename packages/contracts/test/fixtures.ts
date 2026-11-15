@@ -191,6 +191,7 @@ export const sampleProject: Project = {
   name: "CodeDen",
   slug: "codeden",
   path: "C:/Projects/codeden",
+  isGitRepo: true,
   defaultBranch: "main",
   defaultProvider: null,
   defaultModel: null,

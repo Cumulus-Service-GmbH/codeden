@@ -59,6 +59,8 @@ export interface DraftDefaults {
         defaultModel: string | null;
         defaultEffort: ReasoningEffort | null;
         autonomy: AutonomyLevel | null;
+        /** False when the project folder isn't a git repository (`Project.isGitRepo`). */
+        isGitRepo?: boolean;
       }
     | undefined;
   /** Settings → Providers → Agent sessions. */
@@ -79,7 +81,15 @@ export interface ResolvedDraft {
   /** Off at Read-only, where the agent can't fix anything. */
   untilChecksPass: boolean;
   checkRounds: number;
+  /**
+   * Where the session runs (§9): its own worktree, or the project folder itself when the folder
+   * isn't a git repository (no worktree can be made there).
+   */
+  workspace: "worktree" | "repo_root";
 }
+
+/** Why a project whose folder isn't a git repository gets no worktree (as the server says). */
+export const NOT_A_REPO_REASON = "Not a git repository: sessions run in the project folder";
 
 /**
  * Fill in the defaults, so the pickers show what the first send will start:
@@ -90,7 +100,8 @@ export interface ResolvedDraft {
  *   else the provider's default model and the model's own effort. A default for another provider
  *   never applies: its model id means nothing there;
  * - autonomy: the one picked, else the project's, else the Settings default;
- * - keep going until checks pass: as picked, but never at Read-only.
+ * - keep going until checks pass: as picked, but never at Read-only;
+ * - workspace: a new worktree, or the project folder when it isn't a git repository.
  */
 export function resolveDraftChoice(choice: DraftChoice, defaults: DraftDefaults): ResolvedDraft {
   const { providers, project } = defaults;
@@ -127,6 +138,7 @@ export function resolveDraftChoice(choice: DraftChoice, defaults: DraftDefaults)
     planMode: choice.planMode && (provider?.capabilities.planMode ?? false),
     untilChecksPass: (choice.untilChecksPass ?? false) && autonomy !== "read_only",
     checkRounds: choice.checkRounds ?? DEFAULT_CHECK_ROUNDS,
+    workspace: project?.isGitRepo === false ? "repo_root" : "worktree",
   };
 }
 
@@ -165,6 +177,8 @@ export function buildStartRequest(
     ...(resolved.model ? { model: resolved.model } : {}),
     ...(resolved.effort ? { effort: resolved.effort } : {}),
     ...(key ? { workKey: key } : {}),
+    // A git project leaves it to the server (a new worktree); a folder that isn't one says so.
+    ...(resolved.workspace === "repo_root" ? { workspace: { mode: "repo_root" as const } } : {}),
   };
 }
 

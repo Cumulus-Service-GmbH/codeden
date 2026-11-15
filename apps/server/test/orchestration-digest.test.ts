@@ -23,6 +23,7 @@ const project = (id: string, name: string): Project => ({
   name,
   slug: name.toLowerCase(),
   path: `/repos/${name}`,
+  isGitRepo: true,
   kind: "local",
   defaultBranch: "main",
   defaultProvider: null,

@@ -92,8 +92,9 @@ describe("situational awareness (§8.4)", () => {
     const start = { projectId: "p1", input: { text: "Better wording" }, workKey: "issue:9" };
     const parsed = ResolveConflictRequest.parse({ resolution: "wait", behindId: "s9", start });
     expect(parsed).toMatchObject({ resolution: "wait", behindId: "s9", start });
-    // The start request gets its defaults, as `POST /api/sessions` would give it.
-    expect(parsed.start?.workspace).toEqual({ mode: "worktree" });
+    // The start request gets its defaults, as `POST /api/sessions` would give it (the workspace
+    // mode is the server's to pick from the project).
+    expect(parsed.start?.workspace).toEqual({});
     expect(ResolveConflictRequest.parse(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
     // A bare decision still works, and the decision rules still apply.
     expect(ResolveConflictRequest.parse({ resolution: "skip" })).toEqual({ resolution: "skip" });

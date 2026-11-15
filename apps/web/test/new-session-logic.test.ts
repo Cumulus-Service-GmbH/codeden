@@ -260,6 +260,22 @@ describe("buildStartRequest", () => {
     expect(buildStartRequest("p1", input, resolved, "   ")).not.toHaveProperty("workKey");
   });
 
+  it("runs in the project folder when it isn't a git repository (#408)", () => {
+    const notGit = projectWith({ isGitRepo: false });
+    const resolved = resolveDraftChoice(choice(), defaults({ project: notGit }));
+    expect(resolved.workspace).toBe("repo_root");
+    expect(buildStartRequest("p1", input, resolved, "")).toMatchObject({
+      workspace: { mode: "repo_root" },
+    });
+    // A git project (or one detected before the flag existed) leaves it to the server.
+    expect(resolveDraftChoice(choice(), defaults()).workspace).toBe("worktree");
+    const git = resolveDraftChoice(
+      choice(),
+      defaults({ project: projectWith({ isGitRepo: true }) }),
+    );
+    expect(buildStartRequest("p1", input, git, "")).not.toHaveProperty("workspace");
+  });
+
   it("carries the attachments of the first message", () => {
     const withImage = {
       text: "",

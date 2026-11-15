@@ -55,6 +55,13 @@ export type StoredStartMeta = SessionStartMeta & {
   /** A fork's workspace plan (§9): prepared before any start until the worktree exists. */
   forkStart?: ForkStart | null;
   /**
+   * The workspace a start asked for (§9), until it is prepared: a first start that fails keeps
+   * it, and the next start (a message, a restart) prepares it first. A session never runs in the
+   * project folder in place of the worktree it asked for. Absent on sessions started before it
+   * existed, and on forks, which keep `forkStart`.
+   */
+  workspaceStart?: WorkspaceRequest | null;
+  /**
    * A handoff's or a review's brief (§9) until a start delivers it: a first start that fails
    * keeps it, and the next start sends it first, with the message that starts it.
    */
