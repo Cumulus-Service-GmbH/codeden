@@ -110,6 +110,24 @@ describe("live dictation in the composer", () => {
     expect(screen.queryByTestId("dictation-strip")).toBeNull();
   });
 
+  it("adds no space between typed and dictated text in a language written without spaces", () => {
+    let handlers: Parameters<SpeechToText["start"]>[0] | undefined;
+    const engine: SpeechToText = {
+      supported: true,
+      live: "segments",
+      finishesAfterStop: false,
+      start: (o) => {
+        handlers = o;
+      },
+      stop: vi.fn(),
+    };
+    useComposerStore.getState().setText(KEY, "请修复");
+    renderComposer(engine);
+    fireEvent.click(mic());
+    act(() => handlers?.onText({ final: "不稳定的测试", draft: "" }));
+    expect(textbox().value).toBe("请修复不稳定的测试");
+  });
+
   it("waits for the last segments after stop, then keeps the text when an error ends dictation", () => {
     let handlers: Parameters<SpeechToText["start"]>[0] | undefined;
     const engine: SpeechToText = {

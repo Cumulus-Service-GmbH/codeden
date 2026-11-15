@@ -8,6 +8,7 @@ import {
   type NoticeTarget,
   type RawEventEnvelope,
   type Session,
+  type TurnKind,
 } from "@codeden/contracts";
 import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, or, type SQL } from "drizzle-orm";
 import type { Db } from "../../db/client";
@@ -34,6 +35,8 @@ export interface NoticeLookup {
   session(id: string): Session | undefined;
   /** Text of the final assistant message of a turn. */
   finalMessage(sessionId: string, turnId: string): string | null;
+  /** What a turn was for (`Turn.kind`): a compaction finishes no work. Absent: work. */
+  turnKind?(sessionId: string, turnId: string): TurnKind | null | undefined;
   /** The MCP server whose form a transcript item is (an elicitation), if it is one. */
   mcpServer?(sessionId: string, itemId: string): string | undefined;
 }
@@ -108,6 +111,8 @@ export function deriveNotices(events: RawEventEnvelope[], lookup: NoticeLookup):
       const event = e.payload as AgentEventOf<"turn.completed">;
       const s = agentSession(e.sessionId);
       if (!s || s.rootThreadId !== event.threadId) continue;
+      // A compaction ("Compact now", between scout rounds) is no news: no notice, no wake.
+      if (lookup.turnKind?.(s.id, event.turnId) === "compact") continue;
       const final = lookup.finalMessage(s.id, event.turnId);
       const finished: NoticeDraft = {
         id: `session.finished:${s.id}:${event.turnId}`,

@@ -10,7 +10,7 @@ import {
 import { createMockClient } from "@/lib/api/mock";
 import { sessions as fixtureSessions } from "@/lib/api/mock/fixtures/sessions";
 import { providers } from "@/lib/api/mock/fixtures/world";
-import { canReview, reviewBlocked } from "@/lib/session-actions";
+import { canReview, NOT_A_REPO_ACTION_REASON, reviewBlocked } from "@/lib/session-actions";
 import { useUiStore } from "@/stores/ui";
 import { renderWithClient } from "./utils";
 
@@ -86,6 +86,15 @@ describe("reviewing a session with another agent", () => {
     expect(reviewBlocked(idle, 0)).toMatch(/No changes to review/);
     // Unknown here: the server decides.
     expect(reviewBlocked(idle, undefined)).toBeNull();
+  });
+
+  it("never reviews in a project whose folder isn't a git repository, and says so first (#424)", () => {
+    const notGit = { isGitRepo: false };
+    expect(reviewBlocked(idle, 2, notGit)).toBe(NOT_A_REPO_ACTION_REASON);
+    expect(reviewBlocked({ ...idle, status: "waiting" }, 2, notGit)).toBe(NOT_A_REPO_ACTION_REASON);
+    expect(reviewBlocked({ ...idle, branch: null }, 0, notGit)).toBe(NOT_A_REPO_ACTION_REASON);
+    expect(reviewBlocked(idle, 2, { isGitRepo: true })).toBeNull();
+    expect(reviewBlocked(idle, 0, undefined)).toMatch(/No changes to review/);
   });
 
   it("starts on another provider that can run and enforce read-only, else the session's own", () => {

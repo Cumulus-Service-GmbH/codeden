@@ -68,6 +68,7 @@ export function applyTranscriptMessage(
       error: turn.error,
       // Where the conversation can be forked through this turn ("Fork from here", §9).
       forkPoint: turn.forkPoint ?? null,
+      kind: turn.kind ?? null,
     };
     const t = thread(turn.threadId);
     if (!t.turnIds.includes(turn.id)) {

@@ -31,6 +31,7 @@ import { badRequest, conflict, ServiceError } from "../errors";
 import type { InboxService } from "../inbox-service";
 import { projectDefaultProvider } from "../projects/project-config";
 import type { ProjectService } from "../projects/project-service";
+import type { ProjectRedetector } from "../projects/redetector";
 import {
   type RunnerDeps,
   type RunnerPort,
@@ -40,7 +41,7 @@ import {
 } from "../runner-port";
 import type { UtilityService } from "../utility";
 import { freezeChecks } from "./checks";
-import { compactRefusal, startCompaction } from "./compact";
+import { compactingRefusal, compactionRunning, compactRefusal, startCompaction } from "./compact";
 import { derivePurpose, deriveWorkKey, findConflicts } from "./conflicts";
 import { planFork } from "./fork";
 import { planHandoff } from "./handoff";
@@ -72,6 +73,11 @@ export interface SessionServiceDeps extends RunnerDeps {
   outboxRetryMs?: number;
   /** Refuses starts a project's sandboxes can't host (`docs/remote-runners.md` §8). */
   sandboxes?: Pick<SandboxService, "assertStartable" | "wants">;
+  /**
+   * Brings a project's record up to date with its folder (`isGitRepo`) when the start-up check
+   * hasn't reached it yet (#425). Without it, starts trust the record as it is.
+   */
+  projectChecks?: Pick<ProjectRedetector, "current">;
 }
 
 /** What the session service needs from the checks loop (`ChecksLoop`). */
@@ -185,6 +191,8 @@ export class SessionService {
 
   async start(req: StartSessionRequest): Promise<StartSessionResponse> {
     const { repo, projects } = this.deps;
+    // The workspace follows `isGitRepo`: read it once the folder has been checked since start.
+    if (req.projectId) await this.deps.projectChecks?.current(req.projectId);
     const project = req.projectId ? projects.get(req.projectId) : null;
     if (project?.archivedAt) throw badRequest("The project is archived", "project_archived");
     if (!project && req.role !== "orchestrator") {
@@ -255,6 +263,7 @@ export class SessionService {
    */
   async fork(id: string, req: ForkSessionRequest): Promise<ForkSessionResponse> {
     const { repo, projects } = this.deps;
+    await this.sourceProjectChecked(id);
     const plan = await planFork({ repo, projects, runner: this.runnerOf(id) }, id, req);
     repo.create(plan.session, plan.meta);
     this.launchInBackground(plan.session.id, undefined, plan.start.workspace, plan.start.fork);
@@ -269,6 +278,7 @@ export class SessionService {
    */
   async handoff(id: string, req: HandoffSessionRequest): Promise<HandoffSessionResponse> {
     const { repo, projects, utility } = this.deps;
+    await this.sourceProjectChecked(id);
     const plan = await planHandoff({ repo, projects, runner: this.runnerOf(id), utility }, id, req);
     repo.create(plan.session, plan.meta);
     this.launchInBackground(plan.session.id, undefined, plan.start.workspace, plan.start.fork);
@@ -283,10 +293,17 @@ export class SessionService {
    */
   async review(id: string, req: ReviewSessionRequest): Promise<ReviewSessionResponse> {
     const { repo, projects } = this.deps;
+    await this.sourceProjectChecked(id);
     const plan = await planReview({ repo, projects, runner: this.runnerOf(id) }, id, req);
     repo.create(plan.session, plan.meta);
     this.launchInBackground(plan.session.id, undefined, plan.start.workspace, plan.start.fork);
     return { sessionId: plan.session.id };
+  }
+
+  /** Fork, handoff and review refuse a project that isn't a git repository: check it first. */
+  private async sourceProjectChecked(sessionId: string): Promise<void> {
+    const projectId = this.deps.repo.find(sessionId)?.session.projectId;
+    if (projectId) await this.deps.projectChecks?.current(projectId);
   }
 
   /** Start a queued session whose blockers finished (called by the queue). */
@@ -316,8 +333,13 @@ export class SessionService {
     if (BUSY.has(session.status) || delivering) {
       if (req.whenBusy === "reject") throw conflict("A turn is running", "turn_running");
       if (req.whenBusy === "steer" && !delivering) {
-        await this.steer(id, req.input);
-        return { status: "steered" };
+        try {
+          await this.steer(id, req.input);
+          return { status: "steered" };
+        } catch (error) {
+          // A compaction can't be steered: the message goes once it ends.
+          if (runnerErrorCode(error) !== "compacting") throw error;
+        }
       }
       return this.enqueue(id, req.input, from);
     }
@@ -351,6 +373,7 @@ export class SessionService {
     if (!this.provider(session.provider, id)?.capabilities.steer) {
       throw conflict("This provider cannot steer a running turn", "unsupported");
     }
+    if (compactionRunning(this.deps.repo, session)) throw compactingRefusal();
     const input = this.forRunner(session, raw);
     await this.runnerOf(id)
       .request({ name: "session.steer", sessionId: id, input })
