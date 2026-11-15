@@ -1,13 +1,14 @@
 import { binName, DISCARD, unwrap } from "./command-words";
-import { dumpsEnvironment } from "./secrets";
+import { ENV_DRIVE, listsEnvironment } from "./env-dumps";
 import type { SimpleCommand } from "./shell";
 
 /**
  * Names-only environment listings (§11.2, #422). Listing the environment counts as dumping it
- * (`dumpsEnvironment`), unless the pipeline after the listing keeps only the names and those
+ * (`listsEnvironment`), unless the pipeline after the listing keeps only the names and those
  * reach the agent: `… | Select-Object -ExpandProperty Name`, `… | ForEach-Object { $_.Name }`,
  * `(Get-ChildItem env:).Name`, `Get-ChildItem env: -Name`, `printenv | cut -d= -f1`, a `sed`
- * that drops `=` and the rest, `awk -F= '{print $1}'`, or clearing the listed variables
+ * that drops `=` and the rest, `awk -F= '{print $1}'`, cmd's
+ * `for /f "delims==" %i in ('set') do @echo %i`, or clearing the listed variables
  * (`… | Remove-Item`, `… | ForEach-Object { Remove-Item "Env:$($_.Name)" }`). Each stage after
  * the listing is followed. A stage this module doesn't know, one that mentions values or looks
  * them up, one that writes entries to a file, or names handed to another command (a substitution,
@@ -25,9 +26,12 @@ type Flow = "entries" | "names" | "none";
 
 /** The listings in a command list that only show names, and the `(…).Name` projections. */
 export interface NamesOnly {
-  /** Indexes of listings (`dumpsEnvironment`) whose pipeline keeps only the names. */
+  /** Indexes of listings (`listsEnvironment`) whose pipeline keeps only the names. */
   listings: ReadonlySet<number>;
-  /** Indexes of `(…).Name` commands whose group (their first nested list) is projected to names. */
+  /**
+   * Indexes of commands that project their first nested list to names: `(…).Name`, and cmd's
+   * `for /f "delims==" %i in ('…') do @echo %i`.
+   */
   projections: ReadonlySet<number>;
 }
 
@@ -95,20 +99,47 @@ export function namesOnly(list: SimpleCommand[], output: ListOutput): NamesOnly 
   for (const [i, cmd] of list.entries()) {
     const from = source(cmd);
     if (from && keeps(flowFrom(list, i, from))) listings.add(i);
-    if (projects(cmd) && keeps(flowFrom(list, i, "names"))) projections.add(i);
+    if ((projects(cmd) || echoesNames(cmd)) && keeps(flowFrom(list, i, "names"))) {
+      projections.add(i);
+    }
   }
   return { listings, projections };
 }
 
-/** What a listing outputs: entries, or names with `-Name`. Bare `printenv` only. */
+/**
+ * What a listing outputs: entries, or names with `Get-ChildItem env: -Name`. Bare `printenv`
+ * only.
+ */
 function source(cmd: SimpleCommand): Flow | undefined {
   if (cmd.writes.some((w) => !DISCARD.test(w))) return undefined;
   const { tokens } = unwrap(cmd.words);
   const bin = binName(tokens[0]);
   const args = tokens.slice(1);
   if (bin === "printenv") return args.length === 0 ? "entries" : undefined;
-  if (!dumpsEnvironment(bin, args)) return undefined;
-  return args.some((a) => a.toLowerCase() === "-name") ? "names" : "entries";
+  if (!listsEnvironment(bin, args)) return undefined;
+  const names = ENV_DRIVE.test(bin) && args.some((a) => a.toLowerCase() === "-name");
+  return names ? "names" : "entries";
+}
+
+/**
+ * cmd's `for /f "delims==" %i in ('set') do @echo %i` (`tokens=1` allowed, `%%i` in a batch
+ * file): the loop echoes what comes before the first `=` of each line its command prints.
+ */
+function echoesNames(cmd: SimpleCommand): boolean {
+  const [loop, mode, options = "", variable = "", inWord, , doWord, ...body] = cmd.words;
+  if (loop?.toLowerCase() !== "for" || mode?.toLowerCase() !== "/f") return false;
+  if (cmd.nested.length !== 1 || inWord?.toLowerCase() !== "in" || doWord?.toLowerCase() !== "do") {
+    return false;
+  }
+  const settings = options.toLowerCase().split(/\s+/).filter(Boolean);
+  return (
+    settings.includes("delims==") &&
+    settings.every((s) => s === "delims==" || s === "tokens=1") &&
+    /^%%?[a-z]$/i.test(variable) &&
+    body.length === 2 &&
+    /^@?echo$/i.test(body[0] as string) &&
+    body[1] === variable
+  );
 }
 
 /** `(…).Name` as the command, with no other substitution and no value in its operators. */

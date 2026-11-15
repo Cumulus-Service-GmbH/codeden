@@ -10,6 +10,7 @@ import {
   touchesCodedenHome,
 } from "./codeden-home";
 import { binName, CD, DISCARD, unwrap } from "./command-words";
+import { dumpsEnvironment } from "./env-dumps";
 import { type ListOutput, namesOnly } from "./env-names";
 import { classifyGit } from "./git";
 import { classifyInstall } from "./installs";
@@ -25,7 +26,7 @@ import {
 import { projectConfigCommand, projectConfigWrite } from "./project-config";
 import { loginRisk, providerLoginCommand, touchesProviderLogin } from "./provider-logins";
 import { pipesDownloadIntoInterpreter } from "./remote-scripts";
-import { braceAlternatives, dumpsEnvironment, secretArgument, toolOutputs } from "./secrets";
+import { braceAlternatives, secretArgument, toolOutputs } from "./secrets";
 import { parseShell, type ShellDialect, type SimpleCommand } from "./shell";
 
 /**
@@ -131,7 +132,7 @@ function firstInList(
  * substitutions and subshells are classified too, without their `cd` leaking out. `output`: where
  * the list's output goes, which decides whether an environment listing that keeps only the names
  * is a dump (`./env-names`): substitutions hand theirs to another command, except a `(…).Name`
- * group, which keeps only the names itself.
+ * group or cmd's `for /f "delims==" … do @echo %i` loop, which keep only the names themselves.
  */
 function classifyList(
   list: SimpleCommand[],

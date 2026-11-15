@@ -4,8 +4,8 @@ import type { WordPaths } from "./shell";
 
 /**
  * Secrets rules of the risk classifier (§11.2): which words of a command read a credentials
- * file, and which commands dump the environment. Writing a secrets file inside the worktree is
- * not access (`cp .env.example .env`); reading one is.
+ * file (`./env-dumps` has the commands that dump the environment). Writing a secrets file inside
+ * the worktree is not access (`cp .env.example .env`); reading one is.
  */
 
 /**
@@ -113,20 +113,4 @@ export function toolOutputs(bin: string, args: string[]): string[] {
   if (bin !== "openssl" && bin !== "ssh-keygen") return [];
   const flags = bin === "openssl" ? ["-out", "-keyout"] : ["-f"];
   return args.flatMap((a, i) => (flags.includes(a) && args[i + 1] ? [args[i + 1] as string] : []));
-}
-
-/** Variable names that may hold a credential. */
-const SECRET_VAR = /key|token|secret|passw|pwd|credential|auth|private|session|cookie/i;
-
-/**
- * True for `printenv` and `Get-ChildItem env:` listings. Printing named variables that don't
- * look like credentials (`printenv PATH`, `Get-ChildItem env:NODE_ENV`) is not a dump.
- */
-export function dumpsEnvironment(bin: string, args: string[]): boolean {
-  const named = (names: string[]) =>
-    names.length > 0 && names.every((n) => /^\w+$/.test(n) && !SECRET_VAR.test(n));
-  if (bin === "printenv") return !named(args.filter((a) => !a.startsWith("-")));
-  if (!/^(get-childitem|gci|ls|dir)$/.test(bin)) return false;
-  const drives = args.filter((a) => /^env:/i.test(a));
-  return drives.length > 0 && !named(drives.map((a) => a.slice(4)));
 }

@@ -244,10 +244,13 @@ const SECRET_BASENAMES = new Set([
 const SAFE_ENV_SUFFIXES = [".example", ".sample", ".template", ".dist", ".defaults"];
 const SECRET_EXTENSIONS = [".pem", ".key", ".p12", ".pfx", ".keystore", ".jks"];
 
+/** A process's environment on Linux: `/proc/self/environ`, `/proc/1/environ`, a thread's. */
+const PROC_ENVIRON = /^\/proc\/[^/]+\/(task\/[^/]+\/)?environ$/;
+
 /**
- * True for files that commonly hold credentials (`.env`, SSH keys, `.npmrc`, `*.pem`, ...) and
- * the agent CLIs' own login files by name (`./login-names`: `~/.codex/auth.json`,
- * `.credentials.json`, ...).
+ * True for files that commonly hold credentials (`.env`, SSH keys, `.npmrc`, `*.pem`, ...),
+ * a process's environment (`/proc/self/environ`) and the agent CLIs' own login files by name
+ * (`./login-names`: `~/.codex/auth.json`, `.credentials.json`, ...).
  */
 export function isSecretPath(target: string): boolean {
   const normalized = target
@@ -256,6 +259,7 @@ export function isSecretPath(target: string): boolean {
     .replace(/\\/g, "/");
   const base = normalized.split("/").pop()?.toLowerCase() ?? "";
   if (!base) return false;
+  if (PROC_ENVIRON.test(normalized)) return true;
   if (base === ".env" || base.startsWith(".env.")) {
     return !SAFE_ENV_SUFFIXES.some((s) => base.endsWith(s));
   }
