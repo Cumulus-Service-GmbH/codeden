@@ -279,6 +279,7 @@ export class ProjectService {
       name,
       slug: this.uniqueSlug(slugify(name)),
       path,
+      isGitRepo: detected.isGitRepo,
       defaultBranch: detected.defaultBranch,
       defaultProvider: req.defaultProvider ?? null,
       defaultModel: null,

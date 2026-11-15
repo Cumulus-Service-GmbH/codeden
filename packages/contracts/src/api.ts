@@ -129,11 +129,18 @@ export type ReorderProjectsResponse = z.infer<typeof ReorderProjectsResponse>;
 // ---------------------------------------------------------------- sessions
 
 /**
+ * Where a session runs (§9): a fresh worktree, the repo root (the project folder, in place), or
+ * an existing directory (`WorkspaceRequest.path`).
+ */
+export const WorkspaceMode = z.enum(["worktree", "repo_root", "existing"]);
+export type WorkspaceMode = z.infer<typeof WorkspaceMode>;
+
+/**
  * Where a session runs (§9): a fresh worktree (default for agents), the repo root, or an
  * existing directory (`path`).
  */
 export const WorkspaceRequest = z.object({
-  mode: z.enum(["worktree", "repo_root", "existing"]).default("worktree"),
+  mode: WorkspaceMode.default("worktree"),
   path: z.string().min(1).optional(),
   branch: z.string().min(1).optional(),
   baseRef: z.string().min(1).optional(),
@@ -145,6 +152,15 @@ export const WorkspaceRequest = z.object({
   fetch: z.boolean().optional(),
 });
 export type WorkspaceRequest = z.infer<typeof WorkspaceRequest>;
+
+/**
+ * `StartSessionRequest.workspace`: a `WorkspaceRequest` whose `mode` may be left out. The server
+ * then picks it from the project (§9): a new worktree when the project folder is a git
+ * repository, the project folder itself (`repo_root`) when it isn't (`Project.isGitRepo`). A
+ * `worktree` asked for in a folder that isn't a git repository is refused (`not_a_repo`).
+ */
+export const StartWorkspaceRequest = WorkspaceRequest.extend({ mode: WorkspaceMode.optional() });
+export type StartWorkspaceRequest = z.infer<typeof StartWorkspaceRequest>;
 
 /** `POST /api/sessions`: start agent work, with the §8.4 conflict check built in. */
 export const StartSessionRequest = z.object({
@@ -169,7 +185,7 @@ export const StartSessionRequest = z.object({
   untilChecksPass: z.boolean().optional(),
   /** Automatic rounds for `untilChecksPass`; default `DEFAULT_CHECK_ROUNDS`. */
   checkRounds: CheckRounds.optional(),
-  workspace: WorkspaceRequest.prefault({}),
+  workspace: StartWorkspaceRequest.prefault({}),
   /** One line describing the work; defaults to the first line of the input. */
   purpose: z.string().trim().min(1).max(300).optional(),
   /** Stable identifier of the work; derived from the issue or purpose when omitted. */
@@ -308,7 +324,7 @@ export type ReviewSessionResponse = z.infer<typeof ReviewSessionResponse>;
 
 /** Recorded with a session about how it was started (forced starts keep their reason). */
 export const SessionStartMeta = z.object({
-  workspaceMode: WorkspaceRequest.shape.mode,
+  workspaceMode: WorkspaceMode.default("worktree"),
   /** Set when the runner could not prepare the requested workspace and CodeDen fell back. */
   workspaceFallback: z.string().nullable(),
   forced: z.object({ reason: z.string(), conflictsWith: z.array(Id) }).nullable(),

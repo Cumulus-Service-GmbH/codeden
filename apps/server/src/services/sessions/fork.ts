@@ -14,6 +14,7 @@ import { confirmedCheckpoint, forkPointMissing, forkTurn } from "./fork-turn";
 import type { LaunchFork } from "./launcher";
 import { inheritedStarter } from "./origin";
 import type { SessionRepo, StoredStartMeta } from "./repo";
+import { requireGitRepo } from "./start-workspace";
 
 const BUSY = new Set(["running", "waiting"]);
 const NOT_STARTED = new Set(["created", "queued", "starting"]);
@@ -177,6 +178,7 @@ function forkProject(
   if (!source.projectId) throw badRequest("Only agent sessions can be forked", "fork_unsupported");
   const project = projects.get(source.projectId);
   if (project.archivedAt) throw badRequest("The project is archived", "project_archived");
+  requireGitRepo(project);
   return project;
 }
 

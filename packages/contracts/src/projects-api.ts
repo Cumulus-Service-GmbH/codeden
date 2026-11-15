@@ -12,8 +12,10 @@ import { ProjectCheck } from "./project-config";
 /**
  * What a re-detection found:
  * - `unchanged`: nothing new (the message says what is still missing, if anything).
- * - `git_detected`: the folder became a git checkout; its default branch is recorded so
- *   worktrees work. Still no GitHub remote.
+ * - `git_detected`: the folder became a git checkout (`Project.isGitRepo`); its default branch
+ *   is recorded so worktrees work. Still no GitHub remote.
+ * - `git_missing`: a local project's folder isn't a git repository any more
+ *   (`Project.isGitRepo` false): its new sessions run in the project folder.
  * - `github_connected`: a local project gained a GitHub `origin` and is now a `github`
  *   project, or a GitHub project's missing remote is back.
  * - `github_changed`: the GitHub remote moved (another owner or repository, or another URL).
@@ -25,6 +27,7 @@ import { ProjectCheck } from "./project-config";
 export const ProjectRefreshOutcome = z.enum([
   "unchanged",
   "git_detected",
+  "git_missing",
   "github_connected",
   "github_changed",
   "github_remote_missing",

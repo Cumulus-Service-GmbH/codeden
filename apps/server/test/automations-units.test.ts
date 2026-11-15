@@ -392,6 +392,7 @@ describe("issue intake ownership (§10.1)", () => {
     name: "Widgets",
     slug: "widgets",
     path: "/tmp/widgets",
+    isGitRepo: true,
     defaultBranch: "main",
     defaultProvider: "fake",
     defaultModel: null,

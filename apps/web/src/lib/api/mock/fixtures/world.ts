@@ -20,6 +20,7 @@ function project(
   repo?: string,
 ): Project {
   const base = {
+    isGitRepo: true,
     defaultBranch: "main",
     defaultProvider: null,
     defaultModel: null,

@@ -4,6 +4,7 @@ import { type DraftChoice, pickModel, type ResolvedDraft } from "@/lib/new-sessi
 import { ChecksToggle } from "./checks-toggle";
 import { ModelPicker } from "./model-picker/model-picker";
 import { AutonomyPicker, PlanToggle } from "./pickers";
+import { WorkspacePicker } from "./workspace-picker";
 
 /**
  * The New session draft's options: the same provider and model picker (provider unlocked, since
@@ -11,13 +12,15 @@ import { AutonomyPicker, PlanToggle } from "./pickers";
  * the draft until the first send starts the session with them. What is offered follows the
  * provider's capabilities: effort with `reasoningEffort`, Read-only where it is enforced, Plan
  * with `planMode`. "Keep going until checks pass" shows when the project has checks (`checks`)
- * and the permissions let the agent fix things.
+ * and the permissions let the agent fix things. A project folder that isn't a git repository
+ * shows where the session runs instead of a worktree (`WorkspacePicker`).
  */
 export function DraftOptions({
   providers,
   choice,
   resolved,
   checks,
+  projectPath,
   onChange,
 }: {
   providers: ProviderInfo[];
@@ -25,14 +28,23 @@ export function DraftOptions({
   checks: ProjectCheck[];
   choice: DraftChoice;
   resolved: ResolvedDraft;
+  /** The project folder, named where the session runs in it. */
+  projectPath: string;
   onChange: (next: DraftChoice) => void;
 }) {
   const { provider } = resolved;
+  const workspace = resolved.workspace === "repo_root" && <WorkspacePicker path={projectPath} />;
   if (!provider) {
-    return <span className="px-2 text-xs text-muted-foreground">No agent provider ready</span>;
+    return (
+      <>
+        {workspace}
+        <span className="px-2 text-xs text-muted-foreground">No agent provider ready</span>
+      </>
+    );
   }
   return (
     <>
+      {workspace}
       <ModelPicker
         providers={providers}
         // The resolved choice, defaults included: what the first send starts.

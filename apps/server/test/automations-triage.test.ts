@@ -69,6 +69,7 @@ describe("issue triage (§10)", () => {
       name: "Widgets",
       slug: "widgets",
       path: h.repo,
+      isGitRepo: true,
       defaultBranch: "main",
       defaultProvider: "fake",
       defaultModel: null,

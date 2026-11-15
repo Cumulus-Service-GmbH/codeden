@@ -57,6 +57,8 @@ export const projects = sqliteTable(
     name: text("name").notNull(),
     slug: text("slug").notNull(),
     path: text("path").notNull(),
+    /** The folder is a git repository (`Project.isGitRepo`); server start detects it again. */
+    isGitRepo: integer("is_git_repo", { mode: "boolean" }).notNull().default(true),
     defaultBranch: text("default_branch"),
     defaultProvider: text("default_provider"),
     /** Default model and effort on `default_provider` for new sessions (#261). */

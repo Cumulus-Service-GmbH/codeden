@@ -410,9 +410,19 @@ export class FactorySessions {
     return stopped;
   }
 
+  /**
+   * Factory sessions work on branches of their own, so they ask for a worktree unless they name
+   * another workspace: in a project folder that isn't a git repository they are refused
+   * (`not_a_repo`), never run in the folder in place.
+   */
   private start(req: StartSessionRequestInit): Promise<StartSessionResponse> {
     return this.deps.sessions.start(
-      StartSessionRequest.parse({ role: "agent", startedBy: FACTORY_STARTER, ...req }),
+      StartSessionRequest.parse({
+        role: "agent",
+        startedBy: FACTORY_STARTER,
+        workspace: { mode: "worktree" },
+        ...req,
+      }),
     );
   }
 }

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CreateProjectResponse, type Session, StartSessionResponse } from "@codeden/contracts";
@@ -95,10 +96,41 @@ describe("a worktree session whose worktree could not be made", () => {
     expect((await settled(id)).status).toBe("failed");
     expect(h.server.services.sessionRepo.turnCount(id)).toBe(0);
 
-    await h.api("POST", `/sessions/${id}/messages`, { input: { text: "second" } });
+    // The next message prepares the worktree again; it still can't be made, so the message is
+    // refused with the reason instead of running in the project folder.
+    const sent = await h.api("POST", `/sessions/${id}/messages`, { input: { text: "second" } });
+    expect(sent.status).toBeGreaterThanOrEqual(400);
+    expect(JSON.stringify(sent.body)).toContain("no-such-branch");
     const after = await settled(id);
     // The session asked for a worktree: a turn never runs in the project folder in its place.
     const turns = h.server.services.sessionRepo.turnCount(id);
     expect(turns, `a turn ran in ${after.cwd} (worktree: ${after.worktreePath})`).toBe(0);
+    expect(after.status).toBe("failed");
+  });
+
+  it("makes the worktree with the next message once it can be made", async () => {
+    const res = await h.api("POST", "/sessions", {
+      projectId: h.projectId,
+      provider: "fake",
+      input: { text: "first" },
+      workspace: { mode: "worktree", baseRef: "later-branch" },
+    });
+    const started = StartSessionResponse.parse(res.body);
+    if (started.status !== "started") throw new Error(started.status);
+    const id = started.sessionId;
+    expect((await settled(id)).status).toBe("failed");
+
+    // The base exists now: the next message makes the worktree it asked for, then runs there.
+    execFileSync("git", ["-C", h.repo, "branch", "later-branch"], { stdio: "pipe" });
+    const sent = await h.api("POST", `/sessions/${id}/messages`, { input: { text: "second" } });
+    expect(sent.status).toBe(200);
+    const after = await waitUntil(() => {
+      const s = h.server.services.sessionRepo.get(id);
+      return s.status === "idle" ? s : undefined;
+    });
+    expect(h.server.services.sessionRepo.turnCount(id)).toBe(1);
+    expect(after.worktreePath).not.toBeNull();
+    expect(sameRealPath(after.cwd, after.worktreePath ?? "")).toBe(true);
+    expect(sameRealPath(after.cwd, h.repo)).toBe(false);
   });
 });

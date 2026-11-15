@@ -10,10 +10,13 @@ import { createGithubEnv, type GithubEnv } from "./support/github-env";
 let env: GithubEnv;
 let calls: Array<RunnerCommandOf<RunnerCommandName>>;
 let launcher: SessionLauncher;
+/** When set, `workspace.prepare` fails with it (a worktree git can't make). */
+let prepareError: Error | null;
 
 beforeEach(() => {
   env = createGithubEnv();
   calls = [];
+  prepareError = null;
   const runner = {
     isConnected: () => true,
     runnerId: () => "r1",
@@ -23,6 +26,7 @@ beforeEach(() => {
     request: (async (command: RunnerCommandOf<RunnerCommandName>) => {
       calls.push(command);
       if (command.name === "workspace.prepare") {
+        if (prepareError) throw prepareError;
         return { cwd: command.path ?? env.dir, branch: command.branch ?? null, created: true };
       }
       return { resumeToken: null };
@@ -65,6 +69,46 @@ describe("new worktrees of a GitHub project", () => {
     await launcher.launch(session.id, { workspace: { mode: "worktree", baseRef: "release" } });
     expect(prepared()).toMatchObject({ baseRef: "release" });
     expect(prepared().fetch).toBeUndefined();
+  });
+
+  it("are made by the next start when the first couldn't make them, never skipped (#408)", async () => {
+    const session = env.addSession({
+      status: "starting",
+      cwd: env.githubProject.path,
+      worktreePath: null,
+      branch: null,
+    });
+    const opened = () => calls.filter((c) => c.name === "session.start");
+    const text = (t: string) => ({ text: t, attachments: [] });
+    prepareError = Object.assign(new Error("fatal: invalid reference: release"), {
+      code: "git_failed",
+    });
+    await launcher.launch(session.id, {
+      input: text("first"),
+      workspace: { mode: "worktree", baseRef: "release" },
+    });
+    expect(env.repo.get(session.id).status).toBe("failed");
+
+    // Still can't be made: the next message is refused, not opened in the project folder.
+    await expect(launcher.resume(env.repo.get(session.id), text("second"))).rejects.toThrow(
+      "invalid reference",
+    );
+    expect(opened()).toHaveLength(0);
+
+    // Now it can: the same worktree is made, then the session opens in it.
+    prepareError = null;
+    await launcher.resume(env.repo.get(session.id), text("third"));
+    expect(calls.filter((c) => c.name === "workspace.prepare")).toHaveLength(3);
+    expect(prepared()).toMatchObject({ strategy: "worktree", baseRef: "release" });
+    const worktree = env.repo.get(session.id).worktreePath;
+    expect(worktree).toBe(prepared().path);
+    const [start] = opened();
+    expect(start?.name === "session.start" && start.options.cwd).toBe(worktree);
+
+    // Prepared once: later starts open it where it is.
+    await launcher.resume(env.repo.get(session.id));
+    expect(calls.filter((c) => c.name === "workspace.prepare")).toHaveLength(3);
+    expect(opened()).toHaveLength(2);
   });
 
   it("are not fetched for local-only projects", async () => {

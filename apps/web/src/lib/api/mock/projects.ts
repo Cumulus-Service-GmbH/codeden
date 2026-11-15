@@ -71,6 +71,7 @@ export function mockProjectApi(world: MockWorld): MockProjectApi {
         name,
         slug,
         path,
+        isGitRepo: true,
         defaultBranch: "main",
         defaultProvider: null,
         defaultModel: null,

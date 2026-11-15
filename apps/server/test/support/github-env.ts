@@ -133,6 +133,7 @@ export function createGithubEnv(opts: GithubEnvOptions = {}): GithubEnv {
   const inbox = new InboxService(db.db, store, () => async () => {});
   const secrets = new MemorySecretStore();
   const base = {
+    isGitRepo: true,
     defaultBranch: "main",
     defaultProvider: null,
     autonomy: null,

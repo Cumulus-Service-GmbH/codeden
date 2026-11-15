@@ -9,6 +9,8 @@ function compactProject(p: Project) {
     name: p.name,
     kind: p.kind,
     path: p.path,
+    // False: no worktrees, its sessions run in the project folder (§9).
+    isGitRepo: p.isGitRepo,
     github: p.kind === "github" ? `${p.github.owner}/${p.github.repo}` : null,
     defaultBranch: p.defaultBranch,
     defaultProvider: p.defaultProvider,

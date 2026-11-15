@@ -15,6 +15,7 @@ import { inheritedStarter } from "./origin";
 import { readOnlyUnsupported } from "./permissions";
 import type { SessionRepo, StoredStartMeta } from "./repo";
 import { buildReviewBrief } from "./review-brief";
+import { requireGitRepo } from "./start-workspace";
 
 const BUSY = new Set(["running", "waiting"]);
 const NOT_STARTED = new Set(["created", "queued", "starting"]);
@@ -230,6 +231,7 @@ function reviewProject(projects: ProjectService, source: Session): Project {
   }
   const project = projects.get(source.projectId);
   if (project.archivedAt) throw badRequest("The project is archived", "project_archived");
+  requireGitRepo(project);
   return project;
 }
 
