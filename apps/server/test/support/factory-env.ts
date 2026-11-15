@@ -17,6 +17,7 @@ import {
 import { vi } from "vitest";
 import { type Database, openDatabase } from "../../src/db/client";
 import { EventStore } from "../../src/events/store";
+import { ServiceError } from "../../src/services/errors";
 import type { Exec, ExecResult } from "../../src/services/exec";
 import type { RateLimitReading } from "../../src/services/factory/availability";
 import { FactoryService } from "../../src/services/factory/factory-service";
@@ -245,6 +246,13 @@ export function createFactoryEnv(
       env.stopped.push(sessionId);
       return repo.update(sessionId, (s) => ({ ...s, status: "stopped" }));
     },
+    // "Compact now": refused, as on a provider that can't compact, unless a test scripts it.
+    compact: async () => {
+      throw new ServiceError(409, "unsupported", "This provider can't compact on demand.");
+    },
+    // Messages are sent at once: none waits in a queue or is on its way.
+    hasOutbox: () => false,
+    isDelivering: () => false,
   } as unknown as SessionService;
   env.sessions = sessions;
   const runner = {

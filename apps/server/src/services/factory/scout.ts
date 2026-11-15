@@ -20,6 +20,7 @@ import {
   scoutPlanPrompt,
   scoutSelfReviewPrompt,
 } from "./prompts-scout";
+import { wakeForRound } from "./scout-compact";
 import {
   LENS_START_TIMEOUT_MS,
   type LensBrief,
@@ -62,9 +63,26 @@ export const DRAINING_TEXT =
 /** A round that runs longer than this is closed (a stuck scout or lens). */
 export const ROUND_TIMEOUT_MS = 3 * 3_600_000;
 
-/** Whether the session's turn ended after `since` (it was sent work then). */
-function turnEnded(s: Session, since: string): boolean {
-  return !isBusy(s) && Date.parse(s.updatedAt) > Date.parse(since);
+/**
+ * Whether the session's turn ended after `since` (it was sent work then). A session with a
+ * message still queued or on its way hasn't started that turn yet: the turn that ended was one
+ * before it, such as the compaction ahead of the round's brief (`scout-compact.ts`).
+ */
+function turnEnded(ctx: FactoryContext, s: Session, since: string): boolean {
+  return (
+    !isBusy(s) &&
+    !ctx.sessions.hasPendingMessage(s.id) &&
+    Date.parse(s.updatedAt) > Date.parse(since)
+  );
+}
+
+/**
+ * Whether the scout's or an area reviewer's session failed. A failed turn with a message waiting
+ * behind it (a compaction that failed ahead of the round's brief) doesn't count: the brief still
+ * runs.
+ */
+function sessionFailed(ctx: FactoryContext, s: Session): boolean {
+  return s.status === "failed" && !ctx.sessions.hasPendingMessage(s.id);
 }
 
 /** Titles of work open or done recently, so the scout and lenses don't repeat it. */
@@ -222,7 +240,8 @@ async function startRound(
   });
   let sessionId: string;
   if (reuse) {
-    await ctx.sessions.message(reuse.id, text);
+    // Compacted first when its context has grown over earlier rounds (`scout-compact.ts`).
+    await wakeForRound(ctx, reuse, text, "scout");
     sessionId = reuse.id;
   } else {
     if ("waiting" in agent.choice) {
@@ -285,7 +304,7 @@ async function advanceRound(
     return endRound(scout, now, "Closed after 3 hours without finishing.");
   }
   const s = scout.sessionId ? ctx.repo.find(scout.sessionId)?.session : undefined;
-  if (!s || s.status === "failed") {
+  if (!s || sessionFailed(ctx, s)) {
     return endRound(scout, now, "Closed: the scout's session failed.");
   }
   const at = now.toISOString();
@@ -308,7 +327,7 @@ async function advanceRound(
   }
 
   if (round.phase === "planning" || round.phase === "filing") {
-    if (!turnEnded(s, round.sentAt)) return scout;
+    if (!turnEnded(ctx, s, round.sentAt)) return scout;
     // Filing done, or the scout filed by itself without planning lenses.
     if (round.phase === "filing" || round.filed > 0) return endRound(scout, now);
     if (round.nudgedAt) {
@@ -331,9 +350,9 @@ async function advanceRound(
       continue;
     }
     const ls = ctx.repo.find(lens.sessionId)?.session;
-    if (!ls || ls.status === "failed" || ls.status === "stopped") {
+    if (!ls || sessionFailed(ctx, ls) || ls.status === "stopped") {
       lenses.push({ ...lens, reported: true });
-    } else if (!turnEnded(ls, lens.sentAt)) {
+    } else if (!turnEnded(ctx, ls, lens.sentAt)) {
       // Idle long after it was woken without a turn since: the wake never reached it.
       const lost = !isBusy(ls) && now.getTime() - Date.parse(lens.sentAt) > LENS_START_TIMEOUT_MS;
       lenses.push(lost ? { ...lens, reported: true } : lens);

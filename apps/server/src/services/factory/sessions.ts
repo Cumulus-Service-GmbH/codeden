@@ -8,7 +8,7 @@ import {
   type StartSessionResponse,
   type UserInput,
 } from "@codeden/contracts";
-import { errorMessage } from "../errors";
+import { errorMessage, ServiceError } from "../errors";
 import type { RunnerPort } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import type { SessionService } from "../sessions/session-service";
@@ -337,6 +337,32 @@ export class FactorySessions {
   /** Send a follow-up to a session (queued behind a running turn). */
   async message(sessionId: string, text: string): Promise<void> {
     await this.deps.sessions.send(sessionId, { input: brief(text), whenBusy: "queue" }, "factory");
+  }
+
+  /**
+   * Compact a session's conversation now ("Compact now", `SessionService.compact`), so the next
+   * message queues behind the compaction. False when it can't now (a provider that can't compact
+   * on demand, a turn running, the runner away); never throws.
+   */
+  async compact(sessionId: string): Promise<boolean> {
+    try {
+      await this.deps.sessions.compact(sessionId);
+      return true;
+    } catch (error) {
+      // A provider that can't compact on demand is no news: its own compaction still runs.
+      if (!(error instanceof ServiceError && error.code === "unsupported")) {
+        this.deps.log?.(`factory: compact ${sessionId}: ${errorMessage(error)}`);
+      }
+      return false;
+    }
+  }
+
+  /**
+   * Whether a message to the session waits in its queue or is on its way to the runner: the
+   * session hasn't started that turn yet, though it may look idle (a compaction just ended).
+   */
+  hasPendingMessage(sessionId: string): boolean {
+    return this.deps.sessions.hasOutbox(sessionId) || this.deps.sessions.isDelivering(sessionId);
   }
 
   /**

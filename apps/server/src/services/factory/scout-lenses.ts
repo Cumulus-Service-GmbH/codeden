@@ -8,6 +8,7 @@ import type {
 import { errorMessage } from "../errors";
 import { needsFreshSession, type ScoutAgent } from "./agent-choice";
 import type { FactoryContext } from "./context";
+import { wakeForRoundInBackground } from "./scout-compact";
 import { isBusy } from "./sessions";
 import { claimSlot, SCOUT_SLOT } from "./slots";
 
@@ -123,7 +124,10 @@ export function retireScoutSession(ctx: FactoryContext, session: Session | undef
   ctx.archiveSessions([session.id]);
 }
 
-/** Start a new area reviewer, or wake the idle one (not awaited); its session id, or null. */
+/**
+ * Start a new area reviewer, or wake the idle one (not awaited; compacted first when its context
+ * has grown, `scout-compact.ts`); its session id, or null.
+ */
 async function startLens(
   ctx: FactoryContext,
   projectId: string,
@@ -134,11 +138,7 @@ async function startLens(
 ): Promise<string | null> {
   try {
     if (reuse) {
-      void ctx.sessions
-        .message(reuse.id, text)
-        .catch((error: unknown) =>
-          ctx.log?.(`factory: waking area reviewer ${area}: ${errorMessage(error)}`),
-        );
+      wakeForRoundInBackground(ctx, reuse, text, `area reviewer ${area}`);
       return reuse.id;
     }
     if ("waiting" in choice) {
