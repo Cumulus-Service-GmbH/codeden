@@ -37,13 +37,19 @@ function docsItem() {
 
 /**
  * The software factory with auto-merge on builds a docs item whose PR changes `files`. The
- * vision doesn't list CI workflows as protected (a user may take the template's entry out), so
- * the review is what stands between a workflow change and the merge.
+ * vision doesn't list CI workflows or licensing as protected (a user may take the template's
+ * entries out), so the review is what stands between a workflow change and the merge, and
+ * license files are protected whatever the vision says.
  */
 async function build(files: string[]) {
   env = createFactoryEnv();
   const vision = join(env.project.path, env.project.visionPath);
-  writeFileSync(vision, VISION_TEMPLATE.replace("- `.github/workflows/**`\n", ""));
+  writeFileSync(
+    vision,
+    VISION_TEMPLATE.replace("- `.github/workflows/**`\n", "")
+      .replace("- `LICENSE`\n", "")
+      .replace("- licensing\n", ""),
+  );
   await enable("software_factory", { autoMerge: true });
   const created = docsItem();
   await tick();
@@ -80,17 +86,47 @@ describe("the docs pipeline with auto-merge on", () => {
     expect(item(id).reviewerSessionId).toBeFalsy();
     expect(env.gh.merges).toHaveLength(1);
   });
+
+  // Issue #405: MDX runs its JSX and imports when a docs site builds, and an SVG can carry
+  // scripts and event handlers, so neither skips the review.
+  it.each([
+    ["an SVG", ["docs/diagram.svg"]],
+    ["an MDX page", ["docs/page.mdx"]],
+  ])("reviews %s before it merges", async (_what, files) => {
+    const id = await build(files);
+    expect(env.gh.merges).toEqual([]);
+    expect(reviewCheck(id)?.state).not.toBe("skipped");
+    expect(item(id).reviewerSessionId).toBeTruthy();
+  });
+
+  // Issue #405: licensing goes to a person, like `.codeden/`, whatever the vision lists.
+  it.each(["LICENSE.md", "LICENSE", "LICENSE.txt", "COPYING", "NOTICE", "packages/x/LICENSE.md"])(
+    "escalates a change to %s and never merges it",
+    async (file) => {
+      const id = await build(["docs/guide.md", file]);
+      expect(env.gh.merges).toEqual([]);
+      expect(reviewCheck(id)?.state).not.toBe("skipped");
+      expect(item(id).stage).toBe("escalated");
+      expect(item(id).reason).toMatch(/protected areas/);
+      expect(item(id).reason).toContain(file);
+    },
+  );
+
+  it("skips the review for prose plus a raster image", async () => {
+    const id = await build(["docs/guide.md", "docs/shot.png"]);
+    expect(reviewCheck(id)?.state).toBe("skipped");
+    expect(item(id).reviewerSessionId).toBeFalsy();
+    expect(env.gh.merges).toHaveLength(1);
+  });
 });
 
 describe("isDocFile", () => {
   it.each([
     "README.md",
     "docs/guide.md",
-    "docs/site/intro.mdx",
     "NOTES.txt",
     "docs/api.rst",
     "docs/img.png",
-    "docs/logo.svg",
     "assets/photo.JPG",
     "docs/shot.jpeg",
     "docs/anim.gif",
@@ -117,7 +153,17 @@ describe("isDocFile", () => {
     "setup.ini",
     ".github/workflows/ci.yml",
     ".gitignore",
+    // MDX runs JSX and imports when a docs site builds; SVG can carry scripts.
+    "docs/site/intro.mdx",
+    "docs/logo.svg",
+    "public/ICON.SVG",
+    // Licensing, always protected.
     "LICENSE",
+    "LICENSE.md",
+    "LICENSE.txt",
+    "packages/x/license.md",
+    "COPYING",
+    "NOTICE",
     // `.txt` files that steer an install or a build.
     "requirements.txt",
     "requirements-dev.txt",
