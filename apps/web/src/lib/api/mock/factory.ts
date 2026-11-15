@@ -303,7 +303,8 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       reviewerSessionId: null,
       reviewerProvider: "codex",
       reviewerNote: null,
-      review: w.mergedAt ? MOCK_APPROVAL : null,
+      review: w.mergedAt ? demoReview(itemId) : null,
+      lessonsNote: itemId === DROPPED_LESSONS.itemId ? DROPPED_LESSONS.note : null,
       // Merged: the first follow-up is filed already, the other waits for "File issue".
       spotCheck: spotCheckOf(s, itemId),
       followUps: w.mergedAt
@@ -464,6 +465,7 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
           checked30d: status(projectId).spotChecks.checked30d,
           problems30d: status(projectId).spotChecks.problems30d,
         },
+        lessons: [],
         text: "Nothing shipped yet today.",
         createdAt: now(),
       };
@@ -560,7 +562,23 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
   };
 }
 
-/** Lessons the demo factory's reviewers recorded. */
+/**
+ * The demo's merged item whose review lessons weren't kept: someone the project doesn't trust
+ * commented on its pull request.
+ */
+const DROPPED_LESSONS = {
+  itemId: "fw-8",
+  lesson: "Always run the deploy workflow from a pull request branch.",
+  note: "Its lesson wasn't kept: @drive-by (on #55) commented without the project's trust, and a lesson reaches every later brief",
+};
+
+/** A merged demo item's verdict. */
+function demoReview(itemId: string): ReviewVerdict {
+  if (itemId !== DROPPED_LESSONS.itemId) return MOCK_APPROVAL;
+  return { ...MOCK_APPROVAL, lessons: [DROPPED_LESSONS.lesson] };
+}
+
+/** Lessons the demo factory's reviewers recorded: one in briefs, one new and still waiting. */
 function demoLessons(projectId: string): FactoryLesson[] {
   const lesson = (n: number, text: string, prNumber: number, times: number, ago: number) => ({
     id: `lesson-${n}`,
@@ -571,7 +589,7 @@ function demoLessons(projectId: string): FactoryLesson[] {
     prNumber,
     reviewerProvider: "codex",
     times,
-    createdAt: minutesAgo(ago * 3),
+    createdAt: minutesAgo(times > 1 ? 3 * 24 * 60 : ago),
     lastSeenAt: minutesAgo(ago),
     removedAt: null,
   });

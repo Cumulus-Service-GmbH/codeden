@@ -38,7 +38,7 @@ describe("a request for changes that cites only the reviewer's environment, with
     await enable();
     const { id, builder } = await verifying("success");
     const sentToAuthor = env.messages.filter((m) => m.sessionId === builder).length;
-    const res = review(id, ENVIRONMENT_ONLY);
+    const res = await review(id, ENVIRONMENT_ONLY);
     expect(res.recorded).toBe(false);
     expect(res.message).toMatch(/CI on the pull request's head passed/);
     expect(res.message).toMatch(/submit a fresh verdict/);
@@ -70,7 +70,7 @@ describe("a request for changes that cites only the reviewer's environment, with
     const prNumber = item(id).pr?.number;
     const first = item(id).reviewerSessionId as string;
     review(id, ENVIRONMENT_ONLY);
-    const res = review(id, ENVIRONMENT_ONLY);
+    const res = await review(id, ENVIRONMENT_ONLY);
     expect(res.message).toMatch(/a fresh reviewer reviews it in a clean worktree/);
     expect(item(id)).toMatchObject({
       stage: "failed",
@@ -100,7 +100,7 @@ describe("a request for changes that cites only the reviewer's environment, with
     await enable();
     const { id, builder } = await verifying("success");
     env.factory.data.updateItem(id, (i) => ({ ...i, stage: "building" }));
-    const res = review(id, ENVIRONMENT_ONLY);
+    const res = await review(id, ENVIRONMENT_ONLY);
     expect(res.recorded).toBe(false);
     expect(res.message).toMatch(/not passed to the author/);
     expect(lastMessageTo(builder)).not.toMatch(/Also address/);

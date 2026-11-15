@@ -95,7 +95,7 @@ describe("the merge queue", () => {
     expect(lastMessageTo(reviewer)).toContain(`git range-diff ${oldHead}...rebased1`);
     expect(env.gh.merges).toEqual([]);
 
-    const res = review(id, { ...APPROVE, summary: "The resolution keeps both sides" });
+    const res = await review(id, { ...APPROVE, summary: "The resolution keeps both sides" });
     expect(res).toMatchObject({
       recorded: true,
       message: expect.stringMatching(/earlier verdict/),

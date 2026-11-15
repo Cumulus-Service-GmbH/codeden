@@ -1,14 +1,19 @@
 import { describe, expect, it } from "vitest";
 import {
   cleanLessons,
+  DigestLesson,
   EventEnvelope,
+  FactoryDigest,
+  FactoryItem,
   FactoryLesson,
   FactoryLessonResponse,
   FactoryStatus,
   FactoryTuning,
   FactoryTuningPatch,
+  LESSON_BRIEF_DELAY_MS,
   LESSON_MAX,
   LESSONS_PER_VERDICT,
+  lessonInBriefsAt,
   lessonKey,
   ReviewVerdict,
   ReviewVerdictSubmission,
@@ -122,5 +127,20 @@ describe("factory lessons", () => {
     });
     expect(FactoryTuningPatch.parse({})).toEqual({});
     expect(FactoryStatus.shape.lessons.parse(undefined)).toEqual([]);
+  });
+
+  it("go into briefs a day after they are learned; digests list them, older ones none (#391)", () => {
+    expect(lessonInBriefsAt(lesson).getTime() - Date.parse(ts)).toBe(LESSON_BRIEF_DELAY_MS);
+    expect(LESSON_BRIEF_DELAY_MS).toBe(24 * 60 * 60 * 1000);
+    const learned: DigestLesson = {
+      lessonId: "l1",
+      text: lesson.text,
+      issueNumber: 3,
+      prNumber: 12,
+    };
+    expect(DigestLesson.parse(JSON.parse(JSON.stringify(learned)))).toEqual(learned);
+    expect(DigestLesson.safeParse({ ...learned, issueNumber: 0 }).success).toBe(false);
+    expect(FactoryDigest.shape.lessons.parse(undefined)).toEqual([]);
+    expect(FactoryItem.shape.lessonsNote.parse(undefined)).toBeNull();
   });
 });

@@ -391,16 +391,14 @@ export class FactoryStore {
     this.events.append([{ type: "factory.digest.created", sessionId: null, payload: { digest } }]);
   }
 
-  /** The project's lessons in force (not forgotten), last recorded first. */
-  lessons(projectId: string, limit: number): FactoryLesson[] {
-    return this.db
+  /** The project's lessons in force (not forgotten), last recorded first; all without `limit`. */
+  lessons(projectId: string, limit?: number): FactoryLesson[] {
+    const query = this.db
       .select()
       .from(factoryLessons)
       .where(and(eq(factoryLessons.projectId, projectId), isNull(factoryLessons.removedAt)))
-      .orderBy(desc(factoryLessons.lastSeenAt), desc(factoryLessons.id))
-      .limit(limit)
-      .all()
-      .map((r) => r.lesson);
+      .orderBy(desc(factoryLessons.lastSeenAt), desc(factoryLessons.id));
+    return (limit === undefined ? query.all() : query.limit(limit).all()).map((r) => r.lesson);
   }
 
   /** One lesson of the project, forgotten or not. */
@@ -449,6 +447,7 @@ const ITEM_DEFAULTS = {
   mergePath: null,
   followUps: [],
   spotCheck: null,
+  lessonsNote: null,
 } satisfies Partial<FactoryItem>;
 
 /** An item as read from the projection, with the fields newer versions added. */

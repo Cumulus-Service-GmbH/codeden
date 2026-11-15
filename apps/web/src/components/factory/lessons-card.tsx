@@ -1,4 +1,4 @@
-import type { FactoryLesson } from "@codeden/contracts";
+import { type FactoryLesson, lessonInBriefsAt } from "@codeden/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Lightbulb, X } from "lucide-react";
@@ -6,11 +6,12 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { useClient } from "@/lib/api";
 import { factoryKeys } from "@/lib/factory";
-import { ago } from "@/lib/format";
+import { ago, until } from "@/lib/format";
 
 /**
  * The factory's lessons (§10.1): general rules its reviewers recorded with their verdicts, which
- * every new builder and reviewer gets in its brief. Forget takes one out of the briefs for good.
+ * every new builder and reviewer gets in its brief once a day has passed. Forget takes one out of
+ * the briefs for good.
  */
 export function LessonsCard({
   projectId,
@@ -55,6 +56,9 @@ export function LessonsCard({
 
 function LessonRow({ projectId, lesson }: { projectId: string; lesson: FactoryLesson }) {
   const forget = useForgetLesson(projectId);
+  // A new lesson waits a day before it goes into briefs: time to read it and forget it.
+  const inBriefs = lessonInBriefsAt(lesson);
+  const waiting = inBriefs.getTime() > Date.now();
   return (
     <li
       className="flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5 hover:bg-accent/40"
@@ -75,6 +79,12 @@ function LessonRow({ projectId, lesson }: { projectId: string; lesson: FactoryLe
             "from a review"
           )}
           {lesson.times > 1 && ` · recorded ${lesson.times}×`} · {ago(lesson.lastSeenAt)}
+          {waiting && (
+            <span className="text-status-waiting" data-testid="factory-lesson-waiting">
+              {" "}
+              · new: in briefs {until(inBriefs.toISOString())}
+            </span>
+          )}
         </span>
       </span>
       <Button

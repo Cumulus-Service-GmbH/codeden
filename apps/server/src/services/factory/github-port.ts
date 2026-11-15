@@ -12,6 +12,7 @@ import { errorMessage } from "../errors";
 import { EVIDENCE_HEADING } from "../github/evidence";
 import type { GithubService } from "../github/github-service";
 import { authorAssociation } from "../github/graphql";
+import * as commentOps from "./github-port-comments";
 import * as prOps from "./github-port-prs";
 import * as revertOps from "./github-port-revert";
 
@@ -83,6 +84,9 @@ export interface IssueAuthor {
   association: GithubAuthorAssociation;
 }
 
+/** Who wrote a comment or a review on an issue or pull request, fresh from GitHub. */
+export type Commenter = IssueAuthor;
+
 /**
  * What the factory needs from GitHub (§9), as a port so tests can run the loop against a
  * scripted GitHub. `GithubFactoryPort` implements it over `GithubService`.
@@ -93,6 +97,11 @@ export interface FactoryGithub {
   viewerLogin(): Promise<string | null>;
   /** An issue's author and their association with the repository (one API call). */
   issueAuthor(projectId: string, number: number): Promise<IssueAuthor>;
+  /**
+   * Everyone who commented on an issue or pull request, one entry per comment: its conversation
+   * and, with `pr`, the pull request's reviews and review comments.
+   */
+  commenters(projectId: string, number: number, opts: { pr: boolean }): Promise<Commenter[]>;
   createIssue(
     projectId: string,
     req: { title: string; body: string; labels: string[] },
@@ -202,6 +211,10 @@ export class GithubFactoryPort implements FactoryGithub {
       login: data.user?.login ?? null,
       association: authorAssociation(data.author_association),
     };
+  }
+
+  commenters(projectId: string, number: number, opts: { pr: boolean }): Promise<Commenter[]> {
+    return commentOps.commenters(this.github, projectId, number, opts.pr);
   }
 
   isGithubProject(projectId: string): boolean {

@@ -4,6 +4,7 @@ import { AutonomyMode, FactoryLimits, FactoryLoopState, MergePath } from "./fact
 import { FactoryItemCost } from "./factory-cost";
 import { FactoryFollowUp, ReviewFollowUps } from "./factory-follow-ups";
 import {
+  DigestLesson,
   FactoryLesson,
   LESSON_MAX,
   LESSONS_DESCRIPTION,
@@ -235,6 +236,12 @@ export const FactoryItem = z.object({
   /** Set when the reviewer had to run on the author's provider. */
   reviewerNote: z.string().nullable(),
   review: ReviewVerdict.nullable(),
+  /**
+   * Why its review's lessons weren't kept: someone the project doesn't trust commented on its
+   * issue or pull request, or GitHub couldn't be read to tell. Null when they were kept, or when
+   * there were none.
+   */
+  lessonsNote: z.string().nullable().default(null),
   /**
    * The review's follow-ups, taken from the verdict on record when the pull request merged, each
    * with the issue that tracks it once filed (by the dark factory, or with "File issue").
@@ -562,6 +569,8 @@ export const FactoryDigest = z.object({
     .default([]),
   /** Spot-checks people recorded during the day and over the window, and those outstanding. */
   spotChecks: DigestSpotChecks.prefault({}),
+  /** Lessons the factory learned during the day; each is listed in one digest only. */
+  lessons: z.array(DigestLesson).default([]),
   text: z.string(),
   createdAt: Timestamp,
 });

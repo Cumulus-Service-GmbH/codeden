@@ -58,7 +58,7 @@ import { fileFollowUp } from "./follow-ups";
 import type { FactoryGithub } from "./github-port";
 import { itemCosts } from "./item-cost";
 import { allowLargeChange } from "./large-change";
-import { forgetLesson } from "./lessons";
+import { forgetLesson, keepLessons } from "./lessons";
 import { runTick } from "./loop";
 import { PrFiles } from "./overlap";
 import { reportReproduction, submitAnalysis } from "./pipeline";
@@ -694,8 +694,15 @@ export class FactoryService {
     return s !== undefined && isFactorySession(s) && s.workKey.startsWith(LENS_WORK_KEY_PREFIX);
   }
 
-  submitReview(session: Session, verdict: ReviewVerdict) {
-    const { forward, ...res } = decisions.submitReview(this.ctx, session, verdict);
+  /**
+   * `factory_submit_review`. The verdict is settled (or refused, which throws) before this
+   * returns; its lessons are kept once GitHub shows who commented on the work (`keepLessons`).
+   */
+  submitReview(
+    session: Session,
+    verdict: ReviewVerdict,
+  ): Promise<Omit<decisions.ReviewOutcome, "forward">> {
+    const { forward, item, ...res } = decisions.submitReview(this.ctx, session, verdict);
     // A verdict that came after a revise round started: its findings go to the author.
     if (forward) {
       this.ctx.sessions
@@ -705,7 +712,9 @@ export class FactoryService {
         );
     }
     if (session.projectId) this.soon(session.projectId);
-    return res;
+    return keepLessons(this.ctx, item, verdict.lessons).then((kept) =>
+      decisions.withKeptLessons(res, kept),
+    );
   }
 
   /** `factory_allow_large_change`: the PM lets an item over the size limit merge. */
