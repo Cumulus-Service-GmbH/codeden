@@ -3,6 +3,7 @@ import { errorMessage, ServiceError } from "../errors";
 import { type FactoryContext, factoryNotice, raiseInbox } from "./context";
 import { followUpsAtMerge } from "./follow-ups";
 import type { FactoryPr } from "./github-port";
+import { spotCheckAtMerge } from "./spot-checks";
 import { stuckDecisionId, stuckInboxId } from "./stuck";
 
 /**
@@ -55,9 +56,13 @@ export function prDecidedOutside(
 ): void {
   const at = ctx.now().toISOString();
   const merged = ref.state === "merged";
+  // A person merged it: only the merges always spot-checked are set aside (`spot-checks.ts`).
+  const project = merged ? ctx.projects.get(item.projectId) : null;
+  const loop = project ? ctx.store.loopOrNew(project.id, ctx.now()) : null;
   ctx.store.updateItem(item.id, (i) => ({
     ...i,
     ...(merged ? followUpsAtMerge(i, at) : {}),
+    ...(project && loop ? spotCheckAtMerge(project, loop, i, at, false) : {}),
     pr: ref,
     stage: merged ? "merged" : "rejected",
     // A protected area stays the reason it was a person's to merge.
@@ -196,6 +201,8 @@ export async function autoMerge(
     const kept = followUpsAtMerge(i, at);
     return {
       ...i,
+      // A share of automatic merges is set aside for a person's quick look (`spot-checks.ts`).
+      ...spotCheckAtMerge(project, loop, i, at, true),
       stage: "watching",
       pr: { ...pr.ref, state: "merged" },
       mergeSha: res.sha,

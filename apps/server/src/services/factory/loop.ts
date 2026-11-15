@@ -27,6 +27,7 @@ import { advanceScout } from "./scout";
 import { claimSlot } from "./slots";
 import { settleSpecInbox } from "./spec-approval";
 import { closeEarlyPrs } from "./spec-early-pr";
+import { settleSpotCheckInbox } from "./spot-checks";
 import { OWNED_STAGES } from "./store";
 import { mayAutoMerge } from "./trust";
 import { recoverTurnRaceFailures } from "./turn-race";
@@ -134,6 +135,8 @@ export async function runTick(
   archiveFinished(ctx, projectId);
   // Requests to approve a spec that waits for nothing any more are resolved.
   settleSpecInbox(ctx, projectId);
+  // The one "N merges to spot-check" item follows the merges set aside and the checks recorded.
+  settleSpotCheckInbox(ctx, project);
   // A drain whose work is all done stops the loop here (also while paused).
   if (loop.drain) {
     loop = await advanceDrain(ctx, project, loop);

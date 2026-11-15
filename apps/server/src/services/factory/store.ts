@@ -221,6 +221,32 @@ export class FactoryStore {
   }
 
   /**
+   * Items whose spot-check (`spot-checks.ts`) is pending, or, with `checkedSince`, was recorded at
+   * or after it. Every one, however old the merge: a spot-check waits until a person looks.
+   */
+  spotCheckItems(projectId: string, checkedSince: string | null): FactoryItem[] {
+    const keep = (i: FactoryItem) =>
+      i.spotCheck != null &&
+      (i.spotCheck.state === "pending" ||
+        (checkedSince !== null && (i.spotCheck.checkedAt ?? "") >= checkedSince));
+    const read = this.reads.list(projectId);
+    if (read) return read.filter(keep);
+    const field = (path: string) => sql`json_extract(${factoryItems.item}, ${path})`;
+    const pending = sql`${field("$.spotCheck.state")} = 'pending'`;
+    const wanted =
+      checkedSince === null
+        ? pending
+        : or(pending, sql`${field("$.spotCheck.checkedAt")} >= ${checkedSince}`);
+    return this.db
+      .select()
+      .from(factoryItems)
+      .where(and(eq(factoryItems.projectId, projectId), wanted))
+      .all()
+      .map((r) => withItemDefaults(r.item))
+      .filter(keep);
+  }
+
+  /**
    * Merged items whose review follow-ups wait to be filed (`follow-ups.ts`): the merge set the
    * `follow_ups_due` nudge. Oldest first.
    */
@@ -422,6 +448,7 @@ const ITEM_DEFAULTS = {
   stepSince: null,
   mergePath: null,
   followUps: [],
+  spotCheck: null,
 } satisfies Partial<FactoryItem>;
 
 /** An item as read from the projection, with the fields newer versions added. */

@@ -20,6 +20,8 @@ import {
   type FactoryScorecard,
   type FactorySetTypeRequest,
   type FactorySpecDecisionRequest,
+  type FactorySpotCheckRequest,
+  type FactorySpotCheckResponse,
   type FactoryStatus,
   isFactoryMode,
   type KillSwitchMode,
@@ -74,6 +76,7 @@ import {
 } from "./sessions";
 import { SlotBoard } from "./slots";
 import { assertSpecAllowsPr, decideSpec } from "./spec-approval";
+import { decideSpotCheck, fileSpotCheckIssue } from "./spot-checks";
 import { buildStatus } from "./status";
 import { FactoryStore } from "./store";
 import { answerProviderQuestion, recordDecision, unattendedSession } from "./unattended";
@@ -543,6 +546,27 @@ export class FactoryService {
         this.item(projectId, itemId),
         index,
       ),
+    );
+  }
+
+  /**
+   * A person's spot-check of a merge (`spot-checks.ts`): Looks good, or Found a problem with a
+   * note, optionally filed as a follow-up issue. Nothing waits on it.
+   */
+  decideSpotCheck(
+    projectId: string,
+    itemId: string,
+    req: FactorySpotCheckRequest,
+  ): Promise<FactorySpotCheckResponse> {
+    return this.serialize(projectId, "spot-check", () =>
+      decideSpotCheck(this.ctx, this.deps.projects.get(projectId), itemId, req),
+    );
+  }
+
+  /** "File issue": the follow-up issue of a spot-check problem recorded without one. */
+  fileSpotCheckIssue(projectId: string, itemId: string): Promise<FactorySpotCheckResponse> {
+    return this.serialize(projectId, "spot-check issue", () =>
+      fileSpotCheckIssue(this.ctx, this.deps.projects.get(projectId), itemId),
     );
   }
 

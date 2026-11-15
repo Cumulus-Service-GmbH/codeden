@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import {
+  type DigestSpotChecks,
   type FactoryDigest,
   type FactoryItem,
   type FactoryLimits,
@@ -8,6 +9,8 @@ import {
   factoryNeedLabel,
   type InboxItem,
   type Project,
+  SPOT_CHECK_WINDOW_DAYS,
+  spotCheckProblemPercent,
 } from "@codeden/contracts";
 import type { InboxService } from "../inbox-service";
 import { budgetSpend, type FactoryContext, factoryNotice, raiseInbox } from "./context";
@@ -17,6 +20,7 @@ import { localDay } from "./policy";
 import { ownedPr } from "./pr-status";
 import { recoverable } from "./recover";
 import { specInboxId, specPending } from "./spec-approval";
+import { digestSpotChecks, spotCheckInboxId } from "./spot-checks";
 import { lastMergeReverted } from "./stats";
 import { OWNED_STAGES } from "./store";
 import { DECISION_INBOX_PREFIX } from "./unattended";
@@ -42,6 +46,7 @@ export async function writeDigest(
     limits: project.factoryLimits,
     pausedReason: loop.state === "paused" ? loop.pausedReason : null,
     draining: drainLine(ctx, project.id, loop),
+    spotChecks: digestSpotChecks(ctx, project.id, day),
     now: ctx.now(),
   });
   ctx.store.saveDigest(digest);
@@ -119,6 +124,8 @@ export function buildDigest(opts: {
   pausedReason: string | null;
   /** "Draining: 2 items in flight" while the kill switch's drain runs. */
   draining?: string | null;
+  /** Spot-checks of the day and the window (`digestSpotChecks`); none by default. */
+  spotChecks?: DigestSpotChecks;
   now?: Date;
 }): FactoryDigest {
   const shipped = opts.items
@@ -149,6 +156,8 @@ export function buildDigest(opts: {
           x.status === "open" &&
           !listed.has(x.id) &&
           !x.id.startsWith("inbox:factory-digest:") &&
+          // Spot-checks have their own line (`spotChecks`); nothing waits on them.
+          x.id !== spotCheckInboxId(opts.projectId) &&
           // Decisions the factory made on its own are reported, not waiting (unless flagged).
           !(x.id.startsWith(DECISION_INBOX_PREFIX) && x.priority !== "high") &&
           // Its own sessions' failures are the factory's to handle (reported under `handled`).
@@ -185,6 +194,13 @@ export function buildDigest(opts: {
     waiting,
     decisions,
     handled,
+    spotChecks: opts.spotChecks ?? {
+      checkedToday: 0,
+      problemsToday: 0,
+      outstanding: 0,
+      checked30d: 0,
+      problems30d: 0,
+    },
     createdAt: (opts.now ?? new Date()).toISOString(),
   };
   return {
@@ -201,6 +217,21 @@ function isFactoryFailure(x: InboxItem): boolean {
 function dayOf(iso: string): string {
   const d = new Date(iso);
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+/**
+ * "Spot-checks: 2 checked today (1 found a problem), 5 outstanding; over 30 days a person found a
+ * problem in 1 of 7 checked merges (14%)"; null when there was nothing to spot-check.
+ */
+export function spotCheckLine(s: DigestSpotChecks | undefined): string | null {
+  if (!s || s.checkedToday + s.outstanding + s.checked30d === 0) return null;
+  const today = `${s.checkedToday} checked today${s.checkedToday > 0 ? ` (${s.problemsToday} found a problem)` : ""}`;
+  const share = spotCheckProblemPercent(s.checked30d, s.problems30d);
+  const window =
+    share === null
+      ? `none checked in the last ${SPOT_CHECK_WINDOW_DAYS} days`
+      : `over ${SPOT_CHECK_WINDOW_DAYS} days a person found a problem in ${s.problems30d} of ${s.checked30d} checked merge${s.checked30d === 1 ? "" : "s"} (${share}%)`;
+  return `Spot-checks: ${today}, ${s.outstanding} outstanding; ${window}.`;
 }
 
 /** Markdown text of a digest (inbox body and orchestrator notice). */
@@ -243,7 +274,10 @@ export function renderDigest(
     lines.push("", `Failures it handled on its own (${d.handled.length}):`);
     for (const h of d.handled) lines.push(`- ${h.title}${h.detail ? `: ${h.detail}` : ""}`);
   }
-  lines.push("", `Spend: ${budget}`, "", `Waiting on you (${d.waiting.length}):`);
+  lines.push("", `Spend: ${budget}`);
+  const spot = spotCheckLine(d.spotChecks);
+  if (spot) lines.push("", spot);
+  lines.push("", `Waiting on you (${d.waiting.length}):`);
   for (const w of d.waiting) lines.push(`- ${w.title}`);
   if (d.waiting.length === 0) lines.push("- nothing");
   return lines.join("\n");

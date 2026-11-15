@@ -51,6 +51,7 @@ const base: FactoryItem = {
   reviewerNote: null,
   review: null,
   followUps: [],
+  spotCheck: null,
   checks: [],
   attempts: 0,
   reason: null,
@@ -172,6 +173,8 @@ describe("the factory scorecard (#361)", () => {
       estimatedUsd: 0.5,
       unpricedTurns: 1,
       apiEquivalent: true,
+      spotChecked: 0,
+      spotProblems: 0,
     });
     expect(rowOf(card.builders, "codex", "gpt-5.5")).toMatchObject({
       finished: 1,
@@ -234,6 +237,55 @@ describe("the factory scorecard (#361)", () => {
     expect(card.reviewers[0]).toMatchObject({ merged: 3, reverted: 2, firstPass: 1 });
     // Without a ledger the cost reads as nothing spent.
     expect(card.builders[0]).toMatchObject({ costUsd: 0, costPerMergeUsd: 0 });
+  });
+
+  it("counts what people found on spot-checks against the builder and reviewer (#380)", () => {
+    const check = (state: "pending" | "looks_good" | "problem") => ({
+      spotCheck: {
+        reason: "sampled" as const,
+        state,
+        sampledAt: ago(3 * HOUR),
+        checkedAt: state === "pending" ? null : ago(HOUR),
+        note: state === "problem" ? "Leaks a timer" : null,
+        issue: null,
+      },
+    });
+    const codex = {
+      builderSessionId: "b-codex",
+      builderProvider: "codex",
+      reviewerSessionId: "r-claude",
+      reviewerProvider: "claude",
+    };
+    const card = scorecard(
+      "p1",
+      [
+        merged("s1", 3, 1, check("problem")),
+        merged("s2", 4, 1, check("looks_good")),
+        merged("s3", 5, 1, check("pending")),
+        merged("s4", 6, 1),
+        merged("s5", 7, 1, { ...codex, ...check("looks_good") }),
+      ],
+      { models, costs: new Map() },
+      NOW,
+      7,
+    );
+    expect(rowOf(card.builders, "claude", "claude-opus-4-5")).toMatchObject({
+      merged: 4,
+      spotChecked: 2,
+      spotProblems: 1,
+    });
+    expect(rowOf(card.reviewers, "codex", "gpt-5.5")).toMatchObject({
+      spotChecked: 2,
+      spotProblems: 1,
+    });
+    expect(rowOf(card.builders, "codex", "gpt-5.5")).toMatchObject({
+      spotChecked: 1,
+      spotProblems: 0,
+    });
+    expect(card.pairs.map((r) => [r.spotChecked, r.spotProblems])).toEqual([
+      [2, 1],
+      [1, 0],
+    ]);
   });
 
   it("counts only work that finished in the window, from its own work", () => {

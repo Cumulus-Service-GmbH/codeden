@@ -36,6 +36,7 @@ const base: FactoryItem = {
   reviewerNote: null,
   review: null,
   followUps: [],
+  spotCheck: null,
   checks: [],
   attempts: 0,
   reason: null,

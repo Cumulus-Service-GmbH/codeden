@@ -20,6 +20,7 @@ import { ownedPr, pullRequests } from "./pr-status";
 import { recoverable } from "./recover";
 import { scoutNowBlocker, scoutNowFacts } from "./scout";
 import { isBusy } from "./sessions";
+import { spotCheckStatus } from "./spot-checks";
 import { factoryStats, viewRecentItems, viewWindow } from "./stats";
 import { ACTIVE_STAGES, DONE_STAGES, VIEW_ITEMS, WAITING_STAGES } from "./store";
 import { wipOf } from "./wip";
@@ -144,6 +145,7 @@ export async function buildStatus(ctx: FactoryContext, projectId: string): Promi
     scout: project.autonomyMode === "dark_factory" ? scoutStatus(ctx, project, loop, spend) : null,
     visionExists: visionOf(project).exists,
     lessons: ctx.store.lessons(projectId, LESSONS_IN_BRIEF),
+    spotChecks: spotCheckStatus(ctx, project, loop),
     lastDigest: ctx.store.digests(projectId, 1)[0] ?? null,
     // Kept in memory: an idle tick saves nothing (`FactoryStore.saveTick`).
     lastTickAt: ctx.store.lastTick(projectId) ?? loop.lastTickAt,

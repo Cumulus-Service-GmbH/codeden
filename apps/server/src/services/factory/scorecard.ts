@@ -74,6 +74,8 @@ interface Tally {
   estimatedUsd: number;
   unpricedTurns: number;
   apiEquivalent: boolean;
+  spotChecked: number;
+  spotProblems: number;
 }
 
 function add(
@@ -99,12 +101,18 @@ function add(
       estimatedUsd: 0,
       unpricedTurns: 0,
       apiEquivalent: false,
+      spotChecked: 0,
+      spotProblems: 0,
     };
     rows.set(key, row);
   }
   row.reviseRounds += item.attempts;
   if (outcome === "merged") {
     const reverted = revertedAt(item) !== null;
+    // What a person found when they spot-checked the merge (`spot-checks.ts`).
+    const spot = item.spotCheck?.state;
+    if (spot === "looks_good" || spot === "problem") row.spotChecked++;
+    if (spot === "problem") row.spotProblems++;
     row.merged++;
     // A merge reverted before its revise round (older items, `stage: reverted`) wasn't a pass.
     if (item.attempts === 0 && !reverted) row.firstPass++;
@@ -141,6 +149,8 @@ function toRow(t: Tally): FactoryScorecardRow {
     estimatedUsd: round(t.estimatedUsd),
     unpricedTurns: t.unpricedTurns,
     apiEquivalent: t.apiEquivalent,
+    spotChecked: t.spotChecked,
+    spotProblems: t.spotProblems,
   };
 }
 

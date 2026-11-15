@@ -9,6 +9,8 @@ import {
   FactoryScorecardQuery,
   FactorySetTypeRequest,
   FactorySpecDecisionRequest,
+  FactorySpotCheckRequest,
+  type FactorySpotCheckResponse,
   KillSwitchRequest,
   PutVisionRequest,
   SetAutonomyModeRequest,
@@ -27,6 +29,9 @@ import { jsonBody, queryOf } from "./validate";
  * `items/:itemId/spec` approves a feature's spec or asks for changes (409 `spec_not_pending`
  * unless it waits for approval).
  * `factory/scorecard?days=7|30|90` (30 by default) is the scorecard by builder and reviewer.
+ * `items/:itemId/spot-check` records a person's spot-check of a merge (409
+ * `spot_check_not_pending` unless one waits); `spot-check/file-issue` files the follow-up issue of
+ * a problem recorded without one (409 `spot_check_not_problem` or `spot_check_issue_filed`).
  */
 export function projectFactoryRoutes(s: AppServices) {
   const f = s.factory;
@@ -87,6 +92,16 @@ export function projectFactoryRoutes(s: AppServices) {
       const item = await f.decideSpec(id, c.req.param("itemId"), c.req.valid("json"));
       return c.json<FactoryItemResponse>(await f.itemResponse(id, item));
     })
+    .post("/:id/factory/items/:itemId/spot-check", jsonBody(FactorySpotCheckRequest), async (c) =>
+      c.json<FactorySpotCheckResponse>(
+        await f.decideSpotCheck(c.req.param("id"), c.req.param("itemId"), c.req.valid("json")),
+      ),
+    )
+    .post("/:id/factory/items/:itemId/spot-check/file-issue", async (c) =>
+      c.json<FactorySpotCheckResponse>(
+        await f.fileSpotCheckIssue(c.req.param("id"), c.req.param("itemId")),
+      ),
+    )
     .delete("/:id/factory/lessons/:lessonId", (c) =>
       c.json<FactoryLessonResponse>({
         lesson: f.forgetLesson(c.req.param("id"), c.req.param("lessonId")),
