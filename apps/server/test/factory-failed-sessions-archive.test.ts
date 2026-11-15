@@ -348,7 +348,8 @@ describe("the one-time sweep of failed sessions left from before (#411)", () => 
       sessionsArchivedAt: old,
       finishedAt: old,
     });
-    // ...and a busy project's history since: a thousand sessions someone stopped and archived.
+    // ...and a busy project's history since: a thousand sessions someone stopped (not archived,
+    // so they are read too, and a capped read would still miss the failed one).
     const later = Date.parse(old) + 3_600_000;
     env.store.append(
       Array.from({ length: 1000 }, (_, n) => {
@@ -362,7 +363,6 @@ describe("the one-time sweep of failed sessions left from before (#411)", () => 
           status: "stopped",
           createdAt: ts,
           updatedAt: ts,
-          archivedAt: ts,
         };
         return { type: "session.created" as const, sessionId: id, payload: { session: s } };
       }),
@@ -372,5 +372,7 @@ describe("the one-time sweep of failed sessions left from before (#411)", () => 
     await tick();
     expect(env.archived).toEqual([failed]);
     expect(session(failed).archivedAt).not.toBeNull();
+    // The sessions people stopped aren't the factory's to archive.
+    expect(session("stopped-0").archivedAt).toBeNull();
   });
 });
