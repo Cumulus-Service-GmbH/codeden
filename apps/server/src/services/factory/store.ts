@@ -106,6 +106,7 @@ export class FactoryStore {
         fastMergeHold: null,
         tuning: FactoryTuning.parse({}),
         drain: null,
+        failedSessionsSweptAt: null,
         lastTickAt: null,
         updatedAt: now.toISOString(),
       }
@@ -489,6 +490,8 @@ export function upgradeLoop(loop: FactoryLoop): FactoryLoop {
     tuning: { ...TUNING_DEFAULTS, ...loop.tuning },
     // Loops saved before drains existed have none.
     drain: loop.drain ? { ...loop.drain, deadline: loop.drain.deadline ?? null } : null,
+    // Loops saved before the sweep of failed sessions (#411) haven't run it.
+    failedSessionsSweptAt: loop.failedSessionsSweptAt ?? null,
   });
 }
 

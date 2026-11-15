@@ -2,6 +2,7 @@ import {
   type FactoryItem,
   type FactoryItemCost,
   type MergeCheck,
+  type Session,
   stoppedRetry,
   WorkType,
 } from "@codeden/contracts";
@@ -15,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { useClient } from "@/lib/api";
 import { factoryKeys } from "@/lib/factory";
 import { ago } from "@/lib/format";
+import { useSessionLookups } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { CheckPill } from "./factory-columns";
 import { costFact, costTitle, hasCost } from "./item-cost";
@@ -38,6 +40,50 @@ export function SessionLink({ id, label }: { id: string | null; label: string })
     >
       {label}
     </Link>
+  );
+}
+
+/** What a session did for the item, from its work key. */
+function sessionRole(s: Session): string {
+  if (s.workKey.startsWith("factory:review:")) return "Reviewer";
+  if (s.workKey.startsWith("factory:integrate:")) return "Integrator";
+  return "Builder";
+}
+
+/**
+ * The item's other sessions: earlier attempts, and reviewers or builders that failed and were
+ * replaced. The factory archives those, so they leave the sidebar; they stay reachable here.
+ */
+export function EarlierSessions({ item }: { item: FactoryItem }) {
+  const current = new Set([item.builderSessionId, item.reviewerSessionId]);
+  const ids = item.sessionIds.filter((id) => !current.has(id));
+  const sessions = useSessionLookups(ids);
+  if (ids.length === 0) return null;
+  return (
+    <div className="space-y-1 text-xs" data-testid="item-earlier-sessions">
+      <p className="text-muted-foreground">Earlier sessions</p>
+      <ul className="space-y-0.5">
+        {ids.map((id) => {
+          const s = sessions.get(id);
+          return (
+            <li key={id} className="flex items-baseline justify-between gap-3">
+              <SessionLink id={id} label={s ? `${sessionRole(s)} · ${s.provider}` : "Session"} />
+              {s && (
+                <span
+                  className={cn(
+                    "text-3xs",
+                    s.status === "failed" ? "text-status-failed" : "text-muted-foreground",
+                  )}
+                >
+                  {s.status}
+                  {s.archivedAt && " · archived"}
+                </span>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }
 

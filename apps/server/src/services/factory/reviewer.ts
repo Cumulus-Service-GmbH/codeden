@@ -1,6 +1,7 @@
 import type { FactoryItem, FactoryLoop, Project, Session } from "@codeden/contracts";
 import { withAskedHead } from "./approval";
 import { type ProviderCause, unavailableText } from "./availability";
+import { letGoReviewer } from "./cleanup";
 import type { FactoryContext } from "./context";
 import { failReview } from "./failures";
 import type { FactoryPr } from "./github-port";
@@ -118,7 +119,9 @@ async function startReviewer(
 /**
  * The item with a newly started reviewer session. A nudge for its verdict was sent to the
  * session it replaces (one that died, was stopped, or whose provider failed), so it goes with
- * that session: the new reviewer is reminded once itself before its review can fail.
+ * that session: the new reviewer is reminded once itself before its review can fail. A
+ * reviewer it takes over from directly (a failed one, for a re-check) is let go as an earlier
+ * session, which the loop archives now that it is replaced (#411).
  */
 function withReviewer(
   item: FactoryItem,
@@ -127,6 +130,7 @@ function withReviewer(
   const { reviewer: _nudged, ...nudges } = item.nudges;
   return {
     ...item,
+    ...letGoReviewer(item),
     reviewerSessionId: res.sessionId,
     reviewerProvider: res.provider,
     reviewerNote: res.note,
@@ -350,7 +354,8 @@ async function reviewerProviderFailed(
   ctx.log?.(`factory: ${item.id}: reviewer on ${s.provider} failed (${cause.reason})`);
   ctx.store.updateItem(item.id, (i) => ({
     ...i,
-    reviewerSessionId: null,
+    // Archived once a fresh reviewer has started (`cleanup.ts`); until then the note says why.
+    ...letGoReviewer(i),
     note: `The reviewer stopped: ${unavailableText(name, cause)}. A fresh reviewer starts on an available provider.`,
     nudges: skipProvider(withoutRecheckRequest(i.nudges), s.provider, cause.until, ctx.now()),
   }));
@@ -373,7 +378,8 @@ function reviewerDied(ctx: FactoryContext, loop: FactoryLoop, item: FactoryItem)
   const at = ctx.now().toISOString();
   ctx.store.updateItem(item.id, (i) => ({
     ...i,
-    reviewerSessionId: null,
+    // Archived once a fresh reviewer has started (`cleanup.ts`).
+    ...letGoReviewer(i),
     nudges: { ...withoutRecheckRequest(i.nudges), [`reviewer_failed_${n + 1}`]: at },
   }));
   return loop;

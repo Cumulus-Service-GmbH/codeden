@@ -4,6 +4,7 @@ import {
   type InboxCounts,
   type InboxDismissFilter,
   type InboxItem,
+  type InboxItemKind,
   type InboxSettlement,
   inboxAttempts,
   inboxWaitsOnYou,
@@ -14,7 +15,7 @@ import {
   type RuntimeResponse,
   type Session,
 } from "@codeden/contracts";
-import { and, desc, eq, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, type SQL } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { rowToInbox } from "../db/rows";
 import { inboxItems } from "../db/schema";
@@ -38,15 +39,28 @@ export class InboxService {
   ) {}
 
   list(query: ListInboxQuery = {}): InboxItem[] {
+    return this.newest(query, 1000);
+  }
+
+  /**
+   * The newest `limit` items matching `query`, optionally narrowed to some `kinds`. The kinds
+   * filter runs in SQL, before the limit, so older matching items aren't crowded out by newer
+   * items of other kinds.
+   */
+  private newest(
+    query: ListInboxQuery & { kinds?: readonly InboxItemKind[] },
+    limit: number,
+  ): InboxItem[] {
     const conditions: SQL[] = [eq(inboxItems.status, query.status ?? "open")];
     if (query.projectId) conditions.push(eq(inboxItems.projectId, query.projectId));
     if (query.sessionId) conditions.push(eq(inboxItems.sessionId, query.sessionId));
+    if (query.kinds) conditions.push(inArray(inboxItems.kind, [...query.kinds]));
     return this.db
       .select()
       .from(inboxItems)
       .where(and(...conditions))
       .orderBy(desc(inboxItems.createdAt))
-      .limit(1000)
+      .limit(limit)
       .all()
       .map(rowToInbox);
   }
@@ -214,10 +228,7 @@ export class InboxService {
         .filter((item): item is InboxItem => item?.status === "open");
     }
     const { projectId, sessionId, kinds } = scope.filter;
-    const wanted = kinds ? new Set(kinds) : null;
-    return this.list({ projectId, sessionId })
-      .filter((item) => !wanted || wanted.has(item.kind))
-      .slice(0, INBOX_BULK_MAX);
+    return this.newest({ projectId, sessionId, kinds }, INBOX_BULK_MAX);
   }
 
   /** Close an open item CodeDen settled by itself, with a short note on why (`InboxSettlement`). */
