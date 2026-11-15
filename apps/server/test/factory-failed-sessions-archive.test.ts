@@ -276,4 +276,101 @@ describe("the one-time sweep of failed sessions left from before (#411)", () => 
     await tick();
     expect(session(merged.failed).archivedAt).toBeNull();
   });
+
+  it("archives an in-play item's failed sessions a later builder or reviewer superseded", async () => {
+    env = createFactoryEnv();
+    enable();
+    const at = (h: number) => new Date(Date.parse(old) + h * 3_600_000).toISOString();
+    // A revise round in flight during the upgrade: its first builder failed on its provider and
+    // a fresh one took over; a reviewer failed before the fresh builder started. The fresh
+    // builder is still working.
+    const building = {
+      first: factorySession("p-builder-1", { workKey: "issue:270", status: "failed" }),
+      reviewer: factorySession("p-reviewer", {
+        workKey: "factory:review:271",
+        status: "failed",
+        createdAt: at(1),
+      }),
+      current: factorySession("p-builder-2", {
+        workKey: "issue:270",
+        status: "running",
+        createdAt: at(2),
+      }),
+    };
+    oldItem({
+      workKey: "issue:270",
+      stage: "building",
+      pr: { ...pr(271), state: "open" },
+      builderSessionId: building.current,
+      reviewerSessionId: null,
+      sessionIds: Object.values(building),
+    });
+    // Another item in flight whose reviewer failed after its builder started, and nothing has
+    // replaced it yet: it stays.
+    const waiting = {
+      builder: factorySession("w-builder", { workKey: "issue:280", status: "running" }),
+      failed: factorySession("w-reviewer", {
+        workKey: "factory:review:281",
+        status: "failed",
+        createdAt: at(1),
+      }),
+    };
+    oldItem({
+      workKey: "issue:280",
+      stage: "building",
+      pr: { ...pr(281), state: "open" },
+      builderSessionId: waiting.builder,
+      reviewerSessionId: null,
+      sessionIds: Object.values(waiting),
+    });
+
+    env.restart();
+    await tick();
+    expect([...env.archived].sort()).toEqual([building.first, building.reviewer].sort());
+    expect(session(building.current).archivedAt).toBeNull();
+    expect(session(waiting.failed).archivedAt).toBeNull();
+    expect(session(waiting.builder).archivedAt).toBeNull();
+  });
+
+  it("reaches a failed session however many failed or stopped sessions came after it", async () => {
+    env = createFactoryEnv();
+    enable();
+    // A merged item whose failed reviewer an earlier version missed...
+    const builder = factorySession("o-builder", { workKey: "issue:290", archivedAt: old });
+    const failed = factorySession("o-failed", { workKey: "factory:review:291", status: "failed" });
+    oldItem({
+      workKey: "issue:290",
+      stage: "merged",
+      pr: pr(291),
+      builderSessionId: builder,
+      reviewerSessionId: null,
+      sessionIds: [builder, failed],
+      sessionsArchivedAt: old,
+      finishedAt: old,
+    });
+    // ...and a busy project's history since: a thousand sessions someone stopped and archived.
+    const later = Date.parse(old) + 3_600_000;
+    env.store.append(
+      Array.from({ length: 1000 }, (_, n) => {
+        const ts = new Date(later + n * 1000).toISOString();
+        const id = `stopped-${n}`;
+        const s: Session = {
+          ...sampleSession,
+          id,
+          projectId: env.project.id,
+          workKey: `request:${n}`,
+          status: "stopped",
+          createdAt: ts,
+          updatedAt: ts,
+          archivedAt: ts,
+        };
+        return { type: "session.created" as const, sessionId: id, payload: { session: s } };
+      }),
+    );
+
+    env.restart();
+    await tick();
+    expect(env.archived).toEqual([failed]);
+    expect(session(failed).archivedAt).not.toBeNull();
+  });
 });
