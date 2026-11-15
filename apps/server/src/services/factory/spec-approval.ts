@@ -14,7 +14,7 @@ import { specRevisionStep } from "./prompts-spec";
 import { isBusy } from "./sessions";
 import { claimSlot } from "./slots";
 import { builderOpenPr, holdEarlyPr } from "./spec-early-pr";
-import { finishesOpenWork, unopenedBuilds, wipOf, wipText } from "./wip";
+import { buildsAhead, finishesOpenWork, wipOf, wipText } from "./wip";
 
 /**
  * The optional spec approval (§10.1, `FactoryTuning.specApproval`, software factory only). A
@@ -111,7 +111,10 @@ export function approvalOnSubmit(
   return { ...earlier, state: "approved", decidedAt: at, by: "auto", sentAt: at };
 }
 
-/** Ask a person to approve the spec the builder just submitted (an open `needs_you` item). */
+/**
+ * Ask a person to approve the spec the builder just submitted (an open `needs_you` item). Its
+ * `updatedAt` is the spec's version (`requestedAt`), which a decision from the inbox carries.
+ */
 export function raiseSpecInbox(ctx: FactoryContext, item: FactoryItem): void {
   raiseInbox(ctx, {
     id: specInboxId(item.id),
@@ -122,6 +125,7 @@ export function raiseSpecInbox(ctx: FactoryContext, item: FactoryItem): void {
     issue: item.issue,
     title: `Approve the spec: ${item.title}`,
     body: specText(item),
+    at: item.specApproval?.requestedAt,
   });
 }
 
@@ -147,6 +151,13 @@ export async function decideSpec(
   const spec = item.specApproval;
   if (item.stage !== "building" || spec?.state !== "pending") {
     throw conflict(`Item ${item.id} has no spec waiting for approval`, "spec_not_pending");
+  }
+  // Made on a version the builder has revised since (a page open from before): read it again.
+  if (req.version && Date.parse(req.version) !== Date.parse(spec.requestedAt)) {
+    throw conflict(
+      "The spec changed since it was shown: read the revised spec, then decide again",
+      "spec_changed",
+    );
   }
   const at = ctx.now().toISOString();
   const decided = { ...spec, decidedAt: at, by: "user" as const, sentAt: null };
@@ -241,12 +252,13 @@ export async function advanceSpec(
     return loop;
   }
   const approved = spec.state === "approved";
-  // An approved spec becomes a build that will open a PR: it needs room under the limit.
+  // An approved spec becomes a build that will open a PR: it needs room under the limit, after
+  // the builds ahead of it (approved specs go oldest first and never count against each other).
   if (approved && !finishesOpenWork(ctx, item)) {
     const wip = wipOf(ctx, project, loop);
-    const others = unopenedBuilds(ctx, project.id) - 1;
-    if (wip.openPrs + others >= wip.limit) {
-      note(ctx, item, `Spec approved; waiting: ${wipText(wip, others).replace(/^F/, "f")}`);
+    const ahead = buildsAhead(ctx, project.id, item);
+    if (wip.openPrs + ahead >= wip.limit) {
+      note(ctx, item, `Spec approved; waiting: ${wipText(wip, ahead).replace(/^F/, "f")}`);
       return loop;
     }
   }

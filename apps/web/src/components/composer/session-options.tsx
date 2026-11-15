@@ -7,11 +7,16 @@ import { useClient } from "@/lib/api";
 import { snapshotKey, useSnapshotData } from "@/lib/queries";
 import { useHandoffBlocked } from "@/lib/session-actions";
 import { useUiStore } from "@/stores/ui";
+import { ChecksToggle } from "./checks-toggle";
 import { ModelPicker } from "./model-picker/model-picker";
 import { AutonomyPicker, PlanToggle } from "./pickers";
 
 function changeSummary(patch: UpdateSessionRequest): string {
   if (patch.planMode !== undefined) return patch.planMode ? "Plan mode on" : "Plan mode off";
+  if (patch.untilChecksPass === false) return "Keep going until checks pass: off";
+  if (patch.untilChecksPass !== undefined || patch.checkRounds !== undefined) {
+    return `Keep going until checks pass${patch.checkRounds ? `, up to ${patch.checkRounds} ${patch.checkRounds === 1 ? "round" : "rounds"}` : ""}`;
+  }
   if (patch.autonomy !== undefined) return `Permissions: ${AUTONOMY[patch.autonomy].label}`;
   if (patch.model !== undefined && patch.effort !== undefined) return "Model and effort changed";
   return patch.model !== undefined ? "Model changed" : "Effort changed";
@@ -28,13 +33,16 @@ export function appliesFrom(
   liveAutonomy: boolean,
 ): string | undefined {
   if (!running) return undefined;
+  if (patch.untilChecksPass !== undefined || patch.checkRounds !== undefined) {
+    return "Applies when this turn ends.";
+  }
   const live = patch.autonomy !== undefined || patch.planMode !== undefined;
   if (live && liveAutonomy) return "Applies from the next tool call.";
   return "Applies from the next turn.";
 }
 
 /**
- * Model, effort, autonomy and plan mode for a session: a change is saved with
+ * Model, effort, autonomy, plan mode and the checks loop for a session: a change is saved with
  * `PATCH /api/sessions/:id`. Model and effort apply from the next turn (a running turn keeps
  * its settings); autonomy and plan mode apply from the next tool call or the next turn, as the
  * provider allows. The provider is fixed for the life of a session, so the picker shows the
@@ -102,6 +110,18 @@ export function SessionOptions({ session, running }: { session: Session; running
       {session.role === "agent" && providerInfo?.capabilities.planMode && (
         <PlanToggle value={session.planMode ?? false} onChange={(planMode) => save({ planMode })} />
       )}
+      {session.role === "agent" &&
+        session.checks &&
+        session.checks.commands.length > 0 &&
+        session.autonomy !== "read_only" && (
+          <ChecksToggle
+            checks={session.checks.commands}
+            value={session.checks}
+            onChange={(next) =>
+              save({ untilChecksPass: next.untilPass, checkRounds: next.maxRounds })
+            }
+          />
+        )}
     </>
   );
 }

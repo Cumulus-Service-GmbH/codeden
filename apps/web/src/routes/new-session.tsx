@@ -8,7 +8,7 @@ import { ConflictCard } from "@/components/project/conflict-card";
 import { NewSessionHeader } from "@/components/project/new-session-header";
 import { useStartDraft } from "@/components/project/use-start-draft";
 import { resolveDraftChoice } from "@/lib/new-session";
-import { useProject, useSnapshot, useSnapshotData } from "@/lib/queries";
+import { useProject, useProjectChecks, useSnapshot, useSnapshotData } from "@/lib/queries";
 import { newSessionDraftKey, useComposerStore } from "@/stores/composer";
 import { getNewSessionDraft, useNewSessionStore } from "@/stores/new-session";
 
@@ -40,6 +40,7 @@ export function NewSessionPage({ projectId }: { projectId: string }) {
     [draft.choice, providers, project, agent, defaultAutonomy],
   );
   const start = useStartDraft(projectId, resolved, draft.workKey);
+  const checks = useProjectChecks(projectId);
 
   // Open ready to type, like a session.
   useEffect(() => useComposerStore.getState().focus(), []);
@@ -87,6 +88,7 @@ export function NewSessionPage({ projectId }: { projectId: string }) {
             providers={providers}
             choice={draft.choice}
             resolved={resolved}
+            checks={checks}
             onChange={(choice) => setChoice(projectId, choice)}
           />
         }

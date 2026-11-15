@@ -194,7 +194,7 @@ Details and how to report a vulnerability: [docs/security.md](docs/security.md) 
 | Settings | **Settings** in the UI, stored in `<home>/settings.json` (non-secret) |
 | Usage prices and budgets | **Usage** in the UI, stored in `<home>/usage-settings.json` |
 | API keys | Settings, stored in the OS keychain |
-| Per-project setup | `.codeden/project.json` in the repo: worktree setup commands and the dev server |
+| Per-project setup | `.codeden/project.json` in the repo: worktree setup commands, the dev server and the project's checks |
 | Automations | `~/.codeden/automations/*.md` (all projects) and `<repo>/.codeden/automations/*.md` |
 | Project vision | `<repo>/.codeden/VISION.md` (software and dark factory) |
 
@@ -225,9 +225,12 @@ A minimal `.codeden/project.json`:
 ```json
 {
   "setup": ["pnpm install"],
-  "devServer": { "command": "pnpm dev", "port": 5173 }
+  "devServer": { "command": "pnpm dev", "port": 5173 },
+  "checks": ["pnpm typecheck", { "command": "pnpm test", "timeoutSec": 900 }]
 }
 ```
+
+With `checks`, sessions can **keep going until checks pass**: after each turn CodeDen runs them in the session's worktree and sends failures back to the agent, up to a round cap.
 
 ## CLI reference
 

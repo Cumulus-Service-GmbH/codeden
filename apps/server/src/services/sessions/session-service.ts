@@ -37,6 +37,7 @@ import {
   toServiceError,
 } from "../runner-port";
 import type { UtilityService } from "../utility";
+import { freezeChecks } from "./checks";
 import { derivePurpose, deriveWorkKey, findConflicts } from "./conflicts";
 import { planFork } from "./fork";
 import { planHandoff } from "./handoff";
@@ -69,6 +70,12 @@ export interface SessionServiceDeps extends RunnerDeps {
   sandboxes?: Pick<SandboxService, "assertStartable" | "wants">;
 }
 
+/** What the session service needs from the checks loop (`ChecksLoop`). */
+export interface CheckRuns {
+  /** End the session's check run; true when one was running. */
+  cancel(sessionId: string, outcome: "stopped" | "superseded"): Promise<boolean>;
+}
+
 /** Preferred providers when the choice is `auto` (first ready one wins). */
 const AUTO_ORDER = ["claude", "codex", "opencode", "cursor", "gemini"];
 
@@ -89,6 +96,7 @@ export class SessionService {
   readonly launching = new Map<string, Promise<void>>();
   /** Rewrites a turn's input at send time (the orchestration status digest, §8.4). */
   private inputDecorator: InputDecorator | undefined;
+  private checkRuns: CheckRuns | undefined;
   private readonly holds: OutboxHolds;
   /**
    * Sessions with a turn on its way to the runner (between the status check and the runner's
@@ -108,11 +116,25 @@ export class SessionService {
     this.inputDecorator = fn;
   }
 
+  /** The checks loop (§9 Project checks): Stop and new messages end a check run. */
+  setCheckRuns(runs: CheckRuns): void {
+    this.checkRuns = runs;
+  }
+
   /**
    * Model and effort (applied on the next turn), autonomy and plan mode (pushed to the runner)
    * or title.
    */
   update(id: string, req: UpdateSessionRequest): Promise<Session> {
+    if (req.untilChecksPass !== undefined || req.checkRounds !== undefined) {
+      const session = this.deps.repo.get(id);
+      if (session.role !== "agent" || !session.checks?.commands.length) {
+        throw badRequest(
+          "This session has no project checks: add `checks` to .codeden/project.json and start a new session",
+          "no_checks",
+        );
+      }
+    }
     if (req.autonomy === "read_only" || req.planMode !== undefined) {
       const session = this.deps.repo.get(id);
       if (req.autonomy === "read_only") {
@@ -334,6 +356,8 @@ export class SessionService {
   async interrupt(id: string): Promise<void> {
     this.deps.repo.get(id);
     this.deps.outbox.clear(id);
+    // Between turns, Stop ends the session's check run: no turn is running to interrupt.
+    if (await this.checkRuns?.cancel(id, "stopped")) return;
     await this.runnerOf(id)
       .request({ name: "session.interrupt", sessionId: id })
       .catch((e) => {
@@ -461,6 +485,8 @@ export class SessionService {
   private async sendNow(session: Session, raw: UserInput, from: QueueSender): Promise<void> {
     this.delivering.add(session.id);
     try {
+      // A new message takes over from a check run; the loop's own message comes after its run.
+      await this.checkRuns?.cancel(session.id, "superseded");
       const decorated = this.inputDecorator?.(session, raw, from) ?? { input: raw };
       try {
         await this.deliver(session, this.forRunner(session, decorated.input));
@@ -641,6 +667,11 @@ export class SessionService {
       effort: req.effort ?? defaults.effort,
       autonomy,
       planMode: req.planMode ?? false,
+      // Frozen now, from the project's own folder (§9 Project checks).
+      checks: freezeChecks(project?.path, req.role, {
+        untilPass: req.untilChecksPass,
+        maxRounds: req.checkRounds,
+      }),
       status: work.queued ? "queued" : "starting",
       cwd: project?.path ?? ".",
       worktreePath: null,

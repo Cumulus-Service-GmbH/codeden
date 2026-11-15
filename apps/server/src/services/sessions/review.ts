@@ -9,6 +9,7 @@ import type {
 import { badRequest, conflict, type ServiceError } from "../errors";
 import type { ProjectService } from "../projects/project-service";
 import { type RunnerPort, toServiceError } from "../runner-port";
+import { freezeChecks } from "./checks";
 import type { ForkStart } from "./fork";
 import { inheritedStarter } from "./origin";
 import { readOnlyUnsupported } from "./permissions";
@@ -178,6 +179,8 @@ export function reviewPlan(
     // A reviewer reads and runs checks; it never edits, commits or pushes (§11.2).
     autonomy: "read_only",
     planMode: false,
+    // A reviewer runs checks itself; it has nothing to fix, so the loop stays off.
+    checks: freezeChecks(project.path, "agent", { untilPass: false }),
     status: "starting",
     cwd: project.path,
     worktreePath: null,

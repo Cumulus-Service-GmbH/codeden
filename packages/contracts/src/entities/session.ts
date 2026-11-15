@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { SessionChecks } from "../checks";
 import {
   AutonomyLevel,
   ErrorInfo,
@@ -106,6 +107,12 @@ export const Session = z.object({
    * Absent means false.
    */
   planMode: z.boolean().optional(),
+  /**
+   * The project's checks, frozen when the session was created, and whether it keeps going
+   * until they pass (§9 Project checks). Absent or null: the project had no checks then (or the
+   * session predates them), so there is nothing to run.
+   */
+  checks: SessionChecks.nullable().optional(),
   status: SessionStatus,
   /** Directory the agent runs in. */
   cwd: z.string(),

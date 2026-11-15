@@ -137,8 +137,14 @@ function SpecCard({ item }: { item: InboxItem }) {
             <Markdown>{item.body}</Markdown>
           </div>
         )}
+        {/* The factory raises it with the spec's version as its `updatedAt`. */}
         {open && item.projectId && (
-          <SpecDecision projectId={item.projectId} itemId={itemId} compact />
+          <SpecDecision
+            projectId={item.projectId}
+            itemId={itemId}
+            version={item.updatedAt}
+            compact
+          />
         )}
         {item.projectId && (
           <Button size="sm" variant="ghost" asChild>

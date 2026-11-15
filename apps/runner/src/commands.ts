@@ -22,6 +22,7 @@ import { listPorts } from "./ports";
 import type { ProcessSupervisor } from "./process/supervisor";
 import type { TerminalHost } from "./pty/terminal-host";
 import type { SessionHost } from "./session-host";
+import type { CheckRunner } from "./workspace/checks";
 import type { WorkspaceFsHost } from "./workspace/fs";
 import { removeWithLeftovers, stopWithLeftovers } from "./workspace/leftover-processes";
 import { prepareWorkspace } from "./workspace/worktree";
@@ -41,6 +42,8 @@ export interface RunnerCore {
   browser: BrowserCommandHandlers;
   /** `fs.*` and `transfer.*`: workspace files for a server that doesn't share this disk. */
   files: WorkspaceFsHost;
+  /** `check.*`: a session's project checks (§9 Project checks). */
+  checks: CheckRunner;
   startedAt: string;
   emit: (event: RunnerEvent) => void;
   /** The runner's log (background work such as emptying the worktree trash). */
@@ -188,6 +191,7 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
       await host.configure(command);
       return {};
     case "session.stop": {
+      core.checks.cancel(command.sessionId);
       const ctx = { home: core.home, supervisor: core.supervisor, cwds: () => host.cwds() };
       await stopWithLeftovers({ ...ctx, log: core.log }, command.sessionId, async () => {
         await host.stop(command.sessionId);
@@ -210,6 +214,11 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
     case "pty.close":
       await terminals.close(command.ptyId);
       return {};
+
+    case "check.run":
+      return core.checks.run(command);
+    case "check.cancel":
+      return { cancelled: core.checks.cancel(command.sessionId) };
 
     case "git.checkpoint": {
       const cp = await createCheckpoint(command.cwd, command.sessionId, command.index);

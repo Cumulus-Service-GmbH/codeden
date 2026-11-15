@@ -111,11 +111,17 @@ describe("factory pipelines (§10.1)", () => {
     expect(
       FactorySpecDecisionRequest.parse({ decision: "request_changes", feedback: "  Add JSON  " }),
     ).toEqual({ decision: "request_changes", feedback: "Add JSON" });
+    // The version shown travels with the decision.
+    const versioned = { decision: "request_changes" as const, feedback: "Add JSON", version: ts };
+    expect(FactorySpecDecisionRequest.parse(JSON.parse(JSON.stringify(versioned)))).toEqual(
+      versioned,
+    );
     // Asking for changes needs to say which.
     for (const bad of [
       { decision: "request_changes" },
       { decision: "request_changes", feedback: "   " },
       { decision: "reject" },
+      { decision: "approve", version: "yesterday" },
     ]) {
       expect(FactorySpecDecisionRequest.safeParse(bad).success).toBe(false);
     }

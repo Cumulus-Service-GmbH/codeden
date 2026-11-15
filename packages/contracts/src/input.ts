@@ -66,6 +66,12 @@ export const UserInput = z.object({
    * trusted. Absent on every other message.
    */
   relayedForUser: z.boolean().optional(),
+  /**
+   * Set by CodeDen on the message that sends failing checks back to the agent (§9 Project
+   * checks): the automatic round it starts, counted from 1. The next run counts on from it, and
+   * any other message starts the count again. Absent on every other message.
+   */
+  checksRound: z.int().positive().optional(),
 });
 export type UserInput = z.infer<typeof UserInput>;
 /** Input shape accepted before defaults are applied (`attachments` optional). */

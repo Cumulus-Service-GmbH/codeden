@@ -11,6 +11,7 @@ import type {
   JsonValue,
   ProjectRemoteWarning,
   QueueSender,
+  SessionChecks,
   SessionResult,
   StartedBy,
   Usage,
@@ -104,6 +105,8 @@ export const sessions = sqliteTable(
     effort: text("effort"),
     autonomy: text("autonomy").notNull(),
     planMode: integer("plan_mode", { mode: "boolean" }).notNull().default(false),
+    /** The project's checks frozen at creation and the checks loop setting (`Session.checks`). */
+    checks: json<SessionChecks>("checks"),
     status: text("status").notNull(),
     cwd: text("cwd").notNull(),
     worktreePath: text("worktree_path"),

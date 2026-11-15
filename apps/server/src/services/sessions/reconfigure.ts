@@ -1,5 +1,6 @@
 import type { AutonomyLevel, Session, UpdateSessionRequest } from "@codeden/contracts";
 import { type RunnerPort, runnerErrorCode } from "../runner-port";
+import { withLoopSetting } from "./checks";
 import type { SessionRepo, StoredStartMeta } from "./repo";
 
 /**
@@ -38,7 +39,8 @@ function setPending(repo: SessionRepo, id: string, change: Partial<PendingConfig
 }
 
 /**
- * `PATCH /api/sessions/:id`: update model, effort, autonomy, plan mode or title. Every change
+ * `PATCH /api/sessions/:id`: update model, effort, autonomy, plan mode, the checks loop or
+ * title. Every change
  * is saved on the session (`session.updated`), so it survives a restart and later starts and
  * resumes use it.
  * - Model and effort are remembered as pending and applied right before the next turn
@@ -62,6 +64,10 @@ export async function updateSession(
     ...(change.effort !== undefined ? { effort: change.effort } : {}),
     ...(req.autonomy !== undefined ? { autonomy: req.autonomy } : {}),
     ...(req.planMode !== undefined ? { planMode: req.planMode } : {}),
+    // The loop setting only: the frozen commands never change (§9 Project checks).
+    ...((req.untilChecksPass !== undefined || req.checkRounds !== undefined) && s.checks
+      ? { checks: withLoopSetting(s.checks, req) }
+      : {}),
     ...(req.title !== undefined ? { title: req.title } : {}),
   }));
   if (Object.keys(change).length > 0) setPending(repo, id, change);

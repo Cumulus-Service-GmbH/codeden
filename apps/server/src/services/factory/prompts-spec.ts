@@ -40,6 +40,10 @@ export function specRevisionStep(item: FactoryItem): string {
   ].join("\n");
 }
 
+/** A builder's step while its spec waits for a person: nothing, until they decide. */
+export const SPEC_PENDING_STEP =
+  "Your spec is recorded and waits for a person's approval before it is built: end your turn now, and don't change any files or open a pull request. CodeDen sends you the next step once they decide: Implement, or the changes they asked for.";
+
 /**
  * What a builder resumed after a failure outside its work (`continuePrompt`, `builderResume`)
  * still owes while its spec waits for a person or is being revised at their request: the revised
@@ -48,9 +52,7 @@ export function specRevisionStep(item: FactoryItem): string {
  */
 export function specResumeStep(item: FactoryItem): string | null {
   const state = item.specApproval?.state;
-  if (state === "pending") {
-    return "Your spec is recorded and waits for a person's approval before it is built: end your turn now, and don't change any files or open a pull request. CodeDen sends you the next step once they decide: Implement, or the changes they asked for.";
-  }
+  if (state === "pending") return SPEC_PENDING_STEP;
   if (state !== "changes_requested") return null;
   return [
     "You were revising your spec: a person reviewed it and asked for changes before it is built.",

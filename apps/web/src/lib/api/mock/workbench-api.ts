@@ -68,6 +68,7 @@ type WorkbenchApi = Pick<
   | "listSlashCommands"
   | "searchProjectMentions"
   | "listProjectSlashCommands"
+  | "listProjectChecks"
   | "openTerminal"
   | "artifactUrl"
   | "remoteImageUrl"
@@ -267,6 +268,8 @@ export function workbenchApi(world: MockWorld): WorkbenchApi {
     listSlashCommands: () => delay(slashCommands, 20),
     searchProjectMentions: (_projectId, query) => delay(mentionHits(query), 40),
     listProjectSlashCommands: () => delay(slashCommands, 20),
+    listProjectChecks: () =>
+      delay([{ command: "pnpm typecheck" }, { command: "pnpm test", timeoutSec: 900 }], 20),
     openTerminal: (opts) => mockTerminal(opts),
     artifactUrl: (id) => artifacts[id]?.() ?? generatedIllustration(id.length),
     // No server to fetch through in mock mode (dev only): the image loads directly.

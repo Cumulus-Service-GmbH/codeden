@@ -1,4 +1,4 @@
-import type { Project, Session, Snapshot } from "@codeden/contracts";
+import type { Project, ProjectCheck, Session, Snapshot } from "@codeden/contracts";
 import { useMutation, useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useMemo, useRef } from "react";
 import { toast } from "sonner";
@@ -131,6 +131,25 @@ export function useSession(sessionId: string | undefined): Session | undefined {
 
 export function useProject(projectId: string | null | undefined): Project | undefined {
   return useSnapshotData((s) => s.projects.find((x) => x.id === projectId), undefined);
+}
+
+const NO_CHECKS: ProjectCheck[] = [];
+
+/**
+ * The project's checks a new session would freeze (§9 Project checks), read from its
+ * `.codeden/project.json`; empty while loading and when it has none. Read again when the
+ * New session view opens, so an edit to the file shows up.
+ */
+export function useProjectChecks(projectId: string): ProjectCheck[] {
+  const client = useClient();
+  const { data } = useQuery({
+    queryKey: ["project-checks", projectId] as const,
+    queryFn: () => client.listProjectChecks(projectId),
+    staleTime: 30_000,
+    // A server restart mid-request must not hide the option until the view opens again.
+    retry: 3,
+  });
+  return data ?? NO_CHECKS;
 }
 
 /** Root turns a transcript opens with, and each page of earlier ones adds. */

@@ -5,10 +5,11 @@ import {
   McpServerTestResult,
   McpStdioEnv,
 } from "../agent-config-mcp-test";
+import { CHECK_OUTPUT_LIMIT } from "../checks";
 import { AutonomyLevel, Id, ProviderId, ReasoningEffort } from "../common";
 import { UnpushedWork } from "../execution";
 import { UserInput } from "../input";
-import { ProjectConfigFile } from "../project-config";
+import { CHECK_MAX_TIMEOUT_SEC, ProjectConfigFile } from "../project-config";
 import { ProviderInfo, ProviderStatus, RuntimeResponse, SessionOptions } from "../provider";
 import { ProviderHistoryCommandResults, ProviderHistoryCommands } from "../provider-history";
 import { BrowserCommandResults, BrowserCommands } from "./browser";
@@ -238,6 +239,30 @@ export const RunnerCommand = z.discriminatedUnion("name", [
   /** `browser.*` (§12.2), defined in `./browser`; `<select>` menus and file inputs in `./browser-forms`. */
   ...BrowserCommands,
   ...BrowserFormCommands,
+  /**
+   * Run one of a session's project checks (§9 Project checks) in its working directory and
+   * report how it ended, with the end of its combined output. One check runs per session at a
+   * time; `check.cancel` and `session.stop` kill it. Fails with `cwd_missing` when the folder is
+   * gone and `check_running` when the session already runs one.
+   */
+  z.object({
+    name: z.literal("check.run"),
+    sessionId: Id,
+    cwd: z.string().min(1),
+    command: z.string().min(1),
+    /** Kill the command's process tree after this long. */
+    timeoutMs: z
+      .int()
+      .positive()
+      .max(CHECK_MAX_TIMEOUT_SEC * 1000),
+    /**
+     * Add `CI=true` to its environment as agent sessions get it (§4.2): a `CI` the runner's own
+     * environment sets is kept. Default true; false (`Project.agentCiEnv` off) adds nothing.
+     */
+    ciEnv: z.boolean().optional(),
+  }),
+  /** Kill the session's running check, if any (`cancelled` says whether one ran). */
+  z.object({ name: z.literal("check.cancel"), sessionId: Id }),
   /** Snapshot the worktree into `refs/codeden/checkpoints/<session>/<n>` (§9). */
   z.object({
     name: z.literal("git.checkpoint"),
@@ -391,6 +416,18 @@ export const RunnerCommandResults = {
       )
       .optional(),
   }),
+  "check.run": z.object({
+    /** Null when it was killed (timed out, cancelled) or couldn't start. */
+    exitCode: z.int().nullable(),
+    timedOut: z.boolean(),
+    cancelled: z.boolean(),
+    durationMs: z.int().nonnegative(),
+    /** The end of its combined output, at most `CHECK_OUTPUT_LIMIT` characters. */
+    output: z.string().max(CHECK_OUTPUT_LIMIT),
+    /** The output was longer than `output`. */
+    truncated: z.boolean(),
+  }),
+  "check.cancel": z.object({ cancelled: z.boolean() }),
   "workspace.remove": z.object({
     removed: z.boolean(),
     /** A forced removal deleted uncommitted changes (absent from older runners). */

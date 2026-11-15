@@ -12,6 +12,7 @@ import { failItem } from "./outcomes";
 import { revertedPrompt } from "./prompts-revert";
 import { isReReviewRecord } from "./rereview";
 import { regressionInboxId, regressionPausePrefix } from "./revert-blocked";
+import { unverifiedRevert } from "./revert-watch";
 import { isBusy } from "./sessions";
 import { claimSlot } from "./slots";
 import { REVERTED_AT } from "./stats";
@@ -181,6 +182,39 @@ export function revertLanded(
   if (!paused) return loop;
   ctx.log?.(`factory: resuming ${project.id}: revert ${revertPr} merged and ${branch} is green`);
   return { ...loop, state: "idle", pausedReason: null };
+}
+
+/**
+ * The user resumed the loop: they judged the default branch themselves. A merged revert whose CI
+ * on it never reported is no longer watched, and work whose revert merged (green, red or never
+ * verified) goes back to its builder as a revise round, as when CI turned green: once per item
+ * (`reviseAfterReverts`). Its regression's inbox item is resolved.
+ */
+export function revertsOnResume(ctx: FactoryContext, projectId: string): void {
+  const at = ctx.now().toISOString();
+  const reverts = ctx.store
+    .items(projectId, ["watching", "merged"])
+    .filter((i) => i.source === "revert" && (i.stage === "merged" || unverifiedRevert(i)));
+  for (const revert of reverts) {
+    if (revert.stage === "watching") {
+      ctx.store.updateItem(revert.id, (i) => ({
+        ...i,
+        stage: "merged",
+        note: "The loop was resumed before CI on the default branch reported on this revert",
+        finishedAt: at,
+      }));
+    }
+    const original = revertedItem(ctx, revert);
+    if (original?.stage !== "reverted") continue;
+    if (original.nudges[AFTER_REVERT] || original.nudges[AFTER_REVERT_DUE]) continue;
+    ctx.store.updateItem(original.id, (i) => ({
+      ...i,
+      note: "The loop was resumed after its revert merged, so it goes back to its builder",
+      nudges: { ...i.nudges, [AFTER_REVERT_DUE]: at },
+    }));
+    const inbox = ctx.inbox.find(regressionInboxId(original.id));
+    if (inbox?.status === "open") ctx.inbox.close(inbox, "resolved", { note: "loop resumed" });
+  }
 }
 
 /**

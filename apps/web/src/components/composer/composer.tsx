@@ -34,6 +34,7 @@ export function Composer({
   placeholder,
   options,
   running = false,
+  stoppable = false,
   canSteer = false,
   sending,
   onSend,
@@ -47,6 +48,11 @@ export function Composer({
   options: ReactNode;
   /** A turn is running: sending queues or steers, and an empty composer offers Stop. */
   running?: boolean;
+  /**
+   * Something Stop ends runs between turns (the session's checks): an empty composer offers
+   * Stop, and sending still starts a turn.
+   */
+  stoppable?: boolean;
   /** The provider can steer a running turn. */
   canSteer?: boolean;
   /** A send is in flight: the send button waits (Enter still calls `onSend`). */
@@ -104,7 +110,7 @@ export function Composer({
         return;
       }
     }
-    if (matchesCombo(e.nativeEvent, shortcut("stop").combo) && running && onStop) {
+    if (matchesCombo(e.nativeEvent, shortcut("stop").combo) && (running || stoppable) && onStop) {
       e.preventDefault();
       onStop();
       return;
@@ -177,7 +183,7 @@ export function Composer({
         )
       }
     >
-      {running && !canSend && onStop ? (
+      {(running || stoppable) && !canSend && onStop ? (
         <Button
           size="icon-sm"
           variant="secondary"
@@ -203,7 +209,16 @@ export function Composer({
 }
 
 /** The composer of a session: sends, queues or steers, stops a turn, and edits its options. */
-export function SessionComposer({ session, running }: { session: Session; running: boolean }) {
+export function SessionComposer({
+  session,
+  running,
+  checking = false,
+}: {
+  session: Session;
+  running: boolean;
+  /** The session's checks are running after its turn (§9 Project checks): Stop ends them. */
+  checking?: boolean;
+}) {
   const client = useClient();
   const providers = useSnapshotData((s) => s.runner.providers, []);
   const { setText, clear } = useComposerStore.getState();
@@ -236,6 +251,7 @@ export function SessionComposer({ session, running }: { session: Session; runnin
       }
       options={<SessionOptions session={session} running={running} />}
       running={running}
+      stoppable={checking}
       canSteer={provider?.capabilities.steer ?? false}
       sending={send.isPending}
       onSend={(input, sendMode) => send.mutate({ sendMode, input })}
