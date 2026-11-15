@@ -98,12 +98,6 @@ export function setColour(c: Color, [r, g, b]: Rgb): Color {
   return c.setRGB(r, g, b, SRGBColorSpace);
 }
 
-/** A colour lighter or darker by `by` (0..1, in sRGB terms), for the per-agent variation. */
-export function shade([r, g, b]: Rgb, by: number): Rgb {
-  const f = (x: number) => Math.min(1, Math.max(0, x + by));
-  return [f(r), f(g), f(b)];
-}
-
 /** A translation, with an optional turn around y and a scale. */
 export function at(
   x: number,

@@ -122,11 +122,6 @@ export class CameraRig {
     });
   }
 
-  /** The current zoom against the fit (1 is fitted). */
-  get relativeZoom(): number {
-    return this.goal.zoom / this.fitZoom;
-  }
-
   /** Keeps the view's centre over the hall. */
   private clamp(v: View): View {
     const { minX, maxX, minY, maxY } = this.bounds;
