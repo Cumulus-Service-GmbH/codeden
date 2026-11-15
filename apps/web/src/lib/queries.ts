@@ -19,7 +19,11 @@ export function useSnapshot() {
   });
 }
 
-/** Select from the snapshot with a stable fallback. */
+/**
+ * Select from the snapshot with a stable fallback. The fallback stands in until the snapshot
+ * loads, so a view that would say "nothing here" or "none" from an empty fallback reads
+ * `useSnapshot().data` instead and shows a loading state while it is undefined (#400).
+ */
 export function useSnapshotData<T>(select: (s: Snapshot) => T, fallback: T): T {
   const { data } = useSnapshot();
   return data ? select(data) : fallback;

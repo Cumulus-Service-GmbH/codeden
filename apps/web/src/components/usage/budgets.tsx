@@ -11,7 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useSnapshotData } from "@/lib/queries";
+import { useSnapshot } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { useBudgets, useSaveUsageSettings, useUsageSettings } from "./api";
 import { money } from "./format";
@@ -79,7 +79,8 @@ export function BudgetsPanel() {
   const budgets = useBudgets();
   const settings = useUsageSettings();
   const save = useSaveUsageSettings();
-  const projects = useSnapshotData((s) => s.projects, []);
+  // Undefined until the snapshot loads: a budget's project isn't "deleted" before then (#400).
+  const projects = useSnapshot().data?.projects;
   const [adding, setAdding] = useState(false);
   const [projectId, setProjectId] = useState("all");
   const [period, setPeriod] = useState<UsageBudget["period"]>("daily");
@@ -88,7 +89,11 @@ export function BudgetsPanel() {
 
   const current: UsageSettings | undefined = settings.data?.settings;
   const projectName = (id: string | null) =>
-    id ? (projects.find((p) => p.id === id)?.name ?? "Deleted project") : "All projects";
+    !id
+      ? "All projects"
+      : !projects
+        ? "…"
+        : (projects.find((p) => p.id === id)?.name ?? "Deleted project");
 
   const persist = (next: UsageSettings, message: string) =>
     save.mutate(next, {
@@ -136,7 +141,7 @@ export function BudgetsPanel() {
         Crossing the alert level or the limit puts an item in your inbox and sends a notification.
         Factory limits enforce the same figures.
       </p>
-      {list.length === 0 && !adding && (
+      {budgets.data && list.length === 0 && !adding && (
         <p className="py-4 text-xs text-muted-foreground">No budgets yet.</p>
       )}
       <div className="divide-y divide-border">
@@ -163,7 +168,7 @@ export function BudgetsPanel() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All projects</SelectItem>
-              {projects.map((p) => (
+              {projects?.map((p) => (
                 <SelectItem key={p.id} value={p.id}>
                   {p.name}
                 </SelectItem>
