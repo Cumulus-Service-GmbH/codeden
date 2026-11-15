@@ -2,13 +2,19 @@ import type { Session } from "@codeden/contracts";
 import { ApiRequestError } from "@/lib/api";
 
 /**
- * Whether a session gets the right panel and its toggle (§13): every agent session, whether it
- * runs in its own worktree or in place in the project folder. Subagents, the browser, files,
- * the terminal and details don't need git; the Diff tab says so itself when the folder isn't a
- * git repository (`isNotGitRepo`).
+ * Whether a session gets the right panel and its toggle (§13): every agent session once its
+ * workspace is ready, whether that is its own worktree or the project folder it runs in place
+ * in. Subagents, the browser, files, the terminal and details don't need git; the Diff tab says
+ * so itself when the folder isn't a git repository (`isNotGitRepo`).
+ *
+ * Without a worktree, the session must have been opened (`rootThreadId`, set when the provider
+ * starts its root thread, after the workspace is recorded): a new worktree session is queued or
+ * starting with `worktreePath` null and `cwd` still the user's own checkout until `workspace.prepare`
+ * returns, and its panel must not show that checkout's branch, changes or Commit and Push.
  */
 export function hasRightPanel(session: Session | undefined): boolean {
-  return session?.role === "agent";
+  if (session?.role !== "agent") return false;
+  return session.worktreePath !== null || session.rootThreadId !== null;
 }
 
 /**

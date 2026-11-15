@@ -1,3 +1,4 @@
+import type { Session } from "@codeden/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import {
   createMemoryHistory,
@@ -19,7 +20,8 @@ import { useLayoutStore } from "@/stores/layout";
 
 /**
  * A hand-started session in a project folder that isn't a git repository (#409): it runs in
- * place, so it has no worktree, branch or base branch.
+ * place, so it has no worktree, branch or base branch. The provider has opened it there, so it
+ * has its root thread.
  */
 const IN_PLACE = makeSession({
   id: "s-music",
@@ -34,21 +36,29 @@ const IN_PLACE = makeSession({
   worktreePath: null,
   branch: null,
   baseBranch: null,
+  rootThreadId: "t-music",
 });
 
-/**
- * The mock client with the in-place session added, answering for its folder as the server does
- * for one without git: git requests fail with `not_a_repo`, no checkpoints are ever written, and
- * the files are listed from the folder itself.
- */
-function inPlaceClient(): CodeDenClient {
+/** The mock client with `session` added to its snapshot and some answers replaced. */
+function clientWith(session: Session, answers: Partial<CodeDenClient>): CodeDenClient {
   const base = createMockClient();
   return {
     ...base,
     getSnapshot: async () => {
       const snapshot = await base.getSnapshot();
-      return { ...snapshot, sessions: [...snapshot.sessions, IN_PLACE] };
+      return { ...snapshot, sessions: [...snapshot.sessions, session] };
     },
+    ...answers,
+  };
+}
+
+/**
+ * The client answering for the in-place session's folder as the server does for one without
+ * git: git requests fail with `not_a_repo`, no checkpoints are ever written, and the files are
+ * listed from the folder itself.
+ */
+function inPlaceClient(): CodeDenClient {
+  return clientWith(IN_PLACE, {
     gitStatus: async () => {
       throw new ApiRequestError(409, "not_a_repo", `${IN_PLACE.cwd} is not a git repository`);
     },
@@ -60,7 +70,37 @@ function inPlaceClient(): CodeDenClient {
       entries: [{ path: "lyrics.md", kind: "file", sizeBytes: 12 }],
       truncated: false,
     }),
-  };
+  });
+}
+
+/**
+ * A new worktree session before `workspace.prepare` returned: no worktree yet, its `cwd` still
+ * the project checkout, and not opened by the provider. The server would answer for that
+ * checkout: the user's own branch and work in progress.
+ */
+function preparingClient(status: Session["status"]) {
+  const session = makeSession({
+    id: "s-new",
+    projectId: "p-storefront",
+    role: "agent",
+    status,
+    provider: "claude",
+    purpose: "Add a wishlist",
+    workKey: "wishlist",
+    cwd: "C:\\Code\\storefront",
+    worktreePath: null,
+    branch: null,
+    baseBranch: null,
+    rootThreadId: null,
+  });
+  const gitStatus = vi.fn<CodeDenClient["gitStatus"]>(async () => ({
+    branch: "main",
+    baseBranch: null,
+    ahead: 0,
+    behind: 0,
+    files: [{ path: "my-wip.ts", status: " M" }],
+  }));
+  return { session, gitStatus, client: clientWith(session, { gitStatus }) };
 }
 
 function SessionHeader({ sessionId }: { sessionId: string }) {
@@ -193,6 +233,28 @@ describe("the right panel of a session without a worktree (#409)", () => {
     const sheet = await screen.findByTestId("right-sheet");
     expect(within(sheet).getByRole("tab", { name: "Terminal" })).toBeTruthy();
   });
+
+  it.each(["queued", "starting"] as const)(
+    "shows no panel for a %s worktree session before its worktree exists",
+    async (status) => {
+      // The layout's defaults: the panel open at Diff, as a new session finds it.
+      useLayoutStore.setState({ rightOpen: true, rightTab: "diff" });
+      const { session, gitStatus, client } = preparingClient(status);
+      await renderShell(session.id, client);
+      expect(screen.getByRole("heading", { name: session.purpose })).toBeTruthy();
+      expect(screen.queryByRole("button", { name: "Toggle right panel" })).toBeNull();
+
+      pressCtrlBackslash();
+      pressCtrlBackslash();
+      expect(useLayoutStore.getState().rightOpen).toBe(true);
+      // No panel, so nothing shows (or can commit and push) the user's own checkout.
+      expect(panel()).toBeNull();
+      expect(screen.queryByTestId("diff-panel")).toBeNull();
+      expect(screen.queryByRole("button", { name: /Commit/ })).toBeNull();
+      expect(screen.queryByText("main")).toBeNull();
+      expect(gitStatus).not.toHaveBeenCalled();
+    },
+  );
 
   it("keeps the panel of a worktree session", async () => {
     await renderShell("s-checkout", createMockClient());

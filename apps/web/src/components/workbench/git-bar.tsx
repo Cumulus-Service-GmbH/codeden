@@ -33,7 +33,8 @@ export function useGitStatus(sessionId: string) {
 }
 
 /**
- * Branch, ahead/behind and uncommitted count for the session worktree, with commit, push and
+ * Branch, ahead/behind and uncommitted count for the session's folder (its worktree, or the
+ * project folder it runs in place in), with commit, push and
  * **Open PR** (asks the agent; "PR requested" until the PR is open or the turn that carried the
  * request ends without one) or the session's open PR (§9).
  */
@@ -135,7 +136,7 @@ export function GitBar({ sessionId, title }: { sessionId: string; title: string 
           <DialogHeader>
             <DialogTitle>Commit changes</DialogTitle>
             <DialogDescription>
-              Stages all {changed} changed file{changed === 1 ? "" : "s"} in the session worktree.
+              Stages all {changed} changed file{changed === 1 ? "" : "s"} in the session's folder.
             </DialogDescription>
           </DialogHeader>
           <Textarea
