@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { ExternalLink, Eye, GitMerge, GitPullRequest, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
+import { SPOT_CHECKS_ANCHOR } from "@/components/factory/spot-checks";
 import { ChecksBadge, ReviewDecisionBadge } from "@/components/github/github-bits";
 import { Button } from "@/components/ui/button";
 import { useClient } from "@/lib/api";
@@ -143,7 +144,8 @@ export function InboxActions({ item }: { item: InboxItem }) {
         </>
       );
     case "spot_check":
-      // The factory's merges set aside for a person's look: the factory panel lists them.
+      // The factory's merges set aside for a person's look: the factory panel lists them, and
+      // the page opens scrolled to that list.
       return (
         <>
           {item.projectId && (
@@ -153,6 +155,7 @@ export function InboxActions({ item }: { item: InboxItem }) {
                 void navigate({
                   to: "/projects/$projectId",
                   params: { projectId: item.projectId as string },
+                  hash: SPOT_CHECKS_ANCHOR,
                 })
               }
             >

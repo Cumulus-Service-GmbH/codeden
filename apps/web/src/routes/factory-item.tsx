@@ -183,7 +183,6 @@ export function FactoryItemPage({ projectId, itemId }: { projectId: string; item
                 {item.summary || item.title}
               </p>
             </section>
-            <SpecApprovalCard item={item} projectId={projectId} />
             <InvestigationCard item={item} />
             {item.acceptanceCriteria.length > 0 && (
               <section>
@@ -214,6 +213,8 @@ export function FactoryItemPage({ projectId, itemId }: { projectId: string; item
                 </ul>
               </section>
             )}
+            {/* After the spec and its criteria, so you read what you approve before deciding. */}
+            <SpecApprovalCard item={item} projectId={projectId} />
             {item.stage !== "ignored" && (
               <section>
                 <SectionLabel className="mb-2">

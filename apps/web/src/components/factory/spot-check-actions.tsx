@@ -72,8 +72,22 @@ function useSpotCheck(projectId: string, itemId: string) {
   return { decide, fileIssue };
 }
 
-/** The merged PR in the PR view (every changed file with its diff), in a dialog. */
-export function OpenPrButton({ projectId, pr }: { projectId: string; pr: GitHubPrRef }) {
+/**
+ * The merged PR in the PR view (every changed file with its diff), in a dialog whose footer
+ * records the spot-check, so you decide where you read the change. It closes once recorded.
+ */
+export function OpenPrButton({
+  projectId,
+  pr,
+  itemId,
+  title,
+}: {
+  projectId: string;
+  pr: GitHubPrRef;
+  /** The spot-checked item and its title, for the decision. */
+  itemId: string;
+  title: string;
+}) {
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -81,11 +95,36 @@ export function OpenPrButton({ projectId, pr }: { projectId: string; pr: GitHubP
         <GitPullRequest /> Open PR
       </Button>
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
+        <DialogContent
+          className="flex max-h-[85vh] flex-col sm:max-w-4xl"
+          // Focus the dialog, not its first button: while the PR view loads that is Looks
+          // good, and a stray Enter would record it unread.
+          onOpenAutoFocus={(e) => {
+            e.preventDefault();
+            (e.currentTarget as HTMLElement).focus();
+          }}
+        >
           <DialogHeader>
             <DialogTitle>Pull request #{pr.number}</DialogTitle>
+            <DialogDescription className="truncate">{title}</DialogDescription>
           </DialogHeader>
-          {open && <PrDetailsView prId={githubPrId(projectId, pr.number)} />}
+          <div className="-mx-4 min-h-0 flex-1 overflow-y-auto px-4 scroll-thin">
+            {open && <PrDetailsView prId={githubPrId(projectId, pr.number)} />}
+          </div>
+          <DialogFooter className="items-center sm:justify-between">
+            <p className="text-2xs text-muted-foreground">
+              Read the change, then record what you found.
+            </p>
+            <div className="flex flex-wrap gap-1.5">
+              <SpotCheckDecision
+                projectId={projectId}
+                itemId={itemId}
+                title={title}
+                size="sm"
+                onDecided={() => setOpen(false)}
+              />
+            </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>
@@ -97,11 +136,16 @@ export function SpotCheckDecision({
   projectId,
   itemId,
   title,
+  size = "xs",
+  onDecided,
 }: {
   projectId: string;
   itemId: string;
   /** The item's title, for the dialog. */
   title: string;
+  size?: "xs" | "sm";
+  /** Called once the decision is recorded (the PR dialog closes). */
+  onDecided?: () => void;
 }) {
   const { decide } = useSpotCheck(projectId, itemId);
   const [asking, setAsking] = useState(false);
@@ -112,15 +156,15 @@ export function SpotCheckDecision({
   return (
     <>
       <Button
-        size="xs"
+        size={size}
         variant="outline"
-        onClick={() => decide.mutate({ verdict: "looks_good" })}
+        onClick={() => decide.mutate({ verdict: "looks_good" }, { onSuccess: onDecided })}
         disabled={decide.isPending}
       >
         <Check /> Looks good
       </Button>
       <Button
-        size="xs"
+        size={size}
         variant="outline"
         onClick={() => setAsking(true)}
         disabled={decide.isPending}
@@ -171,6 +215,7 @@ export function SpotCheckDecision({
                     onSuccess: () => {
                       setAsking(false);
                       setNote("");
+                      onDecided?.();
                     },
                   },
                 )
