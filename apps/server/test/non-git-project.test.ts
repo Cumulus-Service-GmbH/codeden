@@ -99,6 +99,7 @@ describe("a new session in a project that isn't a git repository", () => {
       ["restore", "POST", `/sessions/${id}/restore`, { index: 0 }],
       ["git status", "GET", `/sessions/${id}/git/status`],
       ["commit", "POST", `/sessions/${id}/git/commit`, { message: "Add a verse" }],
+      ["push", "POST", `/sessions/${id}/git/push`, {}],
     ];
     const answers = [];
     for (const [what, method, path, body] of asks) {
@@ -112,7 +113,7 @@ describe("a new session in a project that isn't a git repository", () => {
         body: {
           error: expect.objectContaining({
             code: "not_a_repo",
-            message: expect.stringContaining("isn't a git repository"),
+            message: expect.stringContaining("is not a git repository"),
           }),
         },
       })),
