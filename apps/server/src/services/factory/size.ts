@@ -95,7 +95,8 @@ export function changeSize(pr: FactoryPr): ChangeSize {
   let lines = 0;
   let files = 0;
   for (const f of pr.fileLines) {
-    if (isUncountedFile(f.path)) continue;
+    // A file moved out of counted code still counts, wherever it went (`vendor/`, `dist/`).
+    if (isUncountedFile(f.path) && (!f.previousPath || isUncountedFile(f.previousPath))) continue;
     lines += f.lines;
     files += 1;
   }

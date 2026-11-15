@@ -125,6 +125,18 @@ export function withVisionFile(areas: ProtectedAreas, visionPath: string): Prote
   return { ...areas, globs: [...areas.globs, file] };
 }
 
+/**
+ * Every path a change touches: each changed file's path (a removed file's included) and the old
+ * path of each renamed or copied file (GitHub's `previous_filename`). Moving a file removes it
+ * from its old path, so the path heuristics read both: moving code into `docs/` changes code.
+ */
+export function changedPaths(pr: {
+  files: readonly string[];
+  renamedFrom?: readonly string[];
+}): string[] {
+  return [...new Set([...pr.files, ...(pr.renamedFrom ?? [])])];
+}
+
 export interface ProtectedHits {
   /** `why` is set for CodeDen's own files (`ALWAYS_PROTECTED_GLOB`). */
   paths: Array<{ path: string; globs: string[]; why?: string }>;

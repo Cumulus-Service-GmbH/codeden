@@ -14,7 +14,7 @@ import { handleFailure } from "./failures";
 import type { FactoryPr, PrEvidence } from "./github-port";
 import { prDecidedOutside, readyForYou } from "./merge";
 import { escalate, failItem, runAudit } from "./outcomes";
-import { isUiFile, withVisionFile } from "./policy";
+import { changedPaths, isUiFile, withVisionFile } from "./policy";
 import { joinQueue, leaveQueue } from "./queue";
 import {
   advanceConflicting,
@@ -194,8 +194,11 @@ async function gatherEvidence(
 ): Promise<{ screenshots: boolean | null; testOutput: boolean | null }> {
   // A revert needs neither: its own CI is its evidence (`checks.ts`).
   const revert = item.source === "revert";
-  const wantScreens = !revert && pr.files.some(isUiFile);
-  const wantTests = !revert && codeFiles(pr.files).length > 0 && !hasTestResults(pr.body);
+  // The same paths the checks read (a rename's old path too), or a check would wait for evidence
+  // nobody looks up.
+  const paths = changedPaths(pr);
+  const wantScreens = !revert && paths.some(isUiFile);
+  const wantTests = !revert && codeFiles(paths).length > 0 && !hasTestResults(pr.body);
   if (!wantScreens && !wantTests) return { screenshots: null, testOutput: null };
   let found = evidenceCache.get(headKey);
   if (!found || (wantScreens && !found.screenshots) || (wantTests && !found.testOutput)) {

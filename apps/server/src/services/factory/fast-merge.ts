@@ -2,6 +2,7 @@ import type { FactoryLoop, Project } from "@codeden/contracts";
 import { type FactoryContext, raiseInbox } from "./context";
 import type { FactoryPr, MainSince } from "./github-port";
 import { matchesGlob } from "./globs";
+import { changedPaths } from "./policy";
 import { isLockfile } from "./size";
 
 /**
@@ -99,7 +100,7 @@ export function fastMergeVerdict(input: {
     };
   if (state !== "clean" && state !== "has_hooks")
     return { fast: false, reason: `GitHub reports its merge state as ${state}` };
-  const mine = [...new Set([...pr.files, ...(pr.renamedFrom ?? [])])];
+  const mine = changedPaths(pr);
   if (!main.complete || (pr.changedFiles ?? 0) > pr.files.length)
     return { fast: false, reason: "too many changed files to compare" };
   const sensitive = mine.filter(isMergeSensitive);

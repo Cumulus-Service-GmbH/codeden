@@ -46,8 +46,11 @@ export interface FactoryPr {
   changedFiles?: number;
   /** The paths renamed files had before the PR (they count as changed for the merge queue). */
   renamedFrom?: string[];
-  /** Added + deleted lines per file, when GitHub reports them. */
-  fileLines?: Array<{ path: string; lines: number }>;
+  /**
+   * Added + deleted lines per file, when GitHub reports them; `previousPath` is a renamed or
+   * copied file's old path.
+   */
+  fileLines?: Array<{ path: string; previousPath?: string; lines: number }>;
   /**
    * Fingerprint of what the PR at `headSha` itself changes (`prDiffKey`, read pinned to that
    * commit): the same on a head that only brought the default branch in, so the approval
@@ -290,7 +293,11 @@ export class GithubFactoryPort implements FactoryGithub {
       files: pr.files.map((f) => f.path),
       changedFiles: pr.changedFiles,
       renamedFrom: pr.files.flatMap((f) => (f.previousPath ? [f.previousPath] : [])),
-      fileLines: pr.files.map((f) => ({ path: f.path, lines: f.additions + f.deletions })),
+      fileLines: pr.files.map((f) => ({
+        path: f.path,
+        ...(f.previousPath ? { previousPath: f.previousPath } : {}),
+        lines: f.additions + f.deletions,
+      })),
     };
   }
 

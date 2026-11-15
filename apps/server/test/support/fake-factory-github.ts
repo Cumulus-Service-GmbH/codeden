@@ -221,6 +221,8 @@ export class FakeFactoryGithub implements FactoryGithub {
     sessionId: string | null;
     title: string;
     files: string[];
+    /** Old paths of renamed or copied files (GitHub's `previous_filename`); `files` has the new ones. */
+    renamedFrom?: string[];
     additions?: number;
     deletions?: number;
     /** Lines per file; the size check counts these (minus lockfiles) when given. */
@@ -254,6 +256,7 @@ export class FakeFactoryGithub implements FactoryGithub {
       additions: opts.additions ?? 20,
       deletions: opts.deletions ?? 2,
       files: opts.files,
+      ...(opts.renamedFrom ? { renamedFrom: opts.renamedFrom } : {}),
       ...(opts.fileLines ? { fileLines: opts.fileLines } : {}),
       sessionId: opts.sessionId,
       evidence: opts.evidence ?? false,

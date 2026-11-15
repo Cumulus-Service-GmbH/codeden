@@ -9,7 +9,7 @@ import type {
   WorkType,
 } from "@codeden/contracts";
 import type { FactoryPr } from "./github-port";
-import { isNonCodeFile, isTestFile, isUiFile, protectedHits } from "./policy";
+import { changedPaths, isNonCodeFile, isTestFile, isUiFile, protectedHits } from "./policy";
 import { type RecheckCause, recheckWhy } from "./recheck";
 import { changeSize, overSizeLimit, sizeLimitText } from "./size";
 
@@ -182,7 +182,9 @@ export function evaluateChecks(i: CheckInputs): { checks: MergeCheck[]; outcome:
         break;
     }
 
-  const code = codeFiles(files);
+  // Code and UI count under a rename's old path too: moving code into docs/ removes the code.
+  const paths = changedPaths(i.pr);
+  const code = codeFiles(paths);
   // The docs pipeline has no agent review (Implement docs change -> Merge), as long as the
   // change really is docs only; anything touching code is reviewed like any other change.
   const reviewed = !(i.type === "docs" && code.length === 0);
@@ -273,7 +275,7 @@ export function evaluateChecks(i: CheckInputs): { checks: MergeCheck[]; outcome:
         : "Reviewer found no security concerns",
     );
 
-  const ui = files.filter(isUiFile);
+  const ui = paths.filter(isUiFile);
   if (ui.length === 0) set("ui_evidence", "skipped", "No UI files changed");
   else if (i.revert)
     set("ui_evidence", "skipped", "A revert: it restores UI that was reviewed with screenshots");
