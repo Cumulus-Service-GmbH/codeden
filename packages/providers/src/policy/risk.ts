@@ -132,7 +132,7 @@ function firstInList(
  * substitutions and subshells are classified too, without their `cd` leaking out. `output`: where
  * the list's output goes, which decides whether an environment listing that keeps only the names
  * is a dump (`./env-names`): substitutions hand theirs to another command, except a `(…).Name`
- * group or cmd's `for /f "delims==" … do @echo %i` loop, which keep only the names themselves.
+ * group, which keeps only the names itself.
  */
 function classifyList(
   list: SimpleCommand[],

@@ -48,6 +48,9 @@ describe("environment dumps beyond printenv (#447)", () => {
       "typeset -x",
       "set",
       "set | grep TOKEN",
+      // A value spanning lines passes its other lines through `cut` (#448).
+      "env | cut -d= -f1",
+      "export -p | cut -d= -f1",
     ]) {
       expect(action(cmd, posix), cmd).toBe("secrets");
     }
@@ -61,6 +64,9 @@ describe("environment dumps beyond printenv (#447)", () => {
       'cmd /c "set"',
       "for /f \"tokens=1,2 delims==\" %i in ('set') do @echo %i=%j",
       "for /f \"delims==\" %i in ('set') do @echo %i & set %i",
+      // A value spanning lines passes its other lines through the loop (#448).
+      "for /f \"delims==\" %i in ('set') do @echo %i",
+      "for /f \"tokens=1 delims==\" %%i in ('set') do @echo %%i",
     ]) {
       expect(action(cmd, win), cmd).toBe("secrets");
     }
@@ -123,8 +129,7 @@ describe("environment dumps beyond printenv (#447)", () => {
       "env -i PATH=/usr/bin node build.js",
       "env -i",
       'env -S "pnpm test"',
-      "env | cut -d= -f1",
-      "export -p | cut -d= -f1",
+      "env -0 | cut -z -d= -f1 | tr '\\0' '\\n'",
       "export FOO=1",
       'export PATH="$PATH:/opt/bin"',
       "declare -p PATH",
@@ -148,13 +153,7 @@ describe("environment dumps beyond printenv (#447)", () => {
     ]) {
       expect(action(cmd, posix), cmd).toBeNull();
     }
-    for (const cmd of [
-      "set CODEDEN_HOME=",
-      'set "PATH=%PATH%;C:\\tools"',
-      "set /a n=1+2",
-      "for /f \"delims==\" %i in ('set') do @echo %i",
-      "for /f \"tokens=1 delims==\" %%i in ('set CODEDEN') do @echo %%i",
-    ]) {
+    for (const cmd of ["set CODEDEN_HOME=", 'set "PATH=%PATH%;C:\\tools"', "set /a n=1+2"]) {
       expect(action(cmd, win), cmd).toBeNull();
     }
     for (const cmd of [

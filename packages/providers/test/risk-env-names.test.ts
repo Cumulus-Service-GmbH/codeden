@@ -3,7 +3,7 @@ import { classifyCommand, type RiskContext } from "../src/policy/risk";
 
 /**
  * Environment variable names versus values (#422). Agents list the names of the variables they
- * have (`Get-ChildItem env: | … Name`, `printenv | cut -d= -f1`) and unset variables in their own
+ * have (`Get-ChildItem env: | … Name`, `compgen -e`) and unset variables in their own
  * shell before running tests. Neither prints a value, so neither asks at Auto; anything that
  * prints values keeps the secrets rules (`secrets.ts`), and so does a names-only listing whose
  * names are then used to look the values up.
@@ -47,25 +47,21 @@ const POWERSHELL_NAMES = [
   "Get-ChildItem env:CODEDEN* | Select-Object -ExpandProperty Name",
 ];
 
-/** Names-only listings in POSIX shells. */
+/** Names-only listings in POSIX shells: NUL-separated records end where a variable does (#448). */
 const POSIX_NAMES = [
-  "printenv | cut -d= -f1",
-  "printenv | cut -d '=' -f 1 | grep CODEDEN",
-  "printenv | sed 's/=.*//'",
-  "printenv | sed -e 's/=.*$//' | sort",
-  "printenv | awk -F= '{print $1}'",
-  "printenv | grep -i codeden | cut -d= -f1",
-  "env | sed 's/=.*//'",
-  "env | cut -d= -f1 | sort",
+  "printenv -0 | cut -z -d= -f1 | tr '\\0' '\\n'",
+  "printenv --null | cut -z -d '=' -f 1 | tr '\\0' '\\n' | grep CODEDEN",
+  "env -0 | cut -zd= -f1 | tr '\\0' '\\n' | sort",
+  "env -0 | sed -z 's/=.*//' | tr '\\0' '\\n'",
+  "printenv -0 | sed -z -e 's/=.*$//' | tr '\\0' '\\n'",
   "compgen -e",
   "compgen -e | grep CODEDEN",
-  'bash -c "printenv | cut -d= -f1"',
+  "bash -c \"printenv -0 | cut -z -d= -f1 | tr '\\0' '\\n'\"",
   'pwsh -NoProfile -Command "(Get-ChildItem env:).Name"',
 ];
 
-/** Names-only listings from cmd, including PowerShell run from it. */
+/** Names-only listings from cmd: PowerShell run from it. */
 const CMD_NAMES = [
-  "for /f \"delims==\" %i in ('set') do @echo %i",
   'powershell -NoProfile -Command "Get-ChildItem env: | Select-Object -ExpandProperty Name"',
   'powershell -NoProfile -Command "(Get-ChildItem env:).Name"',
   'cmd /c "powershell -NoProfile -Command Get-ChildItem env: -Name"',
@@ -165,6 +161,75 @@ describe("environment variable names (#422)", () => {
       "printenv | cut -d= -f1 | xargs -I{} sh -c 'echo {}=$(printenv {})'",
     ]) {
       expect(action(cmd, posix), cmd).toBe("secrets");
+    }
+  });
+});
+
+/**
+ * Names-only listings that could still be steered to print values (#448): an `-OutVariable` that
+ * keeps the entries for a later `$v`, a script block in `Where-Object` or `Sort-Object` that
+ * writes each entry to the host (PowerShell prints `[NAME, value]`), and line-based tools that cut
+ * `NAME=value` at `=`, which pass on the other lines of a value that spans several (a private key).
+ */
+describe("names-only listings steered to print values (#448)", () => {
+  it("asks when an output variable keeps the entries", () => {
+    for (const cmd of [
+      "Get-ChildItem env: -OutVariable v | Select-Object -ExpandProperty Name; $v",
+      "Get-ChildItem env: -ov v | Select-Object -ExpandProperty Name; $v | Format-List",
+      "Get-ChildItem env: -OutVariable:v | ForEach-Object { $_.Name }; $v",
+      "(Get-ChildItem env: -OutVariable v).Name; $v",
+      "Get-ChildItem env: | Where-Object Name -like 'CODEDEN*' -OutVariable v | Select-Object -ExpandProperty Name; $v",
+      "Get-ChildItem env: | Sort-Object Name -OutVar v | ForEach-Object Name; $v",
+    ]) {
+      expect(action(cmd, ps), cmd).toBe("secrets");
+    }
+  });
+
+  it("asks when a Where-Object or Sort-Object script block may print the entries", () => {
+    for (const cmd of [
+      "(Get-ChildItem env: | Where-Object { Write-Host $_ }).Name",
+      "(gci env: | ? { Write-Warning $_ }).Name",
+      "(Get-ChildItem env: | Where-Object { Out-Host -InputObject $_ }).Name",
+      "Get-ChildItem env: | Where-Object { Write-Host $_ } | Select-Object -ExpandProperty Name",
+      "Get-ChildItem env: | Where-Object -FilterScript { Write-Host $_ } | ForEach-Object Name",
+      "Get-ChildItem env: | Sort-Object { Write-Host $_ } | Select-Object -ExpandProperty Name",
+      "Get-ChildItem env: | Where-Object { $x = Write-Host $_ } | Select-Object -ExpandProperty Name",
+    ]) {
+      expect(action(cmd, ps), cmd).toBe("secrets");
+    }
+  });
+
+  it("asks when names are cut from lines, which a value spanning lines passes", () => {
+    for (const cmd of [
+      "printenv | cut -d= -f1",
+      "env | cut -d= -f1 | sort",
+      "printenv | sed 's/=.*//'",
+      "printenv | awk -F= '{print $1}'",
+      "printenv | grep -i codeden | cut -d= -f1",
+      'bash -c "printenv | cut -d= -f1"',
+      // NUL-separated records, cut at newlines all the same.
+      "printenv -0",
+      "printenv -0 | cut -d= -f1",
+      "env -0 | sed 's/=.*//'",
+      "printenv -0 | tr '\\0' '\\n' | cut -d= -f1",
+      "printenv -0 | grep -z CODEDEN | cut -z -d= -f1",
+    ]) {
+      expect(action(cmd, posix), cmd).toBe("secrets");
+    }
+    const loop = "for /f \"delims==\" %i in ('set') do @echo %i";
+    expect(action(loop, win), loop).toBe("secrets");
+  });
+
+  it("still lets script blocks that only compare, and names kept in a variable, run", () => {
+    for (const cmd of [
+      "(Get-ChildItem env: | Where-Object { $_.Name -like $pattern }).Name",
+      "Get-ChildItem env: | Where-Object { $_.Name -match '^CODEDEN' -and $_.Name -ne 'CODEDEN_HOME' } | Select-Object -ExpandProperty Name",
+      "Get-ChildItem env: | Where-Object -FilterScript { -not $_.Name -like 'PS*' } | ForEach-Object Name",
+      "Get-ChildItem env: | Where-Object { $wanted -contains $_.Name } | Select-Object -ExpandProperty Name",
+      "Get-ChildItem env: | Sort-Object { $_.Name } | Select-Object -ExpandProperty Name",
+      "Get-ChildItem env: -Name -OutVariable names; $names",
+    ]) {
+      expect(action(cmd, ps), cmd).toBeNull();
     }
   });
 });
