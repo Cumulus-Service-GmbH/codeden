@@ -33,7 +33,14 @@ export function SpotCheckSection({ item, projectId }: { item: FactoryItem; proje
               </span>
             </p>
             <div className="flex flex-wrap gap-1">
-              {item.pr && <OpenPrButton projectId={projectId} pr={item.pr} />}
+              {item.pr && (
+                <OpenPrButton
+                  projectId={projectId}
+                  pr={item.pr}
+                  itemId={item.id}
+                  title={item.title}
+                />
+              )}
               <SpotCheckDecision projectId={projectId} itemId={item.id} title={item.title} />
             </div>
           </>

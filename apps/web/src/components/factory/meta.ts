@@ -5,6 +5,7 @@ import type {
   FactoryItemStage,
   FactoryLoopState,
   FactoryPrState,
+  InvestigationOutcome,
   MergeCheckName,
   PipelineStep,
   WorkType,
@@ -148,6 +149,16 @@ export const TYPE_LABEL: Record<WorkType, string> = {
   bug: "Bug",
   feature: "Feature",
   docs: "Documentation",
+};
+
+/** What the first step decided (the item page's Reproduction or Analysis card), in words. */
+export const OUTCOME_LABEL: Record<InvestigationOutcome, string> = {
+  reproduced: "Reproduced",
+  not_reproduced: "Not reproduced",
+  implement: "Build it",
+  already_done: "Already possible",
+  needs_info: "Needs more information",
+  out_of_scope: "Out of scope",
 };
 
 export const AREA_LABEL: Record<DiscoveryArea, string> = {

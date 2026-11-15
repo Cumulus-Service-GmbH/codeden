@@ -11,6 +11,12 @@ import {
  * what a person found, the share in force and the share of checks that found a problem.
  */
 
+/**
+ * The Spot-checks card's anchor on the project page: `/projects/<id>#spot-checks` (the inbox's
+ * Open spot-checks) opens the page scrolled to the card, open.
+ */
+export const SPOT_CHECKS_ANCHOR = "spot-checks";
+
 /** Why a merge was set aside, in a few words. */
 export const SPOT_CHECK_REASON: Record<SpotCheckReason, { label: string; title: string }> = {
   sampled: {
