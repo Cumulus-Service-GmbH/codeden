@@ -17,6 +17,8 @@ import {
   mergeRate,
   reviseAverage,
   rowLabel,
+  spotChecks,
+  spotChecksTitle,
 } from "@/components/factory/scorecard";
 import { ScorecardCard } from "@/components/factory/scorecard-card";
 import { ClientProvider, type CodeDenClient } from "@/lib/api";
@@ -44,6 +46,8 @@ const row = (patch: Partial<FactoryScorecardRow> = {}): FactoryScorecardRow => (
   estimatedUsd: 12.3,
   unpricedTurns: 0,
   apiEquivalent: true,
+  spotChecked: 2,
+  spotProblems: 1,
   ...patch,
 });
 
@@ -82,6 +86,13 @@ describe("the scorecard's figures (#361)", () => {
     expect(costPerMerge(unpriced)).toBe("Not priced");
     expect(costPerMergeTitle(unpriced)).toMatch(/· 5 turns not priced$/);
   });
+
+  it("shows the merges people spot-checked and the problems they found (#380)", () => {
+    expect(spotChecks(row())).toBe("2 · 1 problem");
+    expect(spotChecks(row({ spotChecked: 4, spotProblems: 0 }))).toBe("4 · 0 problems");
+    expect(spotChecks(row({ spotChecked: 0, spotProblems: 0 }))).toBe("—");
+    expect(spotChecksTitle(row())).toBe("2 merges spot-checked by a person, 1 with a problem");
+  });
 });
 
 describe("the Scorecard card (#361)", () => {
@@ -119,6 +130,7 @@ describe("the Scorecard card (#361)", () => {
     expect(within(first).getByText("claude-opus-4-5")).toBeTruthy();
     expect(first.textContent).toContain("67%");
     expect(first.textContent).toContain("≈ $4.10");
+    expect(first.textContent).toContain("2 · 1 problem");
 
     fireEvent.click(screen.getByRole("button", { name: "Reviewer" }));
     const reviewers = screen.getAllByTestId("factory-scorecard-row");

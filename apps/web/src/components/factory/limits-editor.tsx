@@ -9,6 +9,7 @@ import { type AgentsDraft, AgentsTuning } from "./agents-tuning";
 import { BudgetFields } from "./budget-fields";
 import { WIP_HELP } from "./meta";
 import { type ScoutDraft, ScoutTuning } from "./scout-tuning";
+import { SpotCheckField } from "./spot-check-tuning";
 
 /**
  * The tuning knobs the editor exposes. It saves them as a patch, so the rest (review areas, the
@@ -27,6 +28,7 @@ export type TuningDraft = AgentsDraft &
     | "maxOpenPrs"
     | "learnFromReviews"
     | "specApproval"
+    | "spotCheckPercent"
   >;
 
 /** The editable tuning knobs of a saved tuning. */
@@ -41,6 +43,7 @@ export function tuningDraft(t: FactoryTuning): TuningDraft {
     watchTimeoutMin: t.watchTimeoutMin,
     learnFromReviews: t.learnFromReviews,
     specApproval: t.specApproval,
+    spotCheckPercent: t.spotCheckPercent,
     minBacklog: t.minBacklog,
     discoveryIntervalMin: t.discoveryIntervalMin,
     discoveryPerRound: t.discoveryPerRound,
@@ -143,6 +146,13 @@ export function LimitsEditor({
             <option value="strict">Strict: always re-test against the default branch</option>
           </select>
         </Field>
+      )}
+      {tuning && onTuningChange && (
+        <SpotCheckField
+          value={tuning.spotCheckPercent}
+          dark={dark}
+          onChange={(spotCheckPercent) => onTuningChange({ ...tuning, spotCheckPercent })}
+        />
       )}
       {!dark && tuning && onTuningChange && (
         <div className="flex items-start gap-2.5 text-xs">

@@ -26,6 +26,8 @@ import {
   type ProviderNames,
   reviseAverage,
   type ScorecardView,
+  spotChecks,
+  spotChecksTitle,
 } from "./scorecard";
 
 const VIEWS: Array<{ id: ScorecardView; label: string }> = [
@@ -52,6 +54,10 @@ const COLUMNS: Array<{ label: string; title: string }> = [
   {
     label: "Reverted",
     title: "Merges reverted because CI on the default branch failed after them",
+  },
+  {
+    label: "Spot-checks",
+    title: "Merges a person spot-checked, and the problems they found",
   },
   { label: "Cost / merge", title: "What the finished work cost, failures included, per merge" },
   { label: "To merge", title: "Median time from intake to merge" },
@@ -159,6 +165,12 @@ function ScorecardTable(props: {
               {reviseAverage(r)}
             </Num>
             <Num className={cn(r.reverted > 0 && "text-status-failed")}>{r.reverted}</Num>
+            <Num
+              className={cn(r.spotProblems > 0 && "text-status-failed")}
+              title={spotChecksTitle(r)}
+            >
+              {spotChecks(r)}
+            </Num>
             <Num className="font-mono" title={costPerMergeTitle(r)}>
               {costPerMerge(r)}
             </Num>

@@ -21,6 +21,7 @@ import { LOOP_LABEL, MODE_LABEL } from "./meta";
 import { PipelineDiagram } from "./pipeline-diagram";
 import { PullRequestsCard } from "./pull-requests-card";
 import { ScorecardCard } from "./scorecard-card";
+import { SpotChecksCard } from "./spot-checks-card";
 import { WipChip } from "./wip-chip";
 
 function Meter(props: {
@@ -252,6 +253,7 @@ export function FactoryPanel({ project }: { project: Project }) {
           <RecentColumn projectId={projectId} recent={f.recent} />
           <IgnoredColumn projectId={projectId} ignored={f.ignored} />
         </div>
+        <SpotChecksCard projectId={projectId} spotChecks={f.spotChecks} />
         <LessonsCard
           projectId={projectId}
           lessons={f.lessons}

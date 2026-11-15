@@ -12,6 +12,8 @@ import {
   FactoryScorecard,
   type FactorySetTypeRequest,
   type FactorySpecDecisionRequest,
+  type FactorySpotCheckRequestInit,
+  FactorySpotCheckResponse,
   FactoryStatus,
   type KillSwitchMode,
   type KillSwitchRequestInit,
@@ -103,6 +105,21 @@ export interface FactoryApi {
    * `no_follow_up` when there is no such follow-up.
    */
   fileFollowUp(projectId: string, itemId: string, index: number): Promise<FactoryItem>;
+  /**
+   * A person's spot-check of a merge: Looks good, or Found a problem with a note (filed as a
+   * follow-up issue unless `fileIssue: false`). The verdict is recorded even when GitHub doesn't
+   * take the issue (`issueError`). 409 `spot_check_not_pending` when none waits.
+   */
+  spotCheck(
+    projectId: string,
+    itemId: string,
+    req: FactorySpotCheckRequestInit,
+  ): Promise<FactorySpotCheckResponse>;
+  /**
+   * "File issue": the follow-up issue of a spot-check problem recorded without one. 409
+   * `spot_check_not_problem` or `spot_check_issue_filed`.
+   */
+  fileSpotCheckIssue(projectId: string, itemId: string): Promise<FactorySpotCheckResponse>;
 }
 
 const enc = encodeURIComponent;
@@ -151,6 +168,14 @@ export function httpFactoryApi(http: Fetcher): FactoryApi {
         `${p(id)}/factory/items/${enc(itemId)}/follow-ups/file`,
         { index } satisfies FactoryFileFollowUpRequest,
         item,
+      ),
+    spotCheck: (id, itemId, req) =>
+      post(`${p(id)}/factory/items/${enc(itemId)}/spot-check`, req, (v) =>
+        FactorySpotCheckResponse.parse(v),
+      ),
+    fileSpotCheckIssue: (id, itemId) =>
+      post(`${p(id)}/factory/items/${enc(itemId)}/spot-check/file-issue`, {}, (v) =>
+        FactorySpotCheckResponse.parse(v),
       ),
   };
 }

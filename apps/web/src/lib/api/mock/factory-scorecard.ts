@@ -17,20 +17,36 @@ const opus: ScorecardAgent = { provider: "claude", model: "claude-opus-4-5" };
 const sonnet: ScorecardAgent = { provider: "claude", model: "claude-sonnet-4-5" };
 const codex: ScorecardAgent = { provider: "codex", model: "gpt-5.5" };
 
-/** Per 30 days: builder, reviewer, merged, failed, first pass, revise rounds, reverted, $, hours. */
+/**
+ * Per 30 days: builder, reviewer, merged, failed, first pass, revise rounds, reverted, $, hours,
+ * merges spot-checked and the problems people found.
+ */
 const PAIRS: Array<
-  [ScorecardAgent, ScorecardAgent | null, number, number, number, number, number, number, number]
+  [
+    ScorecardAgent,
+    ScorecardAgent | null,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+    number,
+  ]
 > = [
-  [opus, codex, 14, 1, 10, 6, 1, 61.6, 3.2],
-  [codex, opus, 11, 2, 6, 9, 0, 38.5, 4.1],
-  [sonnet, codex, 8, 2, 4, 8, 1, 17.2, 5.0],
-  [codex, null, 3, 0, 3, 0, 0, 2.4, 0.8],
+  [opus, codex, 14, 1, 10, 6, 1, 61.6, 3.2, 4, 0],
+  [codex, opus, 11, 2, 6, 9, 0, 38.5, 4.1, 3, 1],
+  [sonnet, codex, 8, 2, 4, 8, 1, 17.2, 5.0, 2, 1],
+  [codex, null, 3, 0, 3, 0, 0, 2.4, 0.8, 1, 0],
 ];
 
 const scale = (n: number, days: ScorecardDays) => Math.round((n * days) / 30);
 
 function pairRow(p: (typeof PAIRS)[number], days: ScorecardDays): FactoryScorecardRow {
   const [builder, reviewer, merged30, failed30, first30, rounds30, reverted30, usd30, hours] = p;
+  const [, , , , , , , , , spot30, problems30] = p;
   const merged = scale(merged30, days);
   const failed = scale(failed30, days);
   const costUsd = Math.round(((usd30 * days) / 30) * 100) / 100;
@@ -50,6 +66,8 @@ function pairRow(p: (typeof PAIRS)[number], days: ScorecardDays): FactoryScoreca
     estimatedUsd: costUsd,
     unpricedTurns: 0,
     apiEquivalent: true,
+    spotChecked: Math.min(merged, scale(spot30, days)),
+    spotProblems: Math.min(merged, scale(problems30, days)),
   };
 }
 
@@ -74,6 +92,8 @@ function sumBy(
       reverted: 0,
       costUsd: 0,
       estimatedUsd: 0,
+      spotChecked: 0,
+      spotProblems: 0,
       weighted: 0,
     };
     r.finished += p.finished;
@@ -82,6 +102,8 @@ function sumBy(
     r.firstPass += p.firstPass;
     r.reviseRounds += p.reviseRounds;
     r.reverted += p.reverted;
+    r.spotChecked += p.spotChecked;
+    r.spotProblems += p.spotProblems;
     r.costUsd = Math.round((r.costUsd + p.costUsd) * 100) / 100;
     r.estimatedUsd = r.costUsd;
     r.weighted += (p.medianMergeMs ?? 0) * p.merged;

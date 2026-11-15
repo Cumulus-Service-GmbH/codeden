@@ -30,6 +30,7 @@ import {
   TYPE_LABEL,
 } from "@/components/factory/meta";
 import { SpecApprovalCard } from "@/components/factory/spec-approval";
+import { SpotCheckSection } from "@/components/factory/spot-check-section";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useFactoryItem } from "@/lib/factory";
 import { ago } from "@/lib/format";
@@ -239,6 +240,7 @@ export function FactoryItemPage({ projectId, itemId }: { projectId: string; item
                 <Verdict review={item.review} item={item} />
               </section>
             )}
+            <SpotCheckSection item={item} projectId={projectId} />
             <FollowUps item={item} projectId={projectId} mode={project.autonomyMode} />
           </div>
           <aside className="space-y-3 rounded-xl border border-border bg-card p-4 self-start">

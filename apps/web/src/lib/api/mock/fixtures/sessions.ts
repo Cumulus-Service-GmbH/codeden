@@ -318,6 +318,21 @@ export const inboxItems: InboxItem[] = [
     updatedAt: ago(38),
   }),
   inbox({
+    id: "inbox:factory-spot-checks:p-storefront",
+    kind: "spot_check",
+    priority: "low",
+    notify: "needs_you",
+    title: "2 merges to spot-check (Storefront)",
+    body: [
+      "The factory set these merges aside for a quick look. Nothing waits on them: open the Spot-checks list in the factory panel, read the change in the PR view, and record Looks good or Found a problem.",
+      "",
+      "- Sticky add-to-cart bar on mobile (#55)",
+      "- Fix footer link contrast (#54)",
+    ].join("\n"),
+    projectId: "p-storefront",
+    createdAt: ago(25),
+  }),
+  inbox({
     id: "ib-audit",
     kind: "automation_result",
     priority: "low",

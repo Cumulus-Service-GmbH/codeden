@@ -13,6 +13,7 @@ const GROUPS: { id: InboxItemKind; title: string; filter: Exclude<InboxFilter, "
   { id: "question", title: "Questions", filter: "asks" },
   { id: "spec_approval", title: "Specs to approve", filter: "asks" },
   { id: "pr_review", title: "Pull requests ready", filter: "reviews" },
+  { id: "spot_check", title: "Spot-checks", filter: "reviews" },
   { id: "run_failed", title: "Failed runs", filter: "problems" },
   { id: "cleanup_failed", title: "Worktrees not removed", filter: "problems" },
   { id: "triage", title: "Triage decisions", filter: "asks" },

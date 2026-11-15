@@ -1,7 +1,7 @@
 import { githubPrId, type InboxItem } from "@codeden/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ExternalLink, GitMerge, GitPullRequest, RotateCcw } from "lucide-react";
+import { ExternalLink, Eye, GitMerge, GitPullRequest, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { ChecksBadge, ReviewDecisionBadge } from "@/components/github/github-bits";
 import { Button } from "@/components/ui/button";
@@ -139,6 +139,26 @@ export function InboxActions({ item }: { item: InboxItem }) {
           <Button size="sm" onClick={() => removeAgain.mutate(false)} disabled={busy}>
             <RotateCcw /> {removeAgain.isPending ? "Removing…" : "Try again"}
           </Button>
+          {dismissButton}
+        </>
+      );
+    case "spot_check":
+      // The factory's merges set aside for a person's look: the factory panel lists them.
+      return (
+        <>
+          {item.projectId && (
+            <Button
+              size="sm"
+              onClick={() =>
+                void navigate({
+                  to: "/projects/$projectId",
+                  params: { projectId: item.projectId as string },
+                })
+              }
+            >
+              <Eye /> Open spot-checks
+            </Button>
+          )}
           {dismissButton}
         </>
       );

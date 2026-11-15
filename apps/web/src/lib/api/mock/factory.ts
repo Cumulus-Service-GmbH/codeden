@@ -25,6 +25,12 @@ import {
   reviseSpecLater,
   specInboxId,
 } from "./factory-spec";
+import {
+  decideMockSpotCheck,
+  demoSpotChecks,
+  fileMockSpotCheckIssue,
+  spotCheckOf,
+} from "./factory-spot-checks";
 import type { FixtureWorkItem } from "./fixtures/factory-fixture-types";
 import { defaultFactoryLimits, factoryFor, visionDoc } from "./fixtures/ops";
 import type { MockWorld } from "./world";
@@ -177,6 +183,8 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
   reviseSpecLater(world, specs);
   /** Follow-ups filed with "File issue", by `<itemId>:<index>`. */
   const filedFollowUps = new Map<string, GitHubIssueRef>();
+  /** Issues filed from spot-checks so far (their numbers). */
+  let spotIssues = 0;
   const project = (id: string) => world.snapshot.projects.find((p) => p.id === id);
   const status = (projectId: string): FactoryStatus => {
     const cached = world.factory.get(projectId);
@@ -188,13 +196,14 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       p?.factoryLimits ?? defaultFactoryLimits,
     );
     const toWork = (w: FixtureWorkItem) => work(w, f.limits);
+    // Spec approval is on where a spec waits for it.
+    const tuning = FactoryTuning.parse({ specApproval: f.inProgress.some((w) => w.specApproval) });
     const s = FactoryStatus.parse({
       ...f,
       experimental: isFactoryMode(f.mode),
       pausedReason: null,
       globalKillSwitch: world.snapshot.settings.factory.killSwitch,
-      // Spec approval is on where a spec waits for it.
-      tuning: FactoryTuning.parse({ specApproval: f.inProgress.some((w) => w.specApproval) }),
+      tuning,
       activeSessions: Math.min(f.inProgress.length, f.limits.maxConcurrentSessions),
       // The work-in-progress limit follows the agent limit (no `maxOpenPrs` set).
       wip: {
@@ -246,6 +255,7 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
         verdict: null,
       })),
       lessons: isFactoryMode(f.mode) ? demoLessons(projectId) : [],
+      spotChecks: demoSpotChecks(f.mode, tuning, f.recent.map(toWork)),
       lastDigest: null,
       lastTickAt: now(),
     });
@@ -295,6 +305,7 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       reviewerNote: null,
       review: w.mergedAt ? MOCK_APPROVAL : null,
       // Merged: the first follow-up is filed already, the other waits for "File issue".
+      spotCheck: spotCheckOf(s, itemId),
       followUps: w.mergedAt
         ? (MOCK_APPROVAL.followUps ?? []).map((f, n) => ({
             ...f,
@@ -446,6 +457,13 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
         waiting: [],
         decisions: [],
         handled: [],
+        spotChecks: {
+          checkedToday: 0,
+          problemsToday: 0,
+          outstanding: status(projectId).spotChecks.outstanding,
+          checked30d: status(projectId).spotChecks.checked30d,
+          problems30d: status(projectId).spotChecks.problems30d,
+        },
         text: "Nothing shipped yet today.",
         createdAt: now(),
       };
@@ -529,6 +547,15 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
         });
       }
       return delay(item(id, itemId));
+    },
+    async spotCheck(id, itemId, req) {
+      const next = decideMockSpotCheck(world, status(id), itemId, req, 600 + spotIssues++);
+      world.factory.set(id, next);
+      return delay({ item: item(id, itemId), issueError: null });
+    },
+    async fileSpotCheckIssue(id, itemId) {
+      world.factory.set(id, fileMockSpotCheckIssue(status(id), itemId, 600 + spotIssues++));
+      return delay({ item: item(id, itemId), issueError: null });
     },
   };
 }

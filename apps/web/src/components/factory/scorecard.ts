@@ -47,6 +47,19 @@ export function medianMerge(row: FactoryScorecardRow): string {
   return row.medianMergeMs === null ? "—" : shortDuration(row.medianMergeMs);
 }
 
+/** Merges a person spot-checked and the problems they found ("3 · 1 problem"); "—" with none. */
+export function spotChecks(row: FactoryScorecardRow): string {
+  if (row.spotChecked === 0) return "—";
+  const problems = row.spotProblems === 1 ? "1 problem" : `${row.spotProblems} problems`;
+  return `${row.spotChecked} · ${problems}`;
+}
+
+/** "3 merges spot-checked by a person, 1 with a problem". */
+export function spotChecksTitle(row: FactoryScorecardRow): string {
+  const checked = `${row.spotChecked} merge${row.spotChecked === 1 ? "" : "s"} spot-checked by a person`;
+  return `${checked}, ${row.spotProblems} with a problem`;
+}
+
 /** "≈ $4.10" estimated, "$4.10" reported, "Not priced" when nothing could be, "—" without a merge. */
 export function costPerMerge(row: FactoryScorecardRow): string {
   if (row.costPerMergeUsd === null) return "—";
