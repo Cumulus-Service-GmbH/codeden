@@ -4,12 +4,12 @@ import type { ReactNode } from "react";
 import { useRetryItem } from "@/components/factory/use-retry-item";
 import { platform } from "@/lib/platform";
 import { cn } from "@/lib/utils";
+import type { AgentCardModel } from "../scene/agent-card";
+import type { SceneAgent } from "../scene/agents";
+import type { BayCrate } from "../scene/repair-bay";
 import { cardNumber, cardStateLabel, type ViewCard } from "../stages";
-import type { AgentCardModel } from "./agent-card";
-import type { SceneAgent } from "./agents";
 import { STATUS_COLOUR } from "./draw-agents";
 import { type Rect, SCENE_H, SCENE_W } from "./floor";
-import type { BayCrate } from "./repair-bay";
 
 /**
  * The pixel mode's cards (#264), in the scene's own style: what an agent is doing on hover or

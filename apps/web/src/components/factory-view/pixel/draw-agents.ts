@@ -1,9 +1,10 @@
-import type { AgentStatus, SceneAgent } from "./agents";
-import { SCENE_W, STATIONS, type StationId, TILE, tileId } from "./floor";
+import type { AgentStatus, SceneAgent } from "../scene/agents";
+import type { Scene } from "../scene/scene-model";
+import type { StationId } from "../scene/stations";
+import { SCENE_W, STATIONS, TILE, tileId } from "./floor";
 import { pixelText, textWidth } from "./font";
 import type { Figure } from "./motion";
 import { accessory, headDrop, lookOf, type Pose, person, seedHash } from "./people";
-import type { Scene } from "./scene-model";
 import { type GlyphName, glyph, INK, type PropName, painted, prop } from "./sprites";
 
 /**
