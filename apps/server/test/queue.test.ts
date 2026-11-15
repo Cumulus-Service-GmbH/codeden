@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NewEvent, ProviderInfo, Session } from "@codeden/contracts";
@@ -11,6 +11,7 @@ import { QueueService } from "../src/services/sessions/queue";
 import { SessionRepo } from "../src/services/sessions/repo";
 import type { SessionService } from "../src/services/sessions/session-service";
 import { sampleSession } from "./helpers";
+import { removeTree } from "./support/remove-tree";
 
 let dir: string;
 let database: Database;
@@ -29,9 +30,9 @@ beforeEach(() => {
   outbox = new Outbox(database.db, store);
 });
 
-afterEach(() => {
+afterEach(async () => {
   database.close();
-  rmSync(dir, { recursive: true, force: true });
+  await removeTree(dir);
 });
 
 const text = (o: Outbox) => o.list("s1").map((m) => m.input.text);

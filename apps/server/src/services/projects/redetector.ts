@@ -37,10 +37,16 @@ export class ProjectRedetector {
     if (opts.checkAll !== false) setImmediate(() => void this.checkAll());
   }
 
-  stop(): void {
+  /**
+   * Stop following turn ends and start no more checks. Resolves once the checks already running
+   * have finished: their `git -C <project>` would otherwise outlive the server, still inside the
+   * project folder (which Windows then refuses to delete) and writing to a closed database.
+   */
+  async stop(): Promise<void> {
     this.stopped = true;
     this.unsubscribe?.();
     this.unsubscribe = undefined;
+    await Promise.allSettled([...this.running.values()]);
   }
 
   /** Detect one project again now (joins a check already running for it). */

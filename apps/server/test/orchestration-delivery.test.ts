@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -17,6 +17,7 @@ import { NoticeDelivery } from "../src/services/orchestration/delivery";
 import { type NoticeDraft, NoticeStore } from "../src/services/orchestration/notices";
 import { SessionRepo } from "../src/services/sessions/repo";
 import { sampleSession } from "./helpers";
+import { removeTree } from "./support/remove-tree";
 
 let dir: string;
 let database: Database;
@@ -46,10 +47,10 @@ beforeEach(() => {
   repo = new SessionRepo(database.db, store);
 });
 
-afterEach(() => {
+afterEach(async () => {
   vi.useRealTimers();
   database.close();
-  rmSync(dir, { recursive: true, force: true });
+  await removeTree(dir);
 });
 
 const finished = (id: string, over: Partial<NoticeDraft> = {}): NoticeDraft =>

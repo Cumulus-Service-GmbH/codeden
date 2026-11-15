@@ -1,10 +1,11 @@
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { findMigrationsDir, openDatabase } from "../src/db/client";
 import { SearchBackfill } from "../src/services/search/backfill";
 import { SEARCH_TOKENIZER } from "../src/services/search/trigrams";
+import { removeTree } from "./support/remove-tree";
 
 const all = findMigrationsDir();
 const names = readdirSync(all).filter((n) => /^\d{14}_/.test(n));
@@ -94,8 +95,8 @@ function expectFullSchema(file: string): void {
   }
 }
 
-afterEach(() => {
-  for (const dir of temps.splice(0)) rmSync(dir, { recursive: true, force: true });
+afterEach(async () => {
+  for (const dir of temps.splice(0)) await removeTree(dir);
 });
 
 // Each case creates and migrates SQLite databases through every migration; on a busy Windows

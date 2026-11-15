@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -18,6 +18,7 @@ import { applyPendingConfig, updateSession } from "../src/services/sessions/reco
 import { SessionRepo } from "../src/services/sessions/repo";
 import { sampleSession } from "./helpers";
 import { type Harness, startHarness, waitUntil } from "./support/harness";
+import { removeTree } from "./support/remove-tree";
 
 /** A runner stand-in that records commands and fails with `failWith` when set. */
 function stubRunner() {
@@ -60,9 +61,9 @@ describe("updateSession with autonomy", () => {
       queuedBehind: [],
     });
   });
-  afterEach(() => {
+  afterEach(async () => {
     database.close();
-    rmSync(dir, { recursive: true, force: true });
+    await removeTree(dir);
   });
 
   it("saves the level with session.updated and asks the runner to apply it", async () => {

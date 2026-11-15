@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { type ProviderCommand, SessionFileList, SlashCommandList } from "@codeden/contracts";
@@ -7,6 +7,7 @@ import { AgentConfigService } from "../src/services/agent-config/agent-config-se
 import type { ProjectService } from "../src/services/projects/project-service";
 import type { SessionRepo } from "../src/services/sessions/repo";
 import { type Harness, startHarness, TOKEN } from "./support/harness";
+import { removeTree } from "./support/remove-tree";
 
 function put(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true });
@@ -106,7 +107,7 @@ describe("a session's `/` commands and skills", () => {
       reportedCommands: () => reported,
     });
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => removeTree(dir));
 
   const list = () => SlashCommandList.parse(service.slashCommands("s1"));
 

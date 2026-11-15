@@ -46,9 +46,9 @@ beforeEach(() => {
   service.start();
 });
 
-afterEach(() => {
+afterEach(async () => {
   service.stop();
-  env.close();
+  await env.close();
 });
 
 const sync = async () => {
@@ -199,7 +199,7 @@ describe("PR feedback for sessions the user started", () => {
     await sync();
     expect(sent).toHaveLength(0);
 
-    env.close();
+    await env.close();
     env = createGithubEnv();
     service.stop();
     service = new PrFeedbackService({

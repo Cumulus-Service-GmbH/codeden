@@ -140,7 +140,7 @@ afterEach(async () => {
   release?.();
   loop.stop();
   await new Promise((resolve) => setImmediate(resolve));
-  env.close();
+  await env.close();
 });
 
 const CHECKS: SessionChecks = {

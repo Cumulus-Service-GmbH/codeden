@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -12,6 +12,7 @@ import { type RunningServer, startServer } from "../src";
 import { PrivateAddressError } from "../src/network/public-fetch";
 import { planImportLink, resolveImportLink } from "../src/services/automations/import-link";
 import type { Exec } from "../src/services/exec";
+import { removeTree } from "./support/remove-tree";
 
 const automation = (name: string, autonomy = "read_only") =>
   [
@@ -344,7 +345,7 @@ describe("POST /api/automations/import/link", () => {
   });
   afterAll(async () => {
     await server?.close();
-    rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    await removeTree(home);
   });
 
   const call = async (path: string, body: unknown) => {

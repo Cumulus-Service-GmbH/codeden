@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -21,6 +21,7 @@ import { SessionRepo } from "../src/services/sessions/repo";
 import { sampleSession } from "./helpers";
 import { FakeGithub } from "./support/fake-github";
 import { startHarness, waitUntil } from "./support/harness";
+import { removeTree } from "./support/remove-tree";
 
 const git = (cwd: string, ...args: string[]) =>
   execFileSync("git", ["-C", cwd, ...args], { stdio: "pipe" });
@@ -54,10 +55,10 @@ describe("ProjectRedetector", () => {
     });
   });
 
-  afterEach(() => {
-    redetector.stop();
+  afterEach(async () => {
+    await redetector.stop();
     database.close();
-    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    await removeTree(dir);
   });
 
   async function projectWithSession(
@@ -177,7 +178,7 @@ describe("re-detection over HTTP and across restarts", () => {
   afterEach(async () => {
     await server?.close();
     server = undefined;
-    rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    await removeTree(home);
   });
 
   it("refreshes on demand and disconnects GitHub when the user asks", async () => {

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunnerCommand, RunnerCommandResult } from "@codeden/contracts";
@@ -7,6 +7,7 @@ import { AgentConfigService } from "../src/services/agent-config/agent-config-se
 import { ServiceError } from "../src/services/errors";
 import type { ProjectService } from "../src/services/projects/project-service";
 import type { SessionRepo } from "../src/services/sessions/repo";
+import { removeTree } from "./support/remove-tree";
 
 const passed: RunnerCommandResult<"mcp.test"> = {
   ok: true,
@@ -56,7 +57,7 @@ describe("MCP connection test requests", () => {
       reportedCommands: () => null,
     });
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => removeTree(dir));
 
   it("tests the saved server in the project folder, or in the runner's home for user scope", async () => {
     expect(

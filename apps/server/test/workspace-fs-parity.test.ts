@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { RunnerCommand } from "@codeden/contracts";
@@ -12,6 +12,7 @@ import { RunnerWorkspaceFs } from "../src/services/workspace-fs/runner";
 import type { WorkspaceFs } from "../src/services/workspace-fs/workspace-fs";
 import { workspaceFsFor } from "../src/services/workspace-fs/workspace-fs";
 import { sampleSession } from "./helpers";
+import { removeTree } from "./support/remove-tree";
 
 /**
  * Workspace file access refuses the same paths with the same codes whether the workspace is on
@@ -64,7 +65,7 @@ beforeEach(() => {
   symlinkSync(outside, join(root, "escape"), "junction");
 });
 
-afterEach(() => rmSync(base, { recursive: true, force: true }));
+afterEach(() => removeTree(base));
 
 /** The code a call fails with, or "ok". */
 async function codeOf(run: () => Promise<unknown>): Promise<string> {

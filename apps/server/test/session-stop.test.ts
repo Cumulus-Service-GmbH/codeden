@@ -74,7 +74,7 @@ afterEach(async () => {
   lifecycle.stop();
   // Let the lifecycle's deferred queue drain run before the database closes.
   await new Promise((resolve) => setImmediate(resolve));
-  env.close();
+  await env.close();
 });
 
 const endedAt = "2026-11-11T09:00:00.000Z";

@@ -1,10 +1,11 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NetworkStatus } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import WebSocket from "ws";
 import { type RunningServer, startServer } from "../src";
+import { removeTree } from "./support/remove-tree";
 
 /**
  * Network access against a real server: the listener moves between 127.0.0.1 and 0.0.0.0 on
@@ -37,7 +38,7 @@ beforeEach(() => {
 afterEach(async () => {
   await server?.close();
   server = undefined;
-  rmSync(home, { recursive: true, force: true });
+  await removeTree(home);
 });
 
 async function api(path: string, init: RequestInit = {}) {

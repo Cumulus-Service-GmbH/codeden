@@ -2,7 +2,6 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
-  rmSync,
   symlinkSync,
   unlinkSync,
   writeFileSync,
@@ -16,6 +15,7 @@ import { RemoteAccessStore } from "../src/network/store";
 import type { AppServices } from "../src/services/container";
 import { EVIDENCE_BRANCH } from "../src/services/github/evidence";
 import { createGithubEnv, type GithubEnv } from "./support/github-env";
+import { removeTree } from "./support/remove-tree";
 
 // #167: evidence is published to GitHub (public on a public repo, and kept in history), and
 // shared files become artifacts evidence can publish by id, so secrets files and CodeDen's own
@@ -48,9 +48,9 @@ const refusedOrOutside = {
 beforeEach(() => {
   env = createGithubEnv();
 });
-afterEach(() => {
+afterEach(async () => {
   links.clear();
-  env.close();
+  await env.close();
 });
 
 /** A stand-in file symlink at `path` to `target`, which needs no privilege (see `links`). */
@@ -127,7 +127,7 @@ describe("attach_evidence refuses secrets", () => {
       ).rejects.toMatchObject(refused);
       nothingPublished();
     } finally {
-      rmSync(temp, { recursive: true, force: true });
+      await removeTree(temp);
     }
   });
 
@@ -221,7 +221,7 @@ describe("attach_evidence refuses secrets", () => {
       mkdirSync(dirname(file), { recursive: true });
       writeFileSync(file, '{"refresh_token":"hunter2"}\n');
     });
-    afterEach(() => rmSync(home, { recursive: true, force: true }));
+    afterEach(() => removeTree(home));
 
     it("attach_evidence refuses it, under any published name", async () => {
       const session = issueSession();
@@ -262,7 +262,7 @@ describe("attach_evidence refuses secrets", () => {
       expect(result.files.map((f) => f.name)).toEqual(["config.toml"]);
     } finally {
       vi.unstubAllEnvs();
-      rmSync(home, { recursive: true, force: true });
+      await removeTree(home);
     }
   });
 
@@ -370,7 +370,7 @@ describe("copies CodeDen keeps of a damaged credential file", () => {
       );
       nothingStored(session.id);
     } finally {
-      rmSync(temp, { recursive: true, force: true });
+      await removeTree(temp);
     }
   });
 
@@ -467,8 +467,8 @@ describe.each([
   ["a plain artifacts folder", false],
   ["an aliased artifacts folder", true],
 ])("a secret artifact reached through a file symlink, with %s", (_label, aliasArtifacts) => {
-  beforeEach(() => {
-    env.close();
+  beforeEach(async () => {
+    await env.close();
     env = createGithubEnv({ aliasArtifacts });
   });
 
@@ -499,8 +499,8 @@ describe.each([
 });
 
 describe("when the artifacts folder is an alias (a junction to another folder)", () => {
-  beforeEach(() => {
-    env.close();
+  beforeEach(async () => {
+    await env.close();
     env = createGithubEnv({ aliasArtifacts: true });
   });
 

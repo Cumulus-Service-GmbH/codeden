@@ -428,7 +428,8 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
       services.lifecycle.stop();
       services.orchestration.stop();
       services.github.stop();
-      services.redetector.stop();
+      // Its git checks run in project folders: waited for below, before the database closes.
+      const redetectorStopped = services.redetector.stop();
       services.usage.stop();
       services.automations.stop();
       services.factory.stop();
@@ -442,6 +443,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
       services.updates.stop();
       await searchBackfill.stop();
       await services.localStt.stop();
+      await redetectorStopped;
       stopUpdateEvents();
       stopTerminalEvents();
       await runners.close({ stopHome: closeOpts.stopRunner });

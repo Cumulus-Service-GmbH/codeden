@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -8,6 +8,7 @@ import { runTool } from "../src/services/exec";
 import { ProjectService } from "../src/services/projects/project-service";
 import { type LauncherDeps, SessionLauncher } from "../src/services/sessions/launcher";
 import { sampleSession } from "./helpers";
+import { removeTree } from "./support/remove-tree";
 
 // #221: agent sessions run with `CI=true` (#194); a project can turn it off for its agents.
 let dir: string;
@@ -25,9 +26,9 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
   database.close();
-  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await removeTree(dir);
 });
 
 async function addProject(): Promise<string> {

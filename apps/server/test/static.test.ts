@@ -4,9 +4,10 @@ import { join } from "node:path";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it } from "vitest";
 import { mountWeb } from "../src/routes/static";
+import { removeTree } from "./support/remove-tree";
 
 let dir: string;
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeTree(dir));
 
 describe("mountWeb", () => {
   it("serves the current index.html for client routes after a rebuild", async () => {

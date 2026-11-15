@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HOME_RUNNER_ID, type RunnerEvent, type RunnerStream } from "@codeden/contracts";
@@ -12,6 +12,7 @@ import { journalIdRefusal } from "../src/runner/identity";
 import { sampleSession } from "./helpers";
 import { type FakeRunner, startFakeRunner } from "./support/fake-runner";
 import { waitUntil } from "./support/harness";
+import { removeTree } from "./support/remove-tree";
 
 /**
  * A sandbox runner shares its sandbox with an agent that has a shell, so to the server its
@@ -39,7 +40,7 @@ afterEach(async () => {
   hub = undefined;
   for (const runner of runners.splice(0)) await runner.close();
   database.close();
-  rmSync(dir, { recursive: true, force: true });
+  await removeTree(dir);
 });
 
 const fakeRunner = async (runnerId: string) => {

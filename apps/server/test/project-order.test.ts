@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { EventEnvelope } from "@codeden/contracts";
@@ -9,6 +9,7 @@ import { applyProjection } from "../src/events/projector";
 import { EventStore } from "../src/events/store";
 import { runTool } from "../src/services/exec";
 import { ProjectService } from "../src/services/projects/project-service";
+import { removeTree } from "./support/remove-tree";
 
 let dir: string;
 const opened: Database[] = [];
@@ -56,9 +57,9 @@ beforeEach(() => {
   service = serviceFor(database);
 });
 
-afterEach(() => {
+afterEach(async () => {
   for (const db of opened.splice(0)) db.close();
-  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await removeTree(dir);
 });
 
 describe("project order", () => {

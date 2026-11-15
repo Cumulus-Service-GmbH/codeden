@@ -9,8 +9,8 @@ import { runClockFrom, TEST_START, todayAt } from "./support/test-clock";
 
 let env: FactoryEnv | undefined;
 let restoreSystemClock = () => {};
-afterEach(() => {
-  env?.close();
+afterEach(async () => {
+  await env?.close();
   env = undefined;
   restoreSystemClock();
   restoreSystemClock = () => {};
@@ -33,7 +33,7 @@ describe.each(["23:50", "00:05"])("the factory test env with the system clock at
     expect(digests(env)).toEqual([]);
     expect(localDay(env.now())).toBe(localDay(TEST_START));
     // Closing it puts back the clock that ran before.
-    env.close();
+    await env.close();
     env = undefined;
     expect(Math.abs(Date.now() - system)).toBeLessThan(60_000);
   });

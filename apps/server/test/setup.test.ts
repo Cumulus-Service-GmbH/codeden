@@ -16,6 +16,7 @@ import {
 import { SetupService, type SetupServiceDeps } from "../src/services/setup/setup-service";
 import { execLocate } from "../src/services/setup/tool-lookup";
 import { SettingsStore } from "../src/settings-store";
+import { removeTree } from "./support/remove-tree";
 
 const NOW = Date.parse("2026-11-07T10:00:00.000Z");
 
@@ -141,7 +142,7 @@ beforeEach(() => {
   settings = new SettingsStore(join(dir, "settings.json"));
 });
 
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeTree(dir));
 
 const happy: Record<string, Partial<ExecResult>> = {
   "claude --version": { stdout: "2.1.318 (Claude Code)" },

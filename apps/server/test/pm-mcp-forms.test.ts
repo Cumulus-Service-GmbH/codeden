@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -19,6 +19,7 @@ import { renderNotices } from "../src/services/orchestration/digest";
 import { deriveNotices, formServerOf } from "../src/services/orchestration/notices";
 import { SessionRepo } from "../src/services/sessions/repo";
 import { sampleSession } from "./helpers";
+import { removeTree } from "./support/remove-tree";
 
 /**
  * An MCP server's form in work the PM started (#235): its answers are data for an external tool,
@@ -134,9 +135,9 @@ describe("the PM and MCP servers' forms", () => {
     store.subscribe((batch) => events.push(...batch));
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     db.close();
-    rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+    await removeTree(dir);
   });
 
   it("refuses the form and leaves it open for the user, sending the server nothing", async () => {

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -14,6 +14,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type RunningServer, startServer } from "../src";
 import { sampleSession } from "./helpers";
+import { removeTree } from "./support/remove-tree";
 
 const TOKEN = "t".repeat(64);
 const auth = { authorization: `Bearer ${TOKEN}` };
@@ -36,7 +37,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await server.close();
-  rmSync(home, { recursive: true, force: true });
+  await removeTree(home);
 });
 
 const iso = (msAgo: number) => new Date(Date.now() - msAgo).toISOString();

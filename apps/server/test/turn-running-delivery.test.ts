@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { UserInput } from "@codeden/contracts";
@@ -15,6 +15,7 @@ import { Outbox } from "../src/services/sessions/outbox";
 import { SessionRepo } from "../src/services/sessions/repo";
 import { SessionService, type SessionServiceDeps } from "../src/services/sessions/session-service";
 import { sampleSession } from "./helpers";
+import { removeTree } from "./support/remove-tree";
 
 /**
  * Issue #96: a message delivered while a turn runs must be queued (or steered), never sent as a
@@ -37,9 +38,9 @@ beforeEach(() => {
   outbox = new Outbox(database.db, store);
 });
 
-afterEach(() => {
+afterEach(async () => {
   database.close();
-  rmSync(dir, { recursive: true, force: true });
+  await removeTree(dir);
 });
 
 const input = (text: string): UserInput => ({ text, attachments: [] });

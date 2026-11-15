@@ -36,7 +36,7 @@ describe("github auth", () => {
     ).rejects.toMatchObject({
       code: "github_not_connected",
     });
-    other.close();
+    await other.close();
   });
 
   it("asks gh again after a 401 and retries with the new token", async () => {

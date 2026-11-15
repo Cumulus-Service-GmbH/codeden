@@ -1,5 +1,5 @@
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { WhisperModelId } from "@codeden/contracts";
@@ -19,6 +19,7 @@ import {
   sha256,
   startFakeDownloads,
 } from "./support/fake-downloads";
+import { removeTree } from "./support/remove-tree";
 
 const ADDON = Buffer.from("fake whisper addon bytes");
 const TARBALL = makeTgz({ "package/package.json": Buffer.from("{}"), "package/index.node": ADDON });
@@ -64,7 +65,7 @@ describe("local Whisper service", () => {
     models = { "base.en": randomBytes(50_000), small: randomBytes(30_000) };
     for (const [id, body] of Object.entries(models)) fake.files.set(`/${id}.bin`, { body });
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => removeTree(dir));
 
   const runtimePin = (over: Partial<RuntimePin> = {}): RuntimePin => ({
     version: "9.9.9",

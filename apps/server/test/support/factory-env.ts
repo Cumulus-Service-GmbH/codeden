@@ -31,6 +31,7 @@ import type { SessionService } from "../../src/services/sessions/session-service
 import { SettingsStore } from "../../src/settings-store";
 import { sampleSession } from "../helpers";
 import { FakeFactoryGithub } from "./fake-factory-github";
+import { removeTree } from "./remove-tree";
 import { runClockFrom, TEST_START } from "./test-clock";
 
 /**
@@ -99,8 +100,8 @@ export interface FactoryEnv {
   /** Recreate the service over the same database (a server restart). */
   restart: () => FactoryService;
   updateProject: (patch: Partial<Project>) => Project;
-  /** Close the database and put back the process clock. */
-  close: () => void;
+  /** Close the database, put back the process clock and remove the temp folder. */
+  close: () => Promise<void>;
 }
 
 export function createFactoryEnv(
@@ -339,11 +340,11 @@ export function createFactoryEnv(
     store.append([{ type: "project.updated", sessionId: null, payload: { project: next } }]);
     return next;
   };
-  env.close = () => {
+  env.close = async () => {
     env.factory.stop();
     db.close();
-    rmSync(dir, { recursive: true, force: true });
     restoreClock();
+    await removeTree(dir);
   };
   return env;
 }

@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -7,6 +7,7 @@ import { ConfigFiles } from "../src/services/files/config-files";
 import { listDirectories, listRoots } from "../src/services/files/fs-browser";
 import { resolveInside } from "../src/services/files/path-guard";
 import type { ProjectService } from "../src/services/projects/project-service";
+import { removeTree } from "./support/remove-tree";
 
 let dir: string;
 
@@ -14,7 +15,7 @@ beforeEach(() => {
   dir = mkdtempSync(join(tmpdir(), "codeden-files-"));
 });
 
-afterEach(() => rmSync(dir, { recursive: true, force: true }));
+afterEach(() => removeTree(dir));
 
 const code = (fn: () => unknown) => {
   try {

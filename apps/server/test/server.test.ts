@@ -1,4 +1,4 @@
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { type RunningServer, startServer } from "../src";
 import { sampleSessionEvent } from "./helpers";
+import { removeTree } from "./support/remove-tree";
 
 const TOKEN = "t".repeat(64);
 let home: string;
@@ -34,7 +35,7 @@ beforeEach(async () => {
 
 afterEach(async () => {
   await server.close();
-  rmSync(home, { recursive: true, force: true });
+  await removeTree(home);
 });
 
 const auth = { authorization: `Bearer ${TOKEN}` };

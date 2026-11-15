@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -17,6 +17,7 @@ import { applyProjection } from "../src/events/projector";
 import { EventStore } from "../src/events/store";
 import { matchExpression, parseQuery, searchTranscripts } from "../src/services/search/search";
 import { sampleSession } from "./helpers";
+import { removeTree } from "./support/remove-tree";
 
 let dir: string;
 const opened: Database[] = [];
@@ -35,9 +36,9 @@ beforeEach(() => {
   store = new EventStore(database.db);
 });
 
-afterEach(() => {
+afterEach(async () => {
   for (const db of opened.splice(0)) db.close();
-  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await removeTree(dir);
 });
 
 /** A session with a root thread `t1` and a running turn `u1`. */

@@ -1,4 +1,4 @@
-import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ImageUsage, UsageSettings } from "@codeden/contracts";
@@ -9,6 +9,7 @@ import { EventStore } from "../src/events/store";
 import { ImageUsageStore, localDate } from "../src/services/images/usage";
 import { UsageService } from "../src/services/usage/usage-service";
 import { type FileReset, loadUserJsonFile } from "../src/user-json-file";
+import { removeTree } from "./support/remove-tree";
 
 /**
  * The other files in the data folder that hold the user's data and are written again later
@@ -21,9 +22,9 @@ beforeEach(() => {
   vi.spyOn(console, "warn").mockImplementation(() => {});
 });
 
-afterEach(() => {
+afterEach(async () => {
   vi.restoreAllMocks();
-  rmSync(dir, { recursive: true, force: true });
+  await removeTree(dir);
 });
 
 const copiesOf = (name: string) => readdirSync(dir).filter((n) => n.startsWith(`${name}.invalid-`));

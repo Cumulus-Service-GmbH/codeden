@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -14,6 +14,7 @@ import {
   parseGitHubRemote,
 } from "../src/services/projects/detect";
 import { ProjectService, redactUrls, slugify } from "../src/services/projects/project-service";
+import { removeTree } from "./support/remove-tree";
 
 describe("project detection helpers", () => {
   it("parses GitHub remotes in every common form", () => {
@@ -66,9 +67,9 @@ beforeEach(() => {
   });
 });
 
-afterEach(() => {
+afterEach(async () => {
   database.close();
-  rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
+  await removeTree(dir);
 });
 
 describe("ProjectService", () => {

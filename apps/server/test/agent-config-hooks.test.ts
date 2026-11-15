@@ -16,6 +16,7 @@ import { HookShelf } from "../src/services/agent-config/hook-shelf";
 import { AgentConfigHooks } from "../src/services/agent-config/hooks-service";
 import { setTopLevelMember } from "../src/services/agent-config/json-edit";
 import { notFound, ServiceError } from "../src/services/errors";
+import { removeTree } from "./support/remove-tree";
 
 function put(path: string, content: string): void {
   mkdirSync(dirname(path), { recursive: true });
@@ -103,7 +104,7 @@ describe("hooks in Claude Code settings files", () => {
       shelf: new HookShelf(join(dir, "data", "disabled-hooks.json")),
     });
   });
-  afterEach(() => rmSync(dir, { recursive: true, force: true }));
+  afterEach(() => removeTree(dir));
 
   it("lists hooks from the user, project and local files", () => {
     put(
