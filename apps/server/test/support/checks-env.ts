@@ -101,7 +101,10 @@ export interface ChecksEnv {
   hanging: () => boolean;
   /** Turns the provider has run so far: their ids are `u1`, `u2`, ... */
   turnCount: () => number;
-  /** A turn of the provider: the message it was sent (none for a compaction), then its end. */
+  /**
+   * A turn of the provider: the message it was sent, then its end. Without a message it is a
+   * compaction (`kind: "compact"`).
+   */
   turn: (sessionId: string, input: UserInput | null, end?: TurnEnd) => string;
   newSession: (checks?: SessionChecks) => string;
   /** The checks card of a turn. */
@@ -131,7 +134,8 @@ export function createChecksEnv(): ChecksEnv {
     const turnId = `u${++turnNo}`;
     agent(
       sessionId,
-      { type: "turn.started", threadId: T, turnId },
+      // A compaction is marked as the runner marks it (`SessionHost.compact`).
+      { type: "turn.started", threadId: T, turnId, ...(input ? {} : { kind: "compact" }) },
       ...(input
         ? [
             {

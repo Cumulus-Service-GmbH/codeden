@@ -52,12 +52,13 @@ interface ActiveRun {
  * "Keep going until checks pass" (§9 Project checks). After a root turn of an agent session
  * completes, when the session keeps going until checks pass, this runs the session's frozen
  * checks one by one on its runner, in its working directory, and shows them as a card in that
- * turn. When some fail and rounds are left, it sends them to the agent in a `codeden` message,
- * which starts the next round; when all pass, or the rounds run out, the session stays idle.
- * The round count is the session's (`SessionChecks.round`, kept by `SessionService` as messages
- * go out), so turns CodeDen starts itself never add rounds. Stop, a new message, stopping or
- * archiving the session end a run (`cancel`). Runs live in memory: after a restart, cards left
- * running are marked interrupted, and their checks are cancelled on the runner once it's ready.
+ * turn; a compaction changes no code, so none run after it. When some fail and rounds are left,
+ * it sends them to the agent in a `codeden` message, which starts the next round; when all
+ * pass, or the rounds run out, the session stays idle. The round count is the session's
+ * (`SessionChecks.round`, kept by `SessionService` as messages go out), so turns CodeDen starts
+ * itself never add rounds. Stop, a new message, stopping or archiving the session end a run
+ * (`cancel`). Runs live in memory: after a restart, cards left running are marked interrupted,
+ * and their checks are cancelled on the runner once it's ready.
  */
 export class ChecksLoop {
   private readonly runs = new Map<string, ActiveRun>();
@@ -124,7 +125,8 @@ export class ChecksLoop {
   /**
    * Run the checks after a completed turn, when the session keeps going until they pass. The
    * round is the session's count (`SessionChecks.round`), whatever started the turn; once the
-   * loop stopped at its cap, no turn runs them again until the count starts again (#412).
+   * loop stopped at its cap, no turn runs them again until the count starts again (#412). A
+   * compaction (Compact now, `kind: "compact"`) changes no code, so none run after it (#482).
    */
   private async afterTurn(sessionId: string, event: AgentEventOf<"turn.completed">): Promise<void> {
     if (this.stopped || this.runs.has(sessionId)) return;
@@ -133,6 +135,7 @@ export class ChecksLoop {
     if (!session || !checks || session.rootThreadId !== event.threadId) return;
     if (loopSkipReason(session) || this.deps.hasPendingMessage(sessionId)) return;
     if (checks.capReached) return;
+    if (this.deps.repo.turn(sessionId, event.turnId)?.kind === "compact") return;
     const run: ActiveRun = {
       threadId: event.threadId,
       turnId: event.turnId,

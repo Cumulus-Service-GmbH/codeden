@@ -6,6 +6,7 @@ import {
   type ChecksEnv,
   createChecksEnv,
   fail,
+  pass,
   T,
   until,
   usageLimit,
@@ -15,8 +16,8 @@ import {
 
 /**
  * The checks loop's round count (#412): only a new user message (or switching the loop off and
- * on) starts it again. Turns CodeDen starts itself (Compact now, auto-retry's and recovery's
- * "continue") never do, so the loop can't run past its cap unattended.
+ * on) starts it again. Turns CodeDen starts itself (auto-retry's and recovery's "continue")
+ * never do, so the loop can't run past its cap unattended; Compact now runs no checks (#482).
  */
 
 let c: ChecksEnv;
@@ -58,6 +59,20 @@ describe("the checks loop's round count (#412)", () => {
     expect(c.env.repo.get(id).status).toBe("idle");
   });
 
+  it("runs no checks after a Compact now turn: it changes no code (#482)", async () => {
+    c.script.set("pnpm test", [pass()]);
+    const id = c.newSession();
+    const first = c.turn(id, user("Add the feature"));
+    await until(c.ended(id, first));
+    expect(c.card(id, first)?.data.outcome).toBe("passed");
+    expect(c.checkRuns()).toEqual(["pnpm typecheck", "pnpm test"]);
+    expect(await c.sessions.compact(id)).toEqual({ status: "compacting" });
+    await settle(2);
+    expect(c.env.repo.turn(id, "u2")?.kind).toBe("compact");
+    expect(c.card(id, "u2")).toBeUndefined();
+    expect(c.checkRuns()).toEqual(["pnpm typecheck", "pnpm test"]);
+  });
+
   it("starts no new round after a restart's continue at the cap", async () => {
     const id = await atTheCap();
     await c.sessions.continueAfterRestart(id, RESTART_CONTINUE_MESSAGE);
@@ -95,7 +110,8 @@ describe("the checks loop's round count (#412)", () => {
     await c.sessions.update(id, { untilChecksPass: false });
     await c.sessions.update(id, { untilChecksPass: true });
     expect(c.env.repo.get(id).checks?.round).toBeUndefined();
-    await c.sessions.compact(id);
+    // A turn CodeDen starts itself keeps the count, so its checks run as round 0 again.
+    await c.sessions.continueAfterRestart(id, RESTART_CONTINUE_MESSAGE);
     await until(() => rounds().length === 3);
     expect(c.card(id, "u4")?.data.round).toBe(0);
     expect(rounds()).toEqual([1, 2, 1]);

@@ -23,7 +23,7 @@ export interface CompactBusy {
   queued: number;
   /**
    * The project's checks are running after the last turn (§9). A compaction would end their run
-   * and lose what they report, and its own turn must not start another round (#412).
+   * and lose what they report; its own turn runs no checks (#412, #482).
    */
   checking?: boolean;
 }

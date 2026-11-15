@@ -63,9 +63,9 @@ export function withLoopSetting(
 /**
  * The loop's round count once a message from `from` is on its way to the session (#412): the
  * loop's own message carries the round it starts (`checksRound`); CodeDen's other messages (an
- * automatic "continue", pull request feedback) keep the count, like Compact now, so no turn
- * CodeDen starts itself gives the loop more rounds; a message from anyone else (the user, a
- * PM, the factory) starts it again. Undefined when the count stays as it is.
+ * automatic "continue", pull request feedback) keep the count, and Compact now runs no checks
+ * (#482), so no turn CodeDen starts itself gives the loop more rounds; a message from anyone
+ * else (the user, a PM, the factory) starts it again. Undefined when the count stays as it is.
  */
 export function roundAfter(input: UserInput, from: MessageSender): number | undefined {
   if (input.checksRound !== undefined) return input.checksRound;
