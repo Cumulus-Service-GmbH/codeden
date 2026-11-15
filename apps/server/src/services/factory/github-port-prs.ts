@@ -78,7 +78,8 @@ const DIFF_KEYS_KEPT = 64;
  * against its merge base, provably that head's, never a newer one's that came between two
  * reads (the PR's file listing names no commit). Kept in `cache` per head. Null when it can't be
  * told: GitHub doesn't know the commit (404, 422), lists 300 files or more, or sends a file
- * without a patch; any other error is thrown, so the verify step reads the PR again later.
+ * with neither a patch nor a blob sha; any other error is thrown, so the verify step reads the
+ * PR again later.
  */
 export async function diffKeyAt(
   github: GithubService,
@@ -96,6 +97,7 @@ export async function diffKeyAt(
     previous_filename?: string;
     status: string;
     patch?: string;
+    sha?: string | null;
   }>;
   try {
     listed = await github.client.run(
@@ -119,6 +121,7 @@ export async function diffKeyAt(
     ...(f.previous_filename ? { previousPath: f.previous_filename } : {}),
     status: f.status,
     patch: f.patch ?? null,
+    sha: f.sha ?? null,
   }));
   const value = listed.length >= COMPARE_FILE_LIMIT ? null : prDiffKey(files, files.length);
   cache.set(key, value);

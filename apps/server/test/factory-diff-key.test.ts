@@ -1,8 +1,12 @@
+import { ReviewVerdict } from "@codeden/contracts";
 import { describe, expect, it } from "vitest";
 import { ServiceError } from "../src/services/errors";
+import { settleApproval, verdictHead } from "../src/services/factory/approval";
 import { type PatchedFile, prDiffKey } from "../src/services/factory/diff-key";
 import { GithubFactoryPort } from "../src/services/factory/github-port";
+import { recheckOf } from "../src/services/factory/recheck";
 import type { GithubService } from "../src/services/github/github-service";
+import { APPROVE } from "./support/factory-steps";
 
 /**
  * The fingerprint of what a PR itself changes (#322): an approval carries over to a new head
@@ -47,9 +51,55 @@ describe("prDiffKey", () => {
     expect(prDiffKey([file(PATCH), file("@@ -0,0 +1 @@\n+x", { path: "b.ts" })], 2)).not.toBe(key);
   });
 
-  it("can't tell without every file's patch", () => {
+  it("can't tell without every file, or a file's patch or blob", () => {
     expect(prDiffKey([file(PATCH), file(null, { path: "logo.png" })], 2)).toBeNull();
     expect(prDiffKey([file(PATCH)], 3001)).toBeNull();
+  });
+});
+
+/** A blob sha at the PR's head, as GitHub lists it per file. */
+const blob = (c: string) => c.repeat(40);
+const SNAPSHOT_PATH = "apps/server/drizzle/20261115071050_turn_kind/snapshot.json";
+
+/**
+ * A file GitHub sends no patch for (too large, binary; every migration's `snapshot.json`, #456)
+ * is fingerprinted by its blob at the head, so an update-branch that leaves it alone keeps the
+ * approval, and any change to its content owes a re-check.
+ */
+describe("prDiffKey with a file GitHub sends no patch for", () => {
+  const snapshot = (sha: string | null) =>
+    file(null, { path: SNAPSHOT_PATH, status: "added", sha });
+  const moved = PATCH.replace("@@ -10,6 +10,7 @@ export function get(url) {", "@@ -42,6 +43,7 @@");
+
+  it("tells an added one by its blob: the same key before and after an update-branch", () => {
+    const before = prDiffKey([file(PATCH), snapshot(blob("a"))], 2);
+    expect(before).toMatch(/^[0-9a-f]{24}$/);
+    expect(prDiffKey([snapshot(blob("a")), file(moved)], 2)).toBe(before);
+  });
+
+  it("changes the key when its content (blob) changes", () => {
+    const key = prDiffKey([file(PATCH), snapshot(blob("a"))], 2);
+    expect(key).not.toBeNull();
+    expect(prDiffKey([file(PATCH), snapshot(blob("b"))], 2)).not.toBe(key);
+  });
+
+  it("gives a modified or renamed one a key that moves with its content at the head", () => {
+    const at = (sha: string, extra: Partial<PatchedFile>) =>
+      prDiffKey([file(PATCH), file(null, { path: "assets/logo.png", sha, ...extra })], 2);
+    for (const extra of [
+      { status: "modified" },
+      { status: "renamed", previousPath: "assets/old-logo.png" },
+    ]) {
+      const key = at(blob("a"), extra);
+      expect(key).toMatch(/^[0-9a-f]{24}$/);
+      expect(at(blob("a"), extra)).toBe(key);
+      expect(at(blob("b"), extra)).not.toBe(key);
+    }
+  });
+
+  it("still can't tell from a file list GitHub cut short, or without its blob", () => {
+    expect(prDiffKey([file(PATCH), snapshot(blob("a"))], 3001)).toBeNull();
+    expect(prDiffKey([file(PATCH), snapshot(null)], 2)).toBeNull();
   });
 });
 
@@ -58,6 +108,7 @@ interface CompareFile {
   filename: string;
   status: string;
   patch?: string;
+  sha?: string | null;
 }
 
 const AT_A: CompareFile[] = [
@@ -77,7 +128,7 @@ const keyOf = (files: CompareFile[]) =>
  * A GitHub whose PR read says head `A` while its file listing already shows a push (B): the two
  * are separate requests, and a push can land between them. Compares answer per commit.
  */
-function racingGithub(filesAt: Record<string, CompareFile[] | Error>) {
+function racingGithub(filesAt: Record<string, CompareFile[] | Error>, headSha = "A") {
   const compares: string[] = [];
   const github = {
     githubRepo: () => ({ owner: "acme", repo: "app", defaultBranch: "main" }),
@@ -87,7 +138,7 @@ function racingGithub(filesAt: Record<string, CompareFile[] | Error>) {
       state: "open",
       title: "Harden fetch",
       body: "",
-      headSha: "A",
+      headSha,
       headBranch: "codeden/fetch",
       baseBranch: "main",
       checks: { state: "success", checks: [] },
@@ -147,5 +198,58 @@ describe("the fingerprint the factory reads", () => {
     await expect(racingGithub({ A: limited }).port.prDetails("p-app", 7)).rejects.toThrow(
       /rate limited/,
     );
+  });
+
+  it("keeps a PR with a migration approved across an update-branch (PR #440, #456)", async () => {
+    // GitHub sends no patch for the migration's snapshot.json, and one for every other file.
+    const snapshot: CompareFile = { filename: SNAPSHOT_PATH, status: "added", sha: blob("5") };
+    const sql: CompareFile = {
+      filename: "apps/server/drizzle/20261115071050_turn_kind/migration.sql",
+      status: "added",
+      patch: "@@ -0,0 +1 @@\n+ALTER TABLE `turns` ADD `kind` text;",
+      sha: blob("6"),
+    };
+    const design: CompareFile = {
+      filename: "docs/DESIGN.md",
+      status: "modified",
+      patch: "@@ -100,2 +100,3 @@ ## Turns\n Turns run one at a time.\n+A turn has a kind.",
+      sha: blob("7"),
+    };
+    // B: update-branch merged main in, which changed DESIGN.md above the PR's lines only.
+    const designAtB = { ...design, patch: design.patch?.replace("-100,2 +100,3", "-112,2 +112,3") };
+    const atA = racingGithub({ A: [snapshot, sql, design] }, "A");
+    const atB = racingGithub({ B: [snapshot, sql, { ...designAtB, sha: blob("8") }] }, "B");
+    const keyA = (await atA.port.prDetails("p-app", 440)).diffKey ?? null;
+    const keyB = (await atB.port.prDetails("p-app", 440)).diffKey ?? null;
+    expect(keyA).toMatch(/^[0-9a-f]{24}$/);
+    expect(keyB).toBe(keyA);
+
+    // The approval of A carries over to B: no re-check of "the new commits" is owed.
+    const T = "2026-11-15T07:42:00.000Z";
+    const seenA = { head_A: T, verdict_A: T, asked_A: T, [`diff_A:${keyA}`]: T };
+    const approved = ReviewVerdict.parse(APPROVE);
+    const next = settleApproval(
+      seenA,
+      { ...seenA, head_B: T },
+      { headSha: "B", diffKey: keyB },
+      approved,
+      T,
+    );
+    expect(verdictHead({ nudges: next })).toBe("B");
+    expect(recheckOf({ nudges: next })).toBeNull();
+
+    // A new blob for the snapshot (its content changed) is the PR's own change: re-check it.
+    const atC = racingGithub({ C: [{ ...snapshot, sha: blob("9") }, sql, design] }, "C");
+    const keyC = (await atC.port.prDetails("p-app", 440)).diffKey ?? null;
+    expect(keyC).not.toBe(keyA);
+    const changed = settleApproval(
+      seenA,
+      { ...seenA, head_C: T },
+      { headSha: "C", diffKey: keyC },
+      approved,
+      T,
+    );
+    expect(verdictHead({ nudges: changed })).toBe("A");
+    expect(recheckOf({ nudges: changed })).toBe("A");
   });
 });
