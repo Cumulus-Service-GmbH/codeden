@@ -1,4 +1,4 @@
-import type { ProviderInfo, Session } from "@codeden/contracts";
+import type { ProviderInfo, Session, Turn } from "@codeden/contracts";
 import { conflict, type ServiceError } from "../errors";
 import { type RunnerPort, runnerErrorCode, toServiceError } from "../runner-port";
 import type { SessionLauncher } from "./launcher";
@@ -62,14 +62,22 @@ export function compactRefusal(
   return null;
 }
 
+/** The session's latest root turn, when it is a compaction (whatever came of it). */
+export function lastCompaction(
+  repo: Pick<SessionRepo, "rootTurnIds" | "turn">,
+  session: Session,
+): Turn | null {
+  const last = repo.rootTurnIds(session).at(-1);
+  const turn = last ? repo.turn(session.id, last) : null;
+  return turn?.kind === "compact" ? turn : null;
+}
+
 /** Whether the session's latest root turn is a compaction that is still running. */
 export function compactionRunning(
   repo: Pick<SessionRepo, "rootTurnIds" | "turn">,
   session: Session,
 ): boolean {
-  const last = repo.rootTurnIds(session).at(-1);
-  const turn = last ? repo.turn(session.id, last) : null;
-  return turn?.status === "running" && turn.kind === "compact";
+  return lastCompaction(repo, session)?.status === "running";
 }
 
 /** The answer to a steer that arrives during a compaction (the runner says the same). */

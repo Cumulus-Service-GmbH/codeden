@@ -29,6 +29,9 @@ describe("session recovery", () => {
         return session ? { session } : undefined;
       },
       closeOrphanedTurns: vi.fn(() => 0),
+      // Their cut-off turns are work turns (a cut-off compaction: compaction-restart.test.ts).
+      rootTurnIds: () => [],
+      turn: () => null,
     } as unknown as SessionRepo;
     const continueAfterRestart = vi.fn(async (_id: string, _text: string): Promise<void> => {});
     // Sessions with a message, Retry or queued delivery on its way to the runner.

@@ -1,6 +1,7 @@
 import type { ProviderInfo, Session } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import { type RunnerDeps, type RunnerPort, runnerForSession } from "../runner-port";
+import { lastCompaction } from "./compact";
 import type { SessionLauncher } from "./launcher";
 import { isTurnRunningError } from "./outbox-holds";
 import type { SessionRepo } from "./repo";
@@ -30,8 +31,9 @@ const isCutOff = (status: string) => (CUT_OFF as readonly string[]).includes(sta
 
 /**
  * After a runner (re)connects: resume its sessions whose turn was cut off by a runner drain,
- * restart or crash, with an automatic "continue" message, and deliver messages that were
- * queued before a server restart. Idle sessions are resumed lazily on their next message.
+ * restart or crash, with an automatic "continue" message (not when that turn was a compaction:
+ * those go idle), and deliver messages that were queued before a server restart. Idle sessions
+ * are resumed lazily on their next message.
  * Only sessions that runner hosts (`sessions.runnerId`, else the home runner) are touched.
  */
 export class SessionRecovery {
@@ -92,10 +94,13 @@ export class SessionRecovery {
       // first, so a dead approval can't keep the resumed session waiting.
       repo.closeOrphanedTurns(id);
       const session = repo.find(id)?.session;
-      if (session && isCutOff(session.status)) {
-        await this.resume(session, runner.providers());
-        hosted = undefined;
+      if (!session || !isCutOff(session.status)) continue;
+      if (lastCompaction(repo, session)) {
+        this.settleCompaction(session);
+        continue;
       }
+      await this.resume(session, runner.providers());
+      hosted = undefined;
     }
 
     sessions.releaseOutboxes(onThisRunner);
@@ -144,6 +149,17 @@ export class SessionRecovery {
       this.deps.log?.(`recovery: runner status failed: ${errorMessage(error)}`);
       return undefined;
     }
+  }
+
+  /**
+   * The turn cut off was a compaction ("Compact now", or the factory's before a scout round):
+   * there is no task to continue, and "continue where you left off" would re-run the finished
+   * one before it. The session goes idle, as after a failed compaction; compacting again is up
+   * to the user, and messages queued behind it (a round's brief) are delivered next.
+   */
+  private settleCompaction(session: Session): void {
+    this.deps.log?.(`recovery: session ${session.id} was cut off while compacting; left idle`);
+    this.deps.repo.update(session.id, (s) => (isCutOff(s.status) ? { ...s, status: "idle" } : s));
   }
 
   private async resume(session: Session, providers: ProviderInfo[]): Promise<void> {
