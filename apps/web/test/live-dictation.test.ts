@@ -24,6 +24,7 @@ const audio = (...parts: Float32Array[]) => {
   return out;
 };
 const ms = (n: number, rate = RATE) => (rate * n) / 1000;
+const lengthsMs = (segments: Float32Array[]) => segments.map((s) => (s.length * 1000) / RATE);
 
 function deferred<T>() {
   let resolve: (value: T) => void = () => {};
@@ -78,7 +79,6 @@ describe("dictation segmenter", () => {
   it("learns a room louder than the minimum threshold from the start, so its hum isn't speech", () => {
     // A fan or air conditioner: about 0.028 RMS, above the 0.01 that is always silence.
     const room = (ms: number) => samples(ms, RATE, 0.04, 50);
-    const lengthsMs = (segments: Float32Array[]) => segments.map((s) => (s.length * 1000) / RATE);
     const hum = createSegmenter({ sampleRate: RATE });
     expect(lengthsMs(hum.push(room(3000)))).toEqual([]);
     expect(lengthsMs(hum.flush())).toEqual([]);
@@ -95,6 +95,30 @@ describe("dictation segmenter", () => {
     expect(lengthsMs(late.push(audio(startup, room(1000), speech(800), room(1000))))).toEqual([
       200 + 800 + 300,
     ]);
+  });
+
+  it("hears soft speech already under way when the microphone opens, from its first word", () => {
+    // Speaking softly (about 0.035 RMS, under the 0.05 threshold the capped seed allows) from
+    // the first frame, in words with short gaps, in a quiet room.
+    const soft = (ms: number, amp = 0.05) => samples(ms, RATE, amp, 220);
+    const segmenter = createSegmenter({ sampleRate: RATE });
+    const segments = segmenter.push(
+      audio(soft(400), quiet(100), soft(400), quiet(100), soft(400), quiet(1000)),
+    );
+    // The whole phrase from its first word (nothing before it to lead in), with its tail.
+    expect(lengthsMs(segments)).toEqual([400 + 100 + 400 + 100 + 400 + 300]);
+    const first = segments[0] ?? new Float32Array();
+    expect(rms(first.subarray(0, ms(200)))).toBeGreaterThan(0.03);
+    expect(lengthsMs(segmenter.flush())).toEqual([]);
+
+    // A single softer word (about 0.02 RMS) is sent too, once the silence after it shows the room.
+    const word = createSegmenter({ sampleRate: RATE });
+    expect(lengthsMs(word.push(audio(soft(500, 0.03), quiet(1000))))).toEqual([500 + 300]);
+
+    // Only the start is judged again: a loud room that goes quiet later wasn't speech.
+    const room = createSegmenter({ sampleRate: RATE });
+    expect(lengthsMs(room.push(audio(samples(3000, RATE, 0.04, 50), quiet(1000))))).toEqual([]);
+    expect(lengthsMs(room.flush())).toEqual([]);
   });
 
   it("flushes the segment still open when dictation stops mid-phrase", () => {

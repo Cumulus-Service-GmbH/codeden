@@ -5,9 +5,11 @@
  *
  * Speech is told from silence by the energy (RMS) of each short frame, against a threshold that
  * follows the room's noise floor, seeded from the first audio so a noisy room isn't taken for
- * speech while the floor learns it. A segment keeps a short lead-in before its first speech and
- * a short tail after its last, so words aren't clipped. One with too little speech is dropped,
- * so silence and clicks never reach Whisper, which tends to invent text for silence.
+ * speech while the floor learns it. When the first gap between words shows that soft speech set
+ * the seed, the audio so far is judged again, so the first word isn't lost. A segment keeps a
+ * short lead-in before its first speech and a short tail after its last, so words aren't
+ * clipped. One with too little speech is dropped, so silence and clicks never reach Whisper,
+ * which tends to invent text for silence.
  */
 
 export interface SegmenterOptions {
@@ -56,6 +58,13 @@ const SEED_MS = 200;
  * heard (its threshold is at most 2.5 x 0.02 = 0.05 RMS). A louder room is learned from there.
  */
 const SEED_MAX = 0.02;
+/**
+ * For this long after the floor is seeded, until a segment is sent, every frame is kept. Softer
+ * speech already under way set the seed itself and stays under it; the first gap between words
+ * drops the floor, and once audio judged silent would count as speech against the lower floor,
+ * all of it is judged again, so the first word isn't lost. In ms.
+ */
+const RECHECK_MS = 2_000;
 
 export interface Segmenter {
   /** Add samples; returns the segments they finished (usually none). */
@@ -114,6 +123,10 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
   let level = 0;
   /** The first frames, held until they seed the noise floor; null once it is seeded. */
   let seed: Omit<Frame, "speech">[] | null = [];
+  /** Every frame judged so far, while they can still be judged again (`RECHECK_MS`); else null. */
+  let history: Frame[] | null = [];
+  /** Frames after the seed that may still have the start judged again. */
+  let recheckLeft = frames(RECHECK_MS);
   /** Recent silent frames while no segment is open: the next segment's lead-in. */
   let leadIn: Frame[] = [];
   /** The open segment; empty when none is open. */
@@ -142,13 +155,16 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
     return speech >= minSpeechFrames ? concat(done) : null;
   };
 
+  const threshold = () => Math.max(o.minThreshold, noise * NOISE_RATIO);
+
   /** Judge one frame against the floor; returns the segment it finished, if any. */
   const step = (samples: Float32Array, r: number, learn: boolean): Float32Array | null => {
-    const speech = r > Math.max(o.minThreshold, noise * NOISE_RATIO);
+    const speech = r > threshold();
     // The floor drops to quiet frames at once and rises slowly, so it follows the room (the
     // quiet between words), not the voice.
     if (learn) noise = r < noise ? noise + (r - noise) * 0.5 : noise + (r - noise) * noiseRise;
     const f: Frame = { samples, speech, rms: r };
+    history?.push(f);
     if (open.length === 0) {
       if (!speech) {
         leadIn.push(f);
@@ -159,9 +175,34 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
       leadIn = [];
     }
     open.push(f);
-    if (trailingSilence(open) >= pauseFrames) return close();
-    if (open.length >= maxFrames) return cut();
-    return null;
+    const segment =
+      trailingSilence(open) >= pauseFrames ? close() : open.length >= maxFrames ? cut() : null;
+    // Audio already sent is never judged again.
+    if (segment) history = null;
+    return segment;
+  };
+
+  /**
+   * The floor has dropped (a gap between words) below audio already judged silent: soft speech
+   * set the seed. Judge every frame so far again against the floor as it is now.
+   */
+  const recheck = (out: Float32Array[]) => {
+    if (!history) return;
+    if (--recheckLeft < 0) {
+      history = null;
+      return;
+    }
+    const now = threshold();
+    if (!history.some((f) => !f.speech && f.rms > now)) return;
+    const heard = history;
+    history = [];
+    leadIn = [];
+    open = [];
+    // They were learned from already, so they don't move the floor again.
+    for (const f of heard) {
+      const segment = step(f.samples, f.rms, false);
+      if (segment) out.push(segment);
+    }
   };
 
   /** Seed the floor from the held frames, then judge them against it. */
@@ -188,6 +229,8 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
     }
     const segment = step(samples, r, true);
     if (segment) out.push(segment);
+    // Only a seeded floor can have been set by speech (startup zeros come before the seed).
+    if (!seed) recheck(out);
   };
 
   return {
@@ -222,6 +265,7 @@ export function createSegmenter(options: SegmenterOptions): Segmenter {
         if (segment) out.push(segment);
       }
       leadIn = [];
+      history = null;
       return out;
     },
   };
