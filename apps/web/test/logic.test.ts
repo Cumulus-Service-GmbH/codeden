@@ -153,6 +153,11 @@ describe("shortcuts", () => {
     );
     expect(matchesCombo(key({ key: "¡", code: "Digit1", altKey: true }), "alt+1")).toBe(true);
     expect(matchesCombo(key({ key: "\\", code: "Backslash", ctrlKey: true }), "mod+\\")).toBe(true);
+    // The space bar, as Settings records it (push-to-talk).
+    const space = key({ key: " ", code: "Space", ctrlKey: true, shiftKey: true });
+    expect(matchesCombo(space, "mod+shift+space")).toBe(true);
+    expect(matchesCombo(space, "mod+shift+s")).toBe(false);
+    expect(matchesCombo(key({ key: " ", code: "Space" }), "mod+shift+space")).toBe(false);
   });
 });
 
