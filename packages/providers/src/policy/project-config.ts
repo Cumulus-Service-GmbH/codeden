@@ -4,44 +4,70 @@ import { type PathContext, resolveAgainst } from "./paths";
 import type { SimpleCommand } from "./shell";
 
 /**
- * CodeDen's project config, `.codeden/project.json` (§9): its `setup` commands run in every new
- * worktree and its `checks` are what sessions run after each turn. An agent that rewrites it
- * would choose commands CodeDen runs outside the approval flow, for later sessions once it is
- * merged. A running session's checks are frozen when it is created and never read from its
- * worktree, so the edit can't reach it; still, writing the file is a risk that Supervised and
- * Auto ask about (Full, with no approvals inside the worktree, runs it). Reads don't ask.
+ * CodeDen's files in a project's `.codeden` folder that decide what CodeDen itself runs:
+ * - `project.json` (§9): its `setup` commands run in every new worktree and its `checks` are
+ *   what sessions run after each turn.
+ * - `automations/*.md` (§10): each project automation's prompt, permission level and schedule.
+ * - `VISION.md` (§10.1): the factory's vision, including its protected areas.
+ * An agent that rewrites one would choose what CodeDen runs or allows outside the approval
+ * flow, for later sessions once it is merged. A running session's checks are frozen when it is
+ * created, and an automation whose file changes what it does is switched off until a person
+ * switches it on again; still, writing these files is a risk that Supervised and Auto ask about
+ * (Full, with no approvals inside the worktree, runs it). Reads don't ask.
  */
 
-/** Whether `target` is `.codeden/project.json`, or the `.codeden` folder a copy may land in. */
-export function isProjectConfigPath(target: string, ctx: PathContext): boolean {
+type CodedenFile = "config" | "automation" | "vision";
+
+/** Which of CodeDen's files `target` is, or the folder (`.codeden`, `.codeden/automations`) a copy may land in. */
+function codedenFileOf(target: string, ctx: PathContext): CodedenFile | undefined {
   const parts = resolveAgainst(target, ctx)
     .replace(/\\/g, "/")
     .toLowerCase()
     .split("/")
     .filter(Boolean);
   const base = parts.at(-1) ?? "";
-  return base === ".codeden" || (base === "project.json" && parts.at(-2) === ".codeden");
+  if (base === ".codeden") return "config";
+  const dot = parts.lastIndexOf(".codeden");
+  if (dot === -1) return undefined;
+  const inside = parts.slice(dot + 1);
+  if (inside[0] === "automations") return "automation";
+  if (inside.length !== 1) return undefined;
+  if (base === "project.json") return "config";
+  if (base === "vision.md") return "vision";
+  return undefined;
 }
 
-/** The verdict on writing CodeDen's project config. */
-export function projectConfigRisk(target: string): RiskAssessment {
-  return risky(
-    "file_change",
+/** Whether `target` is one of CodeDen's protected `.codeden` files, or a folder they live in. */
+export function isProjectConfigPath(target: string, ctx: PathContext): boolean {
+  return codedenFileOf(target, ctx) !== undefined;
+}
+
+const REASONS: Record<CodedenFile, (target: string) => string> = {
+  config: (target) =>
     `Changes CodeDen's project config (${target}): its setup and check commands run in later sessions`,
-  );
+  automation: (target) =>
+    `Changes a CodeDen automation file (${target}): what an automation runs, with which permissions and when`,
+  vision: (target) =>
+    `Changes the project's vision (${target}): it sets what the factory builds and its protected areas`,
+};
+
+/** The verdict on writing one of CodeDen's protected files (the project config by default). */
+export function projectConfigRisk(target: string, file: CodedenFile = "config"): RiskAssessment {
+  return risky("file_change", REASONS[file](target));
 }
 
-/** The verdict on writing `target` when it is CodeDen's project config, else undefined. */
+/** The verdict on writing `target` when it is one of CodeDen's protected files, else undefined. */
 export function projectConfigWrite(target: string, ctx: PathContext): RiskAssessment | undefined {
-  return isProjectConfigPath(target, ctx) ? projectConfigRisk(target) : undefined;
+  const file = codedenFileOf(target, ctx);
+  return file ? projectConfigRisk(target, file) : undefined;
 }
 
-/** The project config named in code (`'.codeden/project.json'`). */
-const MENTION = /\.codeden[\\/]+project\.json/i;
+/** A protected file named in code (`'.codeden/project.json'`, `.codeden/automations/x.md`). */
+const MENTION = /\.codeden[\\/]+(?:(project\.json)|(vision\.md)|(automations)(?![\w.-]))/i;
 
 /**
- * One simple command's write of CodeDen's project config: a redirect, inline interpreter code
- * that names it, or a writing command's argument (`tee`, `cp`, `sed -i`, `Set-Content`,
+ * One simple command's write of CodeDen's protected files: a redirect, inline interpreter code
+ * that names one, or a writing command's argument (`tee`, `cp`, `sed -i`, `Set-Content`,
  * `git checkout -- .codeden/project.json`, ...).
  */
 export function projectConfigCommand(
@@ -52,7 +78,9 @@ export function projectConfigCommand(
     write: (path) => projectConfigWrite(path, ctx),
     mention: (code) => {
       const named = MENTION.exec(code);
-      return named ? projectConfigRisk(named[0]) : undefined;
+      if (!named) return undefined;
+      const file: CodedenFile = named[1] ? "config" : named[2] ? "vision" : "automation";
+      return projectConfigRisk(named[0], file);
     },
   });
 }

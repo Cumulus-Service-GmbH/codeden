@@ -92,13 +92,13 @@ describe("CodeDen's project config (#371)", () => {
       "git diff -- .codeden/project.json",
       "git add .codeden/project.json",
       "ls .codeden",
-      "echo vision > .codeden/VISION.md",
+      "echo note >> .codeden/notes.md",
       "pnpm test",
     ]) {
       expect(classifyCommand(command, posix).risky, command).toBe(false);
     }
     expect(classifyRead(".codeden/project.json", posix).risky).toBe(false);
-    expect(classifyWrite(".codeden/VISION.md", posix).risky).toBe(false);
+    expect(classifyWrite(".codeden/notes.md", posix).risky).toBe(false);
     expect(classifyWrite("src/project.json", posix).risky).toBe(false);
   });
 });
