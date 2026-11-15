@@ -219,6 +219,41 @@ describe("the right panel of a session without a worktree (#409)", () => {
     expect(within(diff).queryByRole("button", { name: "Refresh diff" })).toBeNull();
   });
 
+  it("says Not a git repository when the diff answers not_a_repo before git status does (#477)", async () => {
+    // The server answers a non-git project folder's diff with `not_a_repo` (#452); git status
+    // goes to the runner and can take longer, so the diff's answer may come first.
+    let failStatus: (error: unknown) => void = () => {};
+    const status = new Promise<never>((_, reject) => {
+      failStatus = reject;
+    });
+    const client = clientWith(IN_PLACE, {
+      gitStatus: () => status,
+      getDiff: async () => {
+        throw new ApiRequestError(
+          409,
+          "not_a_repo",
+          `${IN_PLACE.cwd} is not a git repository, so CodeDen keeps no checkpoints of this session`,
+        );
+      },
+    });
+    await renderShell(IN_PLACE.id, client);
+    act(() => useLayoutStore.getState().openRightTab("diff"));
+
+    const diff = await screen.findByTestId("diff-panel");
+    // Once the diff has answered, with git status still pending.
+    await waitFor(() =>
+      expect(diff.textContent).toMatch(/Not a git repository|Couldn't load the diff/),
+    );
+    expect(diff.textContent).not.toContain("Couldn't load the diff");
+    expect(within(diff).getByText("Not a git repository")).toBeTruthy();
+    expect(within(diff).queryByRole("button", { name: "Refresh diff" })).toBeNull();
+
+    await act(async () => {
+      failStatus(new ApiRequestError(409, "not_a_repo", `${IN_PLACE.cwd} is not a git repository`));
+    });
+    expect(within(diff).getByText("Not a git repository")).toBeTruthy();
+  });
+
   it("opens a subagent in the panel, as a subagent card's Open does", async () => {
     await renderShell(IN_PLACE.id, inPlaceClient());
     act(() => useLayoutStore.getState().openChildThread(IN_PLACE.id, "t-research-1"));
