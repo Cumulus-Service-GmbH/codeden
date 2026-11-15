@@ -13,6 +13,9 @@ import {
   FactoryStatus,
   FactoryTuning,
   FactoryTuningPatch,
+  HELD_FOLLOW_UP_DAYS,
+  HELD_FOLLOW_UPS_MAX,
+  HeldFollowUp,
   isFactoryMode,
   KillSwitchRequest,
   KillSwitchResponse,
@@ -470,6 +473,80 @@ describe("factory API contracts (§10.1)", () => {
     expect(FactoryFileFollowUpRequest.safeParse({ index: -1 }).success).toBe(false);
     expect(sameFollowUpTitle(" Fix  the Runner ", "fix the runner")).toBe(true);
     expect(sameFollowUpTitle("Fix the runner", "Fix the web")).toBe(false);
+  });
+
+  it("round-trips follow-ups held for the scout, in the status and the digest (#435)", () => {
+    // A follow-up held, then filed, and one dropped from the held list.
+    const merged = FactoryItem.parse({
+      ...item,
+      stage: "merged",
+      followUps: [
+        {
+          title: "Debounce the save",
+          severity: "low",
+          heldAt: ts,
+          filedAt: ts,
+          issue: { number: 14, url: "https://github.com/acme/app/issues/14" },
+        },
+        { title: "Rename the helper", heldAt: ts, dropped: { reason: "expired", at: ts } },
+      ],
+    });
+    expect(FactoryItem.parse(JSON.parse(JSON.stringify(merged)))).toEqual(merged);
+    expect(merged.followUps[1]?.dropped).toEqual({ reason: "expired", at: ts });
+    expect(
+      FactoryItem.safeParse({
+        ...merged,
+        followUps: [{ title: "x", heldAt: ts, dropped: { reason: "forgotten", at: ts } }],
+      }).success,
+    ).toBe(false);
+    // The scout's held list: each with its source (item, position, PR), title, severity and area.
+    const held = {
+      id: "fu-i1-2",
+      title: "Rename the helper",
+      severity: null,
+      area: "web",
+      itemId: "i1",
+      index: 1,
+      itemTitle: "Add a counter",
+      pr: { number: 12, url: "https://github.com/acme/app/pull/12", state: "merged" },
+      heldAt: ts,
+    } as const;
+    const scout = ScoutStatus.parse({
+      phase: "idle",
+      sessionId: null,
+      lenses: [],
+      findings: 0,
+      filed: 0,
+      lastRoundAt: null,
+      nextRoundAt: null,
+      rounds: 0,
+      heldFollowUps: [held],
+    });
+    expect(ScoutStatus.parse(JSON.parse(JSON.stringify(scout)))).toEqual(scout);
+    expect(scout.heldFollowUps[0]).toEqual(held);
+    expect(HeldFollowUp.safeParse({ ...held, index: -1 }).success).toBe(false);
+    // A status from before #435 holds none; a digest from before counts nothing.
+    expect(ScoutStatus.parse({ ...scout, heldFollowUps: undefined }).heldFollowUps).toEqual([]);
+    const digest = FactoryDigest.parse({
+      id: "d1",
+      projectId: "p1",
+      day: "2026-11-15",
+      shipped: [],
+      rejected: [],
+      spend: { usd: 0, tokens: 0, budgetUsd: null, budgetTokens: null },
+      waiting: [],
+      text: "",
+      createdAt: ts,
+    });
+    expect(digest.followUps).toEqual({ held: 0, filed: 0, dropped: 0, dismissed: 0, waiting: 0 });
+    const counted = FactoryDigest.parse({
+      ...digest,
+      followUps: { held: 3, filed: 1, waiting: 2 },
+    });
+    expect(FactoryDigest.parse(JSON.parse(JSON.stringify(counted)))).toEqual(counted);
+    expect(counted.followUps.dropped).toBe(0);
+    expect(HELD_FOLLOW_UPS_MAX).toBe(50);
+    expect(HELD_FOLLOW_UP_DAYS).toBe(14);
   });
 
   it("validates verdicts, reports and mode requests", () => {

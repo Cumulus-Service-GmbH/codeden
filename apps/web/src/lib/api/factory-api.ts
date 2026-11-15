@@ -106,6 +106,11 @@ export interface FactoryApi {
    */
   fileFollowUp(projectId: string, itemId: string, index: number): Promise<FactoryItem>;
   /**
+   * "Dismiss" on the scout's held list: the review follow-up leaves it without an issue (the item
+   * keeps it for "File issue"). 409 `follow_up_filed` once it has an issue.
+   */
+  dismissFollowUp(projectId: string, itemId: string, index: number): Promise<FactoryItem>;
+  /**
    * A person's spot-check of a merge: Looks good, or Found a problem with a note (filed as a
    * follow-up issue unless `fileIssue: false`). The verdict is recorded even when GitHub doesn't
    * take the issue (`issueError`). 409 `spot_check_not_pending` when none waits.
@@ -166,6 +171,12 @@ export function httpFactoryApi(http: Fetcher): FactoryApi {
     fileFollowUp: (id, itemId, index) =>
       post(
         `${p(id)}/factory/items/${enc(itemId)}/follow-ups/file`,
+        { index } satisfies FactoryFileFollowUpRequest,
+        item,
+      ),
+    dismissFollowUp: (id, itemId, index) =>
+      post(
+        `${p(id)}/factory/items/${enc(itemId)}/follow-ups/dismiss`,
         { index } satisfies FactoryFileFollowUpRequest,
         item,
       ),

@@ -6,11 +6,12 @@ import {
   type CheckRunOutcome,
   checksOf,
   DEFAULT_CHECK_ROUNDS,
-  type Item,
+  type MessageSender,
   type Role,
   type Session,
   type SessionChecks,
   type UpdateSessionRequest,
+  type UserInput,
 } from "@codeden/contracts";
 import { readProjectConfig } from "../projects/project-config";
 
@@ -40,16 +41,46 @@ export function freezeChecks(
   };
 }
 
-/** The session's loop setting after a PATCH; the frozen commands never change. */
+/**
+ * The session's loop setting after a PATCH; the frozen commands never change. Switching the
+ * loop on starts the round count again.
+ */
 export function withLoopSetting(
   checks: SessionChecks,
   req: Pick<UpdateSessionRequest, "untilChecksPass" | "checkRounds">,
 ): SessionChecks {
-  return {
-    ...checks,
-    untilPass: req.untilChecksPass ?? checks.untilPass,
-    maxRounds: req.checkRounds ?? checks.maxRounds,
-  };
+  const switchedOn = req.untilChecksPass === true && !checks.untilPass;
+  return withRound(
+    {
+      ...checks,
+      untilPass: req.untilChecksPass ?? checks.untilPass,
+      maxRounds: req.checkRounds ?? checks.maxRounds,
+    },
+    switchedOn ? 0 : undefined,
+  );
+}
+
+/**
+ * The loop's round count once a message from `from` is on its way to the session (#412): the
+ * loop's own message carries the round it starts (`checksRound`); CodeDen's other messages (an
+ * automatic "continue", pull request feedback) keep the count, like Compact now, so no turn
+ * CodeDen starts itself gives the loop more rounds; a message from anyone else (the user, a
+ * PM, the factory) starts it again. Undefined when the count stays as it is.
+ */
+export function roundAfter(input: UserInput, from: MessageSender): number | undefined {
+  if (input.checksRound !== undefined) return input.checksRound;
+  if (from === "codeden" || input.from === "codeden") return undefined;
+  return 0;
+}
+
+/**
+ * `checks` with the round count set to `round` (undefined: as it is). A count that changes
+ * clears the stop at the cap; an unchanged one returns `checks` itself.
+ */
+export function withRound(checks: SessionChecks, round: number | undefined): SessionChecks {
+  if (round === undefined || ((checks.round ?? 0) === round && !checks.capReached)) return checks;
+  const { round: _round, capReached: _capReached, ...rest } = checks;
+  return round > 0 ? { ...rest, round } : rest;
 }
 
 /** Why the loop doesn't run after a turn of this session, or null when it does. */
@@ -62,17 +93,6 @@ export function loopSkipReason(session: Session): string | null {
   if (session.status !== "idle") return `status ${session.status}`;
   if (session.worktreeRemovedAt || session.archivedAt) return "no worktree";
   return null;
-}
-
-/**
- * Automatic rounds before the checks that follow a turn: the round the loop's own message that
- * started it carries (`UserInput.checksRound`), else 0, for a turn anyone else's message started.
- */
-export function roundOf(turnItems: readonly Item[]): number {
-  for (const item of turnItems) {
-    if (item.kind === "user_message") return item.input.checksRound ?? 0;
-  }
-  return 0;
 }
 
 const failing = (c: CheckResult) => c.status === "failed" || c.status === "timed_out";

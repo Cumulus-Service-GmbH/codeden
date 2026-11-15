@@ -55,6 +55,7 @@ import * as decisions from "./decisions";
 import { writeDigest } from "./digest";
 import { advanceDrain, drainInboxId, drainStatus, startDrain } from "./drain";
 import { fileFollowUp } from "./follow-ups";
+import { dismissFollowUp } from "./follow-ups-held";
 import type { FactoryGithub } from "./github-port";
 import { itemCosts } from "./item-cost";
 import { allowLargeChange } from "./large-change";
@@ -535,8 +536,9 @@ export class FactoryService {
   }
 
   /**
-   * "File issue": file one review follow-up of a merged item as an issue, labelled and linked to
-   * its PR (or link it to the open issue with the same title). Filing it again changes nothing.
+   * "File issue" (and "File now" on the scout's held list): file one review follow-up of a merged
+   * item as an issue, labelled and linked to its PR (or link it to the open issue with the same
+   * title). Filing it again changes nothing.
    */
   fileFollowUp(projectId: string, itemId: string, index: number): Promise<FactoryItem> {
     return this.serialize(projectId, "file follow-up", () =>
@@ -546,6 +548,16 @@ export class FactoryService {
         this.item(projectId, itemId),
         index,
       ),
+    );
+  }
+
+  /**
+   * "Dismiss" on the scout's held list: the review follow-up leaves it without an issue (the
+   * item keeps it, so "File issue" can still file it). 409 `follow_up_filed` once it has one.
+   */
+  dismissFollowUp(projectId: string, itemId: string, index: number): Promise<FactoryItem> {
+    return this.serialize(projectId, "dismiss follow-up", () =>
+      dismissFollowUp(this.ctx, this.item(projectId, itemId), index),
     );
   }
 

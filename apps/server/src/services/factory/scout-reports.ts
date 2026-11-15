@@ -6,14 +6,17 @@ import {
   type FactoryItem,
   type FactoryLoop,
   type FactoryPlanRoundRequest,
+  FOLLOW_UP_LABEL,
   type ScoutFinding,
   type ScoutPlan,
   type ScoutRound,
   type Session,
+  sameFollowUpTitle,
 } from "@codeden/contracts";
 import { badRequest, conflict } from "../errors";
 import { TYPE_LABEL } from "./classify";
 import type { FactoryContext } from "./context";
+import { heldFollowUps, linkHeldFollowUps } from "./follow-ups-held";
 import { FACTORY_LABEL } from "./intake";
 import { slugify } from "./policy";
 import { DRAINING_TEXT, knownTitles } from "./scout";
@@ -160,9 +163,10 @@ export function planRound(
     slots,
     maxConcurrent: project.factoryLimits.maxConcurrentSessions,
   });
+  const held = heldFollowUps(ctx, projectId).length;
   const alone = wip.holding
     ? `No area reviewers this round.${note} ${wipText(wip)}: the factory files no new issues until open pull requests merge. End your turn now without reviewing: CodeDen asks you to review and file once one has merged.`
-    : `No area reviewers this round.${note} Review by yourself now and file at most ${loop.tuning.maxIssuesPerRound} issues with \`factory_file_issue\`, then end your turn.`;
+    : `No area reviewers this round.${note} Review by yourself now and file at most ${loop.tuning.maxIssuesPerRound} issues with \`factory_file_issue\`${held > 0 ? `, the ${held} held review follow-up${held === 1 ? "" : "s"} in your brief included` : ""}, then end your turn.`;
   const plan: ScoutPlan = {
     at,
     lenses: picked,
@@ -289,6 +293,11 @@ export async function fileIssue(
     throw conflict(`Already open as "${duplicate.title}"`, "duplicate");
   }
   const areas = round.findings.filter((f) => req.findingIds?.includes(f.id)).map((f) => f.area);
+  // Review follow-ups held for the scout that this issue covers: cited, or with its title.
+  const covered = heldFollowUps(ctx, projectId).filter(
+    (h) => req.findingIds?.includes(h.id) || sameFollowUpTitle(h.title, req.title),
+  );
+  const prs = [...new Set(covered.flatMap((h) => (h.pr ? [`#${h.pr.number}`] : [])))];
   const issue = await ctx.github.createIssue(projectId, {
     title: req.title,
     body: [
@@ -297,10 +306,14 @@ export async function fileIssue(
       "## Acceptance criteria",
       ...req.acceptanceCriteria.map((c) => `- [ ] ${c}`),
       "",
+      ...(covered.length > 0
+        ? [`Covers review follow-ups${prs.length ? ` of ${prs.join(", ")}` : ""}.`, ""]
+        : []),
       `_Filed by the CodeDen dark factory's scout (${req.type}, ${req.priority} priority)._`,
     ].join("\n"),
-    labels: [FACTORY_LABEL, TYPE_LABEL[req.type]],
+    labels: [FACTORY_LABEL, TYPE_LABEL[req.type], ...(covered.length > 0 ? [FOLLOW_UP_LABEL] : [])],
   });
+  linkHeldFollowUps(ctx, covered, { ...issue, title: issue.title ?? req.title });
   const at = ctx.now().toISOString();
   const item = ctx.store.createItem({
     projectId,

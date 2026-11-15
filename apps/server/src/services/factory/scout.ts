@@ -11,6 +11,7 @@ import {
 import { conflict, errorMessage } from "../errors";
 import { type ScoutAgent, scoutAgent } from "./agent-choice";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
+import { heldFollowUps } from "./follow-ups-held";
 import { budgetExceeded, freeSlots, localDay } from "./policy";
 import {
   LENS_NUDGE,
@@ -45,7 +46,8 @@ import { wipOf, wipText } from "./wip";
  *    reused round after round) reviews its area and reports findings with
  *    `factory_report_findings`;
  * 3. filing: the scout files at most `maxIssuesPerRound` issues with `factory_file_issue`,
- *    which enter the pipelines like any trusted issue.
+ *    which enter the pipelines like any trusted issue. The review follow-ups held for it
+ *    (`follow-ups-held.ts`) compete with the area reviewers' findings for them.
  *
  * The scout and its lenses hold agent slots like builders, and everything else comes first
  * (`slots.ts`): a round only starts with a free slot no review, fix, rebase or build is waiting
@@ -237,6 +239,7 @@ async function startRound(
     maxIssues: loop.tuning.maxIssuesPerRound,
     known: knownTitles(ctx, project.id),
     firstRound: !reuse,
+    followUps: heldFollowUps(ctx, project.id),
   });
   let sessionId: string;
   if (reuse) {
@@ -373,12 +376,14 @@ async function advanceRound(
   }
   const maxIssues = Math.max(0, loop.tuning.maxIssuesPerRound - round.filed);
   const known = knownTitles(ctx, project.id);
+  // Review follow-ups held for the scout compete with the findings for the round's issues.
+  const followUps = heldFollowUps(ctx, project.id);
   // A round planned without area reviewers while the limit held: the scout reviews by itself now.
   await ctx.sessions.message(
     s.id,
     lenses.length === 0
-      ? scoutSelfReviewPrompt({ maxIssues, known })
-      : scoutFilePrompt({ findings: round.findings, maxIssues, known }),
+      ? scoutSelfReviewPrompt({ maxIssues, known, followUps })
+      : scoutFilePrompt({ findings: round.findings, maxIssues, known, followUps }),
   );
   const released = releaseRound({ ...round, lenses }, now);
   return { ...scout, round: { ...released, phase: "filing", sentAt: at } };

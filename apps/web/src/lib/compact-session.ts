@@ -1,8 +1,10 @@
 import type { ProviderInfo, Session } from "@codeden/contracts";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { useTranscriptsStore } from "@/stores/transcripts";
 import { useClient } from "./api";
 import { useSnapshotData } from "./queries";
+import { checksRunning } from "./transcript/checks";
 
 const NOT_STARTED = new Set<Session["status"]>(["created", "queued", "starting"]);
 
@@ -17,13 +19,18 @@ export const compactSupported = (
 
 /**
  * Why a session that supports compaction can't compact right now, or null when it can (the
- * server checks the same, and also refuses while messages wait in its queue).
+ * server checks the same, and also refuses while messages wait in its queue). `checking`: the
+ * project's checks are running after its last turn.
  */
-export function compactBlocked(session: Pick<Session, "status" | "resumeToken">): string | null {
+export function compactBlocked(
+  session: Pick<Session, "status" | "resumeToken">,
+  checking = false,
+): string | null {
   if (session.status === "waiting") return "Answer what it's waiting on first";
   if (session.status === "running") return "Wait for the running turn to finish";
   if (NOT_STARTED.has(session.status)) return "The session hasn't started yet";
   if (!session.resumeToken) return "No conversation to compact yet";
+  if (checking) return "Wait for the project's checks to finish";
   return null;
 }
 
@@ -40,6 +47,11 @@ export function useCompactSession(session: Session) {
     (s) => s.runner.providers.find((p) => p.id === session.provider),
     undefined,
   );
+  const checking = useTranscriptsStore((s) => {
+    const transcript = s.byId[session.id];
+    const threadId = transcript?.rootThreadId ?? session.rootThreadId;
+    return Boolean(transcript && threadId && checksRunning(transcript, threadId));
+  });
   const compact = useMutation({
     mutationFn: () => client.compactSession(session.id),
     onSuccess: () =>
@@ -52,7 +64,11 @@ export function useCompactSession(session: Session) {
   const supported = compactSupported(session, provider);
   return {
     supported,
-    blocked: supported ? (compact.isPending ? "Compacting…" : compactBlocked(session)) : null,
+    blocked: supported
+      ? compact.isPending
+        ? "Compacting…"
+        : compactBlocked(session, checking)
+      : null,
     pending: compact.isPending,
     compact: () => compact.mutate(),
   };

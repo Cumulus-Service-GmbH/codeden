@@ -15,12 +15,17 @@ import type { SessionRepo } from "./repo";
 const BUSY = new Set(["running", "waiting"]);
 const NOT_STARTED = new Set(["created", "queued", "starting"]);
 
-/** What else is under way for the session: a turn on its way, messages waiting. */
+/** What else is under way for the session: a turn on its way, messages waiting, checks. */
 export interface CompactBusy {
   /** A turn (or another compaction) is on its way to the runner. */
   delivering: boolean;
   /** Messages waiting in the session's queue. */
   queued: number;
+  /**
+   * The project's checks are running after the last turn (§9). A compaction would end their run
+   * and lose what they report, and its own turn must not start another round (#412).
+   */
+  checking?: boolean;
 }
 
 /**
@@ -44,6 +49,12 @@ export function compactRefusal(
   }
   if (BUSY.has(session.status) || busy.delivering) {
     return conflict("A turn is running: compact once it ends.", "turn_running");
+  }
+  if (busy.checking) {
+    return conflict(
+      "The project's checks are running: compact once they finish.",
+      "checks_running",
+    );
   }
   if (busy.queued > 0) {
     return conflict("Messages are waiting to be sent: compact once they have run.", "turn_running");

@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { agentCard, agentLabel, stepTime } from "@/components/factory-view/pixel/agent-card";
-import { type SceneAgent, sceneAgents } from "@/components/factory-view/pixel/agents";
 import { labelOf } from "@/components/factory-view/pixel/draw-agents";
-import { stationOf } from "@/components/factory-view/pixel/floor";
 import { lookOf } from "@/components/factory-view/pixel/people";
+import { agentCard, agentLabel, stepTime } from "@/components/factory-view/scene/agent-card";
+import { type SceneAgent, sceneAgents } from "@/components/factory-view/scene/agents";
+import { stationOf } from "@/components/factory-view/scene/stations";
 import type { SessionInfo } from "@/components/factory-view/stages";
 import {
   inputs,

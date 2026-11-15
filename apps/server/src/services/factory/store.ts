@@ -41,6 +41,8 @@ export const OWNED_STAGES: FactoryItemStage[] = ["failed", "escalated"];
 export const FINISHED_STAGES: FactoryItemStage[] = ["merged", "reverted", "rejected", "failed"];
 /** Nudge a merge sets while the item's review follow-ups wait to be filed (`follow-ups.ts`). */
 export const FOLLOW_UPS_DUE = "follow_ups_due";
+/** Nudge an item carries while some of its follow-ups are held for the scout (`follow-ups-held.ts`). */
+export const FOLLOW_UPS_HELD = "follow_ups_held";
 /** The newest items the Factory view lists (`status.ts`); the loop itself reads them all. */
 export const VIEW_ITEMS = 500;
 
@@ -252,9 +254,22 @@ export class FactoryStore {
    * `follow_ups_due` nudge. Oldest first.
    */
   itemsWithFollowUpsDue(projectId: string): FactoryItem[] {
+    return this.itemsWithNudge(projectId, FOLLOW_UPS_DUE);
+  }
+
+  /**
+   * Items whose review follow-ups are held for the scout (`follow-ups-held.ts`): they carry the
+   * `follow_ups_held` nudge. Oldest first.
+   */
+  itemsWithFollowUpsHeld(projectId: string): FactoryItem[] {
+    return this.itemsWithNudge(projectId, FOLLOW_UPS_HELD);
+  }
+
+  /** Items carrying the nudge `key`, oldest first: however old, so none is missed. */
+  private itemsWithNudge(projectId: string, key: string): FactoryItem[] {
     const read = this.reads.list(projectId);
-    if (read) return read.filter((i) => i.nudges?.[FOLLOW_UPS_DUE] != null).reverse();
-    const path = `$.nudges.${FOLLOW_UPS_DUE}`;
+    if (read) return read.filter((i) => i.nudges?.[key] != null).reverse();
+    const path = `$.nudges.${key}`;
     const due = sql`json_extract(${factoryItems.item}, ${path}) is not null`;
     return this.db
       .select()

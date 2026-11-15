@@ -307,7 +307,8 @@ export async function reviewerStalled(
       return failReview(ctx, project, loop, item, "The reviewer session stopped");
     ctx.store.updateItem(item.id, (i) => ({
       ...i,
-      reviewerSessionId: null,
+      // An earlier session now, archived by the loop (`cleanup.ts`) even from its own worktree.
+      ...letGoReviewer(i),
       nudges: { ...withoutRecheckRequest(i.nudges), reviewer_restarted: ctx.now().toISOString() },
     }));
     return loop;

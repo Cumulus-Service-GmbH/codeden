@@ -2,17 +2,20 @@ import type { ScoutStatus } from "@codeden/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { InfoHint } from "@/components/common/info-hint";
 import { StatusDot } from "@/components/common/status-dot";
+import { HeldFollowUps } from "./held-follow-ups";
 import { AREA_LABEL, REVIEW_AREAS_HELP, ROUND_HELP, SCOUT_HELP } from "./meta";
 import { Badge } from "./node-badge";
 
 /**
- * The dark factory's scout on the pipeline diagram (§10.1): its round and its review areas (one
- * long-lived area reviewer each).
+ * The dark factory's scout on the pipeline diagram (§10.1): its round, its review areas (one
+ * long-lived area reviewer each) and the review follow-ups held for it.
  */
 export function ScoutNode({
+  projectId,
   scout,
   scheduled = true,
 }: {
+  projectId: string;
   scout: ScoutStatus;
   /** False when scheduled rounds are off (`minBacklog` 0): it only runs when started. */
   scheduled?: boolean;
@@ -86,6 +89,7 @@ export function ScoutNode({
       {scout.phase === "filing" || scout.filed > 0 ? (
         <span className="text-[10px] text-muted-foreground">{scout.filed} filed this round</span>
       ) : null}
+      <HeldFollowUps projectId={projectId} held={scout.heldFollowUps} />
     </div>
   );
 }
