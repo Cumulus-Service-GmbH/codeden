@@ -3,7 +3,7 @@ import { ServiceError } from "../errors";
 import type { GitBroker } from "../git-broker";
 import type { RunnerPort } from "../runner-port";
 import { slugWords } from "./conflicts";
-import { setupFailureNote } from "./setup-failure";
+import { type SetupGateDeps, seenSetups, settleSetup } from "./setup-gate";
 
 /** What a prepared workspace is recorded as on the session. */
 export interface PreparedWorkspace {
@@ -31,7 +31,7 @@ export async function prepareCloneWorkspace(
   session: Session,
   project: Project,
   req: WorkspaceRequest,
-  opts: { fork: boolean; timeoutMs: number },
+  opts: { fork: boolean; gate: SetupGateDeps },
 ): Promise<PreparedWorkspace> {
   if (opts.fork) {
     throw new ServiceError(
@@ -72,9 +72,10 @@ export async function prepareCloneWorkspace(
       baseRef,
       fetch: true,
       setupCommands: req.setupCommands ?? [],
+      seenSetups: seenSetups(project),
       ...(credential ? { credential } : {}),
     },
-    opts.timeoutMs,
+    opts.gate.timeoutMs,
   );
   return {
     cwd: result.cwd,
@@ -82,6 +83,6 @@ export async function prepareCloneWorkspace(
     branch: result.branch,
     baseBranch: req.mode === "worktree" ? (baseRef ?? null) : null,
     fallback: null,
-    setupNote: setupFailureNote(result.setup),
+    setupNote: await settleSetup(opts.gate, session, project, result),
   };
 }

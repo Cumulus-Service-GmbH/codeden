@@ -359,6 +359,17 @@ describe("entities", () => {
       requestId: null,
     });
     roundTrip(InboxItem, { ...sampleInboxItem, kind: "message", notify: "factory" });
+    // Setup commands changed since a person last saw them (#390).
+    roundTrip(InboxItem, {
+      ...sampleInboxItem,
+      id: "inbox:setup-change:p1:0123456789abcdef",
+      kind: "setup_change",
+      title: "Setup commands changed in #42: run them?",
+      body: "```sh\npnpm install\n```",
+      itemId: null,
+      requestId: null,
+      pr: { number: 42, url: "https://github.com/acme/app/pull/42", state: "merged" },
+    });
     roundTrip(Automation, sampleAutomation);
   });
 

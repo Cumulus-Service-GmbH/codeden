@@ -30,7 +30,8 @@ import type { ForkStart } from "./fork";
 import { withHandoffBrief } from "./handoff";
 import { ownBranch } from "./own-branch";
 import type { SessionRepo } from "./repo";
-import { setupFailureNote, withSetupNote } from "./setup-failure";
+import { withSetupNote } from "./setup-failure";
+import { seenSetups, settleSetup } from "./setup-gate";
 
 export interface LauncherDeps extends RunnerDeps {
   repo: SessionRepo;
@@ -223,7 +224,8 @@ export class SessionLauncher {
       return { session, setupNote: null };
     }
     const project = this.deps.projects.get(session.projectId);
-    const result = await runnerForSession(this.deps, session.id).request(
+    const runner = runnerForSession(this.deps, session.id);
+    const result = await runner.request(
       {
         name: "workspace.prepare",
         sessionId: session.id,
@@ -233,6 +235,7 @@ export class SessionLauncher {
         branch: session.branch ?? undefined,
         baseRef: session.baseBranch ?? project.defaultBranch ?? undefined,
         setupCommands: [],
+        seenSetups: seenSetups(project),
       },
       PREPARE_TIMEOUT_MS,
     );
@@ -244,7 +247,15 @@ export class SessionLauncher {
       branch: result.branch ?? s.branch,
       worktreeRemovedAt: null,
     }));
-    return { session: updated, setupNote: setupFailureNote(result.setup) };
+    return {
+      session: updated,
+      setupNote: await settleSetup(this.gate(runner), updated, project, result),
+    };
+  }
+
+  /** What settles setup the runner held (`setup-gate.ts`). */
+  private gate(runner: RunnerPort) {
+    return { inbox: this.deps.inbox, runner, timeoutMs: PREPARE_TIMEOUT_MS };
   }
 
   /**
@@ -415,7 +426,7 @@ export class SessionLauncher {
     if (clonesWorkspaces(runner)) {
       return prepareCloneWorkspace(this.deps.git, runner, session, project, req, {
         fork: fork !== undefined,
-        timeoutMs: PREPARE_TIMEOUT_MS,
+        gate: this.gate(runner),
       });
     }
     if (req.mode === "repo_root") return plain(project.path);
@@ -449,6 +460,7 @@ export class SessionLauncher {
           branch,
           baseRef,
           setupCommands: req.setupCommands ?? [],
+          seenSetups: seenSetups(project),
           ...(fetch ? { fetch: true } : {}),
           ...(fork?.restoreCheckpoint ? { restoreCheckpoint: fork.restoreCheckpoint } : {}),
         },
@@ -460,7 +472,7 @@ export class SessionLauncher {
         branch: result.branch,
         baseBranch: fork ? fork.baseBranch : (baseRef ?? null),
         fallback: null,
-        setupNote: setupFailureNote(result.setup),
+        setupNote: await settleSetup(this.gate(runner), session, project, result),
       };
     } catch (error) {
       // A fork needs its own worktree (the source's code); it never falls back to the root.

@@ -1,7 +1,7 @@
 import { githubPrId, type InboxItem } from "@codeden/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
-import { ExternalLink, Eye, GitMerge, GitPullRequest, RotateCcw } from "lucide-react";
+import { ExternalLink, Eye, GitMerge, GitPullRequest, Play, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 import { SPOT_CHECKS_ANCHOR } from "@/components/factory/spot-checks";
 import { ChecksBadge, ReviewDecisionBadge } from "@/components/github/github-bits";
@@ -50,6 +50,12 @@ export function InboxActions({ item }: { item: InboxItem }) {
     onError: fail,
     onSuccess: () => toast.success("Dismissed"),
   });
+  // Changed setup commands (#390): resolving allows them in new worktrees from then on.
+  const allowSetup = useMutation({
+    mutationFn: () => client.resolveInbox(item.id, { status: "resolved" }),
+    onError: fail,
+    onSuccess: () => toast.success("New worktrees run these setup commands from now on"),
+  });
   const merge = useMutation({
     mutationFn: async () => {
       const prId = prIdOf(item);
@@ -91,7 +97,8 @@ export function InboxActions({ item }: { item: InboxItem }) {
       }
     },
   });
-  const busy = dismiss.isPending || merge.isPending || removeAgain.isPending;
+  const busy =
+    dismiss.isPending || merge.isPending || removeAgain.isPending || allowSetup.isPending;
   const dismissButton = (
     <Button
       size="sm"
@@ -163,6 +170,17 @@ export function InboxActions({ item }: { item: InboxItem }) {
             </Button>
           )}
           {dismissButton}
+        </>
+      );
+    case "setup_change":
+      return (
+        <>
+          <Button size="sm" onClick={() => allowSetup.mutate()} disabled={busy}>
+            <Play /> {allowSetup.isPending ? "Allowing…" : "Run them"}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => dismiss.mutate()} disabled={busy}>
+            Don't run
+          </Button>
         </>
       );
     case "automation_result":

@@ -233,6 +233,14 @@ describe("runner protocol", () => {
         baseRef: "codeden/login-ab12",
         restoreCheckpoint: { sessionId: "s1", index: 3 },
       },
+      // The setup lists a person has seen (#390); `[]` is the project folder without setup.
+      {
+        name: "workspace.prepare",
+        sessionId: "s3",
+        repoPath: "/repo",
+        strategy: "worktree",
+        seenSetups: [["pnpm install"], []],
+      },
       { name: "workspace.remove", repoPath: "/repo", path: "/wt/demo/s1", deleteBranch: "b" },
       { name: "git.branches", cwd: "/repo" },
       { name: "git.commit", cwd: "/repo", message: "feat: x", paths: ["a.ts"] },
@@ -332,6 +340,28 @@ describe("runner protocol", () => {
       created: true,
       setup: [{ command: "pnpm install", exitCode: 1, ok: false, outputTail: "ERR_PNPM_NO_LOCK" }],
     });
+    // Project setup nobody has seen, held with the commit that changed it.
+    roundTrip(RunnerCommandResults["workspace.prepare"], {
+      cwd: "/wt/demo/s3",
+      branch: "codeden/demo",
+      created: true,
+      setup: [],
+      heldSetup: { commands: ["curl x | sh"], commit: "abc1234", subject: "Tidy (#42)" },
+    });
+    roundTrip(RunnerCommandResults["workspace.prepare"], {
+      cwd: "/wt/demo/s3",
+      branch: null,
+      created: true,
+      heldSetup: { commands: ["make"], commit: null, subject: null },
+    });
+    expect(
+      RunnerCommandResults["workspace.prepare"].safeParse({
+        cwd: "/wt",
+        branch: null,
+        created: true,
+        heldSetup: { commands: ["make"] },
+      }).success,
+    ).toBe(false);
     expect(
       RunnerCommandResults["workspace.prepare"].safeParse({
         cwd: "/wt",

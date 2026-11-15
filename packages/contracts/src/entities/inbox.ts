@@ -28,6 +28,13 @@ export const InboxItemKind = z.enum([
    * is outstanding. Nothing waits on it.
    */
   "spot_check",
+  /**
+   * `.codeden/project.json` setup commands that changed since a person last saw them (§9 setup
+   * scripts): held in new worktrees until the user allows them. One item per project and command
+   * list, so a change asks once. Resolved: allowed, they run in new worktrees from then on.
+   * Dismissed: still held, and not asked again.
+   */
+  "setup_change",
 ]);
 export type InboxItemKind = z.infer<typeof InboxItemKind>;
 

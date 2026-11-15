@@ -108,6 +108,8 @@ describe("inbox grouping", () => {
       "question",
       // A factory spec waiting for approval (#363) is a decision, with the asks.
       "spec_approval",
+      // Setup commands changed since a person last saw them (#390) wait for an answer.
+      "setup_change",
       "pr_review",
       // The factory's merges set aside for a person's look (#380), one item per project.
       "spot_check",
@@ -120,7 +122,7 @@ describe("inbox grouping", () => {
     expect(groupInbox(inboxItems, "problems").map((g) => g.id)).toEqual(["run_failed"]);
   });
   it("counts tabs including conflicts", () => {
-    expect(inboxCounts(inboxItems, 1)).toEqual({ all: 11, asks: 5, reviews: 4, problems: 2 });
+    expect(inboxCounts(inboxItems, 1)).toEqual({ all: 12, asks: 6, reviews: 4, problems: 2 });
   });
   it("shows worktrees that couldn't be removed with the problems", () => {
     const base = inboxItems.find((i) => i.kind === "run_failed");

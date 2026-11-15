@@ -4,6 +4,7 @@ import { ArrowUpRight, CircleDot, GitPullRequest } from "lucide-react";
 import { ProjectTile } from "@/components/shell/sidebar/project-group";
 import { ApprovalCard } from "@/components/thread/cards/approval-card";
 import { QuestionCard } from "@/components/thread/cards/question-card";
+import { Markdown } from "@/components/thread/markdown";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ago } from "@/lib/format";
 import { platform } from "@/lib/platform";
@@ -131,12 +132,18 @@ export function InboxEntry({ item, focused = false }: { item: InboxItem; focused
       ) : (
         <div className="rounded-xl border border-border bg-card px-4 py-3">
           <h3 className="text-[14px] font-medium">{item.title}</h3>
-          {item.body && (
-            // Bodies keep their line breaks (a changed automation's diff, a PM's change list).
-            <p className="mt-1 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-muted-foreground">
-              {item.body}
-            </p>
-          )}
+          {item.body &&
+            // Changed setup commands come as a code block to read before allowing them; other
+            // bodies keep their line breaks (a changed automation's diff, a PM's change list).
+            (item.kind === "setup_change" ? (
+              <div className="mt-2 text-[13px]">
+                <Markdown>{item.body}</Markdown>
+              </div>
+            ) : (
+              <p className="mt-1 whitespace-pre-wrap break-words text-[13px] leading-relaxed text-muted-foreground">
+                {item.body}
+              </p>
+            ))}
           {item.kind === "pr_review" && !resolved && <PrReviewStatus item={item} />}
           {!resolved && (
             <div className="mt-3 flex flex-wrap items-center gap-1.5">

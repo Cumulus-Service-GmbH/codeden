@@ -138,6 +138,13 @@ export const RunnerCommand = z.discriminatedUnion("name", [
       /** Run `.codeden/project.json` `setup` commands before `setupCommands`. Default true. */
       runProjectSetup: z.boolean().optional(),
       /**
+       * The `.codeden/project.json` setup command lists a person has seen (§9 setup scripts):
+       * the project folder's own, and the ones the user allowed. When given, a new workspace's
+       * project setup runs only when it equals one of them, command for command; otherwise it
+       * is held (not run) and returned as `heldSetup`. Omitted: project setup runs as it is.
+       */
+      seenSetups: z.array(z.array(z.string())).optional(),
+      /**
        * A forked session's starting point: once a new worktree is created, its files are made to
        * match this checkpoint of another session (as uncommitted changes on top of the branch)
        * before setup commands run. Ignored when the worktree already existed. Not supported
@@ -420,6 +427,18 @@ export const RunnerCommandResults = {
           outputTail: z.string().max(SETUP_TAIL_LIMIT).optional(),
         }),
       )
+      .optional(),
+    /**
+     * Project setup that matched none of `seenSetups`, so it did not run: its commands, and the
+     * last commit that changed `.codeden/project.json` in the workspace (short sha and subject,
+     * null when git can't tell). Absent when project setup ran, or there was none.
+     */
+    heldSetup: z
+      .object({
+        commands: z.array(z.string()),
+        commit: z.string().nullable(),
+        subject: z.string().nullable(),
+      })
       .optional(),
   }),
   "check.run": z.object({

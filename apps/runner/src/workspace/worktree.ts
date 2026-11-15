@@ -10,7 +10,7 @@ import { currentBranch, defaultBranch } from "../git/ops";
 import type { ProcessSupervisor } from "../process/supervisor";
 import { endProcessesInside } from "../process/worktree-processes";
 import { prepareClone } from "./clone";
-import { readProjectConfig } from "./project-config";
+import { PROJECT_CONFIG_PATH, readProjectConfig } from "./project-config";
 import { pruneWorktrees, removeWorkspace, worktreeState } from "./removal";
 import { runSetup, type SetupStep } from "./setup";
 import { discardFolder, isManagedWorktreePath } from "./trash";
@@ -184,7 +184,8 @@ async function restoreForkStart(
  * worktree, a new worktree under `<home>/wt/<slug>/<short>` on a new branch, or a clone under
  * `<home>/ws/<short>` for a runner that doesn't share the server's disk), restore a
  * forked session's starting checkpoint into a new one, then run `.codeden/project.json` setup
- * (new worktrees and clones only) and the explicit setup commands.
+ * (new worktrees and clones only) and the explicit setup commands. Project setup that matches
+ * none of `seenSetups` is held instead (`heldSetup`): it came from a change no person has seen.
  */
 export async function prepareWorkspace(
   cmd: RunnerCommandOf<"workspace.prepare">,
@@ -233,10 +234,9 @@ export async function prepareWorkspace(
       output: error,
     });
   }
-  const commands = [
-    ...(target.created && cmd.runProjectSetup !== false ? (config?.setup ?? []) : []),
-    ...cmd.setupCommands,
-  ];
+  const project = target.created && cmd.runProjectSetup !== false ? (config?.setup ?? []) : [];
+  const held = project.length > 0 && !seen(project, cmd.seenSetups);
+  const commands = [...(held ? [] : project), ...cmd.setupCommands];
   let setup: SetupStep[] = [];
   if (commands.length > 0) {
     setup = await runSetup({
@@ -247,5 +247,29 @@ export async function prepareWorkspace(
       emit: ctx.emit,
     });
   }
-  return { ...target, config, setup };
+  if (!held) return { ...target, config, setup };
+  return {
+    ...target,
+    config,
+    setup,
+    heldSetup: { commands: project, ...(await lastChange(target.cwd)) },
+  };
+}
+
+/** Whether a person has seen this setup (`seenSetups`; none given: no gate). */
+function seen(commands: readonly string[], seenSetups: readonly string[][] | undefined): boolean {
+  if (!seenSetups) return true;
+  return seenSetups.some(
+    (list) => list.length === commands.length && list.every((c, i) => c === commands[i]),
+  );
+}
+
+/** The last commit that changed `.codeden/project.json` here (for "changed in #N"). */
+async function lastChange(cwd: string): Promise<{ commit: string | null; subject: string | null }> {
+  const out = await git(cwd, ["log", "-1", "--format=%h%x00%s", "--", PROJECT_CONFIG_PATH]).then(
+    (r) => r.stdout.toString("utf8").trim(),
+    () => "",
+  );
+  const [commit, subject] = out.split("\0");
+  return { commit: commit || null, subject: subject || null };
 }
