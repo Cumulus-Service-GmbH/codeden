@@ -6,6 +6,7 @@ import type {
   Session,
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
+import { needsFreshSession, type ScoutAgent } from "./agent-choice";
 import type { FactoryContext } from "./context";
 import { claimSlot, SCOUT_SLOT } from "./slots";
 
@@ -39,6 +40,8 @@ export async function startPlannedLenses(
   scout: ScoutState,
   now: Date,
   brief: LensBrief,
+  /** Where area reviewers run (`scoutProvider`, `scoutModel`). */
+  agent: ScoutAgent,
 ): Promise<{ scout: ScoutState; closed: string | null }> {
   const round = scout.round;
   const plan = round?.plan;
@@ -49,12 +52,13 @@ export async function startPlannedLenses(
   const waiting: DiscoveryArea[] = [];
   const failed: DiscoveryArea[] = [];
   for (const lens of plan.lenses.filter((l) => plan.pending.includes(l.area))) {
-    const reuse = ctx.sessions.reusable(lensSessions[lens.area]);
+    const reuse = reusableScoutSession(ctx, lensSessions[lens.area], agent);
     if (!claimSlot(ctx, project, "scout", SCOUT_SLOT, { wake: reuse?.id })) {
       waiting.push(lens.area);
       continue;
     }
-    const sessionId = await startLens(ctx, project.id, lens.area, brief(lens, !reuse), reuse);
+    const text = brief(lens, !reuse);
+    const sessionId = await startLens(ctx, project.id, lens.area, text, reuse, agent.choice);
     if (!sessionId) {
       failed.push(lens.area);
       continue;
@@ -81,6 +85,25 @@ export async function startPlannedLenses(
   };
 }
 
+/**
+ * The scout's or an area reviewer's long-lived session to use again this round, if any. One that
+ * no longer runs where the settings ask (`needsFreshSession`: they name another provider or
+ * model) is archived, which leaves a busy one alone, so a fresh session starts on the chosen
+ * provider and model instead.
+ */
+export function reusableScoutSession(
+  ctx: FactoryContext,
+  sessionId: string | null | undefined,
+  agent: ScoutAgent,
+): Session | undefined {
+  const session = ctx.sessions.reusable(sessionId);
+  if (!session || !needsFreshSession(session, agent)) return session;
+  const was = `${session.provider}${session.model ? ` (${session.model})` : ""}`;
+  ctx.log?.(`factory: ${session.title ?? session.id} ran on ${was}; a fresh session replaces it`);
+  ctx.archiveSessions([session.id]);
+  return undefined;
+}
+
 /** Start a new area reviewer, or wake the idle one (not awaited); its session id, or null. */
 async function startLens(
   ctx: FactoryContext,
@@ -88,6 +111,7 @@ async function startLens(
   area: DiscoveryArea,
   text: string,
   reuse: Session | undefined,
+  choice: ScoutAgent["choice"],
 ): Promise<string | null> {
   try {
     if (reuse) {
@@ -98,7 +122,11 @@ async function startLens(
         );
       return reuse.id;
     }
-    const res = await ctx.sessions.startLens(projectId, area, text);
+    if ("waiting" in choice) {
+      ctx.log?.(`factory: area reviewer ${area}: ${choice.waiting}`);
+      return null;
+    }
+    const res = await ctx.sessions.startLens(projectId, area, text, choice);
     return res.status === "started" || res.status === "queued" ? res.sessionId : null;
   } catch (error) {
     ctx.log?.(`factory: area reviewer ${area}: ${errorMessage(error)}`);

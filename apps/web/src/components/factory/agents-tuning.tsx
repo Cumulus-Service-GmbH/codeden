@@ -12,7 +12,13 @@ import { useSetupStatus, useSnapshotData } from "@/lib/queries";
 /** The agent knobs of the factory's tuning: who builds and who reviews, on which model. */
 export type AgentsDraft = Pick<
   FactoryTuning,
-  "builderProvider" | "builderModel" | "reviewerProvider" | "reviewerModel" | "reviewerFallback"
+  | "builderProvider"
+  | "builderModel"
+  | "docsBuilderProvider"
+  | "docsBuilderModel"
+  | "reviewerProvider"
+  | "reviewerModel"
+  | "reviewerFallback"
 >;
 
 const FALLBACKS: Array<{ id: ReviewerFallback; label: string }> = [
@@ -32,10 +38,11 @@ const SELECT =
   "h-9 w-full rounded-md border border-border bg-background px-2.5 text-[13px] disabled:opacity-60";
 
 /**
- * Builder and reviewer provider and model (§10.1), from the runner's provider list. `Automatic`
- * keeps the defaults: builders on the project's provider, reviewers on a different provider from
- * the builder's. A model applies only to a chosen provider. Providers that can't run (from the
- * setup checks) say why, and choosing one says what happens until it can.
+ * Builder, docs builder and reviewer provider and model (§10.1), from the runner's provider
+ * list. `Automatic` keeps the defaults: builders on the project's provider, reviewers on a
+ * different provider from the builder's; docs build like everything else until a docs builder is
+ * chosen. A model applies only to a chosen provider. Providers that can't run (from the setup
+ * checks) say why, and choosing one says what happens until it can.
  */
 export function AgentsTuning({
   value,
@@ -45,55 +52,50 @@ export function AgentsTuning({
   onChange: (next: AgentsDraft) => void;
 }) {
   const id = useId();
-  const providers = useSnapshotData((s) => s.runner.providers, []);
-  const checks = useSetupStatus({ staleTime: 60_000 }).data?.checks;
   return (
     <div className="space-y-3 border-t border-border pt-4" data-testid="agents-tuning">
       <div>
         <p className="text-[13px] font-medium">Agents</p>
         <p className="text-3xs text-muted-foreground">
           A reviewer on a different provider from the builder gives the most independent review.
-          Providers that aren't signed in, are too old to run or are at their usage limit are
-          skipped.
+          Docs builds can run on a cheaper model. Providers that aren't signed in, are too old to
+          run or are at their usage limit are skipped.
         </p>
       </div>
       <div className="grid gap-3 sm:grid-cols-2">
-        <ProviderSelect
-          id={`${id}-bp`}
-          label="Builder provider"
-          providers={providers}
-          checks={checks}
-          value={value.builderProvider}
+        <AgentPicker
+          id={`${id}-b`}
+          label="Builder"
+          provider={value.builderProvider}
+          model={value.builderModel}
           meanwhile="builders start on another available provider"
-          onChange={(builderProvider) =>
-            onChange({ ...value, builderProvider, builderModel: null })
+          onChange={(builderProvider, builderModel) =>
+            onChange({ ...value, builderProvider, builderModel })
           }
         />
-        <ModelSelect
-          id={`${id}-bm`}
-          label="Builder model"
-          provider={providers.find((p) => p.id === value.builderProvider)}
-          value={value.builderModel}
-          onChange={(builderModel) => onChange({ ...value, builderModel })}
+        <AgentPicker
+          id={`${id}-d`}
+          label="Docs builder"
+          provider={value.docsBuilderProvider ?? ""}
+          model={value.docsBuilderModel}
+          autoValue=""
+          autoLabel="Same as builders"
+          hint="Builds of docs items (READMEs, guides, comments). Same as builders: they build on the builder's provider and model. Feature and bug builds always use the builder's."
+          meanwhile="docs builds start on another available provider"
+          onChange={(provider, docsBuilderModel) =>
+            onChange({ ...value, docsBuilderProvider: provider || null, docsBuilderModel })
+          }
         />
-        <ProviderSelect
-          id={`${id}-rp`}
-          label="Reviewer provider"
-          providers={providers}
-          checks={checks}
-          value={value.reviewerProvider}
+        <AgentPicker
+          id={`${id}-r`}
+          label="Reviewer"
+          provider={value.reviewerProvider}
+          model={value.reviewerModel}
           autoLabel="Automatic (a different provider from the builder)"
           meanwhile={REVIEWS_MEANWHILE[value.reviewerFallback]}
-          onChange={(reviewerProvider) =>
-            onChange({ ...value, reviewerProvider, reviewerModel: null })
+          onChange={(reviewerProvider, reviewerModel) =>
+            onChange({ ...value, reviewerProvider, reviewerModel })
           }
-        />
-        <ModelSelect
-          id={`${id}-rm`}
-          label="Reviewer model"
-          provider={providers.find((p) => p.id === value.reviewerProvider)}
-          value={value.reviewerModel}
-          onChange={(reviewerModel) => onChange({ ...value, reviewerModel })}
         />
       </div>
       <Field
@@ -120,13 +122,70 @@ export function AgentsTuning({
   );
 }
 
+/**
+ * A "<label> provider" picker and its "<label> model" picker, side by side in the settings grid.
+ * Changing the provider resets the model to the provider's default.
+ */
+export function AgentPicker({
+  id,
+  label,
+  provider,
+  model,
+  autoValue = "auto",
+  autoLabel,
+  hint,
+  meanwhile,
+  onChange,
+}: {
+  id: string;
+  /** "Builder": the pickers read "Builder provider" and "Builder model". */
+  label: string;
+  provider: string;
+  model: string | null;
+  /** The value of the first option, which keeps the default ("auto"). */
+  autoValue?: string;
+  autoLabel?: string;
+  hint?: string;
+  /** What happens while the chosen provider can't run, e.g. "reviews wait". */
+  meanwhile: string;
+  onChange: (provider: string, model: string | null) => void;
+}) {
+  const providers = useSnapshotData((s) => s.runner.providers, []);
+  const checks = useSetupStatus({ staleTime: 60_000 }).data?.checks;
+  return (
+    <>
+      <ProviderSelect
+        id={`${id}p`}
+        label={`${label} provider`}
+        providers={providers}
+        checks={checks}
+        value={provider}
+        autoValue={autoValue}
+        autoLabel={autoLabel}
+        hint={hint}
+        meanwhile={meanwhile}
+        onChange={(next) => onChange(next, null)}
+      />
+      <ModelSelect
+        id={`${id}m`}
+        label={`${label} model`}
+        provider={providers.find((p) => p.id === provider)}
+        value={model}
+        onChange={(next) => onChange(provider, next)}
+      />
+    </>
+  );
+}
+
 function ProviderSelect({
   id,
   label,
   providers,
   checks,
   value,
+  autoValue = "auto",
   autoLabel = "Automatic",
+  hint,
   meanwhile,
   onChange,
 }: {
@@ -135,7 +194,9 @@ function ProviderSelect({
   providers: ProviderInfo[];
   checks: readonly SetupCheck[] | undefined;
   value: string;
+  autoValue?: string;
   autoLabel?: string;
+  hint?: string;
   /** What happens while the chosen provider can't run, e.g. "reviews wait". */
   meanwhile: string;
   onChange: (provider: string) => void;
@@ -163,15 +224,15 @@ function ProviderSelect({
     );
   }
   return (
-    <Field label={label} htmlFor={id} help={help}>
+    <Field label={label} htmlFor={id} hint={hint} help={help}>
       <select id={id} className={SELECT} value={value} onChange={(e) => onChange(e.target.value)}>
-        <option value="auto">{autoLabel}</option>
+        <option value={autoValue}>{autoLabel}</option>
         {providers.map((p) => (
           <option key={p.id} value={p.id}>
             {providerOptionLabel(p.displayName, providerAvailability(p.id, checks))}
           </option>
         ))}
-        {!chosen && value !== "auto" && <option value={value}>{value} (not connected)</option>}
+        {!chosen && value !== autoValue && <option value={value}>{value} (not connected)</option>}
       </select>
     </Field>
   );

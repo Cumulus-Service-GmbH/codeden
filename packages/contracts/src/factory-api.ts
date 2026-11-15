@@ -377,6 +377,27 @@ export const FactoryTuning = z.object({
   /** Model for builders on `builderProvider`; `null` (the default): that provider's default. */
   builderModel: z.string().min(1).nullable().default(null),
   /**
+   * Provider for builders of docs items, so simple, well-scoped work can run on a cheaper model.
+   * `null` (the default): the same as builders (`builderProvider` and `builderModel`). An
+   * unavailable one is skipped for another available provider, as for builders.
+   */
+  docsBuilderProvider: ProviderId.nullable().default(null),
+  /**
+   * Model for docs builders on `docsBuilderProvider`; `null` (the default): that provider's
+   * default. Ignored while `docsBuilderProvider` is null.
+   */
+  docsBuilderModel: z.string().min(1).nullable().default(null),
+  /**
+   * Dark factory: provider for the scout and its area reviewers, long-lived sessions that read a
+   * lot of code each round. `auto` (the default): the project's provider, else the agent role's.
+   * An unavailable one is skipped for another available provider, as for builders. A scout or
+   * area reviewer on another provider or model than the one chosen here is replaced by a fresh
+   * session at its next round.
+   */
+  scoutProvider: z.union([z.literal("auto"), ProviderId]).default("auto"),
+  /** Model for the scout and its area reviewers on `scoutProvider`; `null`: its default. */
+  scoutModel: z.string().min(1).nullable().default(null),
+  /**
    * Provider for the independent reviewer. `auto` (the default): a provider other than the
    * builder's when one is available, which gives the most independent review.
    */

@@ -205,6 +205,7 @@ export function createFactoryEnv(
         workKey: req.workKey ?? "request:work",
         scope: { projectId: req.projectId, ...req.scope },
         provider,
+        model: req.model ?? null,
         status: "running",
         issue: req.issue ?? null,
         cwd: existing ?? worktreePath ?? dir,

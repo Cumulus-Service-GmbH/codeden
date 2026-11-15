@@ -85,4 +85,43 @@ describe("factory settings in the autonomy dialog", () => {
     expect(tuning).not.toHaveProperty("idleGraceMin");
     success.mockRestore();
   });
+
+  it("routes docs builds and the scout to a provider and model of their own (#384)", async () => {
+    const success = vi.spyOn(toast, "success").mockImplementation(() => "t");
+    const client = createMockClient();
+    const setMode = vi.spyOn(client.factory, "setMode");
+    renderWithClient(<AutonomyDialog project={storefront} open onOpenChange={() => {}} />, client, {
+      withRouter: true,
+    });
+
+    const docs = (await screen.findByLabelText("Docs builder provider")) as HTMLSelectElement;
+    // The providers come from the runner's list in the snapshot.
+    await waitFor(() => expect(docs.querySelector('option[value="claude"]')).toBeTruthy());
+    expect(docs.value).toBe("");
+    expect(docs.selectedOptions[0]?.textContent).toBe("Same as builders");
+    const docsModel = screen.getByLabelText("Docs builder model") as HTMLSelectElement;
+    expect(docsModel.disabled).toBe(true);
+    fireEvent.change(docs, { target: { value: "claude" } });
+    fireEvent.change(docsModel, { target: { value: "haiku" } });
+
+    const scout = screen.getByLabelText("Scout provider") as HTMLSelectElement;
+    expect(scout.value).toBe("auto");
+    fireEvent.change(scout, { target: { value: "codex" } });
+    fireEvent.change(screen.getByLabelText("Scout model"), {
+      target: { value: "gpt-6.1-sol-mini" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+
+    await waitFor(() => expect(setMode).toHaveBeenCalled());
+    expect(setMode.mock.calls[0]?.[1].tuning).toMatchObject({
+      docsBuilderProvider: "claude",
+      docsBuilderModel: "haiku",
+      scoutProvider: "codex",
+      scoutModel: "gpt-6.1-sol-mini",
+      // Feature and bug builds keep the builder's choice.
+      builderProvider: "auto",
+      builderModel: null,
+    });
+    success.mockRestore();
+  });
 });

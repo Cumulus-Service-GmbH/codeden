@@ -6,7 +6,7 @@ import {
   type Project,
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
-import { earliestUntil, untilText } from "./availability";
+import { builderWanted, chooseAgent } from "./agent-choice";
 import { archiveFinished } from "./cleanup";
 import { settleClosedIssues } from "./closed-issues";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
@@ -285,35 +285,10 @@ async function assignAgents(
 }
 
 /**
- * The builder's provider and model (§10.1, Provider availability): `builderProvider` and
- * `builderModel` when that provider is available; otherwise another available provider (the
- * project's, then the agent default, then any), with its default model. `auto` stays `auto`
- * while every provider is available. Nothing available: the build waits.
+ * Start a builder for a queued item; true when the item is building. Docs items build on the
+ * docs builder's provider and model when one is chosen, the rest on the builder's
+ * (`agent-choice.ts`); an unavailable provider is skipped, and with none available it waits.
  */
-function chooseBuilder(
-  ctx: FactoryContext,
-  project: Project,
-  loop: FactoryLoop,
-): { provider: string; model: string | null } | { waiting: string } {
-  const wanted = loop.tuning.builderProvider;
-  const available = ctx.sessions.providers();
-  const blocked = ctx.sessions.unavailable();
-  if (blocked.length === 0) {
-    return { provider: wanted, model: wanted === "auto" ? null : loop.tuning.builderModel };
-  }
-  if (available.length === 0) {
-    return { waiting: `Waiting: no build provider available${untilText(earliestUntil(blocked))}` };
-  }
-  if (wanted !== "auto" && available.includes(wanted)) {
-    return { provider: wanted, model: loop.tuning.builderModel };
-  }
-  const roleDefault = ctx.settings.get().providers.agent.provider;
-  const order = [wanted, project.defaultProvider, roleDefault, ...available];
-  const provider = order.find((p): p is string => Boolean(p) && available.includes(p as string));
-  return { provider: provider ?? (available[0] as string), model: null };
-}
-
-/** Start a builder for a queued item; true when the item is building. */
 async function startBuilder(
   ctx: FactoryContext,
   project: Project,
@@ -321,7 +296,7 @@ async function startBuilder(
   vision: string,
   loop: FactoryLoop,
 ): Promise<boolean> {
-  const choice = chooseBuilder(ctx, project, loop);
+  const choice = chooseAgent(ctx, project, builderWanted(item, loop.tuning), "build");
   if ("waiting" in choice) {
     ctx.store.updateItem(item.id, (i) => ({ ...i, note: choice.waiting }));
     return false;

@@ -11,6 +11,7 @@ import { errorMessage } from "../errors";
 import type { RunnerPort } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import type { SessionService } from "../sessions/session-service";
+import type { AgentChoice } from "./agent-choice";
 import type {
   ProviderAvailability,
   ProviderCause,
@@ -29,6 +30,11 @@ export { FACTORY_STARTER, isFactorySession };
  */
 function brief(text: string): UserInput {
   return { text, attachments: [], from: "factory" };
+}
+
+/** A start request's provider and model: a model only when one is chosen. */
+function on(agent: AgentChoice): Pick<StartSessionRequestInit, "provider" | "model"> {
+  return { provider: agent.provider, ...(agent.model ? { model: agent.model } : {}) };
 }
 
 /** Statuses that hold a session slot (`maxConcurrentSessions`). */
@@ -176,10 +182,14 @@ export class FactorySessions {
     return s;
   }
 
-  /** Start the dark factory's scout with its first round's brief. */
-  startScout(projectId: string, text: string): Promise<StartSessionResponse> {
+  /**
+   * Start the dark factory's scout with its first round's brief, on `agent`'s provider and model
+   * (`scoutProvider`/`scoutModel`, `agent-choice.ts`; `auto`: the project's or role's default).
+   */
+  startScout(projectId: string, text: string, agent: AgentChoice): Promise<StartSessionResponse> {
     return this.start({
       projectId,
+      ...on(agent),
       purpose: "Factory scout: review the app against the vision and file the work",
       workKey: SCOUT_WORK_KEY,
       scope: { area: "factory-scout" },
@@ -188,11 +198,17 @@ export class FactorySessions {
     });
   }
 
-  /** Start one of the scout's area reviewers (long-lived, one per review area). */
-  startLens(projectId: string, area: DiscoveryArea, text: string): Promise<StartSessionResponse> {
+  /** Start one of the scout's area reviewers (long-lived, one per review area), as the scout. */
+  startLens(
+    projectId: string,
+    area: DiscoveryArea,
+    text: string,
+    agent: AgentChoice,
+  ): Promise<StartSessionResponse> {
     const name = area.replace("_", " ");
     return this.start({
       projectId,
+      ...on(agent),
       purpose: `Factory area reviewer: review ${name}`,
       workKey: `${LENS_WORK_KEY_PREFIX}${area}`,
       scope: { area: `factory-lens-${area}` },

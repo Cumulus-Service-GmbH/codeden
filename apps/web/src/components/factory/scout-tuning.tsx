@@ -3,12 +3,18 @@ import { useId } from "react";
 import { Field } from "@/components/automations/form-bits";
 import { InfoHint } from "@/components/common/info-hint";
 import { NumberField } from "@/components/common/number-field";
+import { AgentPicker } from "./agents-tuning";
 import { REVIEW_AREAS_HELP, SCOUT_HELP } from "./meta";
 
 /** The scout's knobs (dark factory). */
 export type ScoutDraft = Pick<
   FactoryTuning,
-  "minBacklog" | "discoveryIntervalMin" | "discoveryPerRound" | "maxIssuesPerRound"
+  | "minBacklog"
+  | "discoveryIntervalMin"
+  | "discoveryPerRound"
+  | "maxIssuesPerRound"
+  | "scoutProvider"
+  | "scoutModel"
 >;
 
 /** What the backlog threshold means, for its hint and the scout's description. */
@@ -103,6 +109,17 @@ export function ScoutTuning<T extends ScoutDraft>({
             className="text-[13px]"
           />
         </Field>
+        <AgentPicker
+          id={`${id}-agent`}
+          label="Scout"
+          provider={tuning.scoutProvider}
+          model={tuning.scoutModel}
+          hint="Runs the scout and its area reviewers, long-lived agents that read a lot of code each round. Automatic: the project's provider. A scout or area reviewer on another provider or model starts afresh at its next round."
+          meanwhile="the scout starts on another available provider"
+          onChange={(scoutProvider, scoutModel) =>
+            onChange({ ...tuning, scoutProvider, scoutModel })
+          }
+        />
       </div>
     </div>
   );

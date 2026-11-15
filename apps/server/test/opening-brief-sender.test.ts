@@ -37,8 +37,9 @@ describe("the factory's opening briefs record their sender", () => {
       false,
     );
     await sessions.startRevert(env.project.id, { sha: "abc1234def", prNumber: 7, title: "Bad" });
-    await sessions.startScout(env.project.id, "## Round 1\n\nReview **everything**.");
-    await sessions.startLens(env.project.id, "ux", "## UX\n\nReview the `ux`.");
+    const auto = { provider: "auto", model: null };
+    await sessions.startScout(env.project.id, "## Round 1\n\nReview **everything**.", auto);
+    await sessions.startLens(env.project.id, "ux", "## UX\n\nReview the `ux`.", auto);
     expect(env.starts).toHaveLength(5);
     for (const req of env.starts) {
       expect(req.input?.text.length, req.purpose).toBeGreaterThan(0);

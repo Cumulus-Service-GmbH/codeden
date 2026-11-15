@@ -269,6 +269,29 @@ describe("factory API contracts (§10.1)", () => {
     );
     expect(FactoryTuning.safeParse({ reviewerFallback: "never" }).success).toBe(false);
     expect(FactoryTuning.safeParse({ reviewerModel: "" }).success).toBe(false);
+    // Model routing: loops saved before it build docs like everything else and scout on auto.
+    expect(loop.tuning).toMatchObject({
+      docsBuilderProvider: null,
+      docsBuilderModel: null,
+      scoutProvider: "auto",
+      scoutModel: null,
+    });
+    const routed = {
+      docsBuilderProvider: "claude",
+      docsBuilderModel: "claude-haiku-5-5",
+      scoutProvider: "codex",
+      scoutModel: "gpt-5.5-mini",
+    } as const;
+    const routedTuning = FactoryTuning.parse(routed);
+    expect(FactoryTuning.parse(JSON.parse(JSON.stringify(routedTuning)))).toEqual(routedTuning);
+    expect(routedTuning).toMatchObject(routed);
+    expect(FactoryTuningPatch.parse({ scoutModel: "gpt-5.5-mini" })).toEqual({
+      scoutModel: "gpt-5.5-mini",
+    });
+    expect(FactoryTuningPatch.parse({ docsBuilderProvider: null })).toEqual({
+      docsBuilderProvider: null,
+    });
+    expect(FactoryTuning.safeParse({ scoutModel: "" }).success).toBe(false);
     // The WIP limit follows the agent limit until someone sets it; null sets it back.
     expect(loop.tuning.maxOpenPrs).toBeNull();
     const wip = FactoryTuning.parse({ maxOpenPrs: 4 });

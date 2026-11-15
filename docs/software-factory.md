@@ -432,7 +432,9 @@ Settings are **enforced by the server**, never left to agent judgement. Open the
 | `discoveryIntervalMin` | The scout: Every (hours) | `360` (minutes) |
 | `discoveryPerRound` | The scout: Review areas per round | `2` |
 | `maxIssuesPerRound` | The scout: Issues per round | `3` |
-| `builderProvider` / `builderModel` | Agents: Builder provider / Builder model | `auto` (**Automatic**: the project's provider, else the agent role's) / `null` (the provider's default) |
+| `builderProvider` / `builderModel` | Agents: Builder provider / Builder model (feature and bug builds, and docs builds unless a docs builder is chosen) | `auto` (**Automatic**: the project's provider, else the agent role's) / `null` (the provider's default) |
+| `docsBuilderProvider` / `docsBuilderModel` | Agents: Docs builder provider / Docs builder model (builds of docs items) | `null` (**Same as builders**) / `null` (the provider's default) |
+| `scoutProvider` / `scoutModel` | The scout: Scout provider / Scout model (the scout and its area reviewers) | `auto` (**Automatic**: the project's provider, else the agent role's) / `null` (the provider's default) |
 | `reviewerProvider` / `reviewerModel` | Agents: Reviewer provider / Reviewer model | `auto` (**Automatic**: a different provider from the builder's) / `null` (the provider's default) |
 | `reviewerFallback` | Agents: When the reviewer's provider is unavailable | `builder` |
 | `areas` (dark factory: the review areas the scout may use) | API only | all eight |
@@ -440,14 +442,19 @@ Settings are **enforced by the server**, never left to agent judgement. Open the
 
 **Agents.** This section picks who builds and who reviews. A reviewer on a different provider from the builder gives the most independent review, which is what **Automatic** does. A model applies only to a provider you chose; with **Automatic**, each provider uses its default model. Changing a provider resets its model to **Provider default**.
 
-New builders and reviewers start only on an **available** provider: installed, signed in and not at its usage limit. The pickers mark the ones that aren't, and say what happens until they are:
+**Route work to the model it needs.** Sending simple, well-scoped work to a cheaper model and hard work to a stronger one is the main lever on agent cost. The [scorecard](#the-scorecard) shows whether the cheaper model causes rework.
 
-- **A builder** whose provider is unavailable starts on another available provider (the project's, then the agent role's, then any), with that provider's default model.
+- **Docs builder** picks the provider and model for docs items (READMEs, guides, comments). **Same as builders** (the default) builds them like everything else. Feature and bug builds, and items not yet classified, always use the **Builder**'s choice.
+- **Scout provider** and **Scout model**, in **The scout** section of a dark factory, pick where the scout and its area reviewers run. They are long-lived sessions that read a lot of code each round, often the factory's biggest token users. **Automatic** keeps the project's provider. A scout or area reviewer already running on another provider or model is replaced by a fresh session at its next round, and the old one is archived.
+
+New builders, reviewers and scouts start only on an **available** provider: installed, signed in and not at its usage limit. The pickers mark the ones that aren't, and say what happens until they are:
+
+- **A builder** (docs builders and the scout too) whose provider is unavailable starts on another available provider (the project's, then the agent role's, then any), with that provider's default model.
 - **A reviewer** whose provider is unavailable (or fails to start) follows **When the reviewer's provider is unavailable** (`reviewerFallback`):
   - **Review on the builder's provider and model** (`builder`, the default), in a fresh session;
   - **Review on any available provider** (`any`);
   - **Wait until it is available again** (`wait`).
-- **No provider available at all:** the build or review waits, whatever the setting, and the item says until when ("Waiting: no review provider available until …").
+- **No provider available at all:** the build or review waits, whatever the setting, and the item says until when ("Waiting: no review provider available until …"). No new scout or area reviewer starts either.
 
 The item's page notes when a review didn't run where the settings asked, and why.
 

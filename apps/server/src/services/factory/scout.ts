@@ -9,6 +9,7 @@ import {
   type Session,
 } from "@codeden/contracts";
 import { conflict, errorMessage } from "../errors";
+import { type ScoutAgent, scoutAgent } from "./agent-choice";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { budgetExceeded, freeSlots, localDay } from "./policy";
 import {
@@ -19,7 +20,12 @@ import {
   scoutPlanPrompt,
   scoutSelfReviewPrompt,
 } from "./prompts-scout";
-import { LENS_START_TIMEOUT_MS, type LensBrief, startPlannedLenses } from "./scout-lenses";
+import {
+  LENS_START_TIMEOUT_MS,
+  type LensBrief,
+  reusableScoutSession,
+  startPlannedLenses,
+} from "./scout-lenses";
 import { keepScoutReports } from "./scout-merge";
 import { isBusy } from "./sessions";
 import { busySlots, claimSlot, SCOUT_SLOT } from "./slots";
@@ -91,10 +97,11 @@ export async function advanceScout(
   // At the work-in-progress limit the factory finishes open work before it finds more.
   if (wipOf(ctx, project, loop).holding) return loop;
   // The scout comes last for a free agent: after reviews, fixes, rebases and builds.
-  const reuse = ctx.sessions.reusable(loop.scout.sessionId);
+  const agent = scoutAgent(ctx, project, loop.tuning);
+  const reuse = reusableScoutSession(ctx, loop.scout.sessionId, agent);
   if (!claimSlot(ctx, project, "scout", SCOUT_SLOT, { wake: reuse?.id })) return loop;
   try {
-    return { ...loop, scout: await startRound(ctx, project, loop, now) };
+    return { ...loop, scout: await startRound(ctx, project, loop, now, agent, reuse) };
   } catch (error) {
     ctx.log?.(`factory: scout round: ${errorMessage(error)}`);
     return loop;
@@ -175,20 +182,31 @@ export async function runScoutNow(
 ): Promise<FactoryLoop> {
   const blocked = scoutNowBlocker(project, loop, scoutNowFacts(ctx, project, loop));
   if (blocked) throw conflict(blocked, SCOUT_UNAVAILABLE);
-  const scout = await startRound(ctx, project, loop, ctx.now());
+  const agent = scoutAgent(ctx, project, loop.tuning);
+  const reuse = reusableScoutSession(ctx, loop.scout.sessionId, agent);
+  if (!reuse && "waiting" in agent.choice) {
+    const why = agent.choice.waiting.replace(/^Waiting: /, "");
+    throw conflict(`The scout's session couldn't start: ${why}.`, SCOUT_UNAVAILABLE);
+  }
+  const scout = await startRound(ctx, project, loop, ctx.now(), agent, reuse);
   if (!scout.round) throw conflict("The scout's session couldn't start.", SCOUT_UNAVAILABLE);
   // As the next tick derives it: a round with nothing further along is "discovering".
   return { ...loop, scout, state: loop.state === "idle" ? "discovering" : loop.state };
 }
 
+/**
+ * Start a round: wake the scout's long-lived session (`reuse`), or start a new one on the
+ * scout's provider and model. With no provider available and nothing to wake, no round starts.
+ */
 async function startRound(
   ctx: FactoryContext,
   project: Project,
   loop: FactoryLoop,
   now: Date,
+  agent: ScoutAgent,
+  reuse: Session | undefined,
 ): Promise<ScoutState> {
   const scout = loop.scout;
-  const reuse = ctx.sessions.reusable(scout.sessionId);
   const text = scoutPlanPrompt({
     round: scout.rounds + 1,
     vision: visionOf(project).text,
@@ -204,7 +222,11 @@ async function startRound(
     await ctx.sessions.message(reuse.id, text);
     sessionId = reuse.id;
   } else {
-    const res = await ctx.sessions.startScout(project.id, text);
+    if ("waiting" in agent.choice) {
+      ctx.log?.(`factory: scout round: ${agent.choice.waiting}`);
+      return scout;
+    }
+    const res = await ctx.sessions.startScout(project.id, text, agent.choice);
     if (res.status !== "started" && res.status !== "queued") return scout;
     sessionId = res.sessionId;
   }
@@ -267,7 +289,15 @@ async function advanceRound(
 
   // Planned area reviewers start as agents free up; the round reviews once one has started.
   if (pending()) {
-    const started = await startPlannedLenses(ctx, project, scout, now, lensBrief(ctx, project));
+    const agent = scoutAgent(ctx, project, loop.tuning);
+    const started = await startPlannedLenses(
+      ctx,
+      project,
+      scout,
+      now,
+      lensBrief(ctx, project),
+      agent,
+    );
     if (started.closed) return endRound(started.scout, now, started.closed);
     scout = started.scout;
     round = scout.round;
