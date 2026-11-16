@@ -83,6 +83,75 @@ export class Kit {
   }
 }
 
+/**
+ * An instanced mesh refilled every frame (#476): `begin`, a `push` per instance, `end`. It grows
+ * by doubling when a frame needs more instances than it holds, and draws nothing while empty.
+ * Instances move, so it is never frustum-culled on a stale bounding sphere.
+ */
+export class Pool {
+  private mesh: InstancedMesh | null = null;
+  private n = 0;
+  private readonly c = new Color();
+
+  constructor(
+    private readonly parent: Object3D,
+    private readonly geometry: BufferGeometry,
+    private readonly material: Material,
+    private readonly opts: { colours?: boolean; cast?: boolean; order?: number } = {},
+  ) {}
+
+  begin(): void {
+    this.n = 0;
+  }
+
+  push(m: Matrix4, rgb?: Rgb): void {
+    const mesh = this.room(this.n + 1);
+    mesh.setMatrixAt(this.n, m);
+    if (this.opts.colours)
+      mesh.setColorAt(this.n, rgb ? setColour(this.c, rgb) : this.c.set(1, 1, 1));
+    this.n += 1;
+  }
+
+  end(): void {
+    const mesh = this.mesh;
+    if (!mesh) return;
+    mesh.count = this.n;
+    mesh.visible = this.n > 0;
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  }
+
+  /** The mesh, with room for at least `need` instances. */
+  private room(need: number): InstancedMesh {
+    if (this.mesh && this.mesh.instanceMatrix.count >= need) return this.mesh;
+    const old = this.mesh;
+    const cap = Math.max(8, need * 2, (old?.instanceMatrix.count ?? 0) * 2);
+    const mesh = new InstancedMesh(this.geometry, this.material, cap);
+    mesh.frustumCulled = false;
+    mesh.castShadow = this.opts.cast ?? false;
+    mesh.receiveShadow = false;
+    if (this.opts.order !== undefined) mesh.renderOrder = this.opts.order;
+    if (this.opts.colours) mesh.setColorAt(0, this.c.set(1, 1, 1));
+    if (old) {
+      mesh.instanceMatrix.array.set(old.instanceMatrix.array);
+      if (old.instanceColor && mesh.instanceColor)
+        mesh.instanceColor.array.set(old.instanceColor.array);
+      this.parent.remove(old);
+      old.dispose();
+    }
+    this.parent.add(mesh);
+    this.mesh = mesh;
+    return mesh;
+  }
+
+  dispose(): void {
+    if (!this.mesh) return;
+    this.parent.remove(this.mesh);
+    this.mesh.dispose();
+    this.mesh = null;
+  }
+}
+
 /** Frees what `kit` made and takes `group`'s children off the scene. */
 export function clear(group: Object3D, kit: Kit): void {
   group.clear();

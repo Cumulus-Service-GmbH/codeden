@@ -10,7 +10,7 @@ import {
   nextChange,
   noteActivity,
   tickActivity,
-} from "./activity";
+} from "../scene/activity";
 
 /**
  * The live activity of the agents on screen (#264), for their thought bubbles. It keeps one

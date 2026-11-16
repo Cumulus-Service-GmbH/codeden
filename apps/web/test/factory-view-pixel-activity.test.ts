@@ -13,7 +13,7 @@ import {
   safeCommand,
   TOOL_RECENT_MS,
   tickActivity,
-} from "@/components/factory-view/pixel/activity";
+} from "@/components/factory-view/scene/activity";
 import { redactSecrets } from "@/lib/redact";
 
 /**

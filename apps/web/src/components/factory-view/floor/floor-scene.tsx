@@ -1,28 +1,44 @@
 import type { FactoryStatus } from "@codeden/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { Maximize2 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { useRoleSession } from "@/components/orchestration/role-chat";
 import { Button } from "@/components/ui/button";
 import { usePrefersReducedMotion } from "@/lib/motion";
-import type { PixelChat } from "../pixel/pixel-scene";
-import { PmTerminal } from "../pixel/pm-terminal";
+import { agentCard } from "../scene/agent-card";
 import type { SceneAgent } from "../scene/agents";
 import { bayCount } from "../scene/repair-bay";
 import { sceneSummary } from "../scene/scene-model";
+import { useHover } from "../scene/use-hover";
 import type { SessionInfo, ViewCard, ViewPipeline } from "../stages";
+import { RecentActivity } from "./activity-icons";
+import { AgentCardView } from "./cards";
+import { FigureLayer, type OverlayHandle } from "./overlay";
 import { useFloorPalette } from "./palette";
+import { PmChat } from "./pm-chat";
 import { ROSTER_SPACE, Roster } from "./roster";
 import { FloorStage } from "./stage";
+import { useAgentActivity } from "./use-activity";
 import { useWorkshop } from "./use-workshop";
 
 const TERMINAL_W = 340;
+/** Session states whose agent can be doing something worth a bubble. */
+const LIVE = new Set(["starting", "running", "waiting"]);
+
+/** Where the PM chat goes: docked beside the scene (wide screens) or over it. */
+export interface SceneChat {
+  docked: boolean;
+  open: boolean;
+  setOpen: (open: boolean) => void;
+}
 
 /**
- * Floor mode (#420): the factory as a 3D Workshop, every agent a small crew figure at the
- * station for its step, seated from the agent limit and never left over as "+N". Plain Three.js
- * behind a pure model, in its own chunk. The canvas is decorative: the roster lists every agent
- * as a button and a live caption says what the scene shows. Drag to pan, wheel or pinch to zoom,
+ * Floor mode (#420, #476): the factory as a 3D Workshop, every agent a small crew figure at the
+ * station for its step, its status on the figure (tip light, mouth, pose), a name tag and a
+ * thought bubble of its latest activity. Hovering or focusing a figure shows its card; clicking
+ * it does what its roster row does and flies the camera to it. Plain Three.js behind a pure
+ * model, in its own chunk. The canvas is decorative: the figures' buttons and the roster carry
+ * the facts, and a live caption says what the scene shows. Drag to pan, wheel or pinch to zoom,
  * Fit (or a double-click) to frame it all again. Without WebGL it tells the view to show the
  * board instead.
  */
@@ -42,7 +58,7 @@ export function FloorScene({
   projectId: string;
   now: number;
   onOpen: (card: ViewCard) => void;
-  chat: PixelChat;
+  chat: SceneChat;
   /** WebGL couldn't start, or its context was lost and not restored. */
   onUnsupported: () => void;
 }) {
@@ -52,18 +68,59 @@ export function FloorScene({
   const reduced = usePrefersReducedMotion();
   const host = useRef<HTMLDivElement>(null);
   const stage = useRef<FloorStage | null>(null);
+  const overlay = useRef<OverlayHandle>(null);
   const terminal = useRef<HTMLElement>(null);
   const navigate = useNavigate();
+  const hover = useHover();
+  const ids = useId().replace(/:/g, "");
+  const [focusKey, setFocusKey] = useState<string | null>(null);
   // The roster starts open where there's room beside the floor.
   const [rosterOpen, setRosterOpen] = useState(() => window.innerWidth >= 1600);
   const unsupported = useRef(onUnsupported);
   unsupported.current = onUnsupported;
+  const hoverRef = useRef(hover);
+  hoverRef.current = hover;
+  const tapRef = useRef<(key: string | null) => void>(() => {});
+
+  // The agents drawn on the floor, in the roster's order.
+  const onFloor = useMemo(
+    () =>
+      scene.agents.filter(
+        (a) => scene.seating.seats.has(a.key) && a.role !== "scout" && a.role !== "area",
+      ),
+    [scene],
+  );
+  const lifted = useMemo(
+    () =>
+      new Set(
+        onFloor
+          .filter((a) => (scene.seating.seats.get(a.key)?.tile.r ?? 0) % 2 === 1)
+          .map((a) => a.key),
+      ),
+    [onFloor, scene],
+  );
+  const live = useMemo(
+    () =>
+      new Set(
+        onFloor.flatMap((a) =>
+          a.sessionId && LIVE.has(sessions.get(a.sessionId)?.status ?? "") ? [a.sessionId] : [],
+        ),
+      ),
+    [onFloor, sessions],
+  );
+  const activity = useAgentActivity(useMemo(() => [...live], [live]));
 
   useEffect(() => {
     const el = host.current;
     if (!el) return;
     try {
-      stage.current = new FloorStage(el, () => unsupported.current());
+      stage.current = new FloorStage(el, {
+        onLost: () => unsupported.current(),
+        onHover: (key) => (key ? hoverRef.current.enter(key) : hoverRef.current.leave()),
+        onTap: (key) => tapRef.current(key),
+        onFrame: (figures, u) => overlay.current?.sync(figures, u),
+      });
+      stage.current.coarsePointer = window.matchMedia("(pointer: coarse)").matches;
     } catch {
       unsupported.current();
       return;
@@ -88,7 +145,7 @@ export function FloorScene({
 
   const focusChat = () => {
     chat.setOpen(true);
-    // After the terminal renders: its message box.
+    // After the chat renders: its message box.
     window.setTimeout(() => terminal.current?.querySelector("textarea")?.focus(), 60);
   };
   const openItem = (a: SceneAgent): (() => void) | null => {
@@ -96,13 +153,23 @@ export function FloorScene({
     if (card) return () => onOpen(card);
     return a.role === "pm" ? focusChat : null;
   };
+  /** What clicking an agent does, in the scene or the roster: select it, then open it. */
   const activate = (a: SceneAgent) => {
+    stage.current?.select(a.key);
+    setFocusKey(a.key);
     const open = openItem(a);
     if (open) return open();
     if (a.sessionId)
       void navigate({ to: "/sessions/$sessionId", params: { sessionId: a.sessionId } });
   };
+  tapRef.current = (key) => {
+    const a = key ? scene.agents.find((x) => x.key === key) : undefined;
+    if (a) activate(a);
+    else stage.current?.select(null);
+  };
   const terminalProps = { projectId, onFold: () => chat.setOpen(false), ref: terminal };
+  const hovered = onFloor.find((a) => a.key === hover.key) ?? null;
+  const cardId = `${ids}-figure-card`;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2" data-testid="factory-view-floor-scene">
@@ -112,6 +179,37 @@ export function FloorScene({
           className="relative min-h-0 min-w-0 flex-1 overflow-hidden rounded-lg border border-border bg-muted/20"
         >
           {/* The stage puts its canvas (aria-hidden) here. */}
+          <FigureLayer
+            ref={overlay}
+            agents={onFloor}
+            lifted={lifted}
+            live={live}
+            store={activity}
+            now={now}
+            hovered={hovered?.key ?? null}
+            focusKey={focusKey ?? onFloor[0]?.key ?? null}
+            cardId={cardId}
+            card={
+              hovered && (
+                <AgentCardView
+                  id={cardId}
+                  agent={hovered}
+                  card={agentCard(hovered, now)}
+                  recent={<RecentActivity store={activity} sessionId={hovered.sessionId} />}
+                  onEnter={() => hover.enter(hovered.key)}
+                  onLeave={hover.leave}
+                  onOpenItem={openItem(hovered)}
+                />
+              )
+            }
+            onFocusFigure={(a) => {
+              setFocusKey(a.key);
+              hover.enter(a.key);
+              stage.current?.reveal(a.key);
+            }}
+            onBlurFigure={hover.leave}
+            onActivate={activate}
+          />
           <Roster
             agents={scene.agents}
             now={now}
@@ -131,15 +229,15 @@ export function FloorScene({
             <Maximize2 /> Fit
           </Button>
           {!chat.docked && chat.open && (
-            <PmTerminal
+            <PmChat
               {...terminalProps}
-              className="absolute inset-y-0 right-0 z-30 w-[min(360px,85%)]"
+              className="absolute inset-y-2 right-2 z-30 w-[min(360px,85%)]"
             />
           )}
         </div>
         {chat.docked &&
           (chat.open ? (
-            <PmTerminal {...terminalProps} className="shrink-0" style={{ width: TERMINAL_W }} />
+            <PmChat {...terminalProps} className="shrink-0" style={{ width: TERMINAL_W }} />
           ) : (
             <button
               type="button"

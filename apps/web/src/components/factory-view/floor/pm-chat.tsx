@@ -1,15 +1,16 @@
 import { Link } from "@tanstack/react-router";
+import { Bot, Minus } from "lucide-react";
 import type { CSSProperties, Ref } from "react";
 import { useRoleSession } from "@/components/orchestration/role-chat";
 import { cn } from "@/lib/utils";
 import { QuickChat } from "../quick-chat";
 
 /**
- * The PM chat as part of the floor (#264): a pixel-framed terminal docked beside the PM's control
- * room, inside the scene's frame. Inside it is the usual quick chat, so the text is readable, the
- * composer is the normal one and the messages scroll.
+ * The PM chat as part of the floor (#264, #420): docked beside the scene on wide screens, over it
+ * on narrower ones. Inside it is the usual quick chat, so the composer is the normal one and the
+ * messages scroll.
  */
-export function PmTerminal({
+export function PmChat({
   projectId,
   onFold,
   className,
@@ -29,40 +30,41 @@ export function PmTerminal({
       ref={ref}
       aria-label="Project manager chat"
       className={cn(
-        "dark flex min-h-0 flex-col border-4 border-[#262b44] bg-[#1a1c2c] text-foreground shadow-[inset_0_0_0_2px_#3d4660]",
+        "flex min-h-0 flex-col overflow-hidden rounded-lg border border-border bg-background shadow-md",
         className,
       )}
       style={style}
-      data-testid="factory-view-pixel-terminal"
+      data-testid="factory-view-pm-chat"
     >
-      <header className="flex h-9 shrink-0 items-center gap-2 border-b-4 border-[#262b44] bg-[#29366f] px-2 font-mono text-[11px] text-[#f4f4f4]">
+      <header className="flex h-9 shrink-0 items-center gap-2 border-b border-border px-2.5 text-xs">
+        <Bot className="size-3.5 text-primary" aria-hidden />
+        <h2 className="font-medium">PM chat</h2>
         <span
           aria-hidden
           className={cn(
-            "size-2 border border-[#1a1c2c]",
-            busy ? "bg-[#a7f070] motion-safe:animate-pulse" : "bg-[#566c86]",
+            "size-1.5 rounded-full",
+            busy ? "bg-status-running motion-safe:animate-pulse" : "bg-status-idle",
           )}
         />
-        <h2 className="font-semibold uppercase tracking-wider">PM terminal</h2>
-        {busy && <span className="text-[#73eff7]">answering…</span>}
+        {busy && <span className="text-2xs text-muted-foreground">answering…</span>}
         <Link
           to="/projects/$projectId/pm"
           params={{ projectId }}
-          className="ml-auto text-[#ffcd75] hover:underline"
+          className="ml-auto text-2xs text-primary hover:underline"
         >
           Full chat
         </Link>
         <button
           type="button"
           onClick={onFold}
-          className="border-2 border-[#1a1c2c] bg-[#566c86] px-1 leading-none hover:bg-[#6b7f9a]"
+          className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
           aria-label="Fold the PM chat"
-          data-testid="factory-view-pixel-terminal-fold"
+          data-testid="factory-view-pm-chat-fold"
         >
-          –
+          <Minus className="size-3.5" aria-hidden />
         </button>
       </header>
-      <div className="flex min-h-0 flex-1 flex-col bg-background">
+      <div className="flex min-h-0 flex-1 flex-col">
         <QuickChat projectId={projectId} header={false} />
       </div>
     </aside>

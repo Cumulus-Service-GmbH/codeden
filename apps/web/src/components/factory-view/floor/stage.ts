@@ -8,22 +8,29 @@ import {
   Vector3,
   WebGLRenderer,
 } from "three";
-import { floorSeats, seatAt, WALL_H, type WorkshopLayout } from "../scene/layout";
+import { floorSeats, WALL_H, type WorkshopLayout } from "../scene/layout";
 import type { Scene } from "../scene/scene-model";
 import { CameraRig } from "./camera";
-import { Crew, type Figure } from "./crew";
+import { Crew } from "./crew";
+import { HEAD_Y } from "./crew-geometry";
+import type { FigureStatus } from "./figure-look";
+import type { FigureFrame } from "./frames";
 import { bindInput } from "./input";
 import { clear, colour, Kit } from "./kit";
 import type { FloorPalette } from "./palette";
 import { buildProps, occupiedSeats, propsKey } from "./props";
+import { pickBox, pickFigure, rayAt, type ScreenPoint, screenAnchor } from "./screen";
+import { seatFrames } from "./seat-frames";
 import { buildWorkshop } from "./workshop";
 
 /**
- * Floor mode's stage (#420): one WebGL renderer, the hall, the crew and the live props, lit by a
- * hemisphere light and a sun from the upper left front with soft shadows. It renders only when
- * something changed (the data, the camera, the size or the theme) and never while the tab is
- * hidden or the canvas is off screen. The pixel ratio is capped at 2. Throws when WebGL can't
- * start; calls `onLost` when the context is lost and doesn't come back.
+ * Floor mode's stage (#420, #476): one WebGL renderer, the hall, the crew and the live props, lit
+ * by a hemisphere light and a sun from the upper left front with soft shadows. It draws
+ * continuously only while something animates: at most 30 frames a second for the crew's idle
+ * loops, every display frame while the camera moves, and on demand once nothing does (reduced
+ * motion, a stopped factory, an empty floor). Never while the tab is hidden or the canvas is off
+ * screen. The pixel ratio is capped at 2. Throws when WebGL can't start; calls `onLost` when the
+ * context is lost and doesn't come back.
  */
 
 export interface StageContent {
@@ -32,12 +39,36 @@ export interface StageContent {
   palette: FloorPalette;
 }
 
+/** A figure on screen this frame, for the DOM layer over the canvas. */
+export interface ScreenFigure {
+  key: string;
+  status: FigureStatus;
+  /** Its feet, and the top of its head. */
+  foot: ScreenPoint;
+  head: ScreenPoint;
+}
+
+export interface StageEvents {
+  /** WebGL's context was lost and didn't come back. */
+  onLost: () => void;
+  /** The pointer is over this figure now (null: none), at this canvas point. */
+  onHover: (key: string | null, at: { x: number; y: number } | null) => void;
+  /** A tap or click on a figure, or on the empty floor (null). */
+  onTap: (key: string | null) => void;
+  /** After each frame: where every figure is on screen, and the zoom in pixels per unit. */
+  onFrame: (figures: readonly ScreenFigure[], pxPerUnit: number) => void;
+}
+
 const MAX_DPR = 2;
 const SHADOW_MAP = 1024;
 /** How long a lost context may take to come back before the view gives up on it. */
 const RESTORE_MS = 3000;
 /** Toward the sun: from the upper left front, as the camera sees the hall. */
 const SUN = new Vector3(-0.2, 1.5, 1).normalize();
+/** Idle loops draw at most this often. */
+export const IDLE_FPS = 30;
+/** The hall's lights while the factory is stopped. */
+const STOPPED_LIGHT = 0.4;
 
 export class FloorStage {
   private readonly renderer: WebGLRenderer;
@@ -52,9 +83,16 @@ export class FloorStage {
   private propsKit = new Kit();
   private readonly shared = new Kit();
   private readonly unit = this.shared.own(new BoxGeometry(1, 1, 1));
-  private keys = { hall: "", bounds: "", props: "", crew: "" };
+  private keys = { hall: "", bounds: "", props: "" };
+  private content: StageContent | null = null;
+  private frames: FigureFrame[] = [];
+  private selected: string | null = null;
+  private reducedMotion = false;
+  private coarse = false;
   private raf = 0;
+  private timer = 0;
   private last = 0;
+  private lastDrawn = 0;
   private dirty = true;
   private onScreen = true;
   private lostTimer = 0;
@@ -62,6 +100,9 @@ export class FloorStage {
   private readonly unbind: () => void;
   private readonly resize: ResizeObserver;
   private readonly intersect: IntersectionObserver | null;
+  private viewport = { width: 1, height: 1 };
+  /** Frames drawn, for the dev stats overlay. */
+  drawn = 0;
 
   /**
    * Draws into a canvas of its own inside `host` (decorative: hidden from assistive tech), so
@@ -69,7 +110,7 @@ export class FloorStage {
    */
   constructor(
     private readonly host: HTMLElement,
-    private readonly onLost: () => void,
+    private readonly events: StageEvents,
   ) {
     const canvas = document.createElement("canvas");
     canvas.setAttribute("aria-hidden", "true");
@@ -96,7 +137,12 @@ export class FloorStage {
     canvas.addEventListener("webglcontextlost", this.lost);
     canvas.addEventListener("webglcontextrestored", this.restored);
     document.addEventListener("visibilitychange", this.visibility);
-    this.unbind = bindInput(canvas, this.rig, this.invalidate, () => this.fit(true));
+    this.unbind = bindInput(canvas, this.rig, {
+      moved: this.invalidate,
+      fit: () => this.fit(true),
+      hover: (at) => this.events.onHover(at ? this.pick(at.x, at.y) : null, at),
+      tap: (at) => this.events.onTap(this.pick(at.x, at.y)),
+    });
     this.resize = new ResizeObserver(() => this.measure());
     this.resize.observe(host);
     this.intersect =
@@ -104,14 +150,21 @@ export class FloorStage {
         ? null
         : new IntersectionObserver((entries) => {
             this.onScreen = entries.some((e) => e.isIntersecting);
-            if (this.onScreen && this.dirty) this.invalidate();
+            this.schedule();
           });
     this.intersect?.observe(canvas);
     this.measure();
   }
 
   set reduced(on: boolean) {
+    this.reducedMotion = on;
     this.rig.reduced = on;
+    this.invalidate();
+  }
+
+  /** Touch screens: bigger pick boxes. */
+  set coarsePointer(on: boolean) {
+    this.coarse = on;
   }
 
   /** Keeps the fit clear of `px` CSS pixels on the left (the open roster), and refits. */
@@ -122,7 +175,9 @@ export class FloorStage {
   }
 
   /** Shows `content`, rebuilding only what changed. */
-  update({ layout, scene, palette }: StageContent): void {
+  update(content: StageContent): void {
+    const { layout, scene, palette } = content;
+    this.content = content;
     const hallKey = JSON.stringify([
       layout.bounds,
       layout.zones,
@@ -134,7 +189,7 @@ export class FloorStage {
       clear(this.hall, this.hallKit);
       this.hallKit = new Kit();
       this.hall.add(buildWorkshop(layout, palette, this.hallKit));
-      this.light(layout, palette);
+      this.crew.setPalette(palette);
       const bounds = JSON.stringify(layout.bounds);
       if (bounds !== this.keys.bounds) {
         // The first layout jumps into view; growing eases out to the new fit.
@@ -144,28 +199,7 @@ export class FloorStage {
         this.rig.fit(grew);
       }
     }
-
-    const figures: Figure[] = [];
-    for (const agent of scene.agents) {
-      const at = scene.seating.seats.get(agent.key);
-      const seat = at ? seatAt(layout, at.station, at.tile) : undefined;
-      if (seat && !seat.offFloor) figures.push({ agent, seat });
-    }
-    const crewKey = JSON.stringify([
-      figures.map((f) => [
-        f.agent.key,
-        f.agent.role,
-        f.agent.providerId,
-        f.agent.provider,
-        f.agent.seed,
-        f.seat.tile,
-      ]),
-      palette,
-    ]);
-    if (crewKey !== this.keys.crew) {
-      this.keys.crew = crewKey;
-      this.crew.update(figures, palette);
-    }
+    this.light(layout, palette, scene.stopped);
 
     const occupied = occupiedSeats(scene);
     const props = propsKey(scene, layout, palette, occupied);
@@ -175,6 +209,28 @@ export class FloorStage {
       this.propsKit = new Kit();
       this.props.add(buildProps(scene, layout, palette, this.propsKit, this.unit, occupied));
     }
+    if (this.selected && !scene.agents.some((a) => a.key === this.selected)) this.selected = null;
+    this.invalidate();
+  }
+
+  /** Selects an agent (null: none); it hops, gets a ring, and the camera flies to it. */
+  select(key: string | null): void {
+    this.selected = key;
+    if (key) {
+      const t = this.clock();
+      this.crew.select(key, t);
+      const at = this.crew.anchor(key) ?? this.seatOf(key);
+      if (at) this.rig.flyTo({ x: at.x, y: at.y + 0.35, z: at.z });
+    }
+    this.invalidate();
+  }
+
+  /** Brings a figure into view when it's off screen (keyboard focus moved to it). */
+  reveal(key: string): void {
+    const s = this.screenOf(key);
+    const at = this.crew.anchor(key);
+    if (!s || !at || (s.foot.inView && s.head.inView)) return;
+    this.rig.flyTo({ x: at.x, y: at.y + 0.35, z: at.z });
     this.invalidate();
   }
 
@@ -184,28 +240,119 @@ export class FloorStage {
     this.invalidate();
   }
 
-  /** Asks for a frame, when one can be shown. */
+  /** Where a figure is on screen now, if it's on the floor. */
+  screenOf(key: string): { foot: ScreenPoint; head: ScreenPoint } | null {
+    const at = this.crew.anchor(key);
+    if (!at) return null;
+    return {
+      foot: screenAnchor(this.rig.camera, this.viewport, at),
+      head: screenAnchor(this.rig.camera, this.viewport, { x: at.x, y: at.y + HEAD_Y, z: at.z }),
+    };
+  }
+
+  /** Draw calls and triangles of the last frame (the dev stats overlay). */
+  stats(): { calls: number; triangles: number } {
+    const r = this.renderer.info.render;
+    return { calls: r.calls, triangles: r.triangles };
+  }
+
+  /** The figure under a canvas point, if any. */
+  private pick(x: number, y: number): string | null {
+    const ray = rayAt(this.rig.camera, this.viewport, x, y);
+    const targets = this.frames
+      .filter((f) => !f.ghost)
+      .map((f) => {
+        const at = this.crew.anchor(f.key) ?? f;
+        return { key: f.key, x: at.x, y: at.y, z: at.z };
+      });
+    return pickFigure(ray, targets, pickBox(this.coarse));
+  }
+
+  private seatOf(key: string) {
+    return this.frames.find((f) => f.key === key);
+  }
+
+  private clock(): number {
+    return performance.now() / 1000;
+  }
+
+  /** Asks for a frame now (the data, camera, size or theme changed). */
   readonly invalidate = (): void => {
     this.dirty = true;
-    if (this.raf || !this.onScreen || document.visibilityState !== "visible" || this.lostTimer)
-      return;
-    this.raf = requestAnimationFrame(this.frame);
+    this.schedule();
   };
 
-  private readonly frame = (t: number): void => {
+  private canDraw(): boolean {
+    return this.onScreen && document.visibilityState === "visible" && !this.lostTimer;
+  }
+
+  /** Whether the crew's loops or moments want frames. */
+  private animating(): boolean {
+    const scene = this.content?.scene;
+    return this.crew.animating(this.frames, {
+      t: 0,
+      reduced: this.reducedMotion,
+      still: scene?.stopped ?? false,
+      selected: null,
+    });
+  }
+
+  /** The next frame: now when something changed or the camera moves, else at the idle rate. */
+  private schedule(): void {
+    if (this.raf || !this.canDraw()) return;
+    if (this.dirty || this.rig.moving) {
+      window.clearTimeout(this.timer);
+      this.timer = 0;
+      this.raf = requestAnimationFrame(this.frame);
+      return;
+    }
+    if (this.timer || !this.animating()) return;
+    const wait = Math.max(0, 1000 / IDLE_FPS - (performance.now() - this.lastDrawn) - 4);
+    this.timer = window.setTimeout(() => {
+      this.timer = 0;
+      if (!this.raf && this.canDraw()) this.raf = requestAnimationFrame(this.frame);
+    }, wait);
+  }
+
+  private readonly frame = (now: number): void => {
     this.raf = 0;
-    const dt = this.last ? Math.min(0.1, (t - this.last) / 1000) : 1 / 60;
-    this.last = t;
-    const moving = this.rig.step(dt);
-    this.renderer.render(this.scene, this.rig.camera);
+    const dt = this.last ? Math.min(0.1, (now - this.last) / 1000) : 1 / 60;
+    this.last = now;
+    this.rig.step(dt);
+    this.draw();
     this.dirty = false;
-    if (moving) this.invalidate();
-    else this.last = 0;
+    this.lastDrawn = performance.now();
+    if (!this.rig.moving && !this.animating()) this.last = 0;
+    this.schedule();
   };
+
+  private draw(): void {
+    const c = this.content;
+    const t = this.clock();
+    if (c) {
+      this.frames = seatFrames(c.scene, c.layout);
+      this.crew.draw(this.frames, {
+        t,
+        reduced: this.reducedMotion,
+        still: c.scene.stopped,
+        selected: this.selected,
+      });
+    }
+    this.renderer.render(this.scene, this.rig.camera);
+    this.drawn += 1;
+    const figures: ScreenFigure[] = [];
+    for (const f of this.frames) {
+      if (f.ghost) continue;
+      const s = this.screenOf(f.key);
+      if (s) figures.push({ key: f.key, status: f.status, ...s });
+    }
+    this.events.onFrame(figures, this.rig.pxPerUnit());
+  }
 
   private measure(): void {
     const w = Math.max(1, this.host.clientWidth);
     const h = Math.max(1, this.host.clientHeight);
+    this.viewport = { width: w, height: h };
     this.renderer.setPixelRatio(Math.min(MAX_DPR, window.devicePixelRatio || 1));
     this.renderer.setSize(w, h, false);
     this.rig.setViewport(w, h);
@@ -213,12 +360,13 @@ export class FloorStage {
     this.invalidate();
   }
 
-  private light(layout: WorkshopLayout, p: FloorPalette): void {
+  private light(layout: WorkshopLayout, p: FloorPalette, stopped: boolean): void {
+    const dim = stopped ? STOPPED_LIGHT : 1;
     this.hemi.color = colour(p.sky);
     this.hemi.groundColor = colour(p.floor);
-    this.hemi.intensity = p.light.hemi;
+    this.hemi.intensity = p.light.hemi * dim;
     this.sun.color = colour(p.sky);
-    this.sun.intensity = p.light.sun;
+    this.sun.intensity = p.light.sun * dim;
     // Aim the sun at the hall's centre and fit its shadow camera around the hall.
     const { x0, x1, z0, z1 } = layout.bounds;
     const centre = new Vector3((x0 + x1) / 2, 0, (z0 + z1) / 2);
@@ -262,7 +410,7 @@ export class FloorStage {
   }
 
   private readonly visibility = (): void => {
-    if (document.visibilityState === "visible" && this.dirty) this.invalidate();
+    this.schedule();
   };
 
   private readonly lost = (e: Event): void => {
@@ -270,7 +418,7 @@ export class FloorStage {
     cancelAnimationFrame(this.raf);
     this.raf = 0;
     window.clearTimeout(this.lostTimer);
-    this.lostTimer = window.setTimeout(() => this.onLost(), RESTORE_MS);
+    this.lostTimer = window.setTimeout(() => this.events.onLost(), RESTORE_MS);
   };
 
   private readonly restored = (): void => {
@@ -283,6 +431,7 @@ export class FloorStage {
   dispose(): void {
     cancelAnimationFrame(this.raf);
     this.raf = 0;
+    window.clearTimeout(this.timer);
     window.clearTimeout(this.lostTimer);
     this.unbind();
     this.resize.disconnect();

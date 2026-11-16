@@ -4,6 +4,8 @@ import { Fragment, useId, useMemo, useRef } from "react";
 import { useRoleSession } from "@/components/orchestration/role-chat";
 import { usePrefersReducedMotion } from "@/lib/motion";
 import { cn } from "@/lib/utils";
+import { PmChat as PmTerminal } from "../floor/pm-chat";
+import { useAgentActivity } from "../floor/use-activity";
 import { agentCard, agentLabel } from "../scene/agent-card";
 import type { SceneAgent } from "../scene/agents";
 import { bayCount, bayDescription } from "../scene/repair-bay";
@@ -19,9 +21,7 @@ import {
 import { ActivityBubbles, RecentActivity } from "./activity-bubbles";
 import { SCENE_H, SCENE_W } from "./floor";
 import { AgentCardView, BayCardView, TicketTip } from "./pixel-cards";
-import { PmTerminal } from "./pm-terminal";
 import { pct, type SceneTarget, sceneTargets } from "./targets";
-import { useAgentActivity } from "./use-activity";
 import { useFloorScene, useSceneCanvas, useSceneSize } from "./use-floor";
 
 /** Where the PM chat goes in pixel mode: docked beside the scene (wide screens) or over it. */

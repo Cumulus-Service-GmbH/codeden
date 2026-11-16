@@ -1,9 +1,9 @@
 import { Brain, FileText, Globe, type LucideIcon, Pencil, Search, Terminal } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { type ActivityKind, bubbleOf } from "./activity";
+import { type ActivityStore, useActivityVersion } from "../floor/use-activity";
+import { type ActivityKind, bubbleOf } from "../scene/activity";
 import { SCENE_H, SCENE_W, TILE } from "./floor";
 import type { SceneTarget } from "./targets";
-import { type ActivityStore, useActivityVersion } from "./use-activity";
 
 /**
  * The thought bubbles over the floor (#264): what each agent on screen is doing right now, one

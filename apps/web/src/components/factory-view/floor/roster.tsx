@@ -2,10 +2,10 @@ import { ChevronLeft, Users } from "lucide-react";
 import { type CSSProperties, useId, useState } from "react";
 import { ProviderMark } from "@/components/common/bits";
 import { cn } from "@/lib/utils";
-import { AgentCardView } from "../pixel/pixel-cards";
 import { agentCard } from "../scene/agent-card";
 import type { AgentStatus, SceneAgent } from "../scene/agents";
 import { useHover } from "../scene/use-hover";
+import { AgentCardView } from "./cards";
 
 /**
  * Floor mode's roster (#420): a folding drawer on the scene's left edge that lists every agent as
@@ -146,7 +146,7 @@ export function Roster({
                     id={cardId}
                     agent={agent}
                     card={card}
-                    place={{ style: cardBeside(shown) }}
+                    style={cardBeside(shown)}
                     onEnter={keep}
                     onLeave={hover.leave}
                     onOpenItem={onOpenItem(agent)}
