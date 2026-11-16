@@ -276,6 +276,11 @@ describe("held review follow-ups (#435)", () => {
     expect(followUpIssues()).toHaveLength(0);
     const filed = await env.factory.fileFollowUp(env.project.id, id, 1);
     expect(filed.followUps[1]?.issue?.number).toBe(followUpIssues()[0]?.number);
+    // The digest counts the filed one; nothing is held for a scout in a software factory (#485).
+    const digest = await env.factory.digestNow(env.project.id);
+    expect(digest.followUps).toMatchObject({ held: 0, filed: 1, waiting: 0 });
+    expect(digest.text).toContain("Review follow-ups: 1 filed.");
+    expect(digest.text).not.toContain("held");
   });
 
   it("files each follow-up at once in a dark factory whose scout runs no rounds", async () => {
@@ -284,5 +289,9 @@ describe("held review follow-ups (#435)", () => {
     expect(followUpIssues().map((i) => i.title)).toEqual(FOLLOW_UPS.map((f) => f.title));
     expect(s.item(id).followUps.every((f) => f.issue && !f.heldAt)).toBe(true);
     expect(await held()).toEqual([]);
+    // Nothing waits for the scout, so the digest doesn't mention holding (#485).
+    const digest = await env.factory.digestNow(env.project.id);
+    expect(digest.text).toContain("Review follow-ups: 3 filed.");
+    expect(digest.text).not.toContain("held");
   });
 });
