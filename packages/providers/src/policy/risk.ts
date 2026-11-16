@@ -14,6 +14,7 @@ import { classifyDelete } from "./deletes";
 import { dumpsEnvironment } from "./env-dumps";
 import { type ListOutput, namesOnly } from "./env-names";
 import { classifyGit } from "./git";
+import { inlineScripts } from "./inline-scripts";
 import { classifyInstall } from "./installs";
 import {
   isInside,
@@ -115,10 +116,11 @@ function firstInList(
     }
     const piped = list[i + 1]?.piped === true;
     const { tokens } = unwrap(cmd.words);
-    const script = inlineScript(binName(tokens[0]), tokens.slice(1));
-    if (script && depth < MAX_DEPTH) {
+    const scripts = depth < MAX_DEPTH ? inlineScripts(binName(tokens[0]), tokens.slice(1)) : [];
+    for (const script of scripts) {
       const inner = parseShell(script.text, script.dialect);
-      const found = firstInList(inner, here, depth + 1, check, feeds || piped);
+      const into = feeds || piped || script.feeds === true;
+      const found = firstInList(inner, here, depth + 1, check, into);
       if (found) return found;
     }
     const found = check(cmd, here, feeds || piped);
@@ -192,27 +194,6 @@ function namedArg(args: string[], names: string[]): string | undefined {
   return undefined;
 }
 
-/** The script of an inline shell invocation (`bash -c "…"`, `pwsh -Command …`, `cmd /c …`). */
-function inlineScript(
-  bin: string,
-  args: string[],
-): { text: string; dialect: ShellDialect } | undefined {
-  if (["sh", "bash", "zsh", "dash", "ksh", "ash", "fish"].includes(bin)) {
-    const flag = args.findIndex((a) => /^-[a-z]*c[a-z]*$/i.test(a));
-    const text = flag >= 0 ? args.slice(flag + 1).find((a) => !a.startsWith("-")) : undefined;
-    return text ? { text, dialect: "posix" } : undefined;
-  }
-  if (bin === "pwsh" || bin === "powershell") {
-    const flag = args.findIndex((a) => /^-(c|command)$/i.test(a));
-    return flag >= 0 ? { text: args.slice(flag + 1).join(" "), dialect: "powershell" } : undefined;
-  }
-  if (bin === "cmd") {
-    const flag = args.findIndex((a) => /^\/[ck]$/i.test(a));
-    return flag >= 0 ? { text: args.slice(flag + 1).join(" "), dialect: "auto" } : undefined;
-  }
-  return undefined;
-}
-
 /**
  * Where a simple command stands in its list. `namesOnly`: it lists the environment but only the
  * names reach the agent (`./env-names`). `shown`: its output reaches the agent, not another command.
@@ -236,14 +217,10 @@ function classifySimple(
   const args = tokens.slice(1);
   const lower = args.map((a) => a.toLowerCase());
 
-  const script = inlineScript(bin, args);
-  if (script && depth < MAX_DEPTH) {
-    const inner = classifyList(
-      parseShell(script.text, script.dialect),
-      ctx,
-      depth + 1,
-      at.shown ? "shown" : "feeds",
-    );
+  // Inline scripts (`bash -c "…"`) and the commands of cmd's `for` loop.
+  for (const script of depth < MAX_DEPTH ? inlineScripts(bin, args) : []) {
+    const output = at.shown && !script.feeds ? "shown" : "feeds";
+    const inner = classifyList(parseShell(script.text, script.dialect), ctx, depth + 1, output);
     if (inner.risky) return inner;
   }
 

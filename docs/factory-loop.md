@@ -232,11 +232,12 @@ Failures outside the work's code never count toward the pause. The factory puts 
 
 Every item shows what it **cost so far** on its Factory view card, its side sheet and its page. The figure covers every session that worked on it (builders, reviewers, integrators, earlier attempts) since it started, from the same ledger and with the same labels as the [usage reports](usage-and-costs.md): "≈" for estimates, "API-equivalent" for a subscription login.
 
-The daily budget only stops new work: work in flight carries on even while the loop is paused. To stop one item from spending the day's budget by itself, set a **per-item cap** (USD and/or tokens) in the factory settings. Each pass, an item in the queue, building or verifying that has spent its cap:
+The daily budget only stops new work: work in flight carries on even while the loop is paused. To stop one item from spending the day's budget by itself, set a **per-item cap** (USD and/or tokens) in the factory settings. The cap stops agent turns, not the steps that cost nothing. Each pass, an item in the queue, building or verifying that has spent its cap:
 
 - has its running sessions stopped;
-- stops as **stuck** ("Spend cap reached: $5.10 of $5.00 for this item"), in your inbox (a recorded decision in a dark factory). It doesn't count toward the pause;
-- gets no more agent turns while it waits: no rebases, integrators or automatic re-reviews.
+- in the queue or building, stops as **stuck** ("Spend cap reached: $5.10 of $5.00 for this item"), in your inbox (a recorded decision in a dark factory). It doesn't count toward the pause;
+- in verification, keeps moving through the steps that start no agent turn: an approved pull request still waits on CI, joins the merge queue, is brought up to date by GitHub and merges. The review is often the turn that goes over, so finished work isn't thrown away. It stops as stuck only before a step that would start an agent turn: a revise round, a review or re-review, a rebase or an integrator;
+- once stopped, gets no more agent turns while it waits: no rebases, integrators or automatic re-reviews. Its note says why.
 
 **Retry** gives it a fresh allowance: the cap counts again from the retry, while its cost still shows everything it spent. The cap is checked each pass, so an item can go over it by what its sessions spend in one pass. The cards turn amber from 80% of the cap.
 

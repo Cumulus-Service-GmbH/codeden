@@ -98,22 +98,20 @@ export class WorktreeCleanup {
 
   constructor(private readonly deps: WorktreeCleanupDeps) {}
 
-  /** Whether another live session works in the same folder (never removed under it). */
+  /**
+   * Whether another live agent session works in the same folder (never removed under it), however
+   * old: `inFolder` isn't capped like `list`.
+   */
   private sharedWithLiveSession(session: Session): boolean {
-    const norm = (p: string) =>
-      p
-        .replace(/[\\/]+$/, "")
-        .replace(/\\/g, "/")
-        .toLowerCase();
-    const path = norm(session.worktreePath ?? "");
+    if (!session.worktreePath) return false;
     return this.deps.repo
-      .list({ role: "agent" })
+      .inFolder(session.worktreePath)
       .some(
         (other) =>
           other.id !== session.id &&
+          other.role === "agent" &&
           !other.archivedAt &&
-          !other.worktreeRemovedAt &&
-          [other.worktreePath, other.cwd].some((p) => p && norm(p) === path),
+          !other.worktreeRemovedAt,
       );
   }
 
@@ -275,7 +273,7 @@ export class WorktreeCleanup {
     try {
       const now = this.now();
       const settings = this.deps.settings().worktrees;
-      for (const session of this.deps.repo.list({ role: "agent" })) {
+      for (const session of this.deps.repo.withWorktrees()) {
         if (!cleanupDue(session, now, settings)) continue;
         if (this.kept.get(session.id) === session.updatedAt) continue;
         const force = Boolean(session.archivedAt) && this.forced.has(session.id);
@@ -303,7 +301,7 @@ export class WorktreeCleanup {
   ): Promise<{ removed: string[]; kept: Array<{ sessionId: string; message: string | null }> }> {
     const removed: string[] = [];
     const kept: Array<{ sessionId: string; message: string | null }> = [];
-    for (const session of this.deps.repo.list({ projectId, role: "agent" })) {
+    for (const session of this.deps.repo.agentsOf(projectId)) {
       if (IN_USE.has(session.status)) continue;
       const sandbox = await this.deps.sandboxes?.release(session, { force: false });
       if (sandbox?.status === "removed") {

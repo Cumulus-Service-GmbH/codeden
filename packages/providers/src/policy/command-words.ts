@@ -7,9 +7,15 @@ const KEYWORDS = new Set(["if", "then", "else", "elif", "do", "while", "until", 
 const ASSIGNMENT = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 /**
+ * cmd's `@` before a program, which only stops the command being echoed: `@set AWS`,
+ * `do @echo %i`. Not PowerShell's `@(…)` and `@{…}`.
+ */
+const ECHO_OFF = /^@[\w%.\\/]/;
+
+/**
  * Words that don't change what runs: elevation (`sudo`), wrappers (`env -u X Y=1`, `command`,
- * `exec`) and shell keywords that start a compound command (`if`, `then`, `do`, `{`, ...).
- * `env` with no command to run prints the environment, so it stays the program then.
+ * `exec`), shell keywords that start a compound command (`if`, `then`, `do`, `{`, ...) and cmd's
+ * `@`. `env` with no command to run prints the environment, so it stays the program then.
  */
 export function unwrap(words: string[]): { tokens: string[]; elevated: boolean } {
   let elevated = false;
@@ -30,6 +36,10 @@ export function unwrap(words: string[]): { tokens: string[]; elevated: boolean }
       rest = rest.slice(1);
     } else if (head && ASSIGNMENT.test(head)) {
       rest = rest.slice(1);
+    } else if (head === "@") {
+      rest = rest.slice(1);
+    } else if (head && ECHO_OFF.test(head)) {
+      rest = [(rest[0] as string).slice(1), ...rest.slice(1)];
     } else break;
   }
   return { tokens: rest, elevated };

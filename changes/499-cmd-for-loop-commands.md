@@ -1,0 +1,5 @@
+---
+section: security
+---
+
+- **Commands run by a cmd `for` loop now ask for approval at Auto like the same commands on their own.** The command a `for /f` loop reads, such as `for /f "tokens=*" %i in ('set AWS') do @echo %i`, ran freely, because the quoted command was read as a single word. This loop prints every variable whose name starts with `AWS`, values included. The command is now judged on its own, also when it's written in double quotes (`('"set AWS"')`), which `cmd /c` drops before running it. So are the files `for /f` reads (`for /f %i in (.env) do @echo %i`) and the command after `do` (`for %i in (1) do set AWS`). Reading CodeDen's own credentials this way asks at every level. cmd's `@` before a command (`@set AWS`) no longer hides it either. Loops that print no values, such as `for /f %i in ('git rev-parse HEAD') do @echo %i`, still run freely.

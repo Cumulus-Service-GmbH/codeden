@@ -3,7 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { FACTORY_STARTER } from "../src/services/factory/sessions";
 import { stuckDecisionId, stuckInboxId } from "../src/services/factory/stuck";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
-import { factorySteps } from "./support/factory-steps";
+import { APPROVE, factorySteps } from "./support/factory-steps";
 
 /**
  * What each factory item cost and the optional per-item spend cap (#325): every session that
@@ -13,7 +13,7 @@ import { factorySteps } from "./support/factory-steps";
 
 let env: FactoryEnv;
 afterEach(() => env?.close());
-const { item, tick, enable, backlogItem, verifying, failed, readAgainSoon } = factorySteps(
+const { item, tick, enable, backlogItem, verifying, review, failed, readAgainSoon } = factorySteps(
   () => env,
 );
 
@@ -242,6 +242,71 @@ describe("the per-item spend cap (#325)", () => {
     await tick();
     expect(item(id).stage).toBe("verifying");
     expect(item(id).reviewerSessionId).toBeTruthy();
+  });
+
+  /** Verification whose review turn takes the item over its $5.00 cap ($4.70 + $0.40). */
+  async function reviewedOverCap(checks: "success" | "pending", verdict = APPROVE) {
+    env = capped({ usd: 5 });
+    await enable();
+    const v = await verifying(checks);
+    const reviewer = item(v.id).reviewerSessionId as string;
+    env.spendOn(v.builder, 4.7);
+    env.spendOn(reviewer, 0.4);
+    review(v.id, verdict);
+    return { ...v, reviewer };
+  }
+
+  it("merges approved work its review took over the cap: merging spends nothing (#415)", async () => {
+    const { id, reviewer } = await reviewedOverCap("success");
+    // The verdict lands mid-turn: the reviewer still at work is stopped, the work goes on.
+    expect(env.repo.get(reviewer).status).toBe("running");
+    await tick();
+    expect(env.stopped).toEqual([reviewer]);
+    expect(item(id)).toMatchObject({ stage: "watching", reason: null, failureKind: null });
+    expect(env.gh.merges).toHaveLength(1);
+  });
+
+  it("lets approved work over its cap wait on CI, then merge (#415)", async () => {
+    const { id, pr, reviewer } = await reviewedOverCap("pending");
+    await env.setStatus(reviewer, "idle");
+    await tick();
+    await tick();
+    expect(item(id)).toMatchObject({ stage: "verifying", failureKind: null });
+    pr.checks = "success";
+    await tick();
+    expect(item(id).stage).toBe("watching");
+    expect(env.gh.merges).toHaveLength(1);
+  });
+
+  it("starts no revise round for work over its cap whose review asked for changes (#415)", async () => {
+    const changes = { ...APPROVE, verdict: "request_changes" as const, summary: "Missing a test" };
+    const { id, builder, reviewer } = await reviewedOverCap("success", changes);
+    await env.setStatus(reviewer, "idle");
+    const messages = env.messages.length;
+    await tick();
+    expect(item(id)).toMatchObject({
+      stage: "failed",
+      failureKind: "stuck",
+      attempts: 0,
+      reason: "Spend cap reached: $5.10 of $5.00 for this item",
+      note: expect.stringMatching(/starts no agent work on it until it is retried$/),
+    });
+    expect(env.messages.slice(messages).filter((m) => m.sessionId === builder)).toEqual([]);
+    expect(env.inbox.find(stuckInboxId(id))?.status).toBe("open");
+  });
+
+  it("asks no agent to rebase approved work over its cap that conflicts (#415)", async () => {
+    const { id, pr, reviewer } = await reviewedOverCap("pending");
+    await env.setStatus(reviewer, "idle");
+    await tick();
+    expect(item(id).stage).toBe("verifying");
+    const starts = env.starts.length;
+    const messages = env.messages.length;
+    pr.mergeable = "conflicting";
+    await tick();
+    expect(item(id)).toMatchObject({ stage: "failed", failureKind: "stuck" });
+    expect(env.starts.length).toBe(starts);
+    expect(env.messages.length).toBe(messages);
   });
 
   it("starts no rebase, integrator or re-review for a failed item over its cap", async () => {

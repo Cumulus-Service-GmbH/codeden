@@ -2,6 +2,7 @@ import type { FactoryItem, FactoryLoop, Project } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import { failedChecks, notAuthorFixable } from "./checks";
 import { type FactoryContext, factoryNotice } from "./context";
+import { stopBeforeAgentTurn } from "./item-budget";
 import { failItem, markStuck } from "./outcomes";
 import { fixPrompt, tooLargePrompt } from "./prompts";
 import { MERGE_QUEUED } from "./queue";
@@ -64,6 +65,9 @@ export async function handleFailure(
     builder.status !== "stopped" &&
     item.review?.verdict !== "reject";
   if (fixable && builder) {
+    // A revise round is an agent turn: an item over its spend cap stops before it.
+    const stopped = await stopBeforeAgentTurn(ctx, project, loop, item);
+    if (stopped) return stopped;
     // The round wakes a builder between turns: it waits for a free agent, after the reviews
     // (`slots.ts`), staying in verification with its failed checks until then.
     if (!repairSlot(ctx, project, item, builder)) {

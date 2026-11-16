@@ -1,4 +1,10 @@
-import type { InboxItem, Project, RawEventEnvelope, Session } from "@codeden/contracts";
+import type {
+  HeldFollowUp,
+  InboxItem,
+  Project,
+  RawEventEnvelope,
+  Session,
+} from "@codeden/contracts";
 import { FactoryLimits } from "@codeden/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { buildDigest } from "../src/services/factory/digest";
@@ -9,6 +15,7 @@ import {
   SCOUT_PLAN_NUDGE,
   scoutFilePrompt,
   scoutPlanPrompt,
+  scoutSelfReviewPrompt,
 } from "../src/services/factory/prompts-scout";
 import { FACTORY_STARTER } from "../src/services/factory/sessions";
 import {
@@ -251,6 +258,43 @@ describe("factory prompts", () => {
     }
     expect(plan).toMatch(/review areas? this round/);
     expect(reviewer).toMatch(/area reviewer/);
+  });
+
+  it("tells the scout the round's limit includes held review follow-ups in every filing brief", () => {
+    const followUps: HeldFollowUp[] = [
+      {
+        id: "fu-1",
+        title: "Rename the counter's reset helper",
+        severity: "low",
+        area: "web",
+        itemId: "i1",
+        index: 0,
+        itemTitle: "Add a counter",
+        pr: { number: 9, url: "https://github.com/acme/app/pull/9", state: "merged" },
+        heldAt: "2026-11-09T10:00:00.000Z",
+      },
+    ];
+    const plan = scoutPlanPrompt({
+      round: 2,
+      vision: "v",
+      defaultBranch: "main",
+      areas: [],
+      maxLenses: 0,
+      maxIssues: 2,
+      known: [],
+      firstRound: false,
+      followUps,
+    });
+    // A round planned without area reviewers while the work-in-progress limit held files later.
+    const solo = scoutSelfReviewPrompt({ maxIssues: 2, known: [], followUps });
+    const filing = scoutFilePrompt({ findings: [], maxIssues: 2, known: [], followUps });
+    for (const text of [plan, solo, filing]) {
+      expect(text).toMatch(/at most 2 issues in total, held follow-ups included/);
+    }
+    // Without held follow-ups the limit is stated plainly.
+    expect(scoutSelfReviewPrompt({ maxIssues: 1, known: [] })).toMatch(
+      /file at most 1 issue in total with `factory_file_issue`/,
+    );
   });
 });
 

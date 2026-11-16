@@ -24,6 +24,7 @@ import {
   eq,
   gt,
   inArray,
+  isNotNull,
   isNull,
   lt,
   or,
@@ -226,6 +227,40 @@ export class SessionRepo {
           isNull(sessions.archivedAt),
         ),
       )
+      .orderBy(desc(sessions.createdAt))
+      .all()
+      .map(rowToSession);
+  }
+
+  /**
+   * Agent sessions whose worktree hasn't been removed, newest first: what the worktree cleanup
+   * sweep checks. Not capped like `list`: a session older than a thousand others is still swept.
+   */
+  withWorktrees(): Session[] {
+    return this.db
+      .select()
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.role, "agent"),
+          isNotNull(sessions.worktreePath),
+          isNull(sessions.worktreeRemovedAt),
+        ),
+      )
+      .orderBy(desc(sessions.createdAt))
+      .all()
+      .map(rowToSession);
+  }
+
+  /**
+   * Every agent session of a project, newest first. Not capped like `list`: archiving a project
+   * cleans up each one, however many sessions came after it.
+   */
+  agentsOf(projectId: string): Session[] {
+    return this.db
+      .select()
+      .from(sessions)
+      .where(and(eq(sessions.projectId, projectId), eq(sessions.role, "agent")))
       .orderBy(desc(sessions.createdAt))
       .all()
       .map(rowToSession);
