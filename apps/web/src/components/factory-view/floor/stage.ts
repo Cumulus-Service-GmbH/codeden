@@ -123,6 +123,8 @@ export class FloorStage {
           });
     this.intersect?.observe(canvas);
     this.measure();
+    // Development builds: the stage is reachable from the console for debugging.
+    if (import.meta.env.DEV) (globalThis as { __floorStage?: FloorStage }).__floorStage = this;
   }
 
   set reduced(on: boolean) {
