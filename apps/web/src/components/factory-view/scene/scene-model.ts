@@ -48,7 +48,7 @@ export interface Scene {
   ciRunning: boolean;
   /** Spend against the daily budget, 0..1; null when no budget is set. */
   gauge: number | null;
-  /** Dark factory only; iling while the scout files its round's issues (capsules drop). */
+  /** Dark factory only; `filing` while the scout files its round's issues (capsules drop). */
   scout: { round: number; active: boolean; filing: boolean } | null;
 }
 
