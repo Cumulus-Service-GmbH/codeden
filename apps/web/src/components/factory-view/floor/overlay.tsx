@@ -26,6 +26,7 @@ import { cn } from "@/lib/utils";
 import { bubbleOf } from "../scene/activity";
 import { agentCard, agentLabel } from "../scene/agent-card";
 import type { SceneAgent } from "../scene/agents";
+import { type BayCrate, bayDescription } from "../scene/repair-bay";
 import { ACTIVITY_ICON } from "./activity-icons";
 import { figureStatus, tagVisible } from "./figure-look";
 import type { ScreenFigure } from "./stage";
@@ -166,6 +167,7 @@ export function FigureLayer({
   focusKey,
   cardId,
   card,
+  crates,
   onFocusFigure,
   onBlurFigure,
   onActivate,
@@ -185,10 +187,15 @@ export function FigureLayer({
   cardId: string;
   /** The open card, placed over its figure. */
   card: ReactNode;
-  onFocusFigure: (agent: SceneAgent) => void;
+  /** The repair bay's crates: focusable too, after the crew. */
+  crates: readonly BayCrate[];
+  /** Keyboard focus reached a figure or crate (its key; a crate's is `bay:<kind>`). */
+  onFocusFigure: (key: string) => void;
   onBlurFigure: () => void;
-  onActivate: (agent: SceneAgent) => void;
+  /** Click or Enter on a figure or crate. */
+  onActivate: (key: string) => void;
 }) {
+  const keys = [...agents.map((a) => a.key), ...crates.map((c) => `bay:${c.kind}`)];
   useActivityVersion(store);
   const root = useRef<HTMLDivElement>(null);
   const cardBox = useRef<HTMLDivElement>(null);
@@ -211,7 +218,7 @@ export function FigureLayer({
       node.style.transform = `translate3d(${f.head.x}px, ${f.head.y}px, 0)`;
       node.style.setProperty("--h", `${Math.max(12, f.foot.y - f.head.y)}px`);
       const tag = node.querySelector<HTMLElement>("[data-tag]");
-      if (tag) tag.style.visibility = tagVisible(f.status, frame.u) ? "" : "hidden";
+      if (tag && f.status) tag.style.visibility = tagVisible(f.status, frame.u) ? "" : "hidden";
     }
     for (const [key, node] of nodes.current) if (!seen.has(key)) node.style.visibility = "hidden";
     const box = cardBox.current;
@@ -242,12 +249,12 @@ export function FigureLayer({
         : e.key === "ArrowLeft" || e.key === "ArrowUp"
           ? -1
           : 0;
-    const edge = e.key === "Home" ? 0 : e.key === "End" ? agents.length - 1 : null;
+    const edge = e.key === "Home" ? 0 : e.key === "End" ? keys.length - 1 : null;
     if (!step && edge === null) return;
     e.preventDefault();
-    const at = agents.findIndex((a) => a.key === focusKey);
-    const next = edge ?? (at < 0 ? 0 : (at + step + agents.length) % Math.max(1, agents.length));
-    const key = agents[next]?.key;
+    const at = keys.indexOf(focusKey ?? "");
+    const next = edge ?? (at < 0 ? 0 : (at + step + keys.length) % Math.max(1, keys.length));
+    const key = keys[next];
     if (key) nodes.current.get(key)?.querySelector("button")?.focus();
   };
 
@@ -282,9 +289,9 @@ export function FigureLayer({
                 aria-controls={isOpen ? cardId : undefined}
                 className="absolute top-0 left-0 w-[calc(var(--u)*0.5)] -translate-x-1/2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 style={{ height: "var(--h)" }}
-                onFocus={() => onFocusFigure(agent)}
+                onFocus={() => onFocusFigure(agent.key)}
                 onBlur={onBlurFigure}
-                onClick={() => onActivate(agent)}
+                onClick={() => onActivate(agent.key)}
                 data-testid="factory-view-floor-figure"
               />
               <Tag agent={agent} />
@@ -297,6 +304,37 @@ export function FigureLayer({
                   lifted={lifted.has(agent.key)}
                 />
               )}
+            </div>
+          );
+        })}
+        {crates.map((crate) => {
+          const key = `bay:${crate.kind}`;
+          const n = crate.entries.length;
+          const isOpen = hovered === key;
+          return (
+            <div
+              key={key}
+              ref={(el) => {
+                if (el) nodes.current.set(key, el);
+                else nodes.current.delete(key);
+              }}
+              className="absolute top-0 left-0"
+              style={{ visibility: "hidden" }}
+            >
+              <button
+                type="button"
+                tabIndex={key === focusKey ? 0 : -1}
+                aria-label={`Repair bay, ${crate.title}: ${n} ${n === 1 ? "item" : "items"}`}
+                aria-description={bayDescription(crate)}
+                aria-expanded={isOpen}
+                aria-controls={isOpen ? cardId : undefined}
+                className="absolute top-0 left-0 w-[calc(var(--u)*0.5)] -translate-x-1/2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                style={{ height: "var(--h)" }}
+                onFocus={() => onFocusFigure(key)}
+                onBlur={onBlurFigure}
+                onClick={() => onActivate(key)}
+                data-testid="factory-view-floor-crate"
+              />
             </div>
           );
         })}

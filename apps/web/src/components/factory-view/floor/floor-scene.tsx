@@ -12,7 +12,7 @@ import { sceneSummary } from "../scene/scene-model";
 import { useHover } from "../scene/use-hover";
 import type { SessionInfo, ViewCard, ViewPipeline } from "../stages";
 import { RecentActivity } from "./activity-icons";
-import { AgentCardView } from "./cards";
+import { AgentCardView, BayCardView } from "./cards";
 import { FigureLayer, type OverlayHandle } from "./overlay";
 import { useFloorPalette } from "./palette";
 import { PmChat } from "./pm-chat";
@@ -162,14 +162,21 @@ export function FloorScene({
     if (a.sessionId)
       void navigate({ to: "/sessions/$sessionId", params: { sessionId: a.sessionId } });
   };
-  tapRef.current = (key) => {
+  const crateOf = (key: string | null) =>
+    key?.startsWith("bay:") ? scene.bay.find((c) => `bay:${c.kind}` === key) : undefined;
+  /** A figure's key does what its roster row does; a crate's opens its card. */
+  const activateKey = (key: string | null) => {
     const a = key ? scene.agents.find((x) => x.key === key) : undefined;
-    if (a) activate(a);
-    else stage.current?.select(null);
+    if (a) return activate(a);
+    if (crateOf(key) && key) return hover.enter(key);
+    stage.current?.select(null);
   };
+  tapRef.current = activateKey;
   const terminalProps = { projectId, onFold: () => chat.setOpen(false), ref: terminal };
   const hovered = onFloor.find((a) => a.key === hover.key) ?? null;
+  const crate = crateOf(hover.key);
   const cardId = `${ids}-figure-card`;
+  const keep = () => hover.key && hover.enter(hover.key);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-2" data-testid="factory-view-floor-scene">
@@ -186,29 +193,39 @@ export function FloorScene({
             live={live}
             store={activity}
             now={now}
-            hovered={hovered?.key ?? null}
+            hovered={hovered?.key ?? (crate ? hover.key : null)}
             focusKey={focusKey ?? onFloor[0]?.key ?? null}
             cardId={cardId}
+            crates={scene.bay.slice(0, 3)}
             card={
-              hovered && (
+              hovered ? (
                 <AgentCardView
                   id={cardId}
                   agent={hovered}
                   card={agentCard(hovered, now)}
                   recent={<RecentActivity store={activity} sessionId={hovered.sessionId} />}
-                  onEnter={() => hover.enter(hovered.key)}
+                  onEnter={keep}
                   onLeave={hover.leave}
                   onOpenItem={openItem(hovered)}
                 />
-              )
+              ) : crate ? (
+                <BayCardView
+                  id={cardId}
+                  crate={crate}
+                  projectId={projectId}
+                  onEnter={keep}
+                  onLeave={hover.leave}
+                  onOpen={onOpen}
+                />
+              ) : null
             }
-            onFocusFigure={(a) => {
-              setFocusKey(a.key);
-              hover.enter(a.key);
-              stage.current?.reveal(a.key);
+            onFocusFigure={(key) => {
+              setFocusKey(key);
+              hover.enter(key);
+              stage.current?.reveal(key);
             }}
             onBlurFigure={hover.leave}
-            onActivate={activate}
+            onActivate={activateKey}
           />
           <Roster
             agents={scene.agents}

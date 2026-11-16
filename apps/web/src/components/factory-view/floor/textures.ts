@@ -176,6 +176,24 @@ export function displayCanvas(value: string, caption: string, p: FloorPalette): 
   return canvas;
 }
 
+/** The sign on intake's door while the factory drains: CLOSED, in white on red. */
+export function closedCanvas(p: FloorPalette): HTMLCanvasElement {
+  const canvas = canvasOf(240, 80);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
+  ctx.fillStyle = hex(p.lamp.red);
+  ctx.fillRect(0, 0, 240, 80);
+  ctx.strokeStyle = "#ffffff";
+  ctx.lineWidth = 5;
+  ctx.strokeRect(6, 6, 228, 68);
+  ctx.fillStyle = "#ffffff";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.font = `800 46px ${FONT}`;
+  ctx.fillText("CLOSED", 120, 43);
+  return canvas;
+}
+
 /** The budget dial: a round gauge from green through amber to red, its needle at `fraction`. */
 export function dialCanvas(fraction: number, p: FloorPalette): HTMLCanvasElement {
   const canvas = canvasOf(256, 256);

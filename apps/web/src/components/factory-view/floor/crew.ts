@@ -99,6 +99,8 @@ export interface CrewFrame {
   /** The factory is stopped: everyone stands still at their post. */
   still: boolean;
   selected: string | null;
+  /** Crates riding out of the dock door. */
+  crates: readonly { x: number; y: number; z: number; scale: number }[];
 }
 
 export class Crew {
@@ -222,6 +224,13 @@ export class Crew {
       keys.add(f.key);
       this.figure(f, ctx, p);
     }
+    for (const c of ctx.crates) {
+      const s = 1.35 * c.scale;
+      this.pool("crate", this.m.clay, { colours: true, cast: true }).push(
+        new Matrix4().makeTranslation(c.x, c.y, c.z).multiply(new Matrix4().makeScale(s, s, s)),
+        p.wood,
+      );
+    }
     for (const pool of this.pools.values()) pool.end();
     for (const key of this.memory.keys()) if (!keys.has(key)) this.memory.delete(key);
     this.primed = true;
@@ -231,11 +240,14 @@ export class Crew {
     const { t } = ctx;
     const mem = this.remember(f, t);
     const still = ctx.still || ctx.reduced;
+    // A celebration shows as a merge's hop and confetti, from when it began.
+    const status = f.celebrateAt !== null ? "done" : f.status;
+    const since = f.celebrateAt ?? mem.since;
     let pose = poseAt({
-      status: f.status,
+      status,
       seed: f.agent.seed,
       t,
-      since: mem.since,
+      since,
       selectedAt: mem.selectedAt,
       still: ctx.still,
       reduced: ctx.reduced,
@@ -307,13 +319,15 @@ export class Crew {
         if (a.part === "magnifier") this.pool("lens", this.m.lens, { order: 2 }).push(inHand);
       }
 
-    this.extras(f, mem, pose, upper, ctx, p);
+    this.extras(f, status, since, pose, upper, ctx, p);
   }
 
   /** Walking, carrying and stamping change the pose a figure's status gives it. */
   private moving(f: FigureFrame, pose: FigurePose, t: number): FigurePose {
     if (f.stride === null && !f.stamping && !f.carry) return pose;
-    const out: FigurePose = { ...pose, step: { x: 0, z: 0 }, lean: 0, roll: 0, shift: 0 };
+    // A failed agent trudges, still slumped a little.
+    const lean = f.status === "failed" ? pose.lean * 0.6 : 0;
+    const out: FigurePose = { ...pose, step: { x: 0, z: 0 }, lean, roll: 0, shift: 0 };
     if (f.stride !== null) {
       // Feet alternate with a small lift; the body bobs twice a stride.
       const a = Math.sin(f.stride * Math.PI * 2);
@@ -333,7 +347,8 @@ export class Crew {
   /** The status extras around a figure and its moments. */
   private extras(
     f: FigureFrame,
-    mem: Memory,
+    status: FigureStatus,
+    since: number,
     pose: FigurePose,
     upper: Matrix4,
     ctx: CrewFrame,
@@ -344,14 +359,14 @@ export class Crew {
     const phase = phaseOf(f.agent.seed);
     const tip = upper.clone().multiply(new Matrix4().makeTranslation(0, TIP_Y, 0));
     const at = (m: Matrix4, v: Vec3) => m.clone().multiply(new Matrix4().makeTranslation(...v));
-    const age = t - mem.since;
+    const age = t - since;
     const carried = f.carry ?? (f.stamping ? "crate" : null);
     if (carried)
       this.pool(carried, this.m.clay, { colours: true, cast: true }).push(
         at(upper, carried === "crate" ? [0, 0.32, 0.27] : [0, 0.31, 0.24]),
         carried === "crate" ? p.wood : p.paper,
       );
-    switch (f.status) {
+    switch (status) {
       case "thinking": {
         const spin = loops ? ((t / 2.4 + phase) % 1) * Math.PI * 2 : 0;
         this.pool("dots", this.m.ink).push(tip.clone().multiply(new Matrix4().makeRotationY(spin)));

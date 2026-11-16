@@ -10,6 +10,7 @@ import {
 } from "three";
 import { floorSeats, WALL_H, type WorkshopLayout } from "../scene/layout";
 import type { Scene } from "../scene/scene-model";
+import { sceneEvents } from "../scene/transitions";
 import { CameraRig } from "./camera";
 import { Crew } from "./crew";
 import { HEAD_Y } from "./crew-geometry";
@@ -17,8 +18,9 @@ import type { FigureStatus } from "./figure-look";
 import type { FigureFrame } from "./frames";
 import { bindInput } from "./input";
 import { clear, colour, Kit } from "./kit";
+import { FloorMotion } from "./motion";
 import type { FloorPalette } from "./palette";
-import { buildProps, occupiedSeats, propsKey } from "./props";
+import { BAY_CRATE, bayCrateSpots, buildProps, occupiedSeats, propsKey } from "./props";
 import { pickBox, pickFigure, rayAt, type ScreenPoint, screenAnchor } from "./screen";
 import { seatFrames } from "./seat-frames";
 import { buildWorkshop } from "./workshop";
@@ -39,10 +41,11 @@ export interface StageContent {
   palette: FloorPalette;
 }
 
-/** A figure on screen this frame, for the DOM layer over the canvas. */
+/** A figure (or a repair bay crate, `bay:<kind>`) on screen this frame, for the DOM layer. */
 export interface ScreenFigure {
   key: string;
-  status: FigureStatus;
+  /** The figure's status; null for a crate. */
+  status: FigureStatus | null;
   /** Its feet, and the top of its head. */
   foot: ScreenPoint;
   head: ScreenPoint;
@@ -86,6 +89,10 @@ export class FloorStage {
   private keys = { hall: "", bounds: "", props: "" };
   private content: StageContent | null = null;
   private frames: FigureFrame[] = [];
+  private readonly motion = new FloorMotion();
+  private prevScene: Scene | null = null;
+  /** Crates on their way out when the props were last built. */
+  private shipping = 0;
   private selected: string | null = null;
   private reducedMotion = false;
   private coarse = false;
@@ -201,16 +208,32 @@ export class FloorStage {
     }
     this.light(layout, palette, scene.stopped);
 
-    const occupied = occupiedSeats(scene);
-    const props = propsKey(scene, layout, palette, occupied);
-    if (props !== this.keys.props) {
-      this.keys.props = props;
-      clear(this.props, this.propsKit);
-      this.propsKit = new Kit();
-      this.props.add(buildProps(scene, layout, palette, this.propsKit, this.unit, occupied));
-    }
+    // The moments between the last scene and this one: none on the first, none with reduced
+    // motion or while the factory is stopped (everyone stands still at their post).
+    const t = this.clock();
+    if (this.reducedMotion || scene.stopped) this.motion.reset();
+    else this.motion.play(scene, layout, sceneEvents(this.prevScene, scene), t);
+    this.prevScene = scene;
+    this.rebuildProps(t);
     if (this.selected && !scene.agents.some((a) => a.key === this.selected)) this.selected = null;
     this.invalidate();
+  }
+
+  /** The live props, when what they show changed. The dock's count waits for crates to leave. */
+  private rebuildProps(t: number): void {
+    const c = this.content;
+    if (!c) return;
+    const { layout, palette } = c;
+    const inFlight = this.motion.shipsInFlight(t);
+    this.shipping = inFlight;
+    const scene = { ...c.scene, shipped: Math.max(0, c.scene.shipped - inFlight) };
+    const occupied = occupiedSeats(scene);
+    const props = propsKey(scene, layout, palette, occupied);
+    if (props === this.keys.props) return;
+    this.keys.props = props;
+    clear(this.props, this.propsKit);
+    this.propsKit = new Kit();
+    this.props.add(buildProps(scene, layout, palette, this.propsKit, this.unit, occupied));
   }
 
   /** Selects an agent (null: none); it hops, gets a ring, and the camera flies to it. */
@@ -256,7 +279,18 @@ export class FloorStage {
     return { calls: r.calls, triangles: r.triangles };
   }
 
-  /** The figure under a canvas point, if any. */
+  /** The repair bay's crates, as targets keyed `bay:<kind>`. */
+  private crates(): { key: string; x: number; y: number; z: number }[] {
+    const c = this.content;
+    if (!c) return [];
+    const spots = bayCrateSpots(c.layout, c.scene.bay.length);
+    return c.scene.bay.slice(0, spots.length).map((crate, i) => {
+      const at = spots[i] as { x: number; z: number };
+      return { key: `bay:${crate.kind}`, x: at.x, y: 0, z: at.z };
+    });
+  }
+
+  /** The figure under a canvas point, else the repair bay crate, if any. */
   private pick(x: number, y: number): string | null {
     const ray = rayAt(this.rig.camera, this.viewport, x, y);
     const targets = this.frames
@@ -265,7 +299,10 @@ export class FloorStage {
         const at = this.crew.anchor(f.key) ?? f;
         return { key: f.key, x: at.x, y: at.y, z: at.z };
       });
-    return pickFigure(ray, targets, pickBox(this.coarse));
+    const figure = pickFigure(ray, targets, pickBox(this.coarse));
+    if (figure) return figure;
+    const half = Math.max(BAY_CRATE.w / 2, pickBox(this.coarse).half);
+    return pickFigure(ray, this.crates(), { half, height: BAY_CRATE.h + 0.05 });
   }
 
   private seatOf(key: string) {
@@ -286,15 +323,19 @@ export class FloorStage {
     return this.onScreen && document.visibilityState === "visible" && !this.lostTimer;
   }
 
-  /** Whether the crew's loops or moments want frames. */
+  /** Whether the crew's loops, a walk or a moment want frames. */
   private animating(): boolean {
     const scene = this.content?.scene;
-    return this.crew.animating(this.frames, {
-      t: 0,
-      reduced: this.reducedMotion,
-      still: scene?.stopped ?? false,
-      selected: null,
-    });
+    return (
+      this.motion.busy(this.clock()) ||
+      this.crew.animating(this.frames, {
+        t: 0,
+        reduced: this.reducedMotion,
+        still: scene?.stopped ?? false,
+        selected: null,
+        crates: [],
+      })
+    );
   }
 
   /** The next frame: now when something changed or the camera moves, else at the idle rate. */
@@ -330,13 +371,18 @@ export class FloorStage {
     const c = this.content;
     const t = this.clock();
     if (c) {
-      this.frames = seatFrames(c.scene, c.layout);
+      const still = this.reducedMotion || c.scene.stopped;
+      this.frames = still
+        ? seatFrames(c.scene, c.layout)
+        : this.motion.frames(c.scene, c.layout, t);
       this.crew.draw(this.frames, {
         t,
         reduced: this.reducedMotion,
         still: c.scene.stopped,
         selected: this.selected,
+        crates: this.motion.crates(t),
       });
+      if (this.motion.shipsInFlight(t) !== this.shipping) this.rebuildProps(t);
     }
     this.renderer.render(this.scene, this.rig.camera);
     this.drawn += 1;
@@ -345,6 +391,11 @@ export class FloorStage {
       if (f.ghost) continue;
       const s = this.screenOf(f.key);
       if (s) figures.push({ key: f.key, status: f.status, ...s });
+    }
+    for (const crate of this.crates()) {
+      const foot = screenAnchor(this.rig.camera, this.viewport, crate);
+      const head = screenAnchor(this.rig.camera, this.viewport, { ...crate, y: BAY_CRATE.h });
+      figures.push({ key: crate.key, status: null, foot, head });
     }
     this.events.onFrame(figures, this.rig.pxPerUnit());
   }

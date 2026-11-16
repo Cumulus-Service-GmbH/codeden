@@ -24,8 +24,8 @@ export interface FigureFrame {
   carry: "crate" | "ticket" | null;
   /** Stamping the crate it hands to the merge queue. */
   stamping: boolean;
-  /** A departed agent cheering its merge where it stood. */
-  cheer: boolean;
+  /** When it began to celebrate a merge (a hop and confetti), else null. */
+  celebrateAt: number | null;
 }
 
 /** A figure standing at a point, as most are most of the time. */
@@ -46,6 +46,6 @@ export function standing(
     stride: null,
     carry: null,
     stamping: false,
-    cheer: false,
+    celebrateAt: null,
   };
 }
