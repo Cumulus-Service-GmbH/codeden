@@ -2,6 +2,7 @@ import type { FactoryItem, FactoryLoop, Project, Session } from "@codeden/contra
 import { baseBranchOf, type FactoryContext } from "./context";
 import type { FactoryPr } from "./github-port";
 import { failItem } from "./outcomes";
+import { prGone } from "./pr-gone";
 import { REBASE_WHY, rebasePrompt } from "./prompts";
 import { type IntegratorTask, integratorPrompt } from "./prompts-integration";
 import { rebuild } from "./rebuild";
@@ -154,6 +155,7 @@ export function prAgent(ctx: FactoryContext, item: FactoryItem): Session | undef
  * Ask the PR's agent to rebase, counted as the next request of the current conflict (plus any
  * `also` nudges). Recorded once the message is delivered, so a failed send is retried. The
  * message brings an archived agent back; for finished work cleanup archives it again after.
+ * Nothing is sent for a PR that merged or closed since the step read it (`pr-gone.ts`).
  */
 async function askToRebase(
   ctx: FactoryContext,
@@ -164,6 +166,7 @@ async function askToRebase(
   note: string,
   also: string[] = [],
 ): Promise<void> {
+  if (prGone(ctx, item)) return;
   const ask = rebaseAsks(item) + 1;
   const at = ctx.now().toISOString();
   await ctx.sessions.message(agent.id, rebasePrompt(item, baseBranchOf(project), why, ask));
@@ -182,7 +185,8 @@ async function askToRebase(
  * the PR's head branch, a brief with the issue, the PR description and the review history.
  * It becomes the item's PR agent, so the PR's later follow-ups (conflicts, CI, the audit, the
  * review's worktree) go to it. Waits for a free agent slot; true once it started. `marks` are
- * nudges recorded when it starts.
+ * nudges recorded when it starts. None starts for a PR that merged or closed since the step read
+ * it (`pr-gone.ts`).
  */
 export async function startIntegrator(
   ctx: FactoryContext,
@@ -192,6 +196,7 @@ export async function startIntegrator(
   task: IntegratorTask,
   marks: string[],
 ): Promise<boolean> {
+  if (prGone(ctx, item)) return false;
   const base = baseBranchOf(project);
   const what =
     task === "conflicts"

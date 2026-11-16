@@ -358,6 +358,20 @@ export class FactorySessions {
   }
 
   /**
+   * Withdraw the factory's messages still waiting in a session's queue (a rebase or revise
+   * request for a PR that merged or closed meanwhile). Returns how many were withdrawn; never
+   * throws.
+   */
+  withdrawQueued(sessionId: string): number {
+    try {
+      return this.deps.sessions.dropQueued(sessionId, "factory");
+    } catch (error) {
+      this.deps.log?.(`factory: withdraw queued ${sessionId}: ${errorMessage(error)}`);
+      return 0;
+    }
+  }
+
+  /**
    * Whether a message to the session waits in its queue or is on its way to the runner: the
    * session hasn't started that turn yet, though it may look idle (a compaction just ended).
    */

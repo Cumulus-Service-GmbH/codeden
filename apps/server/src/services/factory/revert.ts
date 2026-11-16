@@ -16,7 +16,7 @@ import { unverifiedRevert } from "./revert-watch";
 import { isBusy } from "./sessions";
 import { claimSlot } from "./slots";
 import { REVERTED_AT } from "./stats";
-import { FOLLOW_UPS_DUE, FOLLOW_UPS_HELD } from "./store";
+import { AFTER_REVERT, FOLLOW_UPS_DUE, FOLLOW_UPS_HELD } from "./store";
 
 /**
  * Automatic reverts (§10.1, Merge). When CI on the default branch fails after a factory merge,
@@ -35,7 +35,6 @@ import { FOLLOW_UPS_DUE, FOLLOW_UPS_HELD } from "./store";
 
 const INEXACT = "revert_inexact_";
 const AFTER_REVERT_DUE = "after_revert_due";
-const AFTER_REVERT = "after_revert";
 /** On the reverted item: the checks that failed on its merge commit, `failed_on_main:<names>`. */
 const FAILED_ON_MAIN = "failed_on_main:";
 

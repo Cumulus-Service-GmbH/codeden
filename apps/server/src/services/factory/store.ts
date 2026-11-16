@@ -43,6 +43,8 @@ export const FINISHED_STAGES: FactoryItemStage[] = ["merged", "reverted", "rejec
 export const FOLLOW_UPS_DUE = "follow_ups_due";
 /** Nudge an item carries while some of its follow-ups are held for the scout (`follow-ups-held.ts`). */
 export const FOLLOW_UPS_HELD = "follow_ups_held";
+/** Nudge set when reverted work went back to its builder for a new PR (`revert.ts`), once per item. */
+export const AFTER_REVERT = "after_revert";
 /** The newest items the Factory view lists (`status.ts`); the loop itself reads them all. */
 export const VIEW_ITEMS = 500;
 

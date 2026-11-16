@@ -4,6 +4,7 @@ import { failedChecks, notAuthorFixable } from "./checks";
 import { type FactoryContext, factoryNotice } from "./context";
 import { stopBeforeAgentTurn } from "./item-budget";
 import { failItem, markStuck } from "./outcomes";
+import { prGone } from "./pr-gone";
 import { fixPrompt, tooLargePrompt } from "./prompts";
 import { MERGE_QUEUED } from "./queue";
 import { repairSlot } from "./rebase";
@@ -47,6 +48,8 @@ export async function handleFailure(
   /** The base branch, when the PR also has merge conflicts with it. */
   conflictsWith: string | null = null,
 ): Promise<FactoryLoop> {
+  // A PR that merged or closed since the step read it needs no revise round, and isn't failed.
+  if (prGone(ctx, item)) return loop;
   const failed = failedChecks(item.checks);
   // CI red on a revert too: the default branch can't be fixed by merging it (`revert-blocked.ts`).
   const ciRed = failed.find((c) => c.name === "ci" && !notAuthorFixable(c));

@@ -535,6 +535,17 @@ export class SessionService {
     return this.deps.outbox.count(id) > 0;
   }
 
+  /**
+   * Drop a session's queued messages from one sender (the factory withdrawing requests that no
+   * longer apply). A message already taken out for delivery is gone from the queue and stays sent.
+   * Returns how many were dropped.
+   */
+  dropQueued(id: string, from: QueueSender): number {
+    const mine = this.deps.outbox.list(id).filter((m) => m.from === from);
+    for (const m of mine) this.deps.outbox.remove(m, "dropped");
+    return mine.length;
+  }
+
   // ---------------------------------------------------------------- internals
 
   /**

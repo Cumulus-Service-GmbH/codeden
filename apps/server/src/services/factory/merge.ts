@@ -48,12 +48,27 @@ export function retargetInboxFor(ctx: FactoryContext, itemId: string, pr: GitHub
   }
 }
 
+/**
+ * The item's PR merged or closed: the factory's requests still waiting in its agent's queue (a
+ * rebase, a revise round, a push to start CI) no longer apply, so none is delivered after the
+ * merge. Messages from a person or the PM stay.
+ */
+export function withdrawRequests(ctx: FactoryContext, item: FactoryItem): void {
+  if (!item.builderSessionId) return;
+  const n = ctx.sessions.withdrawQueued(item.builderSessionId);
+  if (n > 0) {
+    const what = item.pr ? `#${item.pr.number}` : "its PR";
+    ctx.log?.(`factory: ${item.id}: withdrew ${n} queued request(s) after ${what} was decided`);
+  }
+}
+
 /** The PR was merged or closed by someone (a person, on GitHub). */
 export function prDecidedOutside(
   ctx: FactoryContext,
   item: FactoryItem,
   ref: NonNullable<FactoryItem["pr"]>,
 ): void {
+  withdrawRequests(ctx, item);
   const at = ctx.now().toISOString();
   const merged = ref.state === "merged";
   // A person merged it: only the merges always spot-checked are set aside (`spot-checks.ts`).
@@ -231,6 +246,7 @@ export async function autoMerge(
       nudges: { ...kept.nudges, ...Object.fromEntries(unverified) },
     };
   });
+  withdrawRequests(ctx, current);
   const ready = ctx.inbox.find(readyInboxId(current.id));
   if (ready?.status === "open") ctx.inbox.close(ready, "resolved", { note: "merged" });
   if (current.issue && current.source !== "revert") {

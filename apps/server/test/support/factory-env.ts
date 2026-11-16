@@ -56,6 +56,14 @@ export interface FactoryEnv {
   /** Messages sent to sessions. */
   messages: Array<{ sessionId: string; text: string }>;
   /**
+   * Messages queued behind a running turn, oldest first. Only with `queueWhenBusy`: then a
+   * message to a session mid-turn waits here until `setStatus(id, "idle")` ends that turn and
+   * delivers it, as the real queue does.
+   */
+  queued: Array<{ sessionId: string; text: string; from: string }>;
+  /** Queue messages to a session mid-turn (`queued`) instead of sending them at once. */
+  queueWhenBusy: boolean;
+  /**
    * The scripted session service the factory uses: every message is sent at once and marks the
    * session running. A test can replace a method (e.g. `send` with a real `SessionService`'s).
    */
@@ -104,6 +112,9 @@ export interface FactoryEnv {
   /** Close the database, put back the process clock and remove the temp folder. */
   close: () => Promise<void>;
 }
+
+/** Statuses of a session in a turn: a message to it waits in its queue (`queueWhenBusy`). */
+const MID_TURN = new Set<string>(["created", "queued", "starting", "running", "waiting"]);
 
 export function createFactoryEnv(
   opts: {
@@ -176,6 +187,8 @@ export function createFactoryEnv(
     project,
     starts: [],
     messages: [],
+    queued: [],
+    queueWhenBusy: false,
     stopped: [],
     archived: [],
     execs,
@@ -230,17 +243,17 @@ export function createFactoryEnv(
       });
       return { status: "started", sessionId: session.id };
     },
-    send: async (sessionId: string, req: { input: { text: string } }) => {
-      env.messages.push({ sessionId, text: req.input.text });
-      // Messaging an archived session brings it back, recreating a removed worktree.
-      const s = repo.get(sessionId);
-      if (s.worktreePath && s.worktreeRemovedAt) mkdirSync(s.worktreePath, { recursive: true });
-      repo.update(sessionId, (cur) => ({
-        ...cur,
-        status: "running",
-        archivedAt: null,
-        worktreeRemovedAt: null,
-      }));
+    send: async (
+      sessionId: string,
+      req: { input: { text: string }; whenBusy?: string },
+      from = "user",
+    ) => {
+      const busy = MID_TURN.has(repo.get(sessionId).status);
+      if (env.queueWhenBusy && busy && req.whenBusy === "queue") {
+        env.queued.push({ sessionId, text: req.input.text, from });
+        return { status: "queued" };
+      }
+      deliver(sessionId, req.input.text);
       return { status: "sent" };
     },
     stop: async (sessionId: string) => {
@@ -251,10 +264,29 @@ export function createFactoryEnv(
     compact: async () => {
       throw new ServiceError(409, "unsupported", "This provider can't compact on demand.");
     },
-    // Messages are sent at once: none waits in a queue or is on its way.
-    hasOutbox: () => false,
+    // Messages are sent at once unless `queueWhenBusy` queues them; none is ever on its way.
+    hasOutbox: (sessionId: string) => env.queued.some((m) => m.sessionId === sessionId),
     isDelivering: () => false,
+    dropQueued: (sessionId: string, from: string) => {
+      const before = env.queued.length;
+      const kept = env.queued.filter((m) => m.sessionId !== sessionId || m.from !== from);
+      env.queued.splice(0, env.queued.length, ...kept);
+      return before - kept.length;
+    },
   } as unknown as SessionService;
+  /** A message reaches the session: it starts a turn (an archived session comes back). */
+  function deliver(sessionId: string, text: string): void {
+    env.messages.push({ sessionId, text });
+    // Messaging an archived session brings it back, recreating a removed worktree.
+    const s = repo.get(sessionId);
+    if (s.worktreePath && s.worktreeRemovedAt) mkdirSync(s.worktreePath, { recursive: true });
+    repo.update(sessionId, (cur) => ({
+      ...cur,
+      status: "running",
+      archivedAt: null,
+      worktreeRemovedAt: null,
+    }));
+  }
   env.sessions = sessions;
   const runner = {
     providers: () =>
@@ -343,6 +375,12 @@ export function createFactoryEnv(
   env.setStatus = async (sessionId, status) => {
     await new Promise((r) => setTimeout(r, 5));
     repo.update(sessionId, (s) => ({ ...s, status }));
+    // The turn ended: the next queued message starts the next one.
+    const next = status === "idle" ? env.queued.findIndex((m) => m.sessionId === sessionId) : -1;
+    if (next >= 0) {
+      const [message] = env.queued.splice(next, 1);
+      if (message) deliver(sessionId, message.text);
+    }
   };
   env.updateProject = (patch) => {
     const next = { ...projects.get(project.id), ...patch } as Project;

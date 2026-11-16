@@ -64,6 +64,7 @@ import { runTick } from "./loop";
 import { PrFiles } from "./overlap";
 import { reportReproduction, submitAnalysis } from "./pipeline";
 import { localDay } from "./policy";
+import { assertNoMergedPr } from "./pr-gone";
 import { ProviderBackoffStore } from "./provider-backoffs";
 import { revertsOnResume } from "./revert";
 import { buildScorecard } from "./scorecard";
@@ -702,11 +703,14 @@ export class FactoryService {
 
   /**
    * Before `create_pull_request`: throws `409 spec_not_approved` for a factory builder whose spec
-   * waits for a person's approval or is being revised at their request (`spec-approval.ts`).
+   * waits for a person's approval or is being revised at their request (`spec-approval.ts`), and
+   * `409 pr_merged` for the agent of an item whose PR already merged (`pr-gone.ts`).
    */
   assertMayOpenPr(sessionId: string): void {
     const s = this.deps.repo.find(sessionId)?.session;
-    if (s && isFactorySession(s)) assertSpecAllowsPr(this.ctx, s);
+    if (!s || !isFactorySession(s)) return;
+    assertSpecAllowsPr(this.ctx, s);
+    assertNoMergedPr(this.ctx, s);
   }
 
   /** Whether a session is the dark factory's scout. */
