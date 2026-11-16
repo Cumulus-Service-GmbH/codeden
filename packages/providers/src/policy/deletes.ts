@@ -1,6 +1,6 @@
 import { type RiskAssessment, risky, SAFE } from "./assessment";
 import { binName, unwrap } from "./command-words";
-import { isWritable, type PathContext, providerPath } from "./paths";
+import { isWritable, type PathContext, providerPath, SHELL_DRIVES } from "./paths";
 import { type SimpleCommand, wordPaths } from "./shell";
 
 /**
@@ -18,9 +18,10 @@ import { type SimpleCommand, wordPaths } from "./shell";
  *
  * A search that deletes what it finds (#518: `find X -delete`, `find X -exec rm {} +`,
  * `fd . X -x rm`) deletes under the folders it searches, like `find X | xargs rm`. A registry key
- * or certificate (`Remove-Item HKCU:\Software\Foo`, `reg delete HKCU\Software\Foo`) is never in
- * the worktree; PowerShell's `Env:`, `Variable:`, `Function:` and `Alias:` drives only hold the
- * running shell's own state, so deleting there runs freely.
+ * or certificate (`Remove-Item HKCU:\Software\Foo`, or `Remove-Item Foo` after
+ * `cd HKCU:\Software`) is never in the worktree; PowerShell's `Env:`, `Variable:`, `Function:` and
+ * `Alias:` drives only hold the running shell's own state, so deleting there runs freely.
+ * `reg delete` is judged with the other `reg` commands (`./registry`).
  */
 
 /** Commands that delete the paths they are given. */
@@ -59,8 +60,6 @@ const XARGS_VALUED = new Set([
   "--process-slot-var",
 ]);
 const FOREACH = new Set(["foreach-object", "%", "foreach"]);
-/** PowerShell drives (and providers) that only hold the running shell's own state. */
-const SHELL_DRIVES = new Set(["env", "environment", "variable", "function", "alias"]);
 
 /** `find`'s actions that run a command on what it finds. */
 const FIND_RUNS = new Set(["-exec", "-execdir", "-ok", "-okdir"]);
@@ -110,7 +109,6 @@ export function classifyDelete(
   const { tokens } = unwrap(cmd.words);
   const bin = binName(tokens[0]);
   const args = tokens.slice(1);
-  if (bin === "reg") return regDelete(args);
   if (bin === "find" || bin === "fd") return searchDelete(cmd, bin, args, ctx);
   const own = deletedPaths(cmd, bin, args);
   if (!own) return SAFE;
@@ -155,16 +153,6 @@ function deletedPaths(cmd: SimpleCommand, bin: string, args: string[]): string[]
     return at >= 0 ? operands(cmd, words.slice(at + 1)) : undefined;
   }
   return undefined;
-}
-
-/** `reg delete KEY …` deletes a registry key or value, which is never in the worktree. */
-function regDelete(args: string[]): RiskAssessment {
-  if (args[0]?.toLowerCase() !== "delete") return SAFE;
-  const key = args.slice(1).find((a) => !a.startsWith("/"));
-  return risky(
-    "outside_worktree",
-    key ? `Deletes ${key} from the registry` : "Deletes registry keys",
-  );
 }
 
 /**
@@ -294,10 +282,11 @@ function xargsCommand(args: string[]): string[] {
 }
 
 /**
- * The paths a command lists or names, for the delete it feeds. A listing that names none lists
- * the current directory. `find`'s paths are the words before its expression.
+ * The paths a command lists or names, for the delete (or item write, `./item-writes`) it feeds. A
+ * listing that names none lists the current directory. `find`'s paths are the words before its
+ * expression.
  */
-function listedPaths(source: SimpleCommand): string[] {
+export function listedPaths(source: SimpleCommand): string[] {
   const { tokens } = unwrap(source.words);
   const bin = binName(tokens[0]);
   const args = tokens.slice(1);

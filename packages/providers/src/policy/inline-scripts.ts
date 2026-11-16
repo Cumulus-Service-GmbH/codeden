@@ -31,7 +31,8 @@ export function inlineScripts(bin: string, args: string[]): InlineScript[] {
     return flag >= 0 ? [{ text: args.slice(flag + 1).join(" "), dialect: "powershell" }] : [];
   }
   if (bin === "cmd") {
-    const flag = args.findIndex((a) => /^\/[ck]$/i.test(a));
+    // Git Bash writes `/c` as `//c`, which its path conversion leaves alone.
+    const flag = args.findIndex((a) => /^\/\/?[ck]$/i.test(a));
     if (flag < 0) return [];
     return cmdForms(args.slice(flag + 1).join(" ")).map((text) => ({ text, dialect: "auto" }));
   }

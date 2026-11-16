@@ -1,0 +1,5 @@
+---
+section: security
+---
+
+- **Registry writes, lasting environment changes and `New-Item` outside the worktree now ask at Auto.** `reg add`, `reg import`, `regedit /s file.reg`, `Set-ItemProperty HKCU:\…\Run`, `New-Item HKCU:\Software\Foo`, `New-ItemProperty` and the other item cmdlets on a registry or `Cert:` path ran without asking, so an agent could add an autostart entry. So did `setx PATH …` and `[Environment]::SetEnvironmentVariable(…, 'User')`, which change the environment for good, and `New-Item C:\Users\me\profile.ps1 -Value …`, while `Set-Content` on the same file asked. They now ask like any write outside the worktree. So does a relative delete or write after a `cd` onto a registry drive (`cd HKCU:\Software; Remove-Item Foo -Recurse`), which looked like a path in the worktree. Commands run through `cmd //c` from Git Bash are now checked like `cmd /c`. Registry reads, `New-Item` in the worktree or temp, folders made with `New-Item -ItemType Directory`, and writes to the shell's own `Env:`, `Variable:`, `Function:` and `Alias:` drives still run freely.

@@ -16,6 +16,7 @@ import { type ListOutput, namesOnly } from "./env-names";
 import { classifyGit } from "./git";
 import { inlineScripts } from "./inline-scripts";
 import { classifyInstall } from "./installs";
+import { itemWrites } from "./item-writes";
 import {
   isInside,
   isInWorkspace,
@@ -23,10 +24,13 @@ import {
   isTempRoot,
   isWritable,
   type PathContext,
+  providerPath,
   resolveAgainst,
+  SHELL_DRIVES,
 } from "./paths";
 import { projectConfigCommand, projectConfigWrite } from "./project-config";
 import { loginRisk, providerLoginCommand, touchesProviderLogin } from "./provider-logins";
+import { registryChange, registryExports } from "./registry";
 import { pipesDownloadIntoInterpreter } from "./remote-scripts";
 import { braceAlternatives, secretArgument, toolOutputs } from "./secrets";
 import { parseShell, type ShellDialect, type SimpleCommand } from "./shell";
@@ -169,7 +173,11 @@ function classifyList(
   return SAFE;
 }
 
-/** The context after `cmd` when it changes directory (`cd dir`, `Set-Location -Path dir`). */
+/**
+ * The context after `cmd` when it changes directory (`cd dir`, `Set-Location -Path dir`). A `cd`
+ * onto a PowerShell drive that isn't the filesystem (`cd HKCU:\Software`, then `cd Foo`) moves
+ * relative paths there (`psDrive`) until a `cd` back to a folder.
+ */
 function afterCd(cmd: SimpleCommand, ctx: RiskContext): RiskContext {
   const { tokens } = unwrap(cmd.words);
   if (!CD.has(binName(tokens[0]))) return ctx;
@@ -177,7 +185,10 @@ function afterCd(cmd: SimpleCommand, ctx: RiskContext): RiskContext {
   if (args.includes("-")) return ctx;
   const target =
     namedArg(args, ["-path", "-literalpath"]) ?? args.find((a) => !a.startsWith("-")) ?? "~";
-  return { ...ctx, dir: resolveAgainst(target, ctx) };
+  const provider = providerPath(target, ctx);
+  if (provider && provider.path === undefined) return { ...ctx, psDrive: provider.drive };
+  const onDisk = { ...ctx, psDrive: undefined };
+  return { ...onDisk, dir: resolveAgainst(provider?.path ?? target, onDisk) };
 }
 
 /**
@@ -245,11 +256,15 @@ function classifySimple(
 
   const deletes = classifyDelete(cmd, ctx, at.source);
   if (deletes.risky) return deletes;
+  const registry = registryChange(bin, args, tokens);
+  if (registry) return registry;
 
   const dest = copyDestination(bin, args);
-  const outputs = toolOutputs(bin, args);
-  const written = dest ? [dest, ...outputs] : outputs;
-  for (const target of [...(dest ? copyTargets(bin, args, dest, ctx) : []), ...outputs]) {
+  const outputs = [...toolOutputs(bin, args), ...registryExports(bin, args)];
+  const items = itemWrites(cmd, ctx, at.source);
+  const written = [...(dest ? [dest] : []), ...outputs, ...items.words];
+  const targets = [...(dest ? copyTargets(bin, args, dest, ctx) : []), ...outputs];
+  for (const target of [...targets, ...items.targets]) {
     const write = classifyWrite(target, ctx);
     if (write.risky) return write;
   }
@@ -313,9 +328,18 @@ function copyTargets(bin: string, args: string[], dest: string, ctx: RiskContext
  * temp counts as outside the worktree, so Full autonomy (which only asks for writes outside the
  * worktree) still asks for it. CodeDen's own home (its credential files, and anything else
  * outside the session's own worktree there) and agents' own allow-lists (`./agent-permissions`)
- * ask at every level. CodeDen's project config (`./project-config`) asks at Auto.
+ * ask at every level. CodeDen's project config (`./project-config`) asks at Auto. On Windows a
+ * PowerShell drive's item (`HKCU:\…`, `Cert:\…`, or a relative path after a `cd` there) is never
+ * in the worktree, except on the shell's own `Env:`, `Variable:`, `Function:` and `Alias:`
+ * drives; `FileSystem::C:\x` and `Temp:\x` are the files they name.
  */
 export function classifyWrite(target: string, ctx: RiskContext): RiskAssessment {
+  const provider = providerPath(target, ctx);
+  if (provider?.path !== undefined) return classifyWrite(provider.path, ctx);
+  if (provider) {
+    if (SHELL_DRIVES.has(provider.drive)) return SAFE;
+    return risky("outside_worktree", `Writes ${target}, outside the worktree`);
+  }
   const access = codedenAccess(target, ctx);
   if (access) return credentialsRisk(`Writes ${CODEDEN_WHAT[access]}: ${target}`);
   const permissions = agentPermissionsWrite(target, ctx);

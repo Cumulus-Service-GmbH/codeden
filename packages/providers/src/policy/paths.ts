@@ -12,6 +12,12 @@ export interface PathContext {
    * `cd` earlier in the command moved. Defaults to `cwd`. Never widens the worktree.
    */
   dir?: string;
+  /**
+   * The PowerShell drive (or provider) the shell's location is on, lower-cased, when a `cd` earlier
+   * in the command moved it off the filesystem (`cd HKCU:\Software`, `Set-Location Env:`). Relative
+   * paths then name items on that drive, not files under `dir` (`./paths`' `providerPath`).
+   */
+  psDrive?: string;
   /** Extra writable roots (SessionOptions.additionalDirectories). */
   extraRoots?: readonly string[];
   /** The OS temp directories. Defaults to `osTempRoots()` for the running platform. */
@@ -146,12 +152,28 @@ export interface ProviderPath {
   path?: string;
 }
 
+/** PowerShell drives (and providers) that only hold the running shell's own state. */
+export const SHELL_DRIVES: ReadonlySet<string> = new Set([
+  "env",
+  "environment",
+  "variable",
+  "function",
+  "alias",
+]);
+
+/**
+ * A path that doesn't depend on the current location: a drive letter (`C:`), a UNC path, the
+ * home directory (`~`) or a variable (`$env:TEMP\x`, `%TEMP%`).
+ */
+const ROOTED = /^(?:[a-z]:|[\\/]{2}|~|\$|%)/i;
+
 /**
  * A PowerShell provider path on Windows, which Node's path functions would read as a relative
  * path: a drive named by more than one letter (`HKCU:\Software\Foo`, `Env:FOO`, `Cert:\`) or a
  * provider-qualified path (`Registry::HKEY_CURRENT_USER\…`,
- * `Microsoft.PowerShell.Core\FileSystem::C:\x`). Undefined for a file path, and elsewhere than
- * Windows, where a colon is an ordinary character in a file name.
+ * `Microsoft.PowerShell.Core\FileSystem::C:\x`). After a `cd` onto such a drive (`ctx.psDrive`),
+ * a relative path (`Foo`, `.`, `..\Bar`, `\Software`) is an item on that drive too. Undefined for
+ * a file path, and elsewhere than Windows, where a colon is an ordinary character in a file name.
  */
 export function providerPath(target: string, ctx: PathContext): ProviderPath | undefined {
   if (!isWin(ctx)) return undefined;
@@ -162,7 +184,7 @@ export function providerPath(target: string, ctx: PathContext): ProviderPath | u
     return drive === "filesystem" ? { drive, path: qualified[2] as string } : { drive };
   }
   const named = /^([a-z_]\w+):(.*)$/is.exec(value);
-  if (!named) return undefined;
+  if (!named) return ctx.psDrive && !ROOTED.test(value) ? { drive: ctx.psDrive } : undefined;
   const drive = (named[1] as string).toLowerCase();
   const temp = tempRootsOf(ctx)[0];
   if (drive !== "temp" || !temp) return { drive };
