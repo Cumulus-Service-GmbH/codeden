@@ -36,8 +36,9 @@ describe("the factory's opening briefs record their sender", () => {
       null,
       false,
     );
-    await sessions.startRevert(env.project.id, { sha: "abc1234def", prNumber: 7, title: "Bad" });
     const auto = { provider: "auto", model: null };
+    const merge = { sha: "abc1234def", prNumber: 7, title: "Bad" };
+    await sessions.startRevert(env.project.id, merge, auto);
     await sessions.startScout(env.project.id, "## Round 1\n\nReview **everything**.", auto);
     await sessions.startLens(env.project.id, "ux", "## UX\n\nReview the `ux`.", auto);
     expect(env.starts).toHaveLength(5);

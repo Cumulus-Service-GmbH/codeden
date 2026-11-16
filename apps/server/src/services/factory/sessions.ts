@@ -323,12 +323,18 @@ export class FactorySessions {
     });
   }
 
+  /**
+   * Start the agent writing an automatic revert, on `agent`'s provider and model (chosen as a
+   * bug's builder is, with fallback, `revert-start.ts`).
+   */
   startRevert(
     projectId: string,
     merge: { sha: string; prNumber: number; title: string },
+    agent: AgentChoice,
   ): Promise<StartSessionResponse> {
     return this.start({
       projectId,
+      ...on(agent),
       purpose: `Factory: revert #${merge.prNumber} after a CI regression`,
       workKey: `factory:revert:${merge.sha.slice(0, 7)}`,
       title: `Revert #${merge.prNumber}`,

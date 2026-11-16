@@ -11,7 +11,12 @@ import { baseBranchOf } from "./rebase";
 import { rebuildFailed, unreplacedOriginal } from "./rebuild";
 import { recordMainFailure, revertLanded } from "./revert";
 import { regressionInboxId, regressionPausePrefix, revertBlocked } from "./revert-blocked";
-import { revertSessionFailure, revertStartFailed, startRevertAgent } from "./revert-start";
+import {
+  revertAgent,
+  revertSessionFailure,
+  revertStartFailed,
+  startRevertAgent,
+} from "./revert-start";
 import { awaitRevertCi, revertStillRed } from "./revert-watch";
 import { advanceSpec } from "./spec-approval";
 import { builderOpenPr, holdEarlyPr } from "./spec-early-pr";
@@ -273,18 +278,30 @@ async function regression(
     ctx.store.createItem({ ...base, stage: "verifying", pr: revertPr, nudges: { verifying: at } });
     revertNote = `revert PR #${revertPr.number} is open`;
   } else {
-    const started = await startRevertAgent(ctx, project.id, { sha, prNumber, title: item.title });
+    // On the builder's provider for a bug, or another available one (`revert-start.ts`). With
+    // none available it waits in the queue, which starts it once one is: no failed start counts.
+    const agent = revertAgent(ctx, project, loop);
+    const merge = { sha, prNumber, title: item.title };
+    const started =
+      "waiting" in agent ? agent : await startRevertAgent(ctx, project.id, merge, agent);
     const sessionId = "sessionId" in started ? started.sessionId : null;
     const revert = ctx.store.createItem({
       ...base,
       stage: sessionId ? "building" : "backlog",
       builderSessionId: sessionId,
-      note: sessionId ? "An agent is writing the revert" : null,
+      builderProvider: "sessionId" in started ? started.provider : null,
+      note: sessionId
+        ? "An agent is writing the revert"
+        : "waiting" in started
+          ? started.waiting
+          : null,
     });
     if ("why" in started) unstarted = { revert, why: started.why };
     revertNote = sessionId
       ? "an agent is writing the revert PR"
-      : "the revert couldn't start yet: it starts again on the next free agent";
+      : "waiting" in started
+        ? "no provider is available to write the revert yet: it starts as soon as one is"
+        : "the revert couldn't start yet: it starts again on the next free agent";
   }
   ctx.store.updateItem(item.id, (i) => ({
     ...i,
