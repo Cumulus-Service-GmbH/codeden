@@ -176,11 +176,11 @@ export function buildProps(
     display(
       kit,
       boardCanvas(scene.shipped, scene.board.working, scene.board.waiting, p),
-      1.44,
-      0.44,
-      layout.bounds.x1 + 0.1,
-      1.55,
-      door.z,
+      1.8,
+      0.55,
+      layout.bounds.x1 + 0.15,
+      1.62,
+      door.z + 0.2,
     ),
   );
 
