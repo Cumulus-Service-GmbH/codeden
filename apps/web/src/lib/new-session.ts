@@ -23,7 +23,10 @@ export interface DraftChoice {
   model: string | null;
   effort: ReasoningEffort | null;
   autonomy: AutonomyLevel | null;
-  /** Start in plan mode (sent only when the provider reports `capabilities.planMode`). */
+  /**
+   * Start in plan mode: the user's choice, kept across provider switches, but sent only when the
+   * provider reports `capabilities.planMode`.
+   */
   planMode: boolean;
   /**
    * Keep going until checks pass (§9 Project checks); offered only when the project has checks.
@@ -143,17 +146,15 @@ export function resolveDraftChoice(choice: DraftChoice, defaults: DraftDefaults)
 }
 
 /**
- * The choice after the model picker changed provider, model or effort: switching to a provider
- * without plan mode turns Plan off, so it can't come back on unseen when switching back.
+ * The choice after the model picker changed provider, model or effort. Plan stays as chosen: on
+ * a provider without plan mode it is off (`resolveDraftChoice`, so the start request leaves it
+ * out) and the Plan control says so, and picking a provider that can plan turns it back on.
  */
 export function pickModel(
   choice: DraftChoice,
   next: { provider: string; model: string | null; effort: ReasoningEffort | null },
-  providers: ProviderInfo[],
 ): DraftChoice {
-  const planSupported =
-    providers.find((p) => p.id === next.provider)?.capabilities.planMode ?? false;
-  return { ...choice, ...next, planMode: choice.planMode && planSupported };
+  return { ...choice, ...next };
 }
 
 /** `POST /api/sessions` for the draft's first message. */

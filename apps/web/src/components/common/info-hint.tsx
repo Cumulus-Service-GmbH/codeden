@@ -1,7 +1,8 @@
 import { CircleHelp } from "lucide-react";
-import { type ReactNode, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
+import { useTapTooltip } from "./tap-tooltip";
 
 /**
  * Explains a term in a sentence or two: a small "?" next to it, or the term itself with a dotted
@@ -25,28 +26,15 @@ export function InfoHint({
   side?: "top" | "right" | "bottom" | "left";
   className?: string;
 }) {
-  const [open, setOpen] = useState(false);
-  // The pointer behind the next click, and whether the hint was showing when it went down
-  // (the primitive closes it on pointer down, before the click arrives).
-  const press = useRef<{ type: string; wasOpen: boolean } | null>(null);
+  const tip = useTapTooltip();
   return (
-    <Tooltip open={open} onOpenChange={setOpen}>
+    <Tooltip {...tip.root}>
       <TooltipTrigger asChild>
         <button
           type="button"
           aria-label={term ? undefined : `About ${label}`}
           data-testid="info-hint"
-          onPointerDown={(e) => {
-            press.current = { type: e.pointerType, wasOpen: open };
-          }}
-          onClick={(e) => {
-            // Keep the primitive from closing it on click; decide here instead.
-            e.preventDefault();
-            const p = press.current;
-            press.current = null;
-            if (!p) setOpen((o) => !o);
-            else setOpen(p.type === "touch" ? !p.wasOpen : true);
-          }}
+          {...tip.trigger}
           className={cn(
             "cursor-help rounded-sm transition-colors focus-visible:ring-2 focus-visible:ring-ring/50 focus-visible:outline-none",
             term

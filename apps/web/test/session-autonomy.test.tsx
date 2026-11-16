@@ -130,14 +130,14 @@ describe("SessionOptions plan mode", () => {
     );
   });
 
-  it("hides Plan for providers without plan mode and for role sessions", async () => {
+  it("disables Plan for providers without plan mode and hides it for role sessions", async () => {
     const client = createMockClient();
-    const { queryClient, unmount } = renderWithClient(
+    const { unmount } = renderWithClient(
       <SessionOptions session={agent({ provider: "codex", model: "default" })} running={false} />,
       client,
     );
-    await waitFor(() => expect(queryClient.getQueryData(snapshotKey)).toBeTruthy());
-    expect(screen.queryByRole("button", { name: "Plan mode" })).toBeNull();
+    const plan = await screen.findByRole("button", { name: "Plan mode" });
+    expect(plan.getAttribute("aria-disabled")).toBe("true");
     unmount();
     renderWithClient(<SessionOptions session={agent({ role: "pm" })} running={false} />, client);
     await screen.findByRole("button", { name: /opus/i });

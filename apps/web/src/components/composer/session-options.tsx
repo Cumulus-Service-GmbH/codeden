@@ -109,8 +109,16 @@ export function SessionOptions({ session, running }: { session: Session; running
           }}
         />
       )}
-      {session.role === "agent" && providerInfo?.capabilities.planMode && (
-        <PlanToggle value={session.planMode ?? false} onChange={(planMode) => save({ planMode })} />
+      {session.role === "agent" && providerInfo && (
+        <PlanToggle
+          value={session.planMode ?? false}
+          unavailable={
+            providerInfo.capabilities.planMode
+              ? undefined
+              : { provider: providerInfo.displayName, wasOn: session.planMode ?? false }
+          }
+          onChange={(planMode) => save({ planMode })}
+        />
       )}
       {session.role === "agent" &&
         session.checks &&

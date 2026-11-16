@@ -11,9 +11,10 @@ import { WorkspacePicker } from "./workspace-picker";
  * the session doesn't exist yet), effort, permissions and Plan as a session's composer, kept in
  * the draft until the first send starts the session with them. What is offered follows the
  * provider's capabilities: effort with `reasoningEffort`, Read-only where it is enforced, Plan
- * with `planMode`. "Keep going until checks pass" shows when the project has checks (`checks`)
- * and the permissions let the agent fix things. A project folder that isn't a git repository
- * shows where the session runs instead of a worktree (`WorkspacePicker`).
+ * with `planMode` (elsewhere Plan stays, disabled with the reason, and the draft keeps the choice
+ * for a provider that can plan). "Keep going until checks pass" shows when the project has checks
+ * (`checks`) and the permissions let the agent fix things. A project folder that isn't a git
+ * repository shows where the session runs instead of a worktree (`WorkspacePicker`).
  */
 export function DraftOptions({
   providers,
@@ -50,7 +51,7 @@ export function DraftOptions({
         // The resolved choice, defaults included: what the first send starts.
         value={{ provider: provider.id, model: resolved.model, effort: resolved.effort }}
         shortcut
-        onChange={(next) => onChange(pickModel(choice, next, providers))}
+        onChange={(next) => onChange(pickModel(choice, next))}
       />
       <AutonomyPicker
         value={resolved.autonomy}
@@ -58,12 +59,15 @@ export function DraftOptions({
         readOnlySupported={supportsReadOnly(provider)}
         onChange={(autonomy) => onChange({ ...choice, autonomy })}
       />
-      {provider.capabilities.planMode && (
-        <PlanToggle
-          value={resolved.planMode}
-          onChange={(planMode) => onChange({ ...choice, planMode })}
-        />
-      )}
+      <PlanToggle
+        value={resolved.planMode}
+        unavailable={
+          provider.capabilities.planMode
+            ? undefined
+            : { provider: provider.displayName, wasOn: choice.planMode, canSwitch: true }
+        }
+        onChange={(planMode) => onChange({ ...choice, planMode })}
+      />
       {checks.length > 0 && resolved.autonomy !== "read_only" && (
         <ChecksToggle
           checks={checks}

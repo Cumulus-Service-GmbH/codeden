@@ -218,17 +218,17 @@ describe("resolveDraftChoice (the New session draft's defaults)", () => {
     });
   });
 
-  it("turns Plan off when the picker switches to a provider without plan mode", () => {
-    const next = pickModel(
-      choice({ planMode: true }),
-      { provider: "plain", model: null, effort: null },
-      [planner, plain],
-    );
-    expect(next).toMatchObject({ provider: "plain", planMode: false });
-    // Switching back doesn't bring it back unseen.
-    expect(
-      pickModel(next, { provider: "planner", model: null, effort: null }, [planner, plain]),
-    ).toMatchObject({ provider: "planner", planMode: false });
+  it("keeps the Plan choice when the picker switches to a provider without plan mode (#531)", () => {
+    const next = pickModel(choice({ planMode: true }), {
+      provider: "plain",
+      model: null,
+      effort: null,
+    });
+    expect(next).toMatchObject({ provider: "plain", planMode: true });
+    // Off there, and back on after switching back.
+    expect(resolveDraftChoice(next, defaults()).planMode).toBe(false);
+    const back = pickModel(next, { provider: "planner", model: null, effort: null });
+    expect(resolveDraftChoice(back, defaults()).planMode).toBe(true);
   });
 });
 

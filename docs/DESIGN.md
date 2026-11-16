@@ -873,7 +873,7 @@ Detailed, trustworthy reports on spend and usage across every provider, project 
   - typed notice cards
 - **Composer:**
   - text, pasted images and file attachments, `@` file mentions, `/` commands and skills
-  - provider, model and effort pickers, plus the autonomy level and a **Plan** toggle where the provider reports `planMode` (§11.2)
+  - provider, model and effort pickers, plus the autonomy level and a **Plan** toggle, usable where the provider reports `planMode` (§11.2). Elsewhere it stays disabled with the reason, naming the provider. A new session draft keeps the Plan choice across provider switches, but sends it only to a provider that can plan
   - queue or steer while a turn runs
   - the voice button, with live dictation text under the message (§11.3)
   - **follow-up chips** after a turn completes (§7.5)
