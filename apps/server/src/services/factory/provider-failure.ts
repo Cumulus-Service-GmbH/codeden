@@ -1,13 +1,14 @@
 import type { FactoryItem, Session } from "@codeden/contracts";
 import type { InboxService } from "../inbox-service";
 import type { SessionRepo } from "../sessions/repo";
+import { unansweredStartAt } from "../sessions/unanswered-start";
 import { PROVIDER_FAILURE_BACKOFF_MS, type ProviderCause, type Unavailable } from "./availability";
 
 /**
  * A factory session that failed because of its provider rather than its work (§10.1, Provider
  * availability): the provider's usage limit, a sign-in problem, a CLI too old to run, or a
  * session that never started. Read from the error kind the provider adapters give a failed
- * turn, or a refused open (`Session.startError`).
+ * turn, or a refused open (`Session.startError`). A start the runner left unanswered isn't one.
  */
 
 /** Nudge key prefix: this item's reviews skip the provider until the stored time. */
@@ -35,7 +36,8 @@ export function providerWide(cause: Unavailable): boolean {
  * Why `s` failed because of its provider, or null when it didn't (or didn't fail). A session
  * that could not start has the runner's report of the refused open (`startError`, with the
  * provider's classification: `setup` for a CLI too old to run, `auth` for one not signed in),
- * or the launcher's `run_failed` inbox item keyed `start`.
+ * or the launcher's `run_failed` inbox item keyed `start`. A start the runner didn't answer (a
+ * timeout or a lost connection under load) is no failure of the provider (`late-start.ts`).
  */
 export function providerFailure(
   repo: SessionRepo,
@@ -48,6 +50,7 @@ export function providerFailure(
     if (s.status !== "failed") return null;
     if (s.startError?.kind === "setup") return { reason: TOO_OLD, until: null };
     if (s.startError?.kind === "auth") return NOT_SIGNED_IN;
+    if (unansweredStartAt(repo, s)) return null;
     const notStarted = s.startError || inbox.find(`inbox:${s.id}:start`);
     return notStarted ? { reason: FAILING_TO_START, until: null } : null;
   }

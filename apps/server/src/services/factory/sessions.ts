@@ -47,6 +47,8 @@ const LIVE_STATUSES = new Set([...SLOT_STATUSES, "idle", "interrupted"]);
 export const SCOUT_WORK_KEY = "factory:scout";
 /** Work key prefix of the scout's area reviewers ("lenses": one long-lived session per area). */
 export const LENS_WORK_KEY_PREFIX = "factory:lens:";
+/** Work key prefix of the independent reviewers of factory pull requests. */
+export const REVIEW_WORK_KEY_PREFIX = "factory:review:";
 
 /** Whether a session is busy with a turn (or about to start one). */
 export function isBusy(s: Session): boolean {
@@ -287,7 +289,7 @@ export class FactorySessions {
       provider: reviewer.provider,
       ...(reviewer.model ? { model: reviewer.model } : {}),
       purpose: `Factory review: ${item.title}`.slice(0, 300),
-      workKey: `factory:review:${item.pr?.number ?? item.id}`,
+      workKey: `${REVIEW_WORK_KEY_PREFIX}${item.pr?.number ?? item.id}`,
       title: `Review: ${item.title}`.slice(0, 200),
       issue: item.issue ?? undefined,
       workspace,

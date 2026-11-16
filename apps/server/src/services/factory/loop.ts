@@ -14,6 +14,7 @@ import { advanceDrain } from "./drain";
 import { fileDueFollowUps } from "./follow-ups";
 import { classifyPending, intakeFailedChecks, intakeIssues } from "./intake";
 import { enforceItemBudgets } from "./item-budget";
+import { settleLateStarts } from "./late-start";
 import { briefLessons } from "./lessons";
 import { openPrFiles, scheduleOrder } from "./overlap";
 import { advanceOwned } from "./owned";
@@ -89,6 +90,12 @@ export async function runTick(
   // Failed items whose issue was closed on GitHub have nothing left to decide: they settle
   // first, so none of them is put back or waits on a person.
   settleClosedIssues(ctx, project);
+  // Sessions that started after their runner left the start unanswered are adopted by the work
+  // still waiting for them, or stopped when another took their place (`late-start.ts`), before
+  // anything below replaces them.
+  await settleLateStarts(ctx, project, loop).catch((error: unknown) =>
+    ctx.log?.(`factory: sessions that started late: ${errorMessage(error)}`),
+  );
   // Items that failed for a reason outside their code go back by themselves (builders that
   // must carry on wait until after the reviews, fixes and rebases, below). While the factory
   // drains (`drain.ts`), only the drain's own work does.

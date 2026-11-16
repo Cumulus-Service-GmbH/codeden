@@ -12,6 +12,7 @@ import { conflict, errorMessage } from "../errors";
 import { type ScoutAgent, scoutAgent } from "./agent-choice";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { heldFollowUps } from "./follow-ups-held";
+import { awaitingStart } from "./late-start";
 import { budgetExceeded, freeSlots, localDay } from "./policy";
 import {
   LENS_NUDGE,
@@ -81,10 +82,11 @@ function turnEnded(ctx: FactoryContext, s: Session, since: string): boolean {
 /**
  * Whether the scout's or an area reviewer's session failed. A failed turn with a message waiting
  * behind it (a compaction that failed ahead of the round's brief) doesn't count: the brief still
- * runs.
+ * runs. Nor does a start the runner didn't answer while the round waits to see whether it
+ * started (`late-start.ts`).
  */
 function sessionFailed(ctx: FactoryContext, s: Session): boolean {
-  return s.status === "failed" && !ctx.sessions.hasPendingMessage(s.id);
+  return s.status === "failed" && !ctx.sessions.hasPendingMessage(s.id) && !awaitingStart(ctx, s);
 }
 
 /** Titles of work open or done recently, so the scout and lenses don't repeat it. */
@@ -310,6 +312,8 @@ async function advanceRound(
   if (!s || sessionFailed(ctx, s)) {
     return endRound(scout, now, "Closed: the scout's session failed.");
   }
+  // The runner didn't answer the scout's start: the round waits to see whether it started.
+  if (awaitingStart(ctx, s)) return scout;
   const at = now.toISOString();
 
   // Planned area reviewers start as agents free up; the round reviews once one has started.
@@ -355,6 +359,9 @@ async function advanceRound(
     const ls = ctx.repo.find(lens.sessionId)?.session;
     if (!ls || sessionFailed(ctx, ls) || ls.status === "stopped") {
       lenses.push({ ...lens, reported: true });
+    } else if (awaitingStart(ctx, ls)) {
+      // The runner didn't answer its start: the round waits to see whether it started.
+      lenses.push(lens);
     } else if (!turnEnded(ctx, ls, lens.sentAt)) {
       // Idle long after it was woken without a turn since: the wake never reached it.
       const lost = !isBusy(ls) && now.getTime() - Date.parse(lens.sentAt) > LENS_START_TIMEOUT_MS;

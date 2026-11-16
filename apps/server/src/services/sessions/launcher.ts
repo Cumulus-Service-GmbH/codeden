@@ -32,6 +32,7 @@ import { ownBranch } from "./own-branch";
 import type { SessionRepo } from "./repo";
 import { withSetupNote } from "./setup-failure";
 import { seenSetups, settleSetup } from "./setup-gate";
+import { setUnanswered, unansweredCode } from "./unanswered-start";
 
 export interface LauncherDeps extends RunnerDeps {
   repo: SessionRepo;
@@ -98,11 +99,16 @@ const NOTHING_RUNS = new Set(["open_failed", "unknown_provider"]);
 export class SessionLauncher {
   constructor(private readonly deps: LauncherDeps) {}
 
-  /** Start a new session in the background: failures mark it failed (see `start`). */
+  /**
+   * Start a new session in the background: failures mark it failed (see `start`). A start the
+   * runner didn't answer is recorded as such (`unanswered-start.ts`): the session may still open.
+   */
   async launch(sessionId: string, opts: LaunchOptions): Promise<void> {
     try {
       await this.start(sessionId, opts);
     } catch (error) {
+      const code = unansweredCode(error);
+      if (code) setUnanswered(this.deps.repo, sessionId, { code, at: new Date().toISOString() });
       this.fail(sessionId, "start", error);
     }
   }
@@ -285,6 +291,10 @@ export class SessionLauncher {
    * runs. Any other failure (a timeout, a lost connection, an error once the process ran)
    * retires nothing: a process may hold the new token or an earlier one; the next open or the
    * session's end retires them.
+   *
+   * A start the runner answered too late, though a turn of the session already started meanwhile
+   * (its events came first), did open it: it counts as opened, with the resume token its events
+   * carry, rather than failing a session that is working.
    */
   private async open(runner: RunnerPort, session: Session, input: UserInput | undefined) {
     const token = runner.mcpProxyUrl()
@@ -295,6 +305,7 @@ export class SessionLauncher {
         })
       : null;
     this.markVendorHistory(runner, session);
+    const turnsBefore = this.deps.repo.turnCount(session.id);
     try {
       const result = await runner.request(
         {
@@ -307,11 +318,17 @@ export class SessionLauncher {
         START_TIMEOUT_MS,
       );
       if (token) this.deps.tokens.revokeSession(session.id, token);
+      setUnanswered(this.deps.repo, session.id, null);
       return result;
     } catch (error) {
       const code = runnerErrorCode(error);
       if (token && code === "session_exists") this.deps.tokens.revoke(token);
       if (token && NOTHING_RUNS.has(code ?? "")) this.deps.tokens.revokeSession(session.id);
+      if (unansweredCode(error) && this.deps.repo.turnCount(session.id) > turnsBefore) {
+        this.deps.log?.(`session ${session.id}: ${errorMessage(error)}, but its turn started`);
+        setUnanswered(this.deps.repo, session.id, null);
+        return { resumeToken: null };
+      }
       throw error;
     }
   }

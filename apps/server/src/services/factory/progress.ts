@@ -2,6 +2,7 @@ import { type FactoryItem, type FactoryLoop, type Project, specHeld } from "@cod
 import { errorMessage } from "../errors";
 import { type FactoryContext, factoryNotice, pauseLoop, raiseInbox } from "./context";
 import { stoppedSinceNudge } from "./idle";
+import { awaitingStart, awaitingStartNote } from "./late-start";
 import { MERGED_AFTER } from "./merge";
 import { failItem } from "./outcomes";
 import { ANALYZE_NUDGE, BUILDER_NUDGE, REPRODUCE_NUDGE } from "./prompts";
@@ -22,7 +23,8 @@ const BUSY = new Set(["created", "queued", "starting", "running", "waiting"]);
  * Building (§10.1): wait for the builder's turn to end with its first step reported (bugs and
  * features) and then an open PR; nudge it once when it ends without, fail the item when it ends
  * again without and stays idle past the grace period (`idleGraceMin`). A builder session that
- * dies or is gone fails it as an infrastructure failure, which the loop recovers by itself. A
+ * dies or is gone fails it as an infrastructure failure, which the loop recovers by itself; one
+ * whose start the runner didn't answer is waited for a while first (`late-start.ts`). A
  * feature's spec that waits for a person's approval holds it at Analyze, with no nudge or failure.
  */
 export async function advanceBuilding(
@@ -48,6 +50,14 @@ export async function advanceBuilding(
   if (held) return held;
   if (!s) return failItem(ctx, loop, item, "The builder session is gone", infra);
   if (BUSY.has(s.status)) return loop;
+  // The runner didn't answer its start: it may have started all the same (`late-start.ts`).
+  const until = awaitingStart(ctx, s);
+  if (until) {
+    const note = awaitingStartNote("builder", until);
+    if (item.note !== note)
+      ctx.store.updateItem(item.id, (i) => ({ ...i, note }), { touch: false });
+    return loop;
+  }
   const fixAt = item.attempts > 0 ? item.nudges[`fix_${item.attempts}`] : undefined;
   // After a fix request, wait until the builder has taken a turn since.
   if (fixAt && Date.parse(s.updatedAt) <= Date.parse(fixAt) && s.status === "idle") return loop;

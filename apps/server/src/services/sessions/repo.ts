@@ -39,6 +39,7 @@ import type { EventStore } from "../../events/store";
 import { notFound } from "../errors";
 import { ACTIVE_RUN_STATUSES, ACTIVE_SESSION_STATUSES } from "./conflicts";
 import type { ForkStart } from "./fork";
+import type { UnansweredStart } from "./unanswered-start";
 
 /** Session ids per query of `modelsOf`, so no query has too many parameters. */
 const ID_CHUNK = 500;
@@ -87,6 +88,12 @@ export type StoredStartMeta = SessionStartMeta & {
    * Older conversations stay for the user to hide (Settings > Providers).
    */
   vendorHistory?: boolean;
+  /**
+   * The last start failed only because the runner didn't answer it (`unanswered-start.ts`): no
+   * failure of the provider, and the session may still have opened. Cleared once a start or
+   * resume of it is answered.
+   */
+  startUnanswered?: UnansweredStart | null;
 };
 
 /**

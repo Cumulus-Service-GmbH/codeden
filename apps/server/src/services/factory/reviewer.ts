@@ -6,6 +6,7 @@ import type { FactoryContext } from "./context";
 import { failReview } from "./failures";
 import type { FactoryPr } from "./github-port";
 import { stoppedSinceNudge } from "./idle";
+import { awaitingStart, awaitingStartNote } from "./late-start";
 import { briefLessons } from "./lessons";
 import { failItem } from "./outcomes";
 import { REVIEWER_NUDGE, reReviewPrompt } from "./prompts";
@@ -285,7 +286,8 @@ async function requestRecheck(
  * its re-check), and fail the review once it ends again without one and stays idle past the
  * grace period. A reviewer session that died is replaced, up to `MAX_REVIEWER_RESTARTS` times;
  * a pending re-check stays a re-check for the replacement, and the replacement gets its own
- * nudge (`withReviewer`).
+ * nudge (`withReviewer`). One whose start the runner didn't answer is waited for a while first,
+ * since it may have started (`late-start.ts`), and is then replaced like one that died.
  */
 export async function reviewerStalled(
   ctx: FactoryContext,
@@ -298,6 +300,14 @@ export async function reviewerStalled(
     return loop;
   const s = ctx.repo.find(item.reviewerSessionId)?.session;
   if (!s || !ENDED.has(s.status)) return loop;
+  // The runner didn't answer its start: it may have started all the same (`late-start.ts`).
+  const until = awaitingStart(ctx, s);
+  if (until) {
+    const note = awaitingStartNote("reviewer", until);
+    if (item.note !== note)
+      ctx.store.updateItem(item.id, (i) => ({ ...i, note }), { touch: false });
+    return loop;
+  }
   const cause =
     providerRestarts(item) < MAX_PROVIDER_RESTARTS ? providerFailure(ctx.repo, ctx.inbox, s) : null;
   if (cause) return reviewerProviderFailed(ctx, loop, item, s, cause);
