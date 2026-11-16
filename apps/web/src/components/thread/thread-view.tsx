@@ -13,6 +13,7 @@ import { latestFollowups } from "@/lib/transcript/timeline";
 import { useComposerStore } from "@/stores/composer";
 import { useNewSessionStore } from "@/stores/new-session";
 import { FirstMessage } from "./first-message";
+import { McpNotice } from "./mcp-notice";
 import { QueuedMessages } from "./queued-messages";
 import { ThreadHeader } from "./thread-header";
 import { Transcript } from "./transcript";
@@ -126,6 +127,7 @@ export function ThreadView({
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ThreadHeader session={session} running={running} />
+      <McpNotice session={session} />
       {error ? (
         <EmptyState icon={<Sparkles />} title="Couldn't load this session" className="flex-1">
           {error.message}

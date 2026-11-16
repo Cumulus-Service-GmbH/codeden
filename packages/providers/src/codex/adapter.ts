@@ -53,6 +53,8 @@ const capabilities: ProviderCapabilities = {
   vendorHistory: true,
   // `thread/compact/start` runs a compaction turn on the thread.
   compact: true,
+  // `mcpServer/startupStatus/updated` reports each server's startup for the thread.
+  mcpStatus: true,
 };
 
 const CONFIGURED_MODEL = "The model configured in ~/.codex/config.toml";

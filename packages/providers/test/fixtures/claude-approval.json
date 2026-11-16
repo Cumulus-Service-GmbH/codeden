@@ -22,7 +22,8 @@
   "skills": true,
   "liveAutonomy": true,
   "readOnly": true,
-  "compact": true
+  "compact": true,
+  "mcpStatus": true
  },
  "preamble": [],
  "turns": [

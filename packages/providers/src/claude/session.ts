@@ -24,6 +24,7 @@ import { str, toJson } from "../util/text";
 import { policyHook, type ShellState } from "./hook";
 import { ClaudeEventMapper } from "./mapper";
 import { ClaudeMcpConfig } from "./mcp-config";
+import { McpStatusRefresher } from "./mcp-refresh";
 import { claudeNotesDirs } from "./notes-dirs";
 import { buildQueryOptions, claudeEffort, toSdkUserMessage } from "./options";
 import { ClaudePolicy, permissionModeFor } from "./permissions";
@@ -99,6 +100,11 @@ export class ClaudeSession implements ProviderSession {
   private readonly planUsage = new PlanUsageReader();
   /** The session's MCP servers as a private file for `--mcp-config`, removed on close. */
   private readonly mcpConfig: ClaudeMcpConfig;
+  /** Reads the MCP servers' live state after init and after each turn. */
+  private readonly mcpStatus = new McpStatusRefresher({
+    read: () => this.q?.mcpServerStatus(),
+    report: (list) => this.mapper.reportMcpServers(list),
+  });
 
   constructor(
     private readonly opts: SessionOptions,
@@ -262,6 +268,7 @@ export class ClaudeSession implements ProviderSession {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    this.mcpStatus.stop();
     this.broker.cancelAll();
     this.mapper.closeAll();
     this.prompts?.close();
@@ -405,6 +412,10 @@ export class ClaudeSession implements ProviderSession {
         const type = str(message, "type");
         if (type === "rate_limit_event") this.planUsage.noteEvent(message);
         if (type === "result") this.reportPlanUsage(q);
+        // Init lists the servers without errors, often while some still connect.
+        if (type === "result" || (type === "system" && str(message, "subtype") === "init")) {
+          this.mcpStatus.refresh();
+        }
       }
     } catch (error) {
       failure = error;

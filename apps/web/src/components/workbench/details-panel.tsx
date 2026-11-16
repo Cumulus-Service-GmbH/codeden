@@ -209,7 +209,7 @@ export function DetailsPanel({ session }: { session: Session }) {
 
       <ContextWindow session={session} />
 
-      <LoadedConfig sessionId={session.id} projectId={session.projectId} />
+      <LoadedConfig session={session} />
       <div className="flex items-center justify-between gap-3 text-[13px]">
         <span>
           Read this session aloud

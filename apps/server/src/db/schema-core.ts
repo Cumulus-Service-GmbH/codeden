@@ -9,6 +9,7 @@ import type {
   GitHubRepo,
   Item,
   JsonValue,
+  McpServerState,
   ProjectRemoteWarning,
   QueueSender,
   SessionChecks,
@@ -136,6 +137,8 @@ export const sessions = sqliteTable(
     result: json<SessionResult>("result"),
     /** Why the provider last refused to open the session (`Session.startError`). */
     startError: json<ErrorInfo>("start_error"),
+    /** The MCP servers' live state as the provider last reported it (`Session.mcpServers`). */
+    mcpServers: json<McpServerState[]>("mcp_servers"),
   },
   (t) => [
     index("sessions_project").on(t.projectId),

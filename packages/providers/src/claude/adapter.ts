@@ -45,6 +45,8 @@ const capabilities: ProviderCapabilities = {
   liveAutonomy: true,
   readOnly: true,
   compact: true,
+  // `system/init` and `mcpServerStatus()` report each server's state.
+  mcpStatus: true,
 };
 
 const EFFORTS: ReasoningEffort[] = ["low", "medium", "high", "xhigh", "max"];

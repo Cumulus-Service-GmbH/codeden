@@ -64,6 +64,12 @@ export const ProviderCapabilities = z.object({
    * own. False or absent: only the provider's own automatic compaction runs.
    */
   compact: z.boolean().optional(),
+  /**
+   * The provider reports each MCP server's live state while the session runs (connected,
+   * starting, failed, needs sign-in, disabled) as `session.updated.mcpServers`. False or absent:
+   * only the configured servers are known (What's loaded lists them from config, §12.4).
+   */
+  mcpStatus: z.boolean().optional(),
 });
 export type ProviderCapabilities = z.infer<typeof ProviderCapabilities>;
 

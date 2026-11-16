@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { AgentEvent, Item, MessageSender, UserInput } from "@codeden/contracts";
 import type { ItemCtx } from "../approvals";
+import { CodexMcpStatus } from "./mcp-status";
 import type { ServerNotification } from "./protocol";
 import type { RateLimitSnapshot } from "./protocol/v2";
 import { CodexSubagents } from "./subagents";
@@ -28,6 +29,8 @@ export class CodexEventMapper {
   codexThreadId: string | undefined;
   private readonly root: CodexThreadMapper;
   private readonly subagents: CodexSubagents;
+  /** The live state of the session's MCP servers. */
+  private readonly mcpStatus: CodexMcpStatus;
   /** The latest rate-limit snapshot, for when a reached usage limit lifts. */
   private limits: RateLimitSnapshot | undefined;
   /**
@@ -44,6 +47,7 @@ export class CodexEventMapper {
     options: CodexEventMapperOptions = {},
   ) {
     this.rootThreadId = `${sessionId}:thread-root`;
+    this.mcpStatus = new CodexMcpStatus(emit);
     const limits = () => this.limits;
     this.subagents = new CodexSubagents({
       sessionId,
@@ -110,6 +114,13 @@ export class CodexEventMapper {
       return;
     }
     const threadId = (n.params as { threadId?: string | null }).threadId;
+    if (n.method === "mcpServer/startupStatus/updated") {
+      // The session's own thread (or its app-server as a whole): sub-agents' threads don't count.
+      if (!threadId || !this.codexThreadId || threadId === this.codexThreadId) {
+        this.mcpStatus.update(n.params);
+      }
+      return;
+    }
     if (threadId && this.codexThreadId && threadId !== this.codexThreadId) {
       this.subagents.route(threadId, n);
       return;

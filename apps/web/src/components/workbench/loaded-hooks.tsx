@@ -13,6 +13,8 @@ export interface LoadedRow {
   title?: string;
   /** Listed but not in effect (hooks while `disableAllHooks` is on). */
   dim?: boolean;
+  /** A live state after the detail (an MCP server's), as a coloured dot and a label. */
+  state?: { label: string; dot: string };
 }
 
 /**

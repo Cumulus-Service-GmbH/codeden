@@ -1,8 +1,16 @@
 import { randomUUID } from "node:crypto";
-import type { AgentEvent, ErrorInfo, Item, Usage } from "@codeden/contracts";
+import {
+  type AgentEvent,
+  type ErrorInfo,
+  type Item,
+  type McpServerState,
+  sameMcpServers,
+  type Usage,
+} from "@codeden/contracts";
 import { str } from "../util/text";
 import { toProviderCommands } from "./commands";
 import { rejectedResetsAt, resultError, type TurnErrorSignals } from "./errors";
+import { toMcpServerStates } from "./mcp-status";
 import { apiRetryNotice, compactedNotice, compactFailedNotice, compactingNotice } from "./notices";
 import { StreamAssembler } from "./stream";
 import { SubagentTracker, type ThreadCtx } from "./subagents";
@@ -70,6 +78,8 @@ export class ClaudeEventMapper {
   private lastChainUuid: string | undefined;
   /** The `/` command list last reported, so an unchanged list isn't sent again. */
   private commandsKey: string | undefined;
+  /** The MCP server states last reported, so an unchanged list isn't sent again. */
+  private mcpServers: McpServerState[] | undefined;
 
   constructor(opts: MapperOptions) {
     this.rootThreadId = `${opts.sessionId}:thread-root`;
@@ -115,6 +125,20 @@ export class ClaudeEventMapper {
     if (key === this.commandsKey) return;
     this.commandsKey = key;
     this.emit({ type: "session.updated", commands: list });
+  }
+
+  /**
+   * Report the session's MCP servers and their live state (`system/init`'s `mcp_servers`, or a
+   * `mcpServerStatus()` refresh) as `session.updated { mcpServers }`, when they differ from the
+   * last list reported. A refresh that lost a failed server's error keeps the one already known
+   * (init carries none). Returns the list as reported.
+   */
+  reportMcpServers(list: unknown): McpServerState[] {
+    const next = toMcpServerStates(list, this.mcpServers);
+    if (sameMcpServers(next, this.mcpServers)) return next;
+    this.mcpServers = next;
+    this.emit({ type: "session.updated", mcpServers: next });
+    return next;
   }
 
   /** Emit `thread.started` for the root thread (once, at session open). */
@@ -333,6 +357,7 @@ export class ClaudeEventMapper {
           model: this.model,
         });
       }
+      if (Array.isArray(msg.mcp_servers)) this.reportMcpServers(msg.mcp_servers);
     } else if (msg.subtype === "commands_changed") {
       this.reportCommands(msg.commands);
     } else if (msg.subtype === "task_started") {

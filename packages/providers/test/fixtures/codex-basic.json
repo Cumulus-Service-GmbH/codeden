@@ -23,7 +23,8 @@
   "liveAutonomy": false,
   "readOnly": true,
   "vendorHistory": true,
-  "compact": true
+  "compact": true,
+  "mcpStatus": true
  },
  "preamble": [],
  "turns": [

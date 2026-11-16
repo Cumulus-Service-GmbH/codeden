@@ -13,6 +13,7 @@ import {
   Timestamp,
 } from "../common";
 import { Item } from "../items";
+import { McpServerState } from "../mcp-status";
 import { StartedBy, workFields } from "../work";
 import { SessionResult } from "../workbench";
 
@@ -147,6 +148,12 @@ export const Session = z.object({
    * run, `auth` for one that isn't signed in. Absent or null when no open failed.
    */
   startError: ErrorInfo.nullable().optional(),
+  /**
+   * The session's MCP servers and their live state, as its provider last reported them
+   * (`capabilities.mcpStatus`, `session.updated.mcpServers`). Absent or null: not reported, e.g.
+   * a provider without the capability or a session that hasn't started.
+   */
+  mcpServers: z.array(McpServerState).nullable().optional(),
   createdAt: Timestamp,
   updatedAt: Timestamp,
   endedAt: Timestamp.nullable(),

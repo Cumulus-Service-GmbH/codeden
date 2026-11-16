@@ -85,6 +85,7 @@ export function sessionToRow(s: Session): Omit<SessionRow, "usage" | "startMeta"
     worktreeRemovedAt: s.worktreeRemovedAt ?? null,
     forkedFrom: s.forkedFrom ?? null,
     startError: s.startError ?? null,
+    mcpServers: s.mcpServers ?? null,
   };
 }
 

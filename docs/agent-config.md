@@ -104,6 +104,12 @@ For any session, **Details → What's loaded** shows which memory files, skills,
 
 It's the quickest way to answer "why did the agent do that?" when an old rule is still in play.
 
+### MCP servers in What's loaded
+
+The **MCP servers** list shows the servers configured for the session, CodeDen's own (`codeden`, "built in") included. For providers that report their servers' live state (today Claude Code and Codex), each row also shows where that server stands right now: **connected**, **starting**, **failed**, **needs sign-in** or **disabled**. Hover a failed server for the provider's error. Servers the provider runs that aren't in the config files CodeDen reads, such as a plugin's servers or Claude connectors, are listed too.
+
+When a server failed or needs sign-in, the agent can't use its tools, so a notice under the session's header names those servers. For a failed server, check its settings on **Agents › MCP servers**, where **Test the connection** tries it. For one that needs sign-in, sign in through the provider's own MCP login for that server; CodeDen doesn't sign in for you. The notice goes away once the servers connect, or hide it with its close button until the list changes. Only server names, states and the provider's short error (first line, with anything that looks like a secret masked) are kept; commands, URLs, headers and environment values never are.
+
 ### Hooks in What's loaded
 
 For providers whose native config has hooks (today Claude Code), a **Hooks** list shows every hook that applies to the session's folder. Each row has its event and matcher (`all` when the hook has no matcher, so it runs for everything), what it runs and its scope. Hover a row to see its settings file. **Edit hooks** opens the Hooks tab for the session's project. The files that apply are:

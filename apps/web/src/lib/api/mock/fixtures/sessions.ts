@@ -55,6 +55,17 @@ export const sessions: Session[] = [
     branch: "codeden/fix-checkout-flake",
     baseBranch: "main",
     issue: sf.issue(142, "Checkout e2e test is flaky on CI"),
+    // What Claude Code reported: one server waits for sign-in, a plugin's server failed.
+    mcpServers: [
+      { name: "codeden", state: "connected" },
+      { name: "playwright", state: "connected" },
+      { name: "linear", state: "needs_sign_in" },
+      {
+        name: "plugin:sentry:sentry",
+        state: "failed",
+        error: "MCP error -32000: Connection closed",
+      },
+    ],
     createdAt: ago(34),
     updatedAt: ago(1),
   }),

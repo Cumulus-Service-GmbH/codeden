@@ -1,4 +1,4 @@
-import type { AgentConfigScope, LoadedHooks } from "@codeden/contracts";
+import type { AgentConfigScope, LoadedHooks, Session } from "@codeden/contracts";
 import { EditorView } from "@codemirror/view";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -9,6 +9,7 @@ import { MemoryEditor, SkillsView } from "@/components/agents/memory-editor";
 import { PatchView } from "@/components/agents/patch-dialog";
 import { LoadedConfig } from "@/components/workbench/loaded-config";
 import { createMockClient } from "@/lib/api/mock";
+import { makeSession } from "@/lib/api/mock/fixtures/helpers";
 import { renderWithClient } from "./utils";
 
 describe("McpServers", () => {
@@ -222,6 +223,61 @@ describe("ConfigFilesView on a phone", () => {
 });
 
 describe("LoadedConfig", () => {
+  const session = (
+    id: string,
+    projectId: string | null,
+    provider = "claude",
+    mcpServers?: Session["mcpServers"],
+  ) =>
+    makeSession({
+      id,
+      projectId,
+      role: "agent",
+      status: "idle",
+      provider,
+      purpose: "Test",
+      workKey: `test:${id}`,
+      ...(mcpServers !== undefined ? { mcpServers } : {}),
+    });
+
+  it("shows each MCP server's live state where the provider reports it", async () => {
+    const live: Session["mcpServers"] = [
+      { name: "codeden", state: "connected" },
+      { name: "linear", state: "needs_sign_in" },
+      { name: "playwright", state: "failed", error: "spawn npx ENOENT" },
+      { name: "plugin:sentry:sentry", state: "starting" },
+    ];
+    renderWithClient(
+      <LoadedConfig session={session("s1", "p-storefront", "claude", live)} />,
+      createMockClient(),
+      { withRouter: true },
+    );
+    const list = within(await screen.findByTestId("loaded-mcp"));
+    await list.findByText("plugin:sentry:sentry");
+    // The row's line: name, scope and live state.
+    const state = (name: string) => list.getByText(name).parentElement?.textContent ?? "";
+    expect(state("codeden")).toContain("connected");
+    expect(state("linear")).toContain("needs sign-in");
+    expect(state("playwright")).toContain("failed");
+    // The error is the row's tooltip; a server config didn't list is still shown.
+    expect(list.getByText("playwright").closest("[title]")?.getAttribute("title")).toContain(
+      "spawn npx ENOENT",
+    );
+    expect(state("plugin:sentry:sentry")).toContain("starting");
+  });
+
+  it("keeps config-only MCP rows for providers without live state", async () => {
+    const live: Session["mcpServers"] = [{ name: "linear", state: "failed" }];
+    renderWithClient(
+      <LoadedConfig session={session("s2", null, "opencode", live)} />,
+      createMockClient(),
+      { withRouter: true },
+    );
+    const list = within(await screen.findByTestId("loaded-mcp"));
+    await list.findByText("linear");
+    expect(list.queryAllByTestId("mcp-state")).toHaveLength(0);
+  });
+
   it("marks skills that are switched off for the session", async () => {
     const client = createMockClient();
     const base = await client.agentConfig.loaded("s1");
@@ -231,7 +287,7 @@ describe("LoadedConfig", () => {
       ...base,
       skills: [{ ...first, enabled: false, visibility: undefined }, ...rest],
     });
-    renderWithClient(<LoadedConfig sessionId="s1" projectId="p-storefront" />, client, {
+    renderWithClient(<LoadedConfig session={session("s1", "p-storefront")} />, client, {
       withRouter: true,
     });
     const skills = within(await screen.findByTestId("loaded-skills"));
@@ -241,7 +297,7 @@ describe("LoadedConfig", () => {
   });
 
   it("shows memory, skills, subagents and MCP servers for a session", async () => {
-    renderWithClient(<LoadedConfig sessionId="s1" projectId="p-storefront" />, createMockClient(), {
+    renderWithClient(<LoadedConfig session={session("s1", "p-storefront")} />, createMockClient(), {
       withRouter: true,
     });
     expect(await screen.findByText("frontend-design")).toBeTruthy();
@@ -287,7 +343,7 @@ describe("LoadedConfig", () => {
       const client = createMockClient();
       const base = await client.agentConfig.loaded("s1");
       vi.spyOn(client.agentConfig, "loaded").mockResolvedValue({ ...base, hooks });
-      renderWithClient(<LoadedConfig sessionId="s1" projectId={null} />, client, {
+      renderWithClient(<LoadedConfig session={session("s1", null)} />, client, {
         withRouter: true,
       });
       const list = within(await screen.findByTestId("loaded-hooks"));
@@ -344,7 +400,7 @@ describe("LoadedConfig", () => {
     const base = await client.agentConfig.loaded("s1");
     const loaded = vi.spyOn(client.agentConfig, "loaded");
     loaded.mockResolvedValueOnce({ ...base, provider: "codex", hooks: null });
-    renderWithClient(<LoadedConfig sessionId="s2" projectId={null} />, client, {
+    renderWithClient(<LoadedConfig session={session("s2", null, "codex")} />, client, {
       withRouter: true,
     });
     expect(await screen.findByText("frontend-design")).toBeTruthy();

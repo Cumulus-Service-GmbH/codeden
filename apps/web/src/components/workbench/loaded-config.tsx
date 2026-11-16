@@ -1,10 +1,19 @@
-import type { AgentConfigFile, AgentSkill } from "@codeden/contracts";
+import type { AgentConfigFile, AgentSkill, Session } from "@codeden/contracts";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Bot, FileText, Plug, Sparkles, Webhook } from "lucide-react";
 import type { ReactNode } from "react";
 import { skillStateLabel, skillStateTitle } from "@/components/agents/skill-state";
 import { useClient } from "@/lib/api";
+import {
+  type McpRow,
+  mcpRows,
+  mcpRowTitle,
+  mcpStateDot,
+  mcpStateLabel,
+  mcpStatusSupported,
+} from "@/lib/mcp-status";
+import { useSnapshotData } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { hookNotices, hookRows, type LoadedRow } from "./loaded-hooks";
 
@@ -27,21 +36,38 @@ const skillRow = (s: AgentSkill): LoadedRow => {
   };
 };
 
-/** What the session's provider loads into its context from its working directory (§12.4). */
-export function LoadedConfig({
-  sessionId,
-  projectId,
-}: {
-  sessionId: string;
-  projectId: string | null;
-}) {
+/** An MCP server with its live state, when its provider reported one; the error is the tooltip. */
+function mcpRow(m: McpRow): LoadedRow {
+  const title = mcpRowTitle(m);
+  return {
+    key: m.key,
+    label: m.name,
+    ...(m.scope ? { detail: m.scope } : {}),
+    ...(title ? { title } : {}),
+    ...(m.live
+      ? { state: { label: mcpStateLabel[m.live.state], dot: mcpStateDot[m.live.state] } }
+      : {}),
+  };
+}
+
+/**
+ * What the session's provider loads into its context from its working directory (§12.4), with
+ * each MCP server's live state where the provider reports it (`capabilities.mcpStatus`).
+ */
+export function LoadedConfig({ session }: { session: Session }) {
   const client = useClient();
+  const sessionId = session.id;
   const loaded = useQuery({
     queryKey: ["agent-config-loaded", sessionId],
     queryFn: () => client.agentConfig.loaded(sessionId),
   });
+  const provider = useSnapshotData(
+    (s) => s.runner.providers.find((p) => p.id === session.provider),
+    undefined,
+  );
+  const live = mcpStatusSupported(provider) ? session.mcpServers : null;
   const d = loaded.data;
-  const project = projectId ?? "global";
+  const project = session.projectId ?? "global";
   return (
     <section className="space-y-2" data-testid="loaded-config">
       <div className="flex items-baseline justify-between">
@@ -96,12 +122,8 @@ export function LoadedConfig({
         icon={<Plug />}
         title="MCP servers"
         loading={loaded.isLoading}
-        rows={(d?.mcpServers ?? []).map((m) => ({
-          key: `${m.provider}:${m.scope}:${m.name}`,
-          label: m.name,
-          detail: m.provider === "codeden" ? "built in" : m.scope,
-          title: m.file,
-        }))}
+        rows={mcpRows(d?.mcpServers ?? [], live).map(mcpRow)}
+        testId="loaded-mcp"
       />
       {/* Only for providers whose native config has hooks (null otherwise). */}
       {d?.hooks && (
@@ -168,6 +190,15 @@ function LoadedList({
               </span>
               {r.detail && (
                 <span className="shrink-0 text-3xs text-muted-foreground">{r.detail}</span>
+              )}
+              {r.state && (
+                <span
+                  className="inline-flex shrink-0 items-center gap-1 text-3xs text-muted-foreground"
+                  data-testid="mcp-state"
+                >
+                  <span className={cn("size-1.5 rounded-full", r.state.dot)} />
+                  {r.state.label}
+                </span>
               )}
             </div>
             {r.sub && (

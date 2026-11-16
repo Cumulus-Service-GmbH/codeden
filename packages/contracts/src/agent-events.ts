@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ErrorInfo, Id } from "./common";
 import { Item, ItemDelta } from "./items";
+import { McpServerState } from "./mcp-status";
 import { ProviderCommand } from "./slash-commands";
 
 /**
@@ -61,6 +62,11 @@ export const SessionUpdatedEvent = z.object({
    * custom). Replaces any earlier list; absent when unchanged or not reported.
    */
   commands: z.array(ProviderCommand).optional(),
+  /**
+   * Every MCP server of the session and its live state, as the provider reports it
+   * (`capabilities.mcpStatus`). Replaces any earlier list; absent when unchanged or not reported.
+   */
+  mcpServers: z.array(McpServerState).optional(),
 });
 
 /** A thread came into existence. Emitted for the root thread and every subagent thread. */

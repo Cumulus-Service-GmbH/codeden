@@ -49,6 +49,8 @@ export function reduceAgentEvent(
         ...(event.title !== undefined ? { title: event.title } : {}),
         // The agent left (or entered) plan mode itself, e.g. once its plan was approved.
         ...(event.planMode !== undefined ? { planMode: event.planMode } : {}),
+        // The MCP servers' live state, replaced whole (`capabilities.mcpStatus`).
+        ...(event.mcpServers !== undefined ? { mcpServers: event.mcpServers } : {}),
       }));
       break;
     case "thread.started":

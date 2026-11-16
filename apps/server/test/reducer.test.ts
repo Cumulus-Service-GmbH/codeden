@@ -85,6 +85,20 @@ describe("threads and turns", () => {
     expect(p.item("sub1")).toMatchObject({ threadId: T, position: 0 });
   });
 
+  it("keeps the MCP servers' live state on the session, replaced whole", () => {
+    const servers = [
+      { name: "codeden", state: "connected" as const },
+      { name: "db", state: "failed" as const, error: "spawn db-mcp ENOENT" },
+    ];
+    p.apply("s1", { type: "session.updated", mcpServers: servers });
+    expect(p.session().mcpServers).toEqual(servers);
+    // Other updates leave the list as it was.
+    p.apply("s1", { type: "session.updated", model: "fake-2" });
+    expect(p.session().mcpServers).toEqual(servers);
+    p.apply("s1", { type: "session.updated", mcpServers: [{ name: "db", state: "connected" }] });
+    expect(p.session().mcpServers).toEqual([{ name: "db", state: "connected" }]);
+  });
+
   it("sets idle on completion, failed (with an inbox item) on failure", () => {
     p.apply("s1", { type: "turn.completed", threadId: T, turnId: U, stopReason: "end_turn" });
     expect(p.session().status).toBe("idle");

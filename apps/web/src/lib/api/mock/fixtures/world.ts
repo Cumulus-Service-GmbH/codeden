@@ -272,7 +272,7 @@ export const providers: ProviderInfo[] = [
   {
     id: "claude",
     displayName: "Claude Code",
-    capabilities: { ...caps, liveAutonomy: true },
+    capabilities: { ...caps, liveAutonomy: true, mcpStatus: true },
     models: [
       {
         id: "opus",
@@ -305,6 +305,7 @@ export const providers: ProviderInfo[] = [
     displayName: "Codex",
     capabilities: {
       ...caps,
+      mcpStatus: true,
       subagents: false,
       userQuestions: false,
       planMode: false,
