@@ -1,7 +1,7 @@
 import type { McpServerState, Session } from "@codeden/contracts";
 import { Link } from "@tanstack/react-router";
 import { PlugZap, X } from "lucide-react";
-import { useState } from "react";
+import { dismissMcpProblems, useUndismissedMcpProblems } from "@/lib/mcp-dismissals";
 import {
   CODEDEN_MCP_SERVER,
   mcpProblems,
@@ -22,18 +22,21 @@ function ServerName({ server }: { server: McpServerState }) {
 
 /**
  * Below the thread header: the session's MCP servers whose tools the agent lacks (failed, or
- * waiting for sign-in), as its provider reports them (`capabilities.mcpStatus`), and how to fix
- * them. Goes away once they connect; Dismiss hides it until the list changes.
+ * a configured server waiting for sign-in), as its provider reports them
+ * (`capabilities.mcpStatus`), and how to fix them. Goes away once they connect. Dismiss is
+ * remembered in this browser for the project (for CodeDen's own server, the session): only a
+ * server newly in trouble brings the notice back.
  */
 export function McpNotice({ session }: { session: Session }) {
   const provider = useSnapshotData(
     (s) => s.runner.providers.find((p) => p.id === session.provider),
     undefined,
   );
-  const problems = mcpProblems(session, mcpStatusSupported(provider));
-  const key = problems.map((s) => `${s.name}:${s.state}`).join("|");
-  const [dismissed, setDismissed] = useState<string | null>(null);
-  if (problems.length === 0 || dismissed === key) return null;
+  const problems = useUndismissedMcpProblems(
+    session,
+    mcpProblems(session, mcpStatusSupported(provider)),
+  );
+  if (problems.length === 0) return null;
 
   const signIn = problems.some((s) => s.state === "needs_sign_in");
   const failed = problems.some((s) => s.state === "failed");
@@ -85,10 +88,14 @@ export function McpNotice({ session }: { session: Session }) {
       </div>
       <button
         type="button"
-        onClick={() => setDismissed(key)}
+        onClick={() => dismissMcpProblems(session, problems)}
         className="-m-1 rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
         aria-label="Dismiss"
-        title="Hide until the list changes"
+        title={
+          ownTools && count === 1
+            ? "Hide for this session"
+            : "Hide for these servers in this project"
+        }
       >
         <X className="size-3.5" />
       </button>

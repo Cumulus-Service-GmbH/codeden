@@ -35,11 +35,15 @@ const capabilities = {
 };
 
 const servers = [
-  { name: "codeden", state: "connected" },
+  { name: "codeden", state: "connected", origin: "config" },
   { name: "github", state: "needs_sign_in" },
   { name: "db", state: "failed", error: "spawn db-mcp ENOENT" },
   { name: "slow", state: "starting" },
   { name: "off", state: "disabled" },
+  { name: "claude.ai Gmail", state: "needs_sign_in", origin: "account" },
+  { name: "plugin:data:hex", state: "needs_sign_in", origin: "plugin" },
+  { name: "plugin:sentry:sentry", state: "failed", origin: "plugin" },
+  { name: "in-process", state: "connected", origin: "host" },
 ];
 
 describe("MCP server live state contracts", () => {
@@ -51,8 +55,11 @@ describe("MCP server live state contracts", () => {
     expect(roundTrip(Session, session).mcpServers).toBeUndefined();
   });
 
-  it("rejects unknown states, empty names and over-long errors", () => {
+  it("rejects unknown states and origins, empty names and over-long errors", () => {
     expect(McpServerState.safeParse({ name: "x", state: "needs-auth" }).success).toBe(false);
+    expect(
+      McpServerState.safeParse({ name: "x", state: "connected", origin: "claudeai" }).success,
+    ).toBe(false);
     expect(McpServerState.safeParse({ name: "", state: "failed" }).success).toBe(false);
     const long = "e".repeat(MCP_SERVER_ERROR_MAX + 1);
     expect(McpServerState.safeParse({ name: "x", state: "failed", error: long }).success).toBe(
@@ -84,13 +91,20 @@ describe("MCP server live state contracts", () => {
     expect(mcpServerError(undefined)).toBeUndefined();
   });
 
-  it("flags failed and needs-sign-in servers, and compares lists", () => {
+  it("flags failed servers and config servers needing sign-in, and compares lists", () => {
     const parsed = servers.map((s) => McpServerState.parse(s));
-    expect(parsed.filter(mcpServerNeedsAttention).map((s) => s.name)).toEqual(["github", "db"]);
+    // An account connector or a plugin's server that only needs sign-in isn't this work's problem.
+    expect(parsed.filter(mcpServerNeedsAttention).map((s) => s.name)).toEqual([
+      "github",
+      "db",
+      "plugin:sentry:sentry",
+    ]);
     expect(sameMcpServers(parsed, structuredClone(parsed))).toBe(true);
     expect(sameMcpServers(parsed, parsed.slice(1))).toBe(false);
     const changed = parsed.map((s, i) => (i === 0 ? { ...s, state: "failed" as const } : s));
     expect(sameMcpServers(parsed, changed)).toBe(false);
+    const moved = parsed.map((s, i) => (i === 0 ? { ...s, origin: "plugin" as const } : s));
+    expect(sameMcpServers(parsed, moved)).toBe(false);
     expect(sameMcpServers(null, undefined)).toBe(false);
     expect(sameMcpServers(null, null)).toBe(true);
   });

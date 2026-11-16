@@ -246,6 +246,8 @@ describe("LoadedConfig", () => {
       { name: "linear", state: "needs_sign_in" },
       { name: "playwright", state: "failed", error: "spawn npx ENOENT" },
       { name: "plugin:sentry:sentry", state: "starting" },
+      // Left out of the thread's notice, still listed here.
+      { name: "claude.ai Gmail", state: "needs_sign_in", origin: "account" },
     ];
     renderWithClient(
       <LoadedConfig session={session("s1", "p-storefront", "claude", live)} />,
@@ -264,6 +266,7 @@ describe("LoadedConfig", () => {
       "spawn npx ENOENT",
     );
     expect(state("plugin:sentry:sentry")).toContain("starting");
+    expect(state("claude.ai Gmail")).toContain("needs sign-in");
   });
 
   it("keeps config-only MCP rows for providers without live state", async () => {

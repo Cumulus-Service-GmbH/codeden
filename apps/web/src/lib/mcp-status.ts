@@ -88,9 +88,11 @@ export function mcpRowTitle(row: McpRow): string | undefined {
 const ENDED = new Set<Session["status"]>(["completed", "stopped"]);
 
 /**
- * The servers of a live session whose tools the agent lacks (failed or waiting for sign-in), in
- * the order the provider listed them. Empty for a provider without `capabilities.mcpStatus`, an
- * ended or archived session, or when nothing was reported.
+ * The servers of a live session whose tools the agent lacks and the user should hear about
+ * (`mcpServerNeedsAttention`: failed, or waiting for sign-in, except an account connector or a
+ * plugin's server, which What's loaded still lists), in the order the provider listed them.
+ * Empty for a provider without `capabilities.mcpStatus`, an ended or archived session, or when
+ * nothing was reported.
  */
 export function mcpProblems(
   session: Pick<Session, "mcpServers" | "status" | "archivedAt">,

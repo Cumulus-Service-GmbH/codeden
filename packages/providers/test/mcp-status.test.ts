@@ -48,11 +48,11 @@ describe("Claude MCP server states", () => {
     );
     expect(mcpUpdates(events)).toEqual([
       [
-        { name: "codeden", state: "connected" },
-        { name: "db", state: "failed" },
-        { name: "github", state: "needs_sign_in" },
-        { name: "slow", state: "starting" },
-        { name: "off", state: "disabled" },
+        { name: "codeden", state: "connected", origin: "config" },
+        { name: "db", state: "failed", origin: "config" },
+        { name: "github", state: "needs_sign_in", origin: "account" },
+        { name: "slow", state: "starting", origin: "config" },
+        { name: "off", state: "disabled", origin: "config" },
       ],
     ]);
   });
@@ -77,12 +77,46 @@ describe("Claude MCP server states", () => {
     mapper.handle(init([{ name: "db", status: "failed" }]));
     expect(mcpUpdates(events)).toEqual([
       [{ name: "db", state: "starting" }],
-      [{ name: "db", state: "failed", error: "spawn db-mcp ENOENT" }],
+      [{ name: "db", state: "failed", origin: "config", error: "spawn db-mcp ENOENT" }],
     ]);
     expect(JSON.stringify(events)).not.toContain("hunter2");
 
     mapper.reportMcpServers([{ name: "db", status: "connected" }]);
-    expect(mcpUpdates(events).at(-1)).toEqual([{ name: "db", state: "connected" }]);
+    expect(mcpUpdates(events).at(-1)).toEqual([
+      { name: "db", state: "connected", origin: "config" },
+    ]);
+  });
+
+  // #528: Claude reports every claude.ai connector and plugin server the user never signed into
+  // as `needs-auth`; `source` is what tells them apart from the project's own servers.
+  it("keeps where each server comes from", () => {
+    const states = toMcpServerStates([
+      { name: "codeden", status: "connected", source: "dynamic" },
+      { name: "db", status: "failed", source: "project" },
+      { name: "claude.ai Gmail", status: "needs-auth", source: "claudeai" },
+      { name: "plugin:data:hex", status: "needs-auth", source: "plugin" },
+      { name: "policy", status: "connected", source: "managed" },
+      { name: "in-process", status: "connected", source: "sdk" },
+      // An older CLI: only `scope`, or nothing at all.
+      { name: "claude.ai Drive", status: "needs-auth", scope: "claudeai" },
+      { name: "old-cli", status: "connected" },
+      { name: "odd", status: "connected", source: "somewhere-new", scope: "toString" },
+    ]);
+    expect(states.map((s) => [s.name, s.origin])).toEqual([
+      ["codeden", "config"],
+      ["db", "config"],
+      ["claude.ai Gmail", "account"],
+      ["plugin:data:hex", "plugin"],
+      ["policy", "config"],
+      ["in-process", "host"],
+      ["claude.ai Drive", "account"],
+      ["old-cli", undefined],
+      ["odd", undefined],
+    ]);
+
+    // A later report that doesn't say keeps the origin already known.
+    const later = toMcpServerStates([{ name: "claude.ai Gmail", status: "needs-auth" }], states);
+    expect(later).toEqual([{ name: "claude.ai Gmail", state: "needs_sign_in", origin: "account" }]);
   });
 
   it("masks secrets in errors, clips them, and skips unknown or nameless entries", () => {
