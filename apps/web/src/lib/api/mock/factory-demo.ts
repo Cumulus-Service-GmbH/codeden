@@ -12,7 +12,7 @@ import type { MockWorld } from "./world";
 
 /**
  * A busy factory for the Factory view in the mock UI (#264): while the storefront's Factory view
- * is open, a short script moves its work along every few seconds so pixel mode has real
+ * is open, a short script moves its work along every few seconds so Floor mode has real
  * transitions to act out. A build starts from the pile, a build reaches review, a review passes
  * into the merge queue, a pull request merges, a rebase reports progress, a build fails into the
  * repair bay, and the PM replies in its chat. Then it starts over. Mock only: the real server

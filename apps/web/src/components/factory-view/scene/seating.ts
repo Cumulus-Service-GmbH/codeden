@@ -6,7 +6,7 @@ import { type StationId, type StationTable, sameTile, type Tile } from "./statio
  * keeps its seat while its station stays the same, so nothing jumps between refreshes. New agents
  * take the first free seat; when the seats are full they wait on the station's queue tiles, in
  * order, and past those they only count toward the station's "+N". Seats and queue tiles are
- * distinct tiles, so two agents never share one. The floor plan is passed in: pixel mode's fixed
+ * distinct tiles, so two agents never share one. The floor plan is passed in: a fixed
  * stations, or Floor mode's layout, which grows so there is always a seat and `more` stays empty.
  * Pure: the result depends only on the previous seating, the agents and the plan.
  */

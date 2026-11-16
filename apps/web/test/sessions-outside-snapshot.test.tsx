@@ -9,7 +9,7 @@ import { createMockClient } from "@/lib/api/mock";
 import { sessionRecordKey } from "@/lib/queries";
 import { FactoryViewPage } from "@/routes/factory-view";
 import { InboxPage } from "@/routes/inbox";
-import { status, w } from "./pixel-fixtures";
+import { status, w } from "./scene-fixtures";
 import { renderWithClient } from "./utils";
 
 /**
@@ -168,8 +168,8 @@ describe("Factory view cards whose sessions are outside the snapshot", () => {
     ],
   });
 
-  async function renderView(opts: { pixel: boolean }) {
-    // A wide screen, where the pixel scene is offered.
+  async function renderView() {
+    // A wide screen.
     vi.spyOn(window, "matchMedia").mockImplementation(
       (query) =>
         ({
@@ -179,7 +179,7 @@ describe("Factory view cards whose sessions are outside the snapshot", () => {
           removeEventListener: () => {},
         }) as unknown as MediaQueryList,
     );
-    if (opts.pixel) localStorage.setItem("codeden.factoryView.mode", "pixel");
+
     const client = createMockClient();
     await withoutInSnapshot(client, ["s-checkout", "s-a11y"]);
     // Archived when the item merged: done, keeping its last progress line.
@@ -193,16 +193,8 @@ describe("Factory view cards whose sessions are outside the snapshot", () => {
     return client;
   }
 
-  it("shows the agent's provider in pixel mode", async () => {
-    await renderView({ pixel: true });
-    const reviewer = await screen.findByRole("button", { name: /^Reviewer, #7/ });
-    fireEvent.focus(reviewer);
-    const card = await screen.findByTestId("factory-view-pixel-card");
-    await waitFor(() => expect(within(card).getByText("Claude Code · sonnet")).toBeTruthy());
-  });
-
   it("shows the session's last progress line on the board card", async () => {
-    await renderView({ pixel: false });
+    await renderView();
     await waitFor(() =>
       expect(screen.getByRole("button", { name: /^#7 Item 7/ }).textContent).toContain(
         "Fix verified with 50 repeats; waiting to push",

@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { capText, costFact, costText, costTitle, nearCap } from "@/components/factory/item-cost";
 import { viewPipeline } from "@/components/factory-view/stages";
 import { ViewCardButton } from "@/components/factory-view/view-card";
-import { NOW, status, w } from "./pixel-fixtures";
+import { NOW, status, w } from "./scene-fixtures";
 
 /** What a factory item cost, on its Factory view card, side sheet and page (#325). */
 

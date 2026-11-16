@@ -6,10 +6,10 @@ import { assignSeats, type Seating } from "./seating";
 import { type StationId, type StationTable, stationOf } from "./stations";
 
 /**
- * The Factory view's pipeline as a factory floor (#209, #264, #420), shared by pixel mode and
+ * The Factory view's pipeline as a factory floor (#209, #264, #420), used by
  * Floor mode. This module maps the live state to what the scene shows: the agents and their
  * seats, the ticket pile at intake, the repair bay, the shipped counter and the wall's gauge and
- * CI lamp. Pure, so the mapping is unit-tested; each mode only paints it.
+ * CI lamp. Pure, so the mapping is unit-tested; the scene only paints it.
  */
 
 /** Tickets drawn on the intake pallet; the rest show as "+N". */
@@ -75,7 +75,7 @@ function ticketsOf(cards: readonly ViewCard[]): TicketPile {
 export type StationDemand = Record<StationId, number>;
 
 /**
- * The floor plan for a scene, given how many agents each station has to seat: pixel mode's is
+ * The floor plan for a scene, given how many agents each station has to seat: a fixed plan is
  * fixed (`() => STATIONS`), Floor mode's layout grows until everyone has a seat.
  */
 export type FloorPlan = (demand: StationDemand) => StationTable;

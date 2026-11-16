@@ -83,14 +83,36 @@ export interface LayoutZone {
   rows: number;
 }
 
-/** A grid of 1-unit cells over the floor for walking: cell (c, r) is centred on x0 + c + 0.5. */
+/** The walk grid's cells are this wide: fine enough that every desk blocks a row of them. */
+export const WALK_CELL = 0.5;
+
+/**
+ * A grid of square cells over the floor for walking (#476), anchored at the hall's front left:
+ * cell (c, r) spans x0 + c·cell .. x0 + (c+1)·cell and goes back from the front, z0 − r·cell ..
+ * z0 − (r+1)·cell. Anchored at the front, its rows line up with the desk rows.
+ */
 export interface WalkGrid {
   x0: number;
+  /** The front edge (the hall's z1). */
   z0: number;
+  cell: number;
   cols: number;
   rows: number;
-  /** Row-major: true where furniture stands. */
+  /** Row-major: true where furniture, a fence or the walls stand. */
   blocked: boolean[];
+}
+
+/** A cell's centre on the floor. */
+export function cellCentre(grid: WalkGrid, t: Tile): Point {
+  return { x: grid.x0 + (t.c + 0.5) * grid.cell, z: grid.z0 - (t.r + 0.5) * grid.cell };
+}
+
+/** The cell a point on the floor is in. */
+export function cellAt(grid: WalkGrid, p: Point): Tile {
+  return {
+    c: Math.floor((p.x - grid.x0) / grid.cell),
+    r: Math.floor((grid.z0 - p.z) / grid.cell),
+  };
 }
 
 export interface WorkshopLayout {
@@ -296,7 +318,7 @@ export function workshopLayout(
     // At the front of the right wall, clear of the booth at its back.
     shipDoor: { z: -0.95, w: 1.2 },
     budgetDial: { x: (prep.x0 + prep.x1) / 2 },
-    walk: { x0: 0, z0: 0, cols: 0, rows: 0, blocked: [] },
+    walk: { x0: 0, z0: 0, cell: WALK_CELL, cols: 0, rows: 0, blocked: [] },
   };
   layout.walk = walkGrid(layout);
   return layout;
@@ -329,17 +351,33 @@ export function furniture(layout: WorkshopLayout): Box[] {
   return out;
 }
 
+/**
+ * The repair bay's fence (its back edge, and its right edge up to the gap at the front) as thin
+ * boxes: walkers go round it and in through the gap.
+ */
+export function bayFence(layout: WorkshopLayout): Box[] {
+  const { bay } = layout;
+  const t = 0.2;
+  return [
+    { x0: bay.x0, x1: bay.x1 + t, z0: bay.z0 - t, z1: bay.z0 + t },
+    { x0: bay.x1 - t, x1: bay.x1 + t, z0: bay.z0, z1: bay.z1 - 0.7 },
+  ];
+}
+
 function walkGrid(layout: WorkshopLayout): WalkGrid {
   const { bounds } = layout;
-  const cols = Math.ceil(bounds.x1 - bounds.x0);
-  const rows = Math.ceil(bounds.z1 - bounds.z0);
-  const boxes = furniture(layout);
-  const blocked = Array.from({ length: cols * rows }, (_, i) => {
-    const x = bounds.x0 + (i % cols) + 0.5;
-    const z = bounds.z0 + Math.floor(i / cols) + 0.5;
+  const cell = WALK_CELL;
+  const cols = Math.ceil((bounds.x1 - bounds.x0) / cell);
+  const rows = Math.ceil((bounds.z1 - bounds.z0) / cell);
+  // Walkers may enter the repair bay (through its gap), so it blocks as its fence only.
+  const boxes = [...furniture(layout).filter((b) => b !== layout.bay), ...bayFence(layout)];
+  const grid: WalkGrid = { x0: bounds.x0, z0: bounds.z1, cell, cols, rows, blocked: [] };
+  grid.blocked = Array.from({ length: cols * rows }, (_, i) => {
+    const { x, z } = cellCentre(grid, { c: i % cols, r: Math.floor(i / cols) });
+    if (x < bounds.x0 + 0.1 || x > bounds.x1 - 0.1 || z < bounds.z0 + 0.1) return true;
     return boxes.some((b) => x > b.x0 && x < b.x1 && z > b.z0 && z < b.z1);
   });
-  return { x0: bounds.x0, z0: bounds.z0, cols, rows, blocked };
+  return grid;
 }
 
 /** Every seat on the Workshop floor, with its station. */

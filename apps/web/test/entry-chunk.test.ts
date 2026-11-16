@@ -29,7 +29,6 @@ const HEAVY: { name: string; matches: (dep: string) => boolean }[] = [
     name: "the Factory view and its scenes",
     matches: (d) =>
       d === "src/routes/factory-view.tsx" ||
-      d.startsWith("src/components/factory-view/pixel/") ||
       d.startsWith("src/components/factory-view/scene/") ||
       d.startsWith("src/components/factory-view/floor/"),
   },

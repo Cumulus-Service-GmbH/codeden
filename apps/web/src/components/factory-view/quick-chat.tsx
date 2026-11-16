@@ -72,7 +72,7 @@ export function QuickChat({
   projectId: string;
   /** Shown as a "Hide" button when the chat can collapse. */
   onCollapse?: () => void;
-  /** Its own header; pixel mode's terminal draws one of its own. */
+  /** Its own header; Floor mode's PM chat draws one of its own. */
   header?: boolean;
 }) {
   const session = useRoleSession("pm", projectId);

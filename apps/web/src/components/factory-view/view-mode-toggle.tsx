@@ -1,4 +1,4 @@
-import { Box, Gamepad2, LayoutGrid, type LucideIcon } from "lucide-react";
+import { Box, LayoutGrid, type LucideIcon } from "lucide-react";
 import type { KeyboardEvent } from "react";
 import { cn } from "@/lib/utils";
 import type { ViewMode, ViewModeId } from "./view-mode";
@@ -11,16 +11,10 @@ const OPTIONS: { id: ViewModeId; label: string; title: string; icon: LucideIcon 
     title: "Factory floor: a 3D workshop with every agent at its station",
     icon: Box,
   },
-  {
-    id: "pixel",
-    label: "Pixel",
-    title: "A pixel-art scene of the factory at work",
-    icon: Gamepad2,
-  },
 ];
 
 /**
- * The Factory view's mode toggle (#420): Board | Floor | Pixel as one radio group. Arrow keys
+ * The Factory view's mode toggle (#420, #476): Board | Floor as one radio group. Arrow keys
  * move between the modes, like any radio group; only the chosen one is a Tab stop.
  */
 export function ViewModeToggle({ view }: { view: ViewMode }) {

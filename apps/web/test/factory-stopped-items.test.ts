@@ -2,11 +2,11 @@ import { describe, expect, it } from "vitest";
 import { stoppedAction, stoppedKind, stoppedLabel } from "@/components/factory/stopped-items";
 import { repairBay } from "@/components/factory-view/scene/repair-bay";
 import { viewPipeline } from "@/components/factory-view/stages";
-import { minutesAgo, NOW, prEntry, prRef, status, w } from "./pixel-fixtures";
+import { minutesAgo, NOW, prEntry, prRef, status, w } from "./scene-fixtures";
 
 /**
  * Issue #264 (with #259): stopped work says why it stopped and offers the right action, by one
- * shared rule; the pixel repair bay groups it into a few crates with counts.
+ * shared rule; the floor's repair bay groups it into a few crates with counts.
  */
 
 const failed = (id: string, n: number, patch: Parameters<typeof w>[2]) =>

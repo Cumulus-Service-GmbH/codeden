@@ -1,12 +1,17 @@
-import type { SceneAgent } from "../scene/agents";
-import type { Scene } from "../scene/scene-model";
-import type { Tile } from "../scene/stations";
-import { frontOf, tileId } from "./floor";
+import type { SceneAgent } from "./agents";
+import type { Scene } from "./scene-model";
+import type { StationId, Tile } from "./stations";
 
 /**
- * Pixel mode's moments (#264): what its floor acts out between two scenes, on its tile grid.
- * Pure, so the mapping is unit-tested; `motion.ts` plays them.
+ * The floor's moments (#264, #476): what it acts out between two scenes, by seat. Pure, so the
+ * mapping is unit-tested; Floor mode's motion plays them in 3D.
  */
+
+/** A seat: its station and its tile in the seating. */
+export interface SeatRef {
+  station: StationId;
+  tile: Tile;
+}
 
 /** A moment the floor acts out once, between two scenes. */
 export type Transition =
@@ -14,25 +19,30 @@ export type Transition =
   | {
       kind: "move";
       key: string;
-      from: Tile;
-      to: Tile;
+      from: SeatRef;
+      to: SeatRef;
       carry: "crate" | null;
       stamp: boolean;
       /** It celebrates on arrival (its pull request merged). */
       celebrate: boolean;
     }
-  /** A build started from the pile: the builder walks in carrying its ticket. */
-  | { kind: "arrive"; key: string; to: Tile }
-  /** The builder carries its PR crate to the reviewer's desk, then walks back to its bench. */
-  | { kind: "handoff"; agent: SceneAgent; from: Tile; to: Tile }
-  /** A merge: the crate rides up the conveyor and out of the shipping door. */
-  | { kind: "ship"; row: number }
+  /** A build started from the pile: the builder walks in from the pallet carrying its ticket. */
+  | { kind: "arrive"; key: string; to: SeatRef }
+  /** The builder carries its PR crate to the new reviewer's desk, then walks back to its bench. */
+  | { kind: "handoff"; agent: SceneAgent; from: SeatRef; to: SeatRef }
+  /** A merge: the crate rides the conveyor from this seat and out of the dock door. */
+  | { kind: "ship"; from: SeatRef }
   /** A departed agent's pull request merged: a small celebration where it stood. */
-  | { kind: "celebrate"; agent: SceneAgent; at: Tile }
-  /** It failed: a puff of smoke and a slump (and the agent leaves for the repair bay). */
-  | { kind: "fail"; agent: SceneAgent; at: Tile; stays: boolean };
+  | { kind: "celebrate"; agent: SceneAgent; at: SeatRef }
+  /** It failed: a puff of smoke, and unless it stays, it trudges to the repair bay. */
+  | { kind: "fail"; agent: SceneAgent; at: SeatRef; stays: boolean };
 
 const itemOf = (a: SceneAgent) => a.card?.item.id ?? null;
+const sameTile = (a: Tile, b: Tile) => a.c === b.c && a.r === b.r;
+const ref = (s: { station: StationId; tile: Tile }): SeatRef => ({
+  station: s.station,
+  tile: s.tile,
+});
 
 /**
  * The moments between the previous scene and this one. Nothing on the first scene, so opening
@@ -59,21 +69,21 @@ export function sceneEvents(prev: Scene | null, next: Scene): Transition[] {
     const same = was.get(a.key);
     const from = same ? before(a.key) : undefined;
     if (same && from) {
-      if (tileId(from.tile) !== tileId(to.tile)) {
+      if (from.station !== to.station || !sameTile(from.tile, to.tile)) {
         const handsOver = from.station === "review" && to.station === "merge";
         out.push({
           kind: "move",
           key: a.key,
-          from: from.tile,
-          to: to.tile,
+          from: ref(from),
+          to: ref(to),
           carry: handsOver ? "crate" : null,
           stamp: handsOver,
           celebrate: to.station === "ship",
         });
         if (from.station === "merge" && to.station === "ship")
-          out.push({ kind: "ship", row: from.tile.r });
+          out.push({ kind: "ship", from: ref(from) });
       }
-      if (!same.failed && a.failed) out.push({ kind: "fail", agent: a, at: to.tile, stays: true });
+      if (!same.failed && a.failed) out.push({ kind: "fail", agent: a, at: ref(to), stays: true });
       continue;
     }
     if (same || !item) continue;
@@ -81,11 +91,11 @@ export function sceneEvents(prev: Scene | null, next: Scene): Transition[] {
     const builder = prevByItem.get(item);
     const bench = builder ? before(builder.key) : undefined;
     if (builder?.role === "builder" && a.role === "reviewer" && bench) {
-      out.push({ kind: "handoff", agent: builder, from: bench.tile, to: frontOf(to.tile) });
+      out.push({ kind: "handoff", agent: builder, from: ref(bench), to: ref(to) });
       continue;
     }
     if (a.role === "builder" && prev.tickets.ids.includes(item))
-      out.push({ kind: "arrive", key: a.key, to: to.tile });
+      out.push({ kind: "arrive", key: a.key, to: ref(to) });
   }
 
   const merged = new Set(next.merged);
@@ -95,9 +105,9 @@ export function sceneEvents(prev: Scene | null, next: Scene): Transition[] {
     const seat = before(b.key);
     if (nextKeys.has(b.key) || !item || !seat || nextItems.has(item)) continue;
     if (merged.has(item)) {
-      out.push({ kind: "celebrate", agent: b, at: seat.tile });
-      if (seat.station === "merge") out.push({ kind: "ship", row: seat.tile.r });
-    } else if (inBay.has(item)) out.push({ kind: "fail", agent: b, at: seat.tile, stays: false });
+      out.push({ kind: "celebrate", agent: b, at: ref(seat) });
+      if (seat.station === "merge") out.push({ kind: "ship", from: ref(seat) });
+    } else if (inBay.has(item)) out.push({ kind: "fail", agent: b, at: ref(seat), stays: false });
   }
   return out;
 }

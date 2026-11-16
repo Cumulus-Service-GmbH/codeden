@@ -8,7 +8,7 @@ import {
 import type { AgentInputs } from "@/components/factory-view/scene/agents";
 import { type SessionInfo, viewPipeline } from "@/components/factory-view/stages";
 
-/** Builders for the pixel mode tests (#209, #264): work items, PR entries, a status. */
+/** Builders for the Factory view's scene tests (#209, #264, #476): work items, PR entries, a status. */
 
 export const NOW = new Date(2026, 10, 13, 15, 0, 0).getTime();
 export const minutesAgo = (m: number) => new Date(NOW - m * 60_000).toISOString();

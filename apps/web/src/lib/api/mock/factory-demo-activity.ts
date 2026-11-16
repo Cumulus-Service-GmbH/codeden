@@ -5,7 +5,7 @@ import type { MockWorld } from "./world";
 
 /**
  * The busy factory's agents at work in the mock UI (#264): while the storefront's Factory view is
- * open, its live sessions start a tool call now and then, so pixel mode's thought bubbles have
+ * open, its live sessions start a tool call now and then, so Floor mode's thought bubbles have
  * something to show. One session every 1.5 s, in turn. Mock only; nothing here calls a model.
  */
 

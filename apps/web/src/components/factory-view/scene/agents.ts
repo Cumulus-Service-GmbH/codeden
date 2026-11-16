@@ -3,7 +3,7 @@ import { AREA_LABEL } from "@/components/factory/meta";
 import type { SessionInfo, ViewCard, ViewPipeline } from "../stages";
 
 /**
- * The factory floor's agents (#264, #420), for pixel mode and Floor mode: who works on the floor
+ * The factory floor's agents (#264, #420), for Floor mode: who works on the floor
  * right now, in which role, on which step and in which state. One agent per live work item (its
  * builder, reviewer, or the agent rebasing its pull request), plus the PM and, in a dark
  * factory, the scout and its area reviewers. Pure, so the mapping is unit-tested; each mode's

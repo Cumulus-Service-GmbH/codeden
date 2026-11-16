@@ -3,10 +3,10 @@ import { Link } from "@tanstack/react-router";
 import { Bot, Factory, MessageSquare } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { EmptyState } from "@/components/common/bits";
+import type { SceneChat } from "@/components/factory-view/floor/floor-scene";
 import { useChatColumn, useNow, useWide } from "@/components/factory-view/hooks";
 import { ItemSheet } from "@/components/factory-view/item-sheet";
 import { PipelineBoard } from "@/components/factory-view/pipeline-board";
-import { type PixelChat, PixelScene } from "@/components/factory-view/pixel/pixel-scene";
 import { QuickChat } from "@/components/factory-view/quick-chat";
 import { type SessionInfo, type ViewCard, viewPipeline } from "@/components/factory-view/stages";
 import { StatsStrip } from "@/components/factory-view/stats-strip";
@@ -99,11 +99,11 @@ export function FactoryViewPage({ projectId }: { projectId: string }) {
   // Floor mode falls back to the board, for this visit, when WebGL can't start or is lost.
   const [noWebgl, setNoWebgl] = useState(false);
   const floor = view.mode === "floor" && !noWebgl;
-  // The scenes (Floor, Pixel) fill the space; the chat is a terminal in them, docked where the
-  // column would be, or opened over the scene on narrower screens.
-  const scene = floor || view.mode === "pixel";
+  // Floor fills the space; the chat is part of it, docked where the column would be, or opened
+  // over the scene on narrower screens.
+  const scene = floor;
   const [sceneOverlay, setSceneOverlay] = useState(false);
-  const sceneChat: PixelChat = chatColumn
+  const sceneChat: SceneChat = chatColumn
     ? { docked: true, open: chatOpen, setOpen: setChatOpen }
     : { docked: false, open: sceneOverlay, setOpen: setSceneOverlay };
   // The open card by id, so its sheet follows the card as it moves.
@@ -173,8 +173,8 @@ export function FactoryViewPage({ projectId }: { projectId: string }) {
         />
         <div className="flex min-h-0 flex-1">
           {scene ? (
-            // The scenes fill the space; their gauge and counter board stand in for the
-            // figures, and the PM chat is part of them.
+            // Floor fills the space; its dial and status board stand in for the figures, and
+            // the PM chat is part of it.
             <main
               className={
                 wide
@@ -182,28 +182,16 @@ export function FactoryViewPage({ projectId }: { projectId: string }) {
                   : "flex min-h-0 min-w-0 flex-1 flex-col p-3 pb-16"
               }
             >
-              {floor ? (
-                <FloorScene
-                  f={f}
-                  pipeline={pipeline}
-                  sessions={sessions}
-                  projectId={projectId}
-                  now={now}
-                  onOpen={setSelected}
-                  chat={sceneChat}
-                  onUnsupported={() => setNoWebgl(true)}
-                />
-              ) : (
-                <PixelScene
-                  f={f}
-                  pipeline={pipeline}
-                  sessions={sessions}
-                  projectId={projectId}
-                  now={now}
-                  onOpen={setSelected}
-                  chat={sceneChat}
-                />
-              )}
+              <FloorScene
+                f={f}
+                pipeline={pipeline}
+                sessions={sessions}
+                projectId={projectId}
+                now={now}
+                onOpen={setSelected}
+                chat={sceneChat}
+                onUnsupported={() => setNoWebgl(true)}
+              />
             </main>
           ) : (
             <main

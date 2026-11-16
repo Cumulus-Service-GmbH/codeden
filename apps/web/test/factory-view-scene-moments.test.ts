@@ -1,7 +1,6 @@
 import { FactoryLimits, type FactoryStatus } from "@codeden/contracts";
 import { describe, expect, it } from "vitest";
-import { STATIONS } from "@/components/factory-view/pixel/floor";
-import { sceneEvents } from "@/components/factory-view/pixel/transitions";
+import { workshopLayout } from "@/components/factory-view/scene/layout";
 import {
   budgetGauge,
   type Scene,
@@ -9,14 +8,22 @@ import {
   sceneSummary,
 } from "@/components/factory-view/scene/scene-model";
 import { sameSeating } from "@/components/factory-view/scene/seating";
+import { sceneEvents } from "@/components/factory-view/scene/transitions";
 import type { SessionInfo } from "@/components/factory-view/stages";
-import { inputs, minutesAgo, prEntry, prRef, running, status, w } from "./pixel-fixtures";
+import { inputs, minutesAgo, prEntry, prRef, running, status, w } from "./scene-fixtures";
 
 /**
- * Issues #209 and #264: pixel mode maps the factory's live state to a floor of agents at their
- * stations, tickets at intake, a repair bay and a shipped counter, and acts out real
- * transitions once. Only the mapping is tested, never pixels.
+ * Issues #209, #264 and #476: the scene maps the factory's live state to a floor of agents at
+ * their stations, tickets at intake, a repair bay and a shipped counter, and acts out real
+ * transitions once. Only the mapping is tested, on Floor mode's Workshop seats.
  */
+
+/** The Workshop for an agent limit of 4: enough seats for every test here. */
+const STATIONS = workshopLayout(4, {}, null).stations;
+const seat = (station: keyof typeof STATIONS, i: number) => ({
+  station,
+  tile: STATIONS[station].seats[i],
+});
 
 const backlog = [
   w("new", 1, { stage: "candidate", step: "intake", type: null }),
@@ -69,7 +76,7 @@ function sceneFor(patch: Partial<FactoryStatus> = {}, prev: Scene | null = null)
   return sceneOf(inputs(f, sessions), prev?.seating ?? null, () => STATIONS);
 }
 
-describe("pixel mode's scene (#264)", () => {
+describe("the floor's scene (#264)", () => {
   const scene = sceneFor();
 
   it("piles new and sorted issues as tickets at intake, tinted once sorted", () => {
@@ -149,7 +156,7 @@ describe("pixel mode's scene (#264)", () => {
   });
 });
 
-describe("pixel mode's moments (#264)", () => {
+describe("the floor's moments (#264, #476)", () => {
   const before = sceneFor();
   const next = (patch: Partial<FactoryStatus>) => sceneFor(patch, before);
   const without = (id: string) => inProgress.filter((x) => x.id !== id);
@@ -162,7 +169,7 @@ describe("pixel mode's moments (#264)", () => {
     const started = w("sorted-bug", 2, { stage: "building", step: "reproduce", type: "bug" });
     const after = next({ backlog: backlog.slice(0, 1), inProgress: [...inProgress, started] });
     expect(sceneEvents(before, after)).toEqual([
-      { kind: "arrive", key: "item:sorted-bug:builder", to: STATIONS.prep.seats[0] },
+      { kind: "arrive", key: "item:sorted-bug:builder", to: seat("prep", 0) },
     ]);
   });
 
@@ -180,9 +187,9 @@ describe("pixel mode's moments (#264)", () => {
     expect(events[0]).toMatchObject({
       kind: "handoff",
       agent: { key: "item:build:builder", role: "builder" },
-      from: STATIONS.bench.seats[0],
-      // In front of the second review desk (the first is taken).
-      to: { c: STATIONS.review.seats[1]?.c, r: (STATIONS.review.seats[1]?.r ?? 0) - 1 },
+      from: seat("bench", 0),
+      // To the second review desk (the first is taken).
+      to: seat("review", 1),
     });
   });
 
@@ -199,8 +206,8 @@ describe("pixel mode's moments (#264)", () => {
       {
         kind: "move",
         key: "item:review:reviewer",
-        from: STATIONS.review.seats[0],
-        to: STATIONS.merge.seats[1],
+        from: seat("review", 0),
+        to: seat("merge", 1),
         carry: "crate",
         stamp: true,
         celebrate: false,
@@ -236,10 +243,10 @@ describe("pixel mode's moments (#264)", () => {
       expect.objectContaining({
         kind: "move",
         key: "item:first:reviewer",
-        to: STATIONS.ship.seats[0],
+        to: seat("ship", 0),
         celebrate: true,
       }),
-      { kind: "ship", row: STATIONS.merge.seats[0]?.r },
+      { kind: "ship", from: seat("merge", 0) },
     ]);
   });
 
@@ -262,7 +269,7 @@ describe("pixel mode's moments (#264)", () => {
   });
 });
 
-describe("pixel mode's caption (#209, #264)", () => {
+describe("the floor's caption (#209, #264)", () => {
   it("says what the floor shows, in full counts, with the repair bay", () => {
     expect(sceneSummary(sceneFor())).toBe(
       "2 in intake, 1 building, 1 in review, 1 in the merge queue, 2 merged today, 1 in the repair bay.",

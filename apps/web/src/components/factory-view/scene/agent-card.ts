@@ -2,7 +2,7 @@ import { AREA_LABEL } from "@/components/factory/meta";
 import type { AgentRole, AgentStatus, AgentStep, BlockedOn, SceneAgent } from "./agents";
 
 /**
- * What the pixel card says about an agent on hover or keyboard focus (#264): its role, the item
+ * What an agent's card says about it on hover or keyboard focus (#264): its role, the item
  * with its issue and PR number, the step, provider and model, the latest progress line, the time
  * in this step and a plain status. Pure, so each role's and step's card is unit-tested; the
  * component only lays it out. The same facts name the agent's button for screen readers.

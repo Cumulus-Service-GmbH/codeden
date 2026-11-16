@@ -1,7 +1,7 @@
 import type { SceneAgent } from "./agents";
 
 /**
- * Where agents work on the factory floor (#264, #420), shared by pixel mode and Floor mode: one
+ * Where agents work on the factory floor (#264, #420), laid out by Floor mode's Workshop: one
  * station per step zone, and single posts for the PM and, in a dark factory, the scout and its
  * area reviewers. Each mode lays its stations out on its own grid; seating only needs the tiles.
  */
