@@ -71,6 +71,12 @@ export function parseShell(src: string, dialect: ShellDialect = "auto"): SimpleC
 /** Placeholder for heredoc and here-string bodies, which are data, never commands. */
 const BODY = "<body>";
 
+/**
+ * When the shell is unknown, a `${…}` that may be a PowerShell drive item: up to the first `}`,
+ * with no `$`, backtick or line break in its name (bash's `${x:-$(cmd)}` runs a command instead).
+ */
+const BRACED_NAME = /\$\{([^}`$\n\r]*)\}/y;
+
 type Target = "word" | "write" | "heredoc" | "skip";
 
 /** The command being built and the word being read. */
@@ -198,7 +204,9 @@ class Lexer {
         if (b.inWord && b.word.endsWith("@") && this.lineEndsAt(this.i + 1)) {
           const body = this.skipHereString(c);
           // `@"…"@` expands its variables; `@'…'@` doesn't.
-          if (c === '"' && this.dialect !== "posix") for (const item of itemsIn(body)) b.read(item);
+          if (c === '"' && this.dialect !== "posix") {
+            for (const item of itemsIn(body, this.dialect === "auto")) b.read(item);
+          }
           b.add(BODY);
         } else if (c === "'") {
           b.add(this.readSingle());
@@ -226,7 +234,7 @@ class Lexer {
         b.addComma();
         this.i += 1;
       } else if (c === "$" && next === "{" && this.dialect !== "posix") {
-        b.add(this.bracedVariable(b, false));
+        b.add(this.braced(b, false));
       } else {
         b.add(c);
         this.i += 1;
@@ -344,7 +352,7 @@ class Lexer {
         b.cmd.nested.push(this.list(")"));
         text += src.slice(start, this.i);
       } else if (c === "$" && next === "{" && this.dialect !== "posix") {
-        text += this.bracedVariable(b, true);
+        text += this.braced(b, true);
       } else {
         text += c;
         this.i += 1;
@@ -354,27 +362,40 @@ class Lexer {
   }
 
   /**
-   * PowerShell's `${name}` at `this.i`, read whole: the name may hold spaces and ends at the first
-   * `}` a backtick doesn't escape. One that names an item on a drive (`${C:\x}`, `./ps-variables`)
-   * is noted as written when an assignment operator follows, and as read unless it is only the
-   * target of an assignment that starts the command (`${C:\x} = …`, `[string]${C:\x} = …`).
-   * `quoted`: inside a double-quoted string, where it is always read.
+   * `${…}` at `this.i`. In PowerShell it is one variable, read whole: the name may hold spaces and
+   * ends at the first `}` a backtick doesn't escape. When the shell is unknown (`auto`) it may be
+   * bash's `${x:-$(cmd)}`, whose `$(…)` and backticks run commands, so only the `$` is taken here
+   * and the rest is lexed as usual; the item it names is found by looking ahead. The text taken.
    */
-  private bracedVariable(b: Builder, quoted: boolean): string {
+  private braced(b: Builder, quoted: boolean): string {
     const { src } = this;
     const start = this.i;
+    if (this.dialect !== "powershell") {
+      BRACED_NAME.lastIndex = start;
+      const m = BRACED_NAME.exec(src);
+      if (m) this.noteItem(b, variableItem(m[1] as string, true), quoted, start + m[0].length);
+      this.i += 1;
+      return "$";
+    }
     let j = start + 2;
     while (j < src.length && src[j] !== "}") j += src[j] === "`" ? 2 : 1;
-    const end = Math.min(j, src.length);
     this.i = Math.min(j + 1, src.length);
-    const item = variableItem(src.slice(start + 2, end));
-    if (item !== undefined) {
-      const assigns = !quoted && assignsAt(src, this.i);
-      const target = assigns && !b.cmd.words.length && /^(?:\[[^\]]*\])*$/.test(b.word);
-      if (assigns) b.cmd.writes.push(item);
-      if (!target) b.read(item);
-    }
+    this.noteItem(b, variableItem(src.slice(start + 2, Math.min(j, src.length))), quoted, this.i);
     return src.slice(start, this.i);
+  }
+
+  /**
+   * Note the item a PowerShell variable on a drive names (`${C:\x}`, `./ps-variables`): written
+   * when an assignment operator follows it (at `after`), and read unless it is only the target of
+   * an assignment that starts the command (`${C:\x} = …`, `[string]${C:\x} = …`). `quoted`: inside
+   * a double-quoted string, where it is always read.
+   */
+  private noteItem(b: Builder, item: string | undefined, quoted: boolean, after: number): void {
+    if (item === undefined) return;
+    const assigns = !quoted && assignsAt(this.src, after);
+    const target = assigns && !b.cmd.words.length && /^(?:\[[^\]]*\])*$/.test(b.word);
+    if (assigns) b.cmd.writes.push(item);
+    if (!target) b.read(item);
   }
 
   /** True when only spaces or tabs remain before the end of the line at `j`. */
