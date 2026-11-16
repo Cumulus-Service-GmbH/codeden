@@ -1,3 +1,4 @@
+import type { FactoryItem } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
 import { factorySteps } from "./support/factory-steps";
@@ -43,8 +44,14 @@ function mainGreen(sha = "mainfix0001") {
 }
 
 /** A feature whose builder opened its PR, `files` changed, with CI as given. */
-async function opened(title: string, issue: number, opts: { failed?: string[]; files?: string[] }) {
+async function opened(
+  title: string,
+  issue: number,
+  opts: { failed?: string[]; files?: string[]; source?: FactoryItem["source"] },
+) {
   const created = backlogItem(title, issue);
+  const { source } = opts;
+  if (source) env.factory.data.updateItem(created.id, (i) => ({ ...i, source }));
   await tick();
   const builder = item(created.id).builderSessionId as string;
   const pr = env.gh.openPr({
@@ -166,6 +173,22 @@ describe("a PR whose CI fails a check main passes", () => {
   });
 });
 
+describe("a repair of main whose CI fails only what fails on main", () => {
+  it("still gets a revise round: it hasn't fixed main yet", async () => {
+    start();
+    mainRed();
+    const { id } = await verify(
+      await opened("Fix failing Build, test and install on the default branch", 3, {
+        failed: RED,
+        source: "failed_check",
+      }),
+    );
+    expect(item(id)).toMatchObject({ stage: "building", attempts: 1 });
+    expect(reviseRounds(id)).toBe(1);
+    expect(ci(id)?.state).toBe("fail");
+  });
+});
+
 describe("an item failed on main's red CI before the factory waited for main", () => {
   /** What the factory left before #516: failed on CI that only main's failure made red. */
   function failedAsBefore(id: string, pr: FakePr, failed = RED) {
@@ -219,6 +242,24 @@ describe("an item failed on main's red CI before the factory waited for main", (
     failedAsBefore(built.id, built.pr, ["Build, test and install"]);
     await env.setStatus(built.builder, "idle");
     await tick();
+    readAgainSoon(built.id);
+    await tick();
+    expect(item(built.id).stage).toBe("failed");
+    expect(updated()).toEqual([]);
+  });
+
+  it("stays failed when it was a repair of main: main was fixed without it", async () => {
+    start();
+    const built = await opened("Fix failing CI on the default branch", 3, {
+      failed: RED,
+      source: "failed_check",
+    });
+    mainRed();
+    later(60_000);
+    failedAsBefore(built.id, built.pr);
+    await env.setStatus(built.builder, "idle");
+    later(60_000);
+    mainGreen();
     readAgainSoon(built.id);
     await tick();
     expect(item(built.id).stage).toBe("failed");

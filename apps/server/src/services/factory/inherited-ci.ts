@@ -5,6 +5,7 @@ import { letGoReviewer } from "./cleanup";
 import { baseBranchOf, type FactoryContext } from "./context";
 import type { FactoryPr } from "./github-port";
 import { closeInboxFor, githubRefused } from "./merge";
+import { repairsMain } from "./overlap";
 import { MAIN_RED, trackedHead, UPDATE } from "./rebase";
 
 /**
@@ -14,7 +15,8 @@ import { MAIN_RED, trackedHead, UPDATE } from "./rebase";
  * branch (pending: no revise round, no failure counted), and the merge queue passes over it.
  * Once CI on the branch is green again, the PR is brought up to date (GitHub's update-branch, no
  * agent) so its CI runs on the fixed branch, and it is judged as usual. A PR that fails a check
- * the branch passes is its own failure, as before.
+ * the branch passes is its own failure, as before. So is red CI on a repair of the branch (a
+ * revert, a fix for its failed checks, `repairsMain`): it hasn't repaired it yet.
  *
  * Checks are compared by name. A PR that breaks a test of its own inside a check the branch also
  * fails waits for the branch all the same, and is judged on its re-run once the branch is green.
@@ -68,8 +70,9 @@ export async function inheritedCi(
   pr: FactoryPr,
 ): Promise<string | null> {
   const head = pr.headSha;
-  // A revert red on the same checks doesn't fix the branch (`revert-blocked.ts`).
-  if (pr.checks !== "failure" || !head || item.source === "revert") return null;
+  // A repair of the branch (a revert, a fix for its failed checks) red on the branch's checks
+  // hasn't repaired it: that CI is its own failure, so a fix gets its revise rounds.
+  if (pr.checks !== "failure" || !head || repairsMain(item)) return null;
   const branch = baseBranchOf(project);
   const key = `${MAIN_RED}${head}`;
   const main = await ctx.mainCi.view(ctx.github, project.id);
@@ -150,7 +153,9 @@ export async function restoreInherited(
   const finished = item.finishedAt;
   const head = pr.headSha;
   if (holds || !finished || !head || item.nudges[CHECKED] === finished) return false;
-  if (item.source === "revert" || !failedOnCiOnly(item) || pr.checks !== "failure") return false;
+  // A repair of the branch put back after the branch was fixed would only re-test a fix no
+  // longer needed.
+  if (repairsMain(item) || !failedOnCiOnly(item) || pr.checks !== "failure") return false;
   if (ctx.now().getTime() - Date.parse(finished) > RESTORE_WINDOW_MS) return false;
   const main = await ctx.mainCi.view(ctx.github, project.id);
   if (main?.state !== "green") return false;
