@@ -122,8 +122,13 @@ jobs:
           cat health.json
           grep -q '"ok":true' health.json
           TOKEN=$(tr -d '\r\n' < "$CODEDEN_HOME/install-token")
-          curl -sf -H "cookie: codeden_token_4791=$TOKEN" http://127.0.0.1:4791/ | grep -q "<title>CodeDen"
-          curl -sf -H "authorization: Bearer $TOKEN" http://127.0.0.1:4791/api/automations/templates | grep -q security-audit
+          # Responses go to a file before grep reads them: `curl | grep -q` fails the step with
+          # curl's exit 23 when grep finds its match and closes the pipe before curl has written
+          # everything (#539).
+          curl -sf -H "cookie: codeden_token_4791=$TOKEN" http://127.0.0.1:4791/ > index.html
+          grep -q "<title>CodeDen" index.html
+          curl -sf -H "authorization: Bearer $TOKEN" http://127.0.0.1:4791/api/automations/templates > templates.json
+          grep -q security-audit templates.json
           npx codeden stop --home "$CODEDEN_HOME" || true
           cat server.log
 
