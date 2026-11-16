@@ -14,14 +14,14 @@ import type { Scene } from "../scene/scene-model";
 import { stationOf } from "../scene/stations";
 import { at, colour, type Kit } from "./kit";
 import type { FloorPalette } from "./palette";
-import { closedCanvas, dialCanvas, displayCanvas, whiteboardCanvas } from "./textures";
+import { boardCanvas, closedCanvas, dialCanvas, displayCanvas, whiteboardCanvas } from "./textures";
 import { BELT_TOP, type BoxSpec, boxes } from "./workshop";
 
 /**
  * Floor mode's live props (#420): what follows the factory's state rather than the layout. The
  * tickets on intake's pallet (at most 8 drawn) and the sign with the full count, the signal
- * tower (amber while CI runs), a crate on the belt for each agent merging, today's merge count
- * over the dock door, the repair bay's crates (at most 3, by kind), the budget dial (hidden
+ * tower (amber while CI runs), a crate on the belt for each agent merging, the status board over
+ * the dock door (merges today, agents working, items waiting on you), the repair bay's crates (at most 3, by kind), the budget dial (hidden
  * without a budget) and each prep desk's prop: a bug jar for reproducing, a whiteboard for
  * analyzing. Rebuilt when any of it changes.
  */
@@ -38,6 +38,7 @@ export function propsKey(
     scene.tickets.items.length,
     scene.ciRunning,
     scene.shipped,
+    scene.board,
     scene.gauge === null ? null : Math.round(scene.gauge * 100),
     scene.bay.map((c) => [c.kind, c.entries.length]),
     scene.draining !== null,
@@ -169,16 +170,16 @@ export function buildProps(
   }
   add(boxes(kit, unit, kit.matte(p.wood), crates));
 
-  // Today's merges over the dock door.
+  // The status board over the dock door: today's merges, agents working, items waiting on you.
   const door = layout.shipDoor;
   add(
     display(
       kit,
-      displayCanvas(String(scene.shipped), "MERGED TODAY", p),
-      0.64,
-      0.32,
+      boardCanvas(scene.shipped, scene.board.working, scene.board.waiting, p),
+      1.44,
+      0.44,
       layout.bounds.x1 + 0.1,
-      1.47,
+      1.55,
       door.z,
     ),
   );

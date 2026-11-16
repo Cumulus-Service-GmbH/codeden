@@ -62,6 +62,7 @@ export class FloorWorld {
   private lookoutKit = new Kit();
   private chuteKit = new Kit();
   private readonly shared = new Kit();
+  private retired: Kit[] = [];
   private readonly unit = this.shared.own(new BoxGeometry(1, 1, 1));
   private readonly windowGeo = this.shared.own(new PlaneGeometry(0.2, 0.15));
   private readonly windowMat = this.shared.own(new MeshBasicMaterial());
@@ -125,7 +126,7 @@ export class FloorWorld {
     ]);
     if (hallKey !== this.keys.hall) {
       this.keys.hall = hallKey;
-      clear(this.hall, this.hallKit);
+      this.retire(this.hall, this.hallKit);
       this.hallKit = new Kit();
       this.hall.add(buildWorkshop(layout, palette, this.hallKit));
       this.crew.setPalette(palette);
@@ -147,8 +148,8 @@ export class FloorWorld {
     const lk = lookout ? lookoutKey(lookout, litPods, palette) : "";
     if (lk !== this.keys.lookout) {
       this.keys.lookout = lk;
-      clear(this.lookout, this.lookoutKit);
-      clear(this.chute, this.chuteKit);
+      this.retire(this.lookout, this.lookoutKit);
+      this.retire(this.chute, this.chuteKit);
       this.lookoutKit = new Kit();
       this.chuteKit = new Kit();
       if (lookout) {
@@ -183,7 +184,7 @@ export class FloorWorld {
     const key = propsKey(scene, c.layout, c.palette, occupied);
     if (key === this.keys.props) return;
     this.keys.props = key;
-    clear(this.props, this.propsKit);
+    this.retire(this.props, this.propsKit);
     this.propsKit = new Kit();
     this.props.add(buildProps(scene, c.layout, c.palette, this.propsKit, this.unit, occupied));
     this.lit.workshop = -1;
@@ -321,7 +322,22 @@ export class FloorWorld {
     });
   }
 
+  /**
+   * Takes a rebuilt part's old meshes off the scene, freeing their GPU resources only after the
+   * next frame has drawn the new ones: their shaders stay compiled, so a rebuild doesn't stall.
+   */
+  private retire(group: Group, kit: Kit): void {
+    group.clear();
+    this.retired.push(kit);
+  }
+
+  /** Frees what rebuilt parts used to hold; call after a frame is drawn. */
+  flushRetired(): void {
+    for (const kit of this.retired.splice(0)) kit.dispose();
+  }
+
   dispose(): void {
+    this.flushRetired();
     clear(this.hall, this.hallKit);
     clear(this.props, this.propsKit);
     clear(this.lookout, this.lookoutKit);

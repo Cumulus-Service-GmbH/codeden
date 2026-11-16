@@ -176,6 +176,47 @@ export function displayCanvas(value: string, caption: string, p: FloorPalette): 
   return canvas;
 }
 
+/**
+ * The status board over the dock: today's merges, agents working and items waiting on you, as
+ * three big figures with their captions. The waiting figure is amber when someone waits.
+ */
+export function boardCanvas(
+  merged: number,
+  working: number,
+  waiting: number,
+  p: FloorPalette,
+): HTMLCanvasElement {
+  const canvas = canvasOf(576, 176);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
+  ctx.fillStyle = hex(p.sign);
+  ctx.fillRect(0, 0, 576, 176);
+  ctx.strokeStyle = hex(p.lane);
+  ctx.lineWidth = 6;
+  ctx.strokeRect(3, 3, 570, 170);
+  const cols: [string, string, string][] = [
+    [String(merged), "MERGED TODAY", hex(p.lamp.green)],
+    [String(working), "AGENTS WORKING", p.signInk],
+    [String(waiting), "WAITING ON YOU", waiting > 0 ? hex(p.lamp.amber) : p.signInk],
+  ];
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  cols.forEach(([value, caption, ink], i) => {
+    const x = 96 + i * 192;
+    if (i > 0) {
+      ctx.fillStyle = "rgba(255,255,255,0.12)";
+      ctx.fillRect(i * 192, 24, 2, 128);
+    }
+    ctx.fillStyle = ink;
+    ctx.font = `700 72px ${FONT}`;
+    ctx.fillText(value, x, 74);
+    ctx.fillStyle = p.signInk;
+    ctx.font = `600 19px ${FONT}`;
+    ctx.fillText(caption, x, 138);
+  });
+  return canvas;
+}
+
 /** The sign on intake's door while the factory drains: CLOSED, in white on red. */
 export function closedCanvas(p: FloorPalette): HTMLCanvasElement {
   const canvas = canvasOf(240, 80);

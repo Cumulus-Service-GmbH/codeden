@@ -22,6 +22,7 @@ const scene = (gauge: number | null): Scene => ({
   bay: [],
   merged: [],
   shipped: 0,
+  board: { working: 0, waiting: 0 },
   ciRunning: false,
   gauge,
   scout: null,

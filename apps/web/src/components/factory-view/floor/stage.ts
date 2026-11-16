@@ -37,7 +37,7 @@ export interface StageEvents {
   /** A tap or click on a figure or crate, or on the empty floor (null). */
   onTap: (key: string | null) => void;
   /** After each frame: where every figure and crate is on screen, and the zoom in px per unit. */
-  onFrame: (figures: readonly ScreenFigure[], pxPerUnit: number) => void;
+  onFrame: (figures: readonly ScreenFigure[], pxPerUnit: number, width: number) => void;
 }
 
 const MAX_DPR = 2;
@@ -71,6 +71,10 @@ export class FloorStage {
   private viewport = { width: 1, height: 1 };
   /** Frames drawn, for the dev stats overlay. */
   drawn = 0;
+  private timed = { ms: 0, frames: 0 };
+  private lastShadow = 0;
+  /** The scene changed (data, focus, size): redraw the shadows with the next frame. */
+  private shadowsDirty = true;
 
   /**
    * Draws into a canvas of its own inside `host` (decorative: hidden from assistive tech), so
@@ -95,6 +99,8 @@ export class FloorStage {
     this.renderer.shadowMap.enabled = true;
     // Soft: PCF with a blur radius (three folded its soft variant into this one).
     this.renderer.shadowMap.type = PCFShadowMap;
+    // Shadows follow the crew at its idle rate; a moving camera alone doesn't redraw them.
+    this.renderer.shadowMap.autoUpdate = false;
     this.scene.add(this.world.root);
 
     canvas.addEventListener("webglcontextlost", this.lost);
@@ -141,6 +147,7 @@ export class FloorStage {
   update(content: StageContent): void {
     this.content = content;
     this.world.update(content, this.clock(), this.reducedMotion);
+    this.shadowsDirty = true;
     this.frame3d(false);
     const { scene } = content;
     if (this.selected && !scene.agents.some((a) => a.key === this.selected)) this.selected = null;
@@ -152,6 +159,7 @@ export class FloorStage {
     if (focus === this.focus) return;
     this.focus = focus;
     this.world.storeys.set(focus, this.clock(), this.reducedMotion);
+    this.shadowsDirty = true;
     this.frame3d(true);
     this.invalidate();
   }
@@ -203,10 +211,15 @@ export class FloorStage {
     };
   }
 
-  /** Draw calls and triangles of the last frame, and frames drawn (the dev stats overlay). */
-  stats(): { calls: number; triangles: number; drawn: number } {
+  /**
+   * Draw calls and triangles of the last frame, frames drawn, and the main thread's time per
+   * frame in milliseconds, averaged since the last call (the dev stats overlay).
+   */
+  stats(): { calls: number; triangles: number; drawn: number; ms: number } {
     const r = this.renderer.info.render;
-    return { calls: r.calls, triangles: r.triangles, drawn: this.drawn };
+    const ms = this.timed.frames ? this.timed.ms / this.timed.frames : 0;
+    this.timed = { ms: 0, frames: 0 };
+    return { calls: r.calls, triangles: r.triangles, drawn: this.drawn, ms };
   }
 
   /** The figure under a canvas point, else the repair bay crate, if any. */
@@ -268,8 +281,22 @@ export class FloorStage {
   };
 
   private draw(): void {
+    const start = performance.now();
+    this.drawFrame();
+    this.timed.ms += performance.now() - start;
+    this.timed.frames += 1;
+  }
+
+  private drawFrame(): void {
     if (this.content) this.world.draw(this.clock(), this.reducedMotion, this.selected);
+    const now = performance.now();
+    if (this.shadowsDirty || now - this.lastShadow >= 1000 / IDLE_FPS - 4) {
+      this.renderer.shadowMap.needsUpdate = true;
+      this.lastShadow = now;
+      this.shadowsDirty = false;
+    }
     this.renderer.render(this.scene, this.rig.camera);
+    this.world.flushRetired();
     this.drawn += 1;
     const figures: ScreenFigure[] = [];
     for (const f of this.world.frames) {
@@ -285,7 +312,7 @@ export class FloorStage {
       });
       figures.push({ key: crate.key, status: null, foot, head });
     }
-    this.events.onFrame(figures, this.rig.pxPerUnit());
+    this.events.onFrame(figures, this.rig.pxPerUnit(), this.viewport.width);
   }
 
   private measure(): void {

@@ -15,15 +15,17 @@ import {
 } from "lucide-react";
 import {
   type KeyboardEvent,
+  memo,
   type ReactNode,
   type Ref,
   useImperativeHandle,
   useLayoutEffect,
   useRef,
+  useSyncExternalStore,
 } from "react";
 import { providerHue, providerMark } from "@/components/common/provider-logos";
 import { cn } from "@/lib/utils";
-import { bubbleOf } from "../scene/activity";
+import { type ActivityKind, bubbleOf } from "../scene/activity";
 import { agentCard, agentLabel } from "../scene/agent-card";
 import type { SceneAgent } from "../scene/agents";
 import { type BayCrate, bayDescription } from "../scene/repair-bay";
@@ -31,7 +33,7 @@ import { ACTIVITY_ICON } from "./activity-icons";
 import { figureStatus, tagVisible } from "./figure-look";
 import type { ScreenFigure } from "./stage";
 import { type TagGlyph, tagOf } from "./tags";
-import { type ActivityStore, useActivityVersion } from "./use-activity";
+import type { ActivityStore } from "./use-activity";
 
 /**
  * The DOM layer over Floor mode's canvas (#476): for every agent on the floor a name tag, its
@@ -55,7 +57,8 @@ export const GLYPH: Record<TagGlyph, LucideIcon> = {
 };
 
 export interface OverlayHandle {
-  sync: (figures: readonly ScreenFigure[], pxPerUnit: number) => void;
+  /** Places everything after a frame; `width` is the canvas's, in CSS pixels. */
+  sync: (figures: readonly ScreenFigure[], pxPerUnit: number, width: number) => void;
 }
 
 /** A provider's mark from its bundled paths, or its monogram. */
@@ -90,21 +93,37 @@ export function MarkGlyph({ provider, className }: { provider: string; className
   );
 }
 
-function Bubble({
+/**
+ * One agent's bubble now: its own subscription to the store, so a new activity re-renders only
+ * that agent's bubble, not the whole crew (a busy floor has many changes a second).
+ */
+function useBubble(store: ActivityStore, sessionId: string | null, pinned: boolean) {
+  const key = useSyncExternalStore(store.subscribe, () => {
+    const b = bubbleOf(store.get(sessionId), Date.now(), pinned);
+    return b ? JSON.stringify([b.activity.kind, b.activity.text, b.fading]) : "";
+  });
+  if (!key) return null;
+  const [kind, text, fading] = JSON.parse(key) as [ActivityKind, string, boolean];
+  return { kind, text, fading };
+}
+
+const Bubble = memo(function Bubble({
   agent,
   store,
-  now,
   pinned,
   lifted,
 }: {
   agent: SceneAgent;
   store: ActivityStore;
-  now: number;
   pinned: boolean;
   lifted: boolean;
 }) {
   const waiting = agent.status === "approval";
-  const bubble = bubbleOf(store.get(agent.sessionId), now, pinned || waiting);
+  const shown = useBubble(store, agent.sessionId, pinned || waiting);
+  const bubble = shown && {
+    activity: { kind: shown.kind, text: shown.text },
+    fading: shown.fading,
+  };
   if (!bubble && !waiting) return null;
   const Icon = bubble ? ACTIVITY_ICON[bubble.activity.kind] : Hand;
   return (
@@ -130,7 +149,71 @@ function Bubble({
       <span className="truncate">{bubble ? bubble.activity.text : "Waiting for you"}</span>
     </div>
   );
+});
+
+interface FigureCalls {
+  focus: (key: string) => void;
+  blur: () => void;
+  activate: (key: string) => void;
+  node: (key: string, el: HTMLDivElement | null) => void;
 }
+
+/**
+ * One figure's node: its button, tag and bubble. It re-renders only when what it shows changes
+ * (`sig`), not with every new scene: a busy floor gets a new scene on every session event.
+ */
+const FigureNode = memo(
+  function FigureNode({
+    agent,
+    label,
+    open,
+    cardId,
+    tabStop,
+    bubble,
+    lifted,
+    store,
+    on,
+  }: {
+    agent: SceneAgent;
+    label: string;
+    open: boolean;
+    cardId: string;
+    tabStop: boolean;
+    bubble: boolean;
+    lifted: boolean;
+    store: ActivityStore;
+    on: FigureCalls;
+    sig: string;
+  }) {
+    const key = agent.key;
+    return (
+      <div
+        ref={(el) => on.node(key, el)}
+        className="absolute top-0 left-0"
+        style={{ visibility: "hidden" }}
+        data-figure={key}
+        data-status={figureStatus(agent)}
+      >
+        <button
+          type="button"
+          tabIndex={tabStop ? 0 : -1}
+          aria-label={label}
+          aria-expanded={open}
+          aria-controls={open ? cardId : undefined}
+          className="absolute top-0 left-0 w-[calc(var(--u)*0.5)] -translate-x-1/2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          style={{ height: "var(--h)" }}
+          onFocus={() => on.focus(key)}
+          onBlur={on.blur}
+          onClick={() => on.activate(key)}
+          data-testid="factory-view-floor-figure"
+        />
+        <Tag agent={agent} />
+        {bubble && <Bubble agent={agent} store={store} pinned={open} lifted={lifted} />}
+      </div>
+    );
+  },
+  (a, b) => a.sig === b.sig && a.store === b.store && a.cardId === b.cardId,
+);
 
 function Tag({ agent }: { agent: SceneAgent }) {
   const { text, glyph } = tagOf(agent);
@@ -196,36 +279,51 @@ export function FigureLayer({
   onActivate: (key: string) => void;
 }) {
   const keys = [...agents.map((a) => a.key), ...crates.map((c) => `bay:${c.kind}`)];
-  useActivityVersion(store);
   const root = useRef<HTMLDivElement>(null);
   const cardBox = useRef<HTMLDivElement>(null);
   const nodes = useRef(new Map<string, HTMLDivElement>());
-  const last = useRef<{ figures: readonly ScreenFigure[]; u: number } | null>(null);
+  const last = useRef<{ figures: readonly ScreenFigure[]; u: number; width: number } | null>(null);
+  /** What each node was last given, so a frame only writes what moved (no layout thrash). */
+  const placed = useRef(new Map<string, string>());
   const open = useRef(hovered);
   open.current = hovered;
+
+  const write = (key: string, node: HTMLElement, state: string, set: () => void) => {
+    if (placed.current.get(key) === state && node.isConnected) return;
+    placed.current.set(key, state);
+    set();
+  };
 
   const apply = () => {
     const el = root.current;
     const frame = last.current;
     if (!el || !frame) return;
-    el.style.setProperty("--u", `${frame.u}px`);
+    write("--u", el, String(frame.u), () => el.style.setProperty("--u", `${frame.u}px`));
     const seen = new Set<string>();
     for (const f of frame.figures) {
       const node = nodes.current.get(f.key);
       if (!node) continue;
       seen.add(f.key);
-      node.style.visibility = "";
-      node.style.transform = `translate3d(${f.head.x}px, ${f.head.y}px, 0)`;
-      node.style.setProperty("--h", `${Math.max(12, f.foot.y - f.head.y)}px`);
-      const tag = node.querySelector<HTMLElement>("[data-tag]");
-      if (tag && f.status) tag.style.visibility = tagVisible(f.status, frame.u) ? "" : "hidden";
+      // Whole pixels: sub-pixel drift (breathing) needs no new layout.
+      const x = Math.round(f.head.x);
+      const y = Math.round(f.head.y);
+      const h = Math.max(12, Math.round(f.foot.y - f.head.y));
+      const tag = f.status ? tagVisible(f.status, frame.u) : true;
+      write(f.key, node, `${x},${y},${h},${tag}`, () => {
+        node.style.visibility = "";
+        node.style.transform = `translate(${x}px, ${y}px)`;
+        node.style.setProperty("--h", `${h}px`);
+        const el = node.querySelector<HTMLElement>("[data-tag]");
+        if (el) el.style.visibility = tag ? "" : "hidden";
+      });
     }
-    for (const [key, node] of nodes.current) if (!seen.has(key)) node.style.visibility = "hidden";
+    for (const [key, node] of nodes.current)
+      if (!seen.has(key)) write(key, node, "hidden", () => (node.style.visibility = "hidden"));
     const box = cardBox.current;
     const target = frame.figures.find((f) => f.key === open.current);
     if (box && target) {
       // Above the figure when there's room, else below it; kept inside the canvas.
-      const width = el.clientWidth;
+      const width = frame.width;
       const above = target.head.y > 270;
       const x = Math.min(Math.max(target.head.x, 152), Math.max(152, width - 152));
       const y = above ? target.head.y - 10 : target.foot.y + 10;
@@ -234,13 +332,29 @@ export function FigureLayer({
   };
 
   useImperativeHandle(ref, () => ({
-    sync: (figures, u) => {
-      last.current = { figures, u };
+    sync: (figures, u, width) => {
+      last.current = { figures, u, width };
       apply();
     },
   }));
   // Newly rendered nodes take their places at once.
-  useLayoutEffect(apply);
+  useLayoutEffect(() => {
+    placed.current.clear();
+    apply();
+  });
+
+  // Callbacks that keep their identity across renders, so unchanged figures don't re-render.
+  const calls = useRef({ onFocusFigure, onBlurFigure, onActivate });
+  calls.current = { onFocusFigure, onBlurFigure, onActivate };
+  const stable = useRef<FigureCalls>({
+    focus: (key) => calls.current.onFocusFigure(key),
+    blur: () => calls.current.onBlurFigure(),
+    activate: (key) => calls.current.onActivate(key),
+    node: (key, el) => {
+      if (el) nodes.current.set(key, el);
+      else nodes.current.delete(key);
+    },
+  }).current;
 
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>) => {
     const step =
@@ -269,42 +383,33 @@ export function FigureLayer({
         {agents.map((agent) => {
           const label = agentLabel(agentCard(agent, now));
           const isOpen = hovered === agent.key;
+          const bubble = Boolean(agent.sessionId && live.has(agent.sessionId));
+          const tag = tagOf(agent);
           return (
-            <div
+            <FigureNode
               key={agent.key}
-              ref={(el) => {
-                if (el) nodes.current.set(agent.key, el);
-                else nodes.current.delete(agent.key);
-              }}
-              className="absolute top-0 left-0"
-              style={{ visibility: "hidden" }}
-              data-figure={agent.key}
-              data-status={figureStatus(agent)}
-            >
-              <button
-                type="button"
-                tabIndex={agent.key === focusKey ? 0 : -1}
-                aria-label={label}
-                aria-expanded={isOpen}
-                aria-controls={isOpen ? cardId : undefined}
-                className="absolute top-0 left-0 w-[calc(var(--u)*0.5)] -translate-x-1/2 rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                style={{ height: "var(--h)" }}
-                onFocus={() => onFocusFigure(agent.key)}
-                onBlur={onBlurFigure}
-                onClick={() => onActivate(agent.key)}
-                data-testid="factory-view-floor-figure"
-              />
-              <Tag agent={agent} />
-              {agent.sessionId && live.has(agent.sessionId) && (
-                <Bubble
-                  agent={agent}
-                  store={store}
-                  now={Date.now()}
-                  pinned={isOpen}
-                  lifted={lifted.has(agent.key)}
-                />
-              )}
-            </div>
+              agent={agent}
+              label={label}
+              open={isOpen}
+              cardId={cardId}
+              tabStop={agent.key === focusKey}
+              bubble={bubble}
+              lifted={lifted.has(agent.key)}
+              store={store}
+              on={stable}
+              sig={JSON.stringify([
+                label,
+                figureStatus(agent),
+                isOpen,
+                agent.key === focusKey,
+                bubble,
+                lifted.has(agent.key),
+                tag.text,
+                tag.glyph,
+                agent.providerId,
+                agent.sessionId,
+              ])}
+            />
           );
         })}
         {crates.map((crate) => {

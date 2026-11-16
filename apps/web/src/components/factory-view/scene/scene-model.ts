@@ -44,6 +44,11 @@ export interface Scene {
   merged: string[];
   /** The counter by the shipping door: merges today, as the figures count them. */
   shipped: number;
+  /**
+   * The status board over the dock, beside `shipped`: agents working and items waiting on a
+   * person, the same figures the stats strip and the header use.
+   */
+  board: { working: number; waiting: number };
   /** Some pull request waits on CI, or CI on the default branch is watched after a merge. */
   ciRunning: boolean;
   /** Spend against the daily budget, 0..1; null when no budget is set. */
@@ -116,6 +121,7 @@ export function sceneOf(inputs: AgentInputs, prev: Seating | null, plan: FloorPl
     bay: repairBay(pipeline),
     merged: pipeline.stages.merged.filter((c) => c.item.stage === "merged").map((c) => c.item.id),
     shipped: f.limits.autoMerge ? f.mergesToday : f.stats.mergedToday,
+    board: { working: f.activeSessions, waiting: pipeline.needsPerson },
     ciRunning: all.some((c) => c.pr?.state === "waiting_ci" || c.item.stage === "watching"),
     gauge: budgetGauge(f),
     scout:

@@ -187,6 +187,34 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
   /** Held follow-ups dismissed from the scout's list, by `<itemId>:<index>`. */
   const dismissedFollowUps = new Set<string>();
   /** Issues filed from spot-checks so far (their numbers). */
+  /**
+   * `?crowd=N` in the mock UI's URL adds N more builders, for measuring Floor mode with a busy
+   * floor (#476). Mock only: the real server never sees it.
+   */
+  const crowd = (items: FactoryWorkItem[]): FactoryWorkItem[] => {
+    const n = Number(new URLSearchParams(globalThis.location?.search ?? "").get("crowd") ?? 0);
+    const template = items.find((w) => w.stage === "building");
+    if (!template || !(n > 0)) return items;
+    const sessions = items.map((w) => w.sessionId).filter((id): id is string => Boolean(id));
+    return [
+      ...items,
+      ...Array.from({ length: Math.min(200, n) }, (_, i) => ({
+        ...template,
+        id: `fw-crowd-${i}`,
+        title: `Crowd item ${i + 1}`,
+        workKey: `issue:${900 + i}`,
+        issue: {
+          number: 900 + i,
+          url: `https://github.com/hearth-co/storefront/issues/${900 + i}`,
+        },
+        pr: null,
+        ownedPr: null,
+        sessionId: sessions[i % Math.max(1, sessions.length)] ?? null,
+        activeSessionId: sessions[i % Math.max(1, sessions.length)] ?? null,
+        step: i % 3 === 0 ? ("analyze" as const) : ("implement" as const),
+      })),
+    ];
+  };
   let spotIssues = 0;
   const project = (id: string) => world.snapshot.projects.find((p) => p.id === id);
   const status = (projectId: string): FactoryStatus => {
@@ -215,14 +243,16 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
         holding: f.inProgress.filter((w) => w.pr).length >= f.limits.maxConcurrentSessions,
       },
       backlog: f.backlog.map(toWork),
-      inProgress: f.inProgress.map(toWork).map((w) => {
-        // Check counts from the fixture's merge checks of the same pull request.
-        const c = f.mergeChecks.find((m) => m.prNumber === w.pr?.number)?.checks;
-        if (!c) return w;
-        const passed = c.filter((x) => x.state === "pass" || x.state === "skipped").length;
-        const failed = c.filter((x) => x.state === "fail").length;
-        return { ...w, checks: { passed, failed, total: c.length } };
-      }),
+      inProgress: crowd(
+        f.inProgress.map(toWork).map((w) => {
+          // Check counts from the fixture's merge checks of the same pull request.
+          const c = f.mergeChecks.find((m) => m.prNumber === w.pr?.number)?.checks;
+          if (!c) return w;
+          const passed = c.filter((x) => x.state === "pass" || x.state === "skipped").length;
+          const failed = c.filter((x) => x.state === "fail").length;
+          return { ...w, checks: { passed, failed, total: c.length } };
+        }),
+      ),
       recent: f.recent.map(toWork),
       // What a server keeps for the view beyond the capped recent list.
       viewRecent: f.recent

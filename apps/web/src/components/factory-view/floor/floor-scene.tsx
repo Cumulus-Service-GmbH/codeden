@@ -1,10 +1,11 @@
 import type { FactoryStatus } from "@codeden/contracts";
 import { useNavigate } from "@tanstack/react-router";
 import { Maximize2 } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { type RefObject, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useRoleSession } from "@/components/orchestration/role-chat";
 import { Button } from "@/components/ui/button";
 import { usePrefersReducedMotion } from "@/lib/motion";
+import { useRoomy } from "../hooks";
 import { agentCard } from "../scene/agent-card";
 import type { SceneAgent } from "../scene/agents";
 import { lookoutLayout } from "../scene/lookout";
@@ -25,6 +26,33 @@ import { useAgentActivity } from "./use-activity";
 import { useWorkshop } from "./use-workshop";
 
 const TERMINAL_W = 340;
+
+/**
+ * The dev-only stats overlay (#476): frames drawn per second, draw calls and triangles of the
+ * last frame. Only in development builds, with `?stats` in the URL; production never runs it.
+ */
+function useStageStats(stage: RefObject<FloorStage | null>): string | null {
+  const on = import.meta.env.DEV && new URLSearchParams(window.location.search).has("stats");
+  const [text, setText] = useState<string | null>(null);
+  useEffect(() => {
+    if (!on) return;
+    let drawn = stage.current?.stats().drawn ?? 0;
+    let at = performance.now();
+    const timer = window.setInterval(() => {
+      const s = stage.current?.stats();
+      if (!s) return;
+      const now = performance.now();
+      const fps = ((s.drawn - drawn) * 1000) / (now - at);
+      drawn = s.drawn;
+      at = now;
+      setText(
+        `${fps.toFixed(0)} fps · ${s.ms.toFixed(1)} ms/frame · ${s.calls} calls · ${(s.triangles / 1000).toFixed(0)}k tris`,
+      );
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [on, stage]);
+  return on ? text : null;
+}
 /** Session states whose agent can be doing something worth a bubble. */
 const LIVE = new Set(["starting", "running", "waiting"]);
 
@@ -80,8 +108,11 @@ export function FloorScene({
   const hover = useHover();
   const ids = useId().replace(/:/g, "");
   const [focusKey, setFocusKey] = useState<string | null>(null);
+  // Phones: the roster is a bottom sheet behind a button.
+  const phone = !useRoomy();
   // The roster starts open where there's room beside the floor.
   const [rosterOpen, setRosterOpen] = useState(() => window.innerWidth >= 1600);
+  const stats = useStageStats(stage);
   const unsupported = useRef(onUnsupported);
   unsupported.current = onUnsupported;
   const hoverRef = useRef(hover);
@@ -126,7 +157,7 @@ export function FloorScene({
         onLost: () => unsupported.current(),
         onHover: (key) => (key ? hoverRef.current.enter(key) : hoverRef.current.leave()),
         onTap: (key) => tapRef.current(key),
-        onFrame: (figures, u) => overlay.current?.sync(figures, u),
+        onFrame: (figures, u, width) => overlay.current?.sync(figures, u, width),
       });
       stage.current.coarsePointer = window.matchMedia("(pointer: coarse)").matches;
     } catch {
@@ -144,8 +175,8 @@ export function FloorScene({
   }, [reduced]);
 
   useEffect(() => {
-    stage.current?.setInset(rosterOpen ? ROSTER_SPACE : 0);
-  }, [rosterOpen]);
+    stage.current?.setInset(rosterOpen && !phone ? ROSTER_SPACE : 0);
+  }, [rosterOpen, phone]);
 
   useEffect(() => {
     stage.current?.update({ layout, scene, palette, lookout });
@@ -242,12 +273,21 @@ export function FloorScene({
           <Roster
             agents={scene.agents}
             byStorey={lookout !== null}
+            sheet={phone}
             now={now}
             open={rosterOpen}
             setOpen={setRosterOpen}
             onActivate={activate}
             onOpenItem={openItem}
           />
+          {stats && (
+            <p
+              className="pointer-events-none absolute top-2 right-2 z-10 rounded bg-black/70 px-1.5 py-0.5 font-mono text-[10px] leading-tight text-white"
+              data-testid="factory-view-floor-stats"
+            >
+              {stats}
+            </p>
+          )}
           <Button
             size="sm"
             variant="outline"
