@@ -72,6 +72,14 @@ export interface MainSince {
 /** Commit-level CI state, for watching main after a merge. */
 export type CommitChecks = ChecksState;
 
+/** A commit on the default branch and its CI. */
+export interface MainHead {
+  sha: string;
+  checks: CommitChecks;
+  /** Names of the checks that failed on it. */
+  failed: string[];
+}
+
 /** Evidence attached to a PR (or its issue) through `attach_evidence`. */
 export interface PrEvidence {
   /** Screenshots or other images. */
@@ -136,7 +144,12 @@ export interface FactoryGithub {
   /** Names of the checks that failed on a commit (CI on the default branch after a merge). */
   failedChecks(projectId: string, sha: string): Promise<string[]>;
   /** Head of the default branch and its CI state. */
-  mainHead(projectId: string): Promise<{ sha: string; checks: CommitChecks; failed: string[] }>;
+  mainHead(projectId: string): Promise<MainHead>;
+  /**
+   * The default branch's head as it was at `at` (its newest commit then) and that commit's CI
+   * now; null when the branch had no commit by then.
+   */
+  mainHeadAt(projectId: string, at: string): Promise<MainHead | null>;
   /** Commits the default branch has that the PR's head (`headSha`) doesn't; 0 when up to date. */
   behindBy(projectId: string, number: number, headSha: string): Promise<number>;
   /**
@@ -361,6 +374,13 @@ export class GithubFactoryPort implements FactoryGithub {
     );
     const { state, failed } = await this.checksFor(projectId, branch.commit.sha);
     return { sha: branch.commit.sha, checks: state, failed };
+  }
+
+  async mainHeadAt(projectId: string, at: string): Promise<MainHead | null> {
+    const sha = await prOps.mainShaAt(this.github, projectId, at);
+    if (!sha) return null;
+    const { state, failed } = await this.checksFor(projectId, sha);
+    return { sha, checks: state, failed };
   }
 
   behindBy(projectId: string, _number: number, headSha: string): Promise<number> {

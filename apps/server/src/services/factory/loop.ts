@@ -86,6 +86,8 @@ export async function runTick(
   ctx.sessions.refreshAvailability();
   // Work that waited for an agent on the last tick gets the free slots first (`slots.ts`).
   ctx.slots.beginTick(projectId);
+  // CI on the default branch is read from GitHub again, once for the whole tick (`main-ci.ts`).
+  ctx.mainCi.beginTick(projectId);
   // Failed items whose issue was closed on GitHub have nothing left to decide: they settle
   // first, so none of them is put back or waits on a person.
   settleClosedIssues(ctx, project);

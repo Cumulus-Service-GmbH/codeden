@@ -12,6 +12,7 @@ import { CI_KICK_NUDGE, kickCi } from "./ci-kick";
 import { type FactoryContext, visionOf } from "./context";
 import { handleFailure } from "./failures";
 import type { FactoryPr, PrEvidence } from "./github-port";
+import { inheritedCi } from "./inherited-ci";
 import { stopBeforeAgentTurn } from "./item-budget";
 import { prDecidedOutside, readyForYou } from "./merge";
 import { escalate, failItem, runAudit } from "./outcomes";
@@ -127,6 +128,8 @@ export async function advanceVerifying(
   };
   const head = trackHead(item.nudges, pr, at);
   const settled = { nudges: nudgesFor(item.nudges, item.review) };
+  // Red CI that fails only what fails on the default branch waits for it (`inherited-ci.ts`).
+  const ciInherited = await inheritedCi(ctx, project, item, pr);
   const { checks, outcome } = evaluateChecks({
     pr,
     issueTitle: item.issue?.title ?? item.title,
@@ -140,6 +143,7 @@ export async function advanceVerifying(
     audit: auditCache.get(headKey) ?? null,
     auditConfigured,
     ciTimedOut: !kicking && now.getTime() - Date.parse(head.since) > ctx.ciGraceMs,
+    ciInherited,
     limits: project.factoryLimits,
     tuning: loop.tuning,
     largeChange: item.largeChange ?? null,

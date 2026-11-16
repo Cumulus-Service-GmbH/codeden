@@ -444,6 +444,20 @@ export class FakeFactoryGithub implements FactoryGithub {
     return { ...this.main };
   }
 
+  /**
+   * Main's head at earlier times, oldest first, as a test records them (`at` is when that head
+   * took over). `mainHeadAt` answers with the last one at or before the time asked about, and
+   * with `main` when none is.
+   */
+  mainHistory: Array<{ at: string; sha: string; checks: CommitChecks; failed: string[] }> = [];
+
+  async mainHeadAt(_projectId: string, at: string) {
+    const then = this.mainHistory.filter((h) => Date.parse(h.at) <= Date.parse(at)).at(-1);
+    return then
+      ? { sha: then.sha, checks: then.checks, failed: [...then.failed] }
+      : { ...this.main };
+  }
+
   visionCommits: Array<{ path: string; contents: string }> = [];
   visionPr: GitHubPrRef | null = null;
   async shareVision(_projectId: string, path: string, contents: string) {

@@ -268,6 +268,7 @@ export const CI_IS_AUTHORITATIVE = [
   "CI on the pull request's head is the authority for the full test suite: it runs the suite on a clean machine, and green CI there means the suite passes, also for an acceptance criterion that asks for it.",
   `A broken local environment (missing or corrupted dependencies, a module that won't load, timeouts under load) is an environment problem, not a defect of the pull request. Before testing, reinstall the dependencies cleanly and non-interactively (for pnpm: ${REINSTALL}) rather than giving up, then run what you can (typecheck, lint, the focused tests).`,
   "Never request changes only because local verification couldn't run: approve when the code is right and CI is green, and say in the summary which local checks couldn't run and why. `request_changes` needs a cause in the pull request: a defect, a criterion not met, or red CI. If your environment is the only thing in your way, set `blockers: \"environment\"`, and the factory gives you the CI result instead of sending it to the author.",
+  "Red CI whose failing checks also fail on the default branch (CI there is red too) isn't caused by the pull request, so it is no cause on its own: the factory holds the merge until the default branch is green and runs the pull request's CI again.",
 ].join("\n");
 
 /** One verdict per review, but a call rejected for invalid input never counts as it. */

@@ -5,9 +5,9 @@ import type { MainSince } from "./github-port";
 
 /**
  * The GitHub calls behind the factory's merge queue and PR ownership (§10.1): how far a PR is
- * behind the default branch and what changed there since, bringing it up to date without an
- * agent, closing a PR a rebuild
- * replaced, and whether CI can run on the repository at all.
+ * behind the default branch and what changed there since, what the default branch's head was at
+ * an earlier time, bringing a PR up to date without an agent, closing a PR a rebuild replaced,
+ * and whether CI can run on the repository at all.
  */
 
 /** Commits the default branch has that the PR's head doesn't (0: up to date). */
@@ -28,6 +28,31 @@ export async function behindBy(
         })
       ).data.behind_by,
   );
+}
+
+/**
+ * The default branch's newest commit at `at` (GitHub's commit list filtered by commit date: a
+ * merge made on GitHub is dated when it merged); null when it had none by then.
+ */
+export async function mainShaAt(
+  github: GithubService,
+  projectId: string,
+  at: string,
+): Promise<string | null> {
+  const { owner, repo, defaultBranch } = github.githubRepo(projectId);
+  const commits = await github.client.run(
+    async (o) =>
+      (
+        await o.rest.repos.listCommits({
+          owner,
+          repo,
+          sha: defaultBranch,
+          until: at,
+          per_page: 1,
+        })
+      ).data,
+  );
+  return commits[0]?.sha ?? null;
 }
 
 /** GitHub's compare lists at most this many files for the whole comparison. */

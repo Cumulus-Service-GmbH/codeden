@@ -174,12 +174,8 @@ export async function withMainCi(
   loop: FactoryLoop,
   branch: string,
 ): Promise<FactoryLoop | null> {
-  let main: Awaited<ReturnType<typeof ctx.github.mainHead>>;
-  try {
-    main = await ctx.github.mainHead(project.id);
-  } catch {
-    return null;
-  }
+  const main = await ctx.mainCi.head(ctx.github, project.id);
+  if (!main) return null;
   if (main.checks === "success")
     return loop.fastMergeHold ? { ...loop, fastMergeHold: null } : loop;
   if (main.checks !== "failure" || loop.fastMergeHold) return loop;

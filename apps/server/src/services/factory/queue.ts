@@ -10,6 +10,7 @@ import { CONFLICTS_DETAIL } from "./checks";
 import type { FactoryContext } from "./context";
 import { fastMergeVerdict, noteProtectionForcesStrict, withMainCi } from "./fast-merge";
 import type { FactoryPr, MainSince } from "./github-port";
+import { waitsForMain } from "./inherited-ci";
 import { autoMerge, githubRefused, type MergeFailed, prDecidedOutside } from "./merge";
 import { markStuck } from "./outcomes";
 import {
@@ -109,6 +110,8 @@ export function mergeQueue(ctx: FactoryContext, project: Project): FactoryItem[]
  * merges within one CI run.
  */
 export function isRetesting(item: FactoryItem): boolean {
+  // Waiting for CI on the default branch (`inherited-ci.ts`) isn't a re-test, and holds up nothing.
+  if (waitsForMain(item)) return false;
   if (isUpdating(item)) return true;
   if (!item.nudges[QUEUE_UPDATED]) return false;
   return item.checks.some((c) => c.name === "ci" && c.state === "pending");

@@ -18,6 +18,7 @@ import type { SessionRepo } from "../sessions/repo";
 import type { RateLimitReading } from "./availability";
 import type { FactoryGithub } from "./github-port";
 import type { LedgerTurn } from "./item-cost";
+import type { MainCiReads } from "./main-ci";
 import type { PrFiles } from "./overlap";
 import type { FactorySessions } from "./sessions";
 import type { SlotBoard } from "./slots";
@@ -65,6 +66,8 @@ export interface FactoryContext {
    * merge queue last saw (in memory): there every PR is re-tested, one at a time (`queue.ts`).
    */
   upToDateRequired: Set<string>;
+  /** CI on each project's default branch, read once per tick (`main-ci.ts`), in memory. */
+  mainCi: MainCiReads;
   /**
    * Give GitHub a moment to work out the next queued PR against a default branch that just
    * moved (the merge before it), so merges follow each other within seconds (`queue.ts`).

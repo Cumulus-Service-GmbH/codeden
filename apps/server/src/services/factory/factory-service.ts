@@ -61,6 +61,7 @@ import { itemCosts } from "./item-cost";
 import { allowLargeChange } from "./large-change";
 import { forgetLesson, keepLessons } from "./lessons";
 import { runTick } from "./loop";
+import { MainCiReads } from "./main-ci";
 import { PrFiles } from "./overlap";
 import { reportReproduction, submitAnalysis } from "./pipeline";
 import { localDay } from "./policy";
@@ -183,6 +184,7 @@ export class FactoryService {
       slots: new SlotBoard(),
       prFiles: new PrFiles(),
       upToDateRequired: new Set(),
+      mainCi: new MainCiReads(),
       settle: () => wait(deps.options?.settleMs ?? 2_000),
       setKillSwitch: (projectId, on) => this.writeKillSwitch(projectId, on),
       now: deps.options?.now ?? (() => new Date()),

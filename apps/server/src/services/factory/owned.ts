@@ -2,6 +2,7 @@ import type { FactoryItem, FactoryLoop, GitHubPrRef, Project } from "@codeden/co
 import { errorMessage } from "../errors";
 import type { FactoryContext } from "./context";
 import type { FactoryPr } from "./github-port";
+import { restoreInherited } from "./inherited-ci";
 import { overBudgetNote, overItemBudget } from "./item-budget";
 import { prDecidedOutside } from "./merge";
 import {
@@ -99,6 +100,8 @@ export async function advanceOwned(
   if (pr.mergeable !== "conflicting") {
     const resolved = rebaseAsks(item) > 0 && pr.mergeable === "mergeable";
     if (current.stage === "failed") {
+      // Failed only on CI that was red on the default branch too: back once it is green.
+      if (await restoreInherited(ctx, project, current, pr, holdsAgentTurns(loop))) return loop;
       return settleStopped(ctx, project, loop, current, pr, resolved);
     }
     // Escalated (a protected area): only a person merges it.

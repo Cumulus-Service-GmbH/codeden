@@ -52,6 +52,11 @@ export interface CheckInputs {
    * first saw the head); before that "no checks" counts as not reported yet.
    */
   ciTimedOut: boolean;
+  /**
+   * The PR's red CI fails only checks that fail on the default branch too (`inherited-ci.ts`):
+   * the `ci` check waits with this detail instead of failing. Absent or null: judged as usual.
+   */
+  ciInherited?: string | null;
   limits: FactoryLimits;
   tuning: FactoryTuning;
   /** Why the PM let this item go over the size limit; null when it didn't. */
@@ -190,7 +195,8 @@ export function evaluateChecks(i: CheckInputs): { checks: MergeCheck[]; outcome:
         set("ci", "pass", null);
         break;
       case "failure":
-        set("ci", "fail", `CI failed: ${list(i.pr.failedChecks) || "see the PR"}`);
+        if (i.ciInherited) set("ci", "pending", i.ciInherited);
+        else set("ci", "fail", `CI failed: ${list(i.pr.failedChecks) || "see the PR"}`);
         break;
       case "pending":
         set("ci", "pending", "CI is running");

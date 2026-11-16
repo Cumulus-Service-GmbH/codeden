@@ -219,12 +219,8 @@ export async function intakeFailedChecks(
 ): Promise<FactoryLoop> {
   // Regressions after factory merges are handled by the watch step.
   if (ctx.store.items(project.id, ["watching"]).length > 0) return loop;
-  let head: Awaited<ReturnType<typeof ctx.github.mainHead>>;
-  try {
-    head = await ctx.github.mainHead(project.id);
-  } catch {
-    return loop;
-  }
+  const head = await ctx.mainCi.head(ctx.github, project.id);
+  if (!head) return loop;
   if (head.checks !== "failure" || loop.seenFailedShas.includes(head.sha)) return loop;
   const failing = head.failed.join(", ") || "CI";
   const at = ctx.now().toISOString();

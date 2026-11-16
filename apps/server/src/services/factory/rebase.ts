@@ -32,8 +32,16 @@ const HEAD = "head_";
 const RESTORE = "restore_";
 /** The head a conflict started on (`conflict_from_<sha>`), until the conflict is resolved. */
 const CONFLICT_FROM = "conflict_from_";
-/** `update_<sha>`: the merge queue asked GitHub to bring that head up to date. */
+/**
+ * `update_<sha>`: the factory asked GitHub to bring that head up to date (the merge queue, or a
+ * PR that waited for the default branch: `inherited-ci.ts`).
+ */
 export const UPDATE = "update_";
+/**
+ * `main_red_<sha>`: that head's red CI fails only what fails on the default branch
+ * (`inherited-ci.ts`).
+ */
+export const MAIN_RED = "main_red_";
 /** `refused_<sha>_<n>`: the n-th time GitHub refused to merge or update that head (`queue.ts`). */
 export const REFUSED = "refused_";
 /** `strict_<sha>`: GitHub refused to merge that head on its own CI; it takes the strict path. */
@@ -74,8 +82,9 @@ export function headSeenAt(item: Pick<FactoryItem, "nudges">, sha: string): stri
 
 /**
  * The item's nudges for this verification pass: when the head was first seen (`head_<sha>`,
- * the start of its CI clock), its worktree restore request (`restore_<sha>`), the merge
- * queue's update request (`update_<sha>`), a refused fast merge (`strict_<sha>`) and GitHub's
+ * the start of its CI clock), its worktree restore request (`restore_<sha>`), the factory's
+ * update request (`update_<sha>`), red CI that is the default branch's (`main_red_<sha>`), a
+ * refused fast merge (`strict_<sha>`) and GitHub's
  * refusals to merge or update it (`refused_<sha>_<n>`), with older heads' dropped; and the rebase requests,
  * which end once GitHub reports the PR mergeable (not while it is still working that out), so
  * the next conflict starts afresh.
@@ -93,6 +102,7 @@ export function trackHead(
     (k.startsWith(HEAD) && k !== key) ||
     (k.startsWith(RESTORE) && k !== `${RESTORE}${sha}`) ||
     (k.startsWith(UPDATE) && k !== `${UPDATE}${sha}`) ||
+    (k.startsWith(MAIN_RED) && k !== `${MAIN_RED}${sha}`) ||
     (k.startsWith(STRICT) && k !== `${STRICT}${sha}`) ||
     (k.startsWith(REFUSED) && !k.startsWith(`${REFUSED}${sha}_`));
   // Keeps the order of what stays, so an unchanged item isn't written again.
