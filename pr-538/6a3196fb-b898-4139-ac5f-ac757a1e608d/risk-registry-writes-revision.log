@@ -1,0 +1,37 @@
+===== Rename regression test on the previous PR commit 216d25cd (untracked policy copy) =====
+ × still asks when Rename-Item moves a secrets file, which hands it over under a new name
+AssertionError: Rename-Item .env x.txt: expected null to be 'secrets' // Object.is equality
+      Tests  1 failed | 9 passed (10)
+
+===== AFTER the revision (efba51c0) =====
+
+ RUN  v5.1.0 <home>/.codeden/wt/codeden/6a3196fb
+
+ ✓ |@codeden/providers| test/risk-registry-writes.test.ts > registry writes (#533) > asks when reg adds, imports, copies, restores or loads registry keys 90ms
+ ✓ |@codeden/providers| test/risk-registry-writes.test.ts > registry writes (#533) > asks when a PowerShell item cmdlet writes a registry key, value or certificate 183ms
+ ✓ |@codeden/providers| test/risk-registry-writes.test.ts > registry writes (#533) > asks when setx or SetEnvironmentVariable changes the environment for good 23ms
+ ✓ |@codeden/providers| test/risk-registry-writes.test.ts > registry writes (#533) > still runs reads of the registry, exports into the worktree and the running shell's environment 35ms
+ ✓ |@codeden/providers| test/risk-registry-writes.test.ts > New-Item and Set-Item writing files (#533) > asks when New-Item creates a file outside the worktree 41ms
+ ✓ |@codeden/providers| test/risk-registry-writes.test.ts > New-Item and Set-Item writing files (#533) > still runs New-Item and Set-Item in the worktree, temp and the shell's own drives 50ms
+ ✓ |@codeden/providers| test/risk-registry-writes.test.ts > New-Item and Set-Item writing files (#533) > still asks when Rename-Item moves a secrets file, which hands it over under a new name 15ms
+ ✓ |@codeden/providers| test/risk-registry-writes.test.ts > relative paths after cd into a PowerShell drive (#533) > asks when a relative delete or write follows a cd into the registry 13ms
+ ✓ |@codeden/providers| test/risk-registry-writes.test.ts > relative paths after cd into a PowerShell drive (#533) > still runs relative deletes after a cd into the shell's own drives or back to a folder 1ms
+ ✓ |@codeden/providers| test/risk-registry-writes.test.ts > relative paths after cd into a PowerShell drive (#533) > reads a colon as part of a file name elsewhere than Windows 0ms
+
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
+   Start at  10:09:01
+   Duration  923ms (tests 56%, import 26%, transform 18%, worker 1%)
+
+
+===== pnpm test (full suite, tail) =====
+
+ Test Files  561 passed | 12 skipped (573)
+      Tests  4409 passed | 55 skipped (4464)
+   Start at  10:05:16
+   Duration  182.77s (tests 52%, import 31%, environment 9%, transform 5%, setup 2%)
+
+Environment  |@codeden/web| jsdom was created 118 times · 118.60s total, 37% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+
