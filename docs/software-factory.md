@@ -442,7 +442,7 @@ When an item's issue is closed on GitHub (as a duplicate, as not planned, or bec
 - the issue was closed by a merged pull request that links it ("Fixes #n"): the work is done, marked **merged** with "Resolved by #n";
 - otherwise it's **rejected**, with how the issue was closed ("The issue was closed on GitHub as a duplicate", "as not planned", "as completed").
 
-This also covers a builder that finished without a pull request because there was nothing left to do. Inbox items about it are resolved too. An item with a pull request of its own (or a rebuild's original pull request) is left to that pull request, as before: merging or closing it on GitHub finishes the item, with the merge recorded, and while it's open it waits for you. A queued item whose issue is closed is dropped before an agent starts on it.
+This also covers a builder that finished without a pull request because there was nothing left to do. Inbox items about it are resolved too. An item with a pull request of its own (or a rebuild's original pull request) is left to that pull request, as before: merging or closing it on GitHub finishes the item, with the merge recorded, and while it's open it waits for you. A queued item whose issue is closed is dropped before an agent starts on it. An automatic revert never is: it carries the reverted work's issue, which the merge it undoes usually closed, and the default branch stays red until it lands.
 
 ### Only what is truly stuck reaches you
 
@@ -536,7 +536,7 @@ While the factory drains, the header, the factory panel, the Factory view and th
 
 Either way, the loop stays stopped until you release the switch (**Release kill switch**). After a drain there's nothing half done to recover. A kill switch never hands work back to automations.
 
-When the loop **pauses** by itself (budget, repeated failures, a revert), resume it from the panel once you've looked at the reason; that also clears the failure count. A pause for a revert ends by itself once the revert merged and CI on the default branch is green again. If CI doesn't report on the revert's merge commit, or is still red there, you get one inbox item saying so. Resume once the branch is green, and the reverted work goes back to its builder.
+When the loop **pauses** by itself (budget, repeated failures, a revert), resume it from the panel once you've looked at the reason; that also clears the failure count. A pause for a revert ends by itself once the revert merged and CI on the default branch is green again, or, when no revert is on its way any more (you closed it and fixed the branch yourself, or merged it on GitHub), once CI on the default branch is green. A revert whose agent couldn't start starts again on the next free agent; after 3 failed starts you get one inbox item saying so. If CI doesn't report on the revert's merge commit, or is still red there, you get one inbox item saying so. Resume once the branch is green, and the reverted work goes back to its builder.
 
 ## How the factory and automations share work
 

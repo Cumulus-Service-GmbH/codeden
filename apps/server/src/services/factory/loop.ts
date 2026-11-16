@@ -8,7 +8,7 @@ import {
 import { errorMessage } from "../errors";
 import { builderWanted, chooseAgent } from "./agent-choice";
 import { archiveFinished, sweepFailedSessions } from "./cleanup";
-import { settleClosedIssues } from "./closed-issues";
+import { closedIssueOf, settleClosedIssues } from "./closed-issues";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { advanceDrain } from "./drain";
 import { fileDueFollowUps } from "./follow-ups";
@@ -22,7 +22,8 @@ import { advanceBuilding, advanceWatching, inMergeOrder } from "./progress";
 import { advanceQueue } from "./queue-pass";
 import { closeReplacedPrs } from "./rebuild";
 import { recoverInfraFailures } from "./recover";
-import { reviseAfterReverts } from "./revert";
+import { resumeWhenGreen, reviseAfterReverts } from "./revert";
+import { startQueuedReverts } from "./revert-start";
 import { advanceScout } from "./scout";
 import { claimSlot } from "./slots";
 import { settleSpecInbox } from "./spec-approval";
@@ -98,6 +99,9 @@ export async function runTick(
   // Work that reached the per-item spend cap stops before it takes another step, also while
   // paused or draining (in-flight work moves on then).
   loop = await enforceItemBudgets(ctx, project, loop);
+  // A revert whose agent couldn't start starts again, ahead of all other work, also while the
+  // regression pauses the loop (`revert-start.ts`).
+  loop = await startQueuedReverts(ctx, project, loop);
   // Items already in flight move on even while paused (merges stay blocked, reverts excepted).
   // Watch merges first, then builds, then verification, so a PR found while building is
   // verified in the same step and a fresh merge is watched from the next one. Then the merge
@@ -115,6 +119,9 @@ export async function runTick(
     }
     if (stage === "verifying") loop = await advanceQueue(ctx, project, loop);
   }
+  // A regression pause with no revert on its way any more ends once CI on the default branch is
+  // green again, whatever fixed it (`revert.ts`).
+  loop = await resumeWhenGreen(ctx, project, loop);
   // Work whose revert merged (and CI on the default branch is green again) goes back to its
   // builder as a revise round (`revert.ts`), also while paused, like any revise round.
   await reviseAfterReverts(ctx, project).catch((error: unknown) =>
@@ -245,7 +252,8 @@ function underMergeCap(
  * PR wait behind those that don't (`overlap.ts`). An item whose issue was closed meanwhile stops.
  * Every build that will open a PR takes room under the work-in-progress limit, those started
  * earlier and those this tick starts, so the limit is never overshot. While draining, `only` the
- * drain's items are considered; the rest of the queue is left as it is.
+ * drain's items are considered; the rest of the queue is left as it is. Queued reverts aren't
+ * builds: they start first, on their own (`revert-start.ts`).
  */
 async function assignAgents(
   ctx: FactoryContext,
@@ -255,12 +263,14 @@ async function assignAgents(
 ) {
   const wip = wipOf(ctx, project, loop);
   let building = unopenedBuilds(ctx, project.id);
-  const queued = ctx.store.items(project.id, ["backlog"]).filter((i) => !only || only.has(i.id));
+  const queued = ctx.store
+    .items(project.id, ["backlog"])
+    .filter((i) => i.source !== "revert" && (!only || only.has(i.id)));
   const queue = scheduleOrder(queued.sort(queueOrder), openPrFiles(ctx, project));
   const vision = visionOf(project).text;
   let full = false;
   for (const { item, overlap } of queue) {
-    if (item.issue && ctx.github.issue(project.id, item.issue.number)?.state === "closed") {
+    if (closedIssueOf(ctx, project.id, item)) {
       ctx.store.updateItem(item.id, (i) => ({
         ...i,
         stage: "rejected",

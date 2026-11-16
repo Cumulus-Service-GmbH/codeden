@@ -60,9 +60,9 @@ The loop **pauses itself** for one of these reasons:
 
 - **The daily budget is spent** ("daily budget reached ($10.00 of $10.00)"). It resumes by itself the next day.
 - **Failures in a row**: 3 failed items or reverts in a row ("3 failed merge checks or reverts in a row").
-- **A regression**: CI on the default branch failed after an automatic merge, and a revert pull request is open. The loop resumes by itself once the revert merged and CI on the default branch is green again (see [Watching main after a merge](#watching-main-after-a-merge)).
+- **A regression**: CI on the default branch failed after an automatic merge, and a revert pull request is open. The loop resumes by itself once the revert merged and CI on the default branch is green again, or, when no revert is on its way any more (you closed it and fixed the branch yourself, or merged it on GitHub), once CI on the default branch is green again (see [Watching main after a merge](#watching-main-after-a-merge)).
 
-While paused, work already in flight keeps moving (builds and reviews finish), but nothing merges except a revert. Nothing new starts: no intake, no new builds, no scout round, no automatic recovery or re-review. **Resume** clears the pause and the failure count.
+While paused, work already in flight keeps moving (builds and reviews finish), but nothing merges except a revert. Nothing new starts: no intake, no new builds, no scout round, no automatic recovery or re-review, except for a revert, which starts again and is put back as usual. **Resume** clears the pause and the failure count.
 
 **Finishing open work (2 of 2 PRs open)** beside the state means the open pull request limit is reached (see [Agent slots and priority](#agent-slots-and-priority)).
 
@@ -133,6 +133,10 @@ Get the default branch green and **Resume** the loop: the reverted work goes bac
 
 **A revert that can't merge** (CI red on the revert too, conflicts that still aren't resolved after 3 requests, other failed checks, or the agent writing it giving up) stops there. You get one inbox item, "main is red and the revert can't merge: CI failed on the revert too (test)", and the loop stays paused until you get the default branch green and resume it.
 
+**A revert that couldn't start.** When GitHub can't open the revert by itself (the default branch moved on), an agent writes it. If that agent can't start (say, the runner timed out opening its session on a busy machine), or its session fails before it opened the pull request, the revert goes back to the queue and starts again on the next check, on the first free agent, ahead of all other work. A revert is never dropped because its issue was closed: it carries the reverted work's issue, which the merge it undoes usually closed. After 3 failed starts you get one inbox item, "main is red and the revert of #42 couldn't start: <reason>": **Retry** the revert, or fix the default branch yourself and resume the loop.
+
+**When no revert is on its way any more** (you closed the revert pull request and fixed the default branch another way, or merged the revert yourself on GitHub), the loop doesn't wait for one: it resumes by itself once CI on the default branch is green again. The reverted work goes back to its builder only if its revert merged; otherwise its merge stands, and its note says so.
+
 ## The merge queue
 
 With auto-merge on, a pull request whose checks all pass joins a queue, and on every pass the factory merges **every pull request that is ready**, seconds apart:
@@ -161,12 +165,13 @@ To re-test, the factory asks GitHub to update the pull request (**Update branch*
 
 **Agents at once** (2) caps every factory agent working at the same time: builders, reviewers, the scout and its area reviewers. Work in progress is never interrupted; only the next free agent is decided. When an agent is free it goes, in this order, to:
 
-1. a reviewer for a pull request whose CI passed;
-2. a rebase, a conflict resolution or a revise round;
-3. a reviewer for a pull request whose CI is still running;
-4. a builder carrying on after a failure outside its code;
-5. a new build from the queue;
-6. the scout and its area reviewers.
+1. the agent writing a revert, started again after its start failed;
+2. a reviewer for a pull request whose CI passed;
+3. a rebase, a conflict resolution or a revise round;
+4. a reviewer for a pull request whose CI is still running;
+5. a builder carrying on after a failure outside its code;
+6. a new build from the queue;
+7. the scout and its area reviewers.
 
 Within each, what waited longest goes first. **Reviews, fixes and rebases come before new builds**, so open work finishes before more starts. (Merging needs no agent: the loop does it.)
 

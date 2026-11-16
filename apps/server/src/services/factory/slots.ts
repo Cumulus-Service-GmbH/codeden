@@ -8,6 +8,8 @@ import { isBusy } from "./sessions";
  * to a merge comes first; the order only decides who takes a slot that is free, and work in
  * flight is never interrupted.
  *
+ * - `revert`: the agent writing an automatic revert, started again after its start failed
+ *   (`revert-start.ts`): the default branch is red until it lands;
  * - `review`: a reviewer for a PR whose CI passed (a fresh review, a re-review after a revise
  *   round, a re-check of a conflict resolution);
  * - `repair`: a rebase or conflict resolution (a request to the PR's agent, an integrator) or a
@@ -20,7 +22,15 @@ import { isBusy } from "./sessions";
  * Within a tier, work that waited longer goes first, except where the caller claims in an order
  * of its own (`ordered`: the queue, which is sorted by who asked and priority).
  */
-export const SLOT_TIERS = ["review", "repair", "review_early", "resume", "build", "scout"] as const;
+export const SLOT_TIERS = [
+  "revert",
+  "review",
+  "repair",
+  "review_early",
+  "resume",
+  "build",
+  "scout",
+] as const;
 
 /** The scout's claim on an agent slot: its rounds and their area reviewers. */
 export const SCOUT_SLOT = "scout";

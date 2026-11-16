@@ -10,6 +10,7 @@ import { baseBranchOf } from "./rebase";
 import { rebuildFailed, unreplacedOriginal } from "./rebuild";
 import { recordMainFailure, revertLanded } from "./revert";
 import { regressionInboxId, regressionPausePrefix, revertBlocked } from "./revert-blocked";
+import { revertSessionFailure, revertStartFailed, startRevertAgent } from "./revert-start";
 import { awaitRevertCi, revertStillRed } from "./revert-watch";
 import { advanceSpec } from "./spec-approval";
 import { builderOpenPr, holdEarlyPr } from "./spec-early-pr";
@@ -36,16 +37,18 @@ export async function advanceBuilding(
   const infra = { kind: "infrastructure" } as const;
   // A rebuild that ends without its new PR leaves the PR it was replacing stuck with the user.
   const original = unreplacedOriginal(ctx, item);
+  const revert = item.source === "revert";
   const fail = (reason: string) => {
     if (original) return rebuildFailed(ctx, loop, item, original, reason);
     // The agent writing a revert gave up: the default branch stays red, and the user hears it.
-    if (item.source === "revert")
-      return revertBlocked(ctx, project, loop, item, lowerFirst(reason));
+    if (revert) return revertBlocked(ctx, project, loop, item, lowerFirst(reason));
     return failItem(ctx, loop, item, reason);
   };
   // A spec waiting for a person, or their decision on its way to the builder (`spec-approval.ts`).
   const held = await advanceSpec(ctx, project, loop, item, s);
   if (held) return held;
+  // The agent writing a revert couldn't start or carry on: it starts again (`revert-start.ts`).
+  if (!s && revert) return revertStartFailed(ctx, project, loop, item, "its session is gone");
   if (!s) return failItem(ctx, loop, item, "The builder session is gone", infra);
   if (BUSY.has(s.status)) return loop;
   const fixAt = item.attempts > 0 ? item.nudges[`fix_${item.attempts}`] : undefined;
@@ -74,14 +77,18 @@ export async function advanceBuilding(
     if (s.status === "failed") {
       const cause = providerFailure(ctx.repo, ctx.inbox, s);
       if (cause && providerWide(cause)) ctx.sessions.providerFailed(s.provider, cause);
+      if (revert) return revertStartFailed(ctx, project, loop, item, revertSessionFailure(ctx, s));
       return failItem(ctx, loop, item, BUILDER_FAILED_REASON, infra);
     }
     return fail("The builder session stopped without a pull request");
   }
-  // Its first step isn't reported yet, or a person asked for changes to the spec.
+  // Its first step isn't reported yet, or a person asked for changes to the spec. A revert has
+  // none: the agent writing it only reverts the merge.
   const revising = item.specApproval?.state === "changes_requested";
   const investigating =
-    (!item.investigation || revising) && (item.type === "bug" || item.type === "feature");
+    !revert &&
+    (!item.investigation || revising) &&
+    (item.type === "bug" || item.type === "feature");
   if (investigating) {
     const step = item.type === "bug" ? "reproduction" : "analysis";
     const asked = item.nudges.builder_investigate;
@@ -250,25 +257,24 @@ async function regression(
     revertOf: item.id,
   };
   let revertNote: string;
-  /** The revert item when no agent could start to write it, and why. */
+  /** The revert item when no agent could start to write it, and why: it is started again. */
   let unstarted: { revert: FactoryItem; why: string } | null = null;
   if (revertPr) {
     ctx.store.createItem({ ...base, stage: "verifying", pr: revertPr, nudges: { verifying: at } });
     revertNote = `revert PR #${revertPr.number} is open`;
   } else {
-    const res = await ctx.sessions.startRevert(project.id, { sha, prNumber, title: item.title });
-    const sessionId = res.status === "started" ? res.sessionId : null;
+    const started = await startRevertAgent(ctx, project.id, { sha, prNumber, title: item.title });
+    const sessionId = "sessionId" in started ? started.sessionId : null;
     const revert = ctx.store.createItem({
       ...base,
-      stage: sessionId ? "building" : "failed",
+      stage: sessionId ? "building" : "backlog",
       builderSessionId: sessionId,
       note: sessionId ? "An agent is writing the revert" : null,
-      reason: sessionId ? null : `Could not start the revert session (${res.status})`,
     });
-    if (!sessionId) unstarted = { revert, why: `no agent could start to write it (${res.status})` };
+    if ("why" in started) unstarted = { revert, why: started.why };
     revertNote = sessionId
       ? "an agent is writing the revert PR"
-      : "the revert could not be started";
+      : "the revert couldn't start yet: it starts again on the next free agent";
   }
   ctx.store.updateItem(item.id, (i) => ({
     ...i,
@@ -308,7 +314,7 @@ async function regression(
   const reason = `${prefix}${prNumber}; ${revertNote}`;
   const paused = keep ? next : pauseLoop(ctx, next, reason, { inbox: false });
   if (!unstarted) return paused;
-  return revertBlocked(ctx, project, paused, unstarted.revert, unstarted.why);
+  return revertStartFailed(ctx, project, paused, unstarted.revert, unstarted.why);
 }
 
 /** "The builder ..." as the middle of a sentence. */

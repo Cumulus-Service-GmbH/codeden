@@ -26,7 +26,9 @@ import { FOLLOW_UPS_DUE, FOLLOW_UPS_HELD } from "./store";
  * agent review; otherwise (conflicts resolved, more changed) the normal review applies. It merges
  * first, once its CI is green. When it merged and CI on the default branch is green again, the
  * loop resumes and the reverted work goes back to its builder as a revise round. A revert that
- * can't merge is one clear inbox item (`revert-blocked.ts`).
+ * can't merge is one clear inbox item (`revert-blocked.ts`); one whose agent couldn't start
+ * starts again (`revert-start.ts`); and with none on its way any more, a green default branch
+ * ends the regression (`resumeWhenGreen`).
  *
  * Nudges: `revert_inexact_<sha>` on a revert item (that head isn't an exact revert); on the
  * reverted item `after_revert_due` (the revert landed: its revise round is due) and
@@ -42,6 +44,18 @@ const FAILED_ON_MAIN = "failed_on_main:";
 /** The item whose merge a revert item reverts. */
 function revertedItem(ctx: FactoryContext, revert: FactoryItem): FactoryItem | undefined {
   return revert.revertOf ? ctx.store.item(revert.revertOf) : undefined;
+}
+
+/** Reverts still on their way: queued to start, being written, checked or watched on main. */
+function liveReverts(ctx: FactoryContext, projectId: string): FactoryItem[] {
+  return ctx.store
+    .items(projectId, ["backlog", "building", "verifying", "watching"])
+    .filter((i) => i.source === "revert");
+}
+
+/** A revert that merged (by the factory, or by a person on GitHub), not one that only finished. */
+function revertMerged(revert: FactoryItem): boolean {
+  return revert.stage === "merged" && (revert.mergeSha !== null || revert.pr?.state === "merged");
 }
 
 /** The verdict an exact revert gets instead of an agent review. */
@@ -162,9 +176,7 @@ export function revertLanded(
     }));
   }
   // Another revert still on its way means another regression still holds the default branch.
-  const pending = ctx.store
-    .items(project.id, ["building", "verifying", "watching"])
-    .some((i) => i.source === "revert" && i.id !== revert.id);
+  const pending = liveReverts(ctx, project.id).some((i) => i.id !== revert.id);
   const paused =
     loop.state === "paused" &&
     !pending &&
@@ -194,7 +206,7 @@ export function revertsOnResume(ctx: FactoryContext, projectId: string): void {
   const at = ctx.now().toISOString();
   const reverts = ctx.store
     .items(projectId, ["watching", "merged"])
-    .filter((i) => i.source === "revert" && (i.stage === "merged" || unverifiedRevert(i)));
+    .filter((i) => i.source === "revert" && (revertMerged(i) || unverifiedRevert(i)));
   for (const revert of reverts) {
     if (revert.stage === "watching") {
       ctx.store.updateItem(revert.id, (i) => ({
@@ -215,6 +227,53 @@ export function revertsOnResume(ctx: FactoryContext, projectId: string): void {
     const inbox = ctx.inbox.find(regressionInboxId(original.id));
     if (inbox?.status === "open") ctx.inbox.close(inbox, "resolved", { note: "loop resumed" });
   }
+}
+
+/**
+ * A regression pause with no revert on its way any more (a person closed it and fixed the
+ * default branch forward, or merged it on GitHub, so nobody watches CI on it): once CI on the
+ * default branch is green again, whatever fixed it, the regression is over and the loop resumes,
+ * as when a revert lands (#509). Work whose revert merged goes back to its builder, once
+ * (`revertsOnResume`); work whose revert didn't keeps its merge. Another pause stays.
+ */
+export async function resumeWhenGreen(
+  ctx: FactoryContext,
+  project: Project,
+  loop: FactoryLoop,
+): Promise<FactoryLoop> {
+  const branch = baseBranchOf(project);
+  if (loop.state !== "paused" || !loop.pausedReason?.startsWith(regressionPausePrefix(branch)))
+    return loop;
+  if (liveReverts(ctx, project.id).length > 0) return loop;
+  const head = await ctx.github.mainHead(project.id).catch(() => null);
+  if (head?.checks !== "success") return loop;
+  revertsOnResume(ctx, project.id);
+  const green = `CI on ${branch} is green again (${head.sha.slice(0, 7)})`;
+  const reverts = ctx.store.items(project.id).filter((i) => i.source === "revert");
+  for (const original of ctx.store.items(project.id, ["reverted"])) {
+    const inbox = ctx.inbox.find(regressionInboxId(original.id));
+    if (inbox?.status !== "open") continue;
+    if (reverts.some((r) => r.revertOf === original.id && revertMerged(r))) {
+      ctx.inbox.close(inbox, "resolved", { note: green });
+      continue;
+    }
+    ctx.inbox.close(inbox, "resolved", { note: `${green}; the revert didn't merge` });
+    ctx.store.updateItem(original.id, (i) => ({
+      ...i,
+      note: `Its revert didn't merge, and ${green}: its merge stands`,
+    }));
+  }
+  factoryNotice(ctx, {
+    id: `factory.regression-over:${project.id}:${head.sha}`,
+    projectId: project.id,
+    target: "pm",
+    event: "regression",
+    title: `${green}; the loop resumed`,
+    text: "No revert is on its way any more, so the loop no longer waits for one.",
+    wake: false,
+  });
+  ctx.log?.(`factory: resuming ${project.id}: ${branch} is green with no revert on its way`);
+  return { ...loop, state: "idle", pausedReason: null };
 }
 
 /**

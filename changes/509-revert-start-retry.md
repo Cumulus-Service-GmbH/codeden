@@ -1,0 +1,5 @@
+---
+section: fixed
+---
+
+- **An automatic revert whose agent couldn't start no longer leaves the default branch red and the factory paused for good.** A revert carries the reverted work's issue, which the merge it undoes usually closed, so when its agent failed to start (a runner start that timed out on a busy machine) it was settled as "The issue was closed on GitHub: resolved by #N", the very merge it was meant to revert, and no revert ever ran. A closed issue no longer stops a revert. A revert whose start fails goes back to the queue and starts again on the next free agent, ahead of all other work, also while the regression pauses the loop. After three failed starts, one inbox item says so: "main is red and the revert of #N couldn't start: <reason>", with Retry or fixing main by hand and resuming. And a regression pause no longer waits on a revert that's gone: once no revert is on its way (a person closed it to fix main forward, or merged it on GitHub) and CI on the default branch is green again, the loop resumes by itself. The reverted work goes back to its builder only if the revert actually merged.

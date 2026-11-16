@@ -14,6 +14,8 @@ import { rebuildOriginal } from "./rebuild";
  * to ownership (`owned.ts`): a person merging or closing that PR finishes it (`prDecidedOutside`,
  * with the merge recorded), and while it is open it waits for them. Its "Fixes #n" closes the
  * issue in the same sync as the merge, so settling it here would pre-empt that.
+ *
+ * An automatic revert never stops for a closed issue (`closedIssueOf`), here or in the queue.
  */
 
 const CLOSED_AS: Record<NonNullable<GithubIssue["stateReason"]>, string> = {
@@ -22,13 +24,28 @@ const CLOSED_AS: Record<NonNullable<GithubIssue["stateReason"]>, string> = {
   duplicate: " as a duplicate",
 };
 
+/**
+ * The item's issue when it was closed on GitHub, which stops the item; null otherwise. Never for
+ * an automatic revert: it carries the reverted item's issue, which the very merge it undoes
+ * usually closed ("Fixes #n"), and the default branch stays red until it lands (#509).
+ */
+export function closedIssueOf(
+  ctx: FactoryContext,
+  projectId: string,
+  item: FactoryItem,
+): GithubIssue | null {
+  if (!item.issue || item.source === "revert") return null;
+  const issue = ctx.github.issue(projectId, item.issue.number);
+  return issue?.state === "closed" ? issue : null;
+}
+
 /** Settle the project's failed items whose issue was closed; returns how many it settled. */
 export function settleClosedIssues(ctx: FactoryContext, project: Project): number {
   let settled = 0;
   for (const item of ctx.store.items(project.id, ["failed"])) {
-    if (!item.issue || item.pr || rebuildOriginal(item)) continue;
-    const issue = ctx.github.issue(project.id, item.issue.number);
-    if (issue?.state !== "closed") continue;
+    if (item.pr || rebuildOriginal(item)) continue;
+    const issue = closedIssueOf(ctx, project.id, item);
+    if (!issue) continue;
     settle(ctx, project, item, issue);
     settled++;
   }

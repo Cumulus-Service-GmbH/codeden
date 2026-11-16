@@ -118,12 +118,14 @@ export async function recoverInfraFailures(
   loop: FactoryLoop,
   opts: { resume: boolean; only?: ReadonlySet<string> } = { resume: true },
 ): Promise<FactoryLoop> {
-  // A paused loop (budget, failures in a row) starts no agent turns; resuming it recovers.
-  if (loop.state === "paused") return loop;
+  // A paused loop (budget, failures in a row) starts no agent turns; resuming it recovers. Reverts
+  // are the exception: a regression's pause waits on them.
+  const paused = loop.state === "paused";
   let next = loop;
   const providers = ctx.sessions.providers();
   const waits: ProviderWait[] = [];
   for (const item of ctx.store.items(project.id, ["failed"])) {
+    if (paused && item.source !== "revert") continue;
     if (!recoverable(item) || (opts.only && !opts.only.has(item.id))) continue;
     // A builder that lost a message race to its own turn is told to carry on by `turn-race.ts`.
     if (ownsTurnRaceFailure(ctx, item)) continue;
