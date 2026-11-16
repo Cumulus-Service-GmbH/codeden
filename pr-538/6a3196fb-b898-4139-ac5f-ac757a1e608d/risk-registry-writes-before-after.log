@@ -1,0 +1,194 @@
+===== BEFORE the fix (pre-fix source 18a2f25d, final test file) =====
+
+ RUN  v5.1.0 <home>/AppData/Local/Temp/cd533-prefix
+
+ ❯ |@codeden/providers| test/risk-registry-writes.test.ts (9 tests | 7 failed) 119ms
+   ❯ registry writes (#533) (4)
+     × asks when reg adds, imports, copies, restores or loads registry keys 12ms
+     × asks when a PowerShell item cmdlet writes a registry key, value or certificate 5ms
+     × asks when setx or SetEnvironmentVariable changes the environment for good 2ms
+     × still runs reads of the registry, exports into the worktree and the running shell's environment 37ms
+   ❯ New-Item and Set-Item writing files (#533) (2)
+     × asks when New-Item creates a file outside the worktree 4ms
+     × still runs New-Item and Set-Item in the worktree, temp and the shell's own drives 54ms
+   ❯ relative paths after cd into a PowerShell drive (#533) (3)
+     × asks when a relative delete or write follows a cd into the registry 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 7 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |@codeden/providers| test/risk-registry-writes.test.ts > registry writes (#533) > asks when reg adds, imports, copies, restores or loads registry keys
+AssertionError: reg add HKCU\Software\Foo /v Bar /d 1 /f: expected null to be 'outside_worktree' // Object.is equality
+
+- Expected:
+"outside_worktree"
+
++ Received:
+null
+
+ ❯ test/risk-registry-writes.test.ts:48:37
+     46|       "regedit.exe evil.reg",
+     47|     ]) {
+     48|       expect(action(cmd, win), cmd).toBe("outside_worktree");
+       |                                     ^
+     49|       expect(action(cmd, ps), `${cmd} (PowerShell)`).toBe("outside_wor…
+     50|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/7]⎯
+
+ FAIL  |@codeden/providers| test/risk-registry-writes.test.ts > registry writes (#533) > asks when a PowerShell item cmdlet writes a registry key, value or certificate
+AssertionError: Set-ItemProperty HKCU:\Software\Microsoft\Windows\CurrentVersion\Run -Name x -Value C:\x.exe: expected null to be 'outside_worktree' // Object.is equality
+
+- Expected:
+"outside_worktree"
+
++ Received:
+null
+
+ ❯ test/risk-registry-writes.test.ts:108:36
+    106|       "[Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Software\…
+    107|     ]) {
+    108|       expect(action(cmd, ps), cmd).toBe("outside_worktree");
+       |                                    ^
+    109|       expect(action(cmd, win), `${cmd} (shell unknown)`).toBe("outside…
+    110|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/7]⎯
+
+ FAIL  |@codeden/providers| test/risk-registry-writes.test.ts > registry writes (#533) > asks when setx or SetEnvironmentVariable changes the environment for good
+AssertionError: setx PATH C:\evil: expected null to be 'outside_worktree' // Object.is equality
+
+- Expected:
+"outside_worktree"
+
++ Received:
+null
+
+ ❯ test/risk-registry-writes.test.ts:135:37
+    133|   it("asks when setx or SetEnvironmentVariable changes the environment…
+    134|     for (const cmd of ["setx PATH C:\\evil", "setx FOO bar /m", "setx.…
+    135|       expect(action(cmd, win), cmd).toBe("outside_worktree");
+       |                                     ^
+    136|       expect(action(cmd, ps), `${cmd} (PowerShell)`).toBe("outside_wor…
+    137|     }
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/7]⎯
+
+ FAIL  |@codeden/providers| test/risk-registry-writes.test.ts > registry writes (#533) > still runs reads of the registry, exports into the worktree and the running shell's environment
+AssertionError: expected null to be 'Writes C:\Users\me\foo.reg, outside t…' // Object.is equality
+
+- Expected:
+"Writes C:\\Users\\me\\foo.reg, outside the worktree"
+
++ Received:
+null
+
+ ❯ test/risk-registry-writes.test.ts:186:82
+    184|     expect(action("reg query HKCU\\\\Software\\\\Foo //s", gitBash)).t…
+    185|     // An export is a file write, judged like one.
+    186|     expect(reason("reg export HKCU\\Software\\Foo C:\\Users\\me\\foo.r…
+       |                                                                                  ^
+    187|       "Writes C:\\Users\\me\\foo.reg, outside the worktree",
+    188|     );
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/7]⎯
+
+ FAIL  |@codeden/providers| test/risk-registry-writes.test.ts > New-Item and Set-Item writing files (#533) > asks when New-Item creates a file outside the worktree
+AssertionError: New-Item C:\Windows\x.txt -ItemType File -Value hi: expected null to be 'outside_worktree' // Object.is equality
+
+- Expected:
+"outside_worktree"
+
++ Received:
+null
+
+ ❯ test/risk-registry-writes.test.ts:211:36
+    209|       "cd C:\\Users\\me; New-Item x.txt -Value hi",
+    210|     ]) {
+    211|       expect(action(cmd, ps), cmd).toBe("outside_worktree");
+       |                                    ^
+    212|     }
+    213|     expect(classifyCommand("New-Item C:\\Windows\\x.txt -ItemType File…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[5/7]⎯
+
+ FAIL  |@codeden/providers| test/risk-registry-writes.test.ts > New-Item and Set-Item writing files (#533) > still runs New-Item and Set-Item in the worktree, temp and the shell's own drives
+AssertionError: expected 'secrets' to be null
+
+- Expected:
+null
+
++ Received:
+"secrets"
+
+ ❯ test/risk-registry-writes.test.ts:247:58
+    245|     }
+    246|     // Creating an env file in the worktree reads nothing (as with Set…
+    247|     expect(action("New-Item .env -Value PORT=3000", ps)).toBeNull();
+       |                                                          ^
+    248|   });
+    249| });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[6/7]⎯
+
+ FAIL  |@codeden/providers| test/risk-registry-writes.test.ts > relative paths after cd into a PowerShell drive (#533) > asks when a relative delete or write follows a cd into the registry
+AssertionError: cd HKCU:\Software; Remove-Item Foo -Recurse: expected null to be 'outside_worktree' // Object.is equality
+
+- Expected:
+"outside_worktree"
+
++ Received:
+null
+
+ ❯ test/risk-registry-writes.test.ts:268:36
+    266|       "cd Cert:\\CurrentUser\\My; Remove-Item ABC123",
+    267|     ]) {
+    268|       expect(action(cmd, ps), cmd).toBe("outside_worktree");
+       |                                    ^
+    269|     }
+    270|     expect(classifyCommand("cd HKCU:\\Software; Remove-Item Foo -Recur…
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[7/7]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  7 failed | 2 passed (9)
+   Start at  09:55:41
+   Duration  1.19s (transform 64%, import 24%, tests 12%)
+
+
+
+===== AFTER the fix =====
+
+ RUN  v5.1.0 <home>/.codeden/wt/codeden/6a3196fb
+
+ ✓ |@codeden/providers| test/risk-registry-writes.test.ts > registry writes (#533) > asks when reg adds, imports, copies, restores or loads registry keys 91ms
+ ✓ |@codeden/providers| test/risk-registry-writes.test.ts > registry writes (#533) > asks when a PowerShell item cmdlet writes a registry key, value or certificate 182ms
+ ✓ |@codeden/providers| test/risk-registry-writes.test.ts > registry writes (#533) > asks when setx or SetEnvironmentVariable changes the environment for good 23ms
+ ✓ |@codeden/providers| test/risk-registry-writes.test.ts > registry writes (#533) > still runs reads of the registry, exports into the worktree and the running shell's environment 35ms
+ ✓ |@codeden/providers| test/risk-registry-writes.test.ts > New-Item and Set-Item writing files (#533) > asks when New-Item creates a file outside the worktree 40ms
+ ✓ |@codeden/providers| test/risk-registry-writes.test.ts > New-Item and Set-Item writing files (#533) > still runs New-Item and Set-Item in the worktree, temp and the shell's own drives 49ms
+ ✓ |@codeden/providers| test/risk-registry-writes.test.ts > relative paths after cd into a PowerShell drive (#533) > asks when a relative delete or write follows a cd into the registry 13ms
+ ✓ |@codeden/providers| test/risk-registry-writes.test.ts > relative paths after cd into a PowerShell drive (#533) > still runs relative deletes after a cd into the shell's own drives or back to a folder 1ms
+ ✓ |@codeden/providers| test/risk-registry-writes.test.ts > relative paths after cd into a PowerShell drive (#533) > reads a colon as part of a file name elsewhere than Windows 0ms
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  09:56:11
+   Duration  946ms (tests 53%, import 28%, transform 19%, worker 1%)
+
+
+
+===== pnpm test (full suite, tail) =====
+Not implemented: Window's scrollTo() method
+Not implemented: Window's scrollTo() method
+
+ Test Files  561 passed | 12 skipped (573)
+      Tests  4408 passed | 55 skipped (4463)
+   Start at  09:51:05
+   Duration  164.60s (tests 40%, import 29%, transform 14%, environment 12%, setup 4%)
+
+Environment  |@codeden/web| jsdom was created 118 times · 370.45s total, 36% of tracked time
+             create it once per worker with pool: 'vmThreads' (keeps per-file isolation) or isolate: false (shares it across files)
+             learn more: https://vitest.dev/guide/improving-performance#test-environments
+
+
