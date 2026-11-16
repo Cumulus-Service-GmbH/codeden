@@ -246,6 +246,27 @@ describe("New-Item and Set-Item writing files (#533)", () => {
     // Creating an env file in the worktree reads nothing (as with Set-Content).
     expect(action("New-Item .env -Value PORT=3000", ps)).toBeNull();
   });
+
+  it("still asks when Rename-Item moves a secrets file, which hands it over under a new name", () => {
+    for (const cmd of [
+      "Rename-Item .env x.txt",
+      "Rename-Item -Path .env -NewName x.txt",
+      "rni .env x.txt",
+      "Rename-Item .env.local notes.md",
+      "Rename-Item secrets\\id_rsa key.txt",
+      "Rename-Item C:\\work\\repo\\.env x.txt",
+      "Rename-Item .env notes.txt; Get-Content notes.txt",
+    ]) {
+      expect(action(cmd, ps), cmd).toBe("secrets");
+    }
+    // cmd's `ren`, like `mv .env x.txt` and `Move-Item .env x.txt`.
+    expect(action("ren .env x.txt", win)).toBe("secrets");
+    expect(classifyCommand("Rename-Item .env x.txt", ps)).toEqual({
+      risky: true,
+      action: "secrets",
+      reason: "Accesses the secrets file .env",
+    });
+  });
 });
 
 describe("relative paths after cd into a PowerShell drive (#533)", () => {

@@ -30,11 +30,18 @@ interface ItemCmdlet {
   creates?: true;
   /** Makes folders (`mkdir`, `md`). */
   folder?: true;
+  /**
+   * Its path is the source of a move (`Rename-Item .env notes.txt`), which hands the file's
+   * content over under a new name: the path still counts as a read for the secrets check, as
+   * `mv .env x` and `Move-Item .env x` do.
+   */
+  moves?: true;
 }
 
 const PATHS = ["path", "literalpath", "lp", "pspath"];
 const AT_PATH: ItemCmdlet = { positions: [0], named: PATHS, here: true };
 const NEW_ITEM: ItemCmdlet = { ...AT_PATH, creates: true };
+const RENAME: ItemCmdlet = { ...AT_PATH, moves: true };
 const COPY_PROPERTY: ItemCmdlet = { positions: [1], named: ["destination"] };
 const MOVE_PROPERTY: ItemCmdlet = { positions: [0, 1], named: [...PATHS, "destination"] };
 const MKDIR: ItemCmdlet = { positions: "all", named: PATHS, folder: true };
@@ -47,9 +54,9 @@ const CMDLETS: Record<string, ItemCmdlet> = {
   si: AT_PATH,
   "clear-item": AT_PATH,
   cli: AT_PATH,
-  "rename-item": AT_PATH,
-  rni: AT_PATH,
-  ren: AT_PATH,
+  "rename-item": RENAME,
+  rni: RENAME,
+  ren: RENAME,
   "clear-content": AT_PATH,
   clc: AT_PATH,
   "new-itemproperty": AT_PATH,
@@ -72,7 +79,10 @@ const SWITCHES = ["force", "passthru", "whatif", "confirm", "usetransaction", "v
 /** A PowerShell parameter (`-Path`, `-Path:x`); not a negative number or a lone `-`. */
 const PARAM = /^-([a-z][\w-]*)(?::(.*))?$/is;
 
-/** What an item cmdlet writes: the paths to judge, and the words naming them (not secrets reads). */
+/**
+ * What an item cmdlet writes: the paths to judge, and the words naming them that read nothing (a
+ * secrets file it only writes, `New-Item .env`, is not a secrets access; one it moves is).
+ */
 export interface ItemWrites {
   targets: string[];
   words: string[];
@@ -105,6 +115,7 @@ export function itemWrites(
       return provider !== undefined && provider.path === undefined;
     });
   }
+  if (cmdlet.moves) return { targets, words: [] };
   return { targets, words: name ? [...words, name] : words };
 }
 

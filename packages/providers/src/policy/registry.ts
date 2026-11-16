@@ -40,8 +40,10 @@ const operands = (args: string[]): string[] => args.filter((a) => !SWITCH.test(a
 /**
  * The verdict on a command that changes the registry or the lasting environment, or undefined.
  * `words`: the whole command, for the .NET calls PowerShell makes in an expression. Only a word
- * that starts with a type (`[Environment]::…`, `[void][…]`) is read as one, so a call quoted in
- * text (`gh pr create --body "… SetEnvironmentVariable(…) …"`) is not.
+ * that starts with a type (`[Environment]::…`, `[void][…]`) is read as one, so a call mentioned
+ * inside text (`gh pr create --body "Uses [Environment]::SetEnvironmentVariable(…)"`) is not.
+ * Quotes are gone from the words by then, so quoted text that starts with such a call is read as
+ * one and asks; that errs on the side of asking.
  */
 export function registryChange(
   bin: string,
