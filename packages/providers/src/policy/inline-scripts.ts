@@ -1,9 +1,11 @@
-import type { ShellDialect } from "./shell";
+import type { ShellDialect, SimpleCommand } from "./shell";
+import { startedProcesses } from "./start-process";
 
 /**
  * Command lines that another command runs (§11.2): a shell's inline script (`bash -c "…"`,
- * `pwsh -Command …`, `cmd /c …`) and the commands of cmd's `for` loop (#499). The risk
- * classifier parses each one and classifies it like a command line of its own.
+ * `pwsh -Command …`, `cmd /c …`), the commands of cmd's `for` loop (#499) and the program
+ * `Start-Process` starts (#541, `./start-process`). The risk classifier parses each one and
+ * classifies it like a command line of its own.
  */
 
 export interface InlineScript {
@@ -15,12 +17,16 @@ export interface InlineScript {
    * command a `for /f` loop reads (`('set AWS')`).
    */
   feeds?: boolean;
+  /** The folder it runs in (`Start-Process -WorkingDirectory`), as written; else where it is run. */
+  dir?: string;
+  /** True when it runs elevated (`Start-Process -Verb RunAs`). */
+  elevated?: boolean;
 }
 
 const SHELLS = new Set(["sh", "bash", "zsh", "dash", "ksh", "ash", "fish"]);
 
-/** The command lines `bin` runs, given the words after it. */
-export function inlineScripts(bin: string, args: string[]): InlineScript[] {
+/** The command lines `bin` runs, given the words after it; `cmd`: the command they are from. */
+export function inlineScripts(bin: string, args: string[], cmd: SimpleCommand): InlineScript[] {
   if (SHELLS.has(bin)) {
     const flag = args.findIndex((a) => /^-[a-z]*c[a-z]*$/i.test(a));
     const text = flag >= 0 ? args.slice(flag + 1).find((a) => !a.startsWith("-")) : undefined;
@@ -37,7 +43,7 @@ export function inlineScripts(bin: string, args: string[]): InlineScript[] {
     return cmdForms(args.slice(flag + 1).join(" ")).map((text) => ({ text, dialect: "auto" }));
   }
   if (bin === "for") return forLoop(args);
-  return [];
+  return startedProcesses(bin, args, cmd);
 }
 
 /**

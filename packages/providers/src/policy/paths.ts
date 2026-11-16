@@ -18,6 +18,11 @@ export interface PathContext {
    * paths then name items on that drive, not files under `dir` (`./paths`' `providerPath`).
    */
   psDrive?: string;
+  /**
+   * Locations `pushd`/`Push-Location` saved earlier in the command, the latest last, for
+   * `popd`/`Pop-Location` to go back to (`./locations`).
+   */
+  pushed?: readonly SavedLocation[];
   /** Extra writable roots (SessionOptions.additionalDirectories). */
   extraRoots?: readonly string[];
   /** The OS temp directories. Defaults to `osTempRoots()` for the running platform. */
@@ -52,6 +57,14 @@ export interface PathContext {
    * `CLAUDE_CONFIG_DIR`, `XDG_*`, ...; `./provider-logins`). Defaults to `process.env`.
    */
   env?: Readonly<Record<string, string | undefined>>;
+}
+
+/** A location saved on the shell's location stack: `PathContext`'s `dir` and `psDrive`. */
+export interface SavedLocation {
+  dir?: string;
+  psDrive?: string;
+  /** The named stack it is on (`Push-Location -StackName x`), lower-cased; none for the default. */
+  stack?: string;
 }
 
 /** True when the context's paths are Windows paths. */

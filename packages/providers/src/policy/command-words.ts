@@ -80,6 +80,57 @@ function envCommand(args: string[]): string[] {
 /** Commands that change the shell's current directory. */
 export const CD = new Set(["cd", "pushd", "chdir", "set-location", "sl", "push-location"]);
 
+/**
+ * The value of a PowerShell-style named parameter, if present: `-Path x`, or bound with a
+ * colon, `-Path:x`.
+ */
+export function namedArg(args: string[], names: string[]): string | undefined {
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = (args[i] as string).toLowerCase();
+    if (names.includes(arg)) return args[i + 1];
+    const bound = names.find((name) => arg.startsWith(`${name}:`));
+    if (bound) return (args[i] as string).slice(bound.length + 1);
+  }
+  return undefined;
+}
+
+/**
+ * A cmdlet's arguments with each PowerShell script block (`-NewName { $_.Name + '.bak' }`) joined
+ * into one, as PowerShell passes it (#541). A block runs from a word starting with `{` to the word
+ * that closes it, braces counted, or to the end of the words when a `;` inside it ended the command
+ * early. Quotes are gone by then, so a brace inside a string in the block counts too.
+ */
+export function joinScriptBlocks(args: string[]): string[] {
+  const out: string[] = [];
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i] as string;
+    if (!isScriptBlock(arg)) {
+      out.push(arg);
+      continue;
+    }
+    const block = [arg];
+    let depth = braces(arg);
+    while (depth > 0 && i + 1 < args.length) {
+      i += 1;
+      block.push(args[i] as string);
+      depth += braces(args[i] as string);
+    }
+    out.push(block.join(" "));
+  }
+  return out;
+}
+
+/** True for a script block argument: a word starting with `{`, as PowerShell reads one. */
+export const isScriptBlock = (word: string): boolean => word.startsWith("{");
+
+/** The words inside a script block `joinScriptBlocks` joined, without its braces. */
+export const scriptBlockWords = (block: string): string[] =>
+  block.replace(/^\{/, "").replace(/\}$/, "").split(/\s+/).filter(Boolean);
+
+/** How many more `{` than `}` a word has. */
+const braces = (word: string): number =>
+  (word.match(/\{/g)?.length ?? 0) - (word.match(/\}/g)?.length ?? 0);
+
 /** Redirect targets that write nothing anywhere (`2>/dev/null`, `> nul`, `> $null`). */
 export const DISCARD = /^(\/dev\/(null|stdout|stderr|tty)|nul|\$null)$/i;
 

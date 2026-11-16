@@ -9,14 +9,23 @@ import {
   touchesCodedenCredentials,
   touchesCodedenHome,
 } from "./codeden-home";
-import { binName, CD, DISCARD, unwrap } from "./command-words";
+import {
+  binName,
+  DISCARD,
+  isScriptBlock,
+  joinScriptBlocks,
+  namedArg,
+  scriptBlockWords,
+  unwrap,
+} from "./command-words";
 import { classifyDelete } from "./deletes";
 import { dumpsEnvironment } from "./env-dumps";
 import { type ListOutput, namesOnly } from "./env-names";
 import { classifyGit } from "./git";
-import { inlineScripts } from "./inline-scripts";
+import { type InlineScript, inlineScripts } from "./inline-scripts";
 import { classifyInstall } from "./installs";
 import { itemWrites } from "./item-writes";
+import { afterCd, moveTo } from "./locations";
 import {
   isInside,
   isInWorkspace,
@@ -120,11 +129,12 @@ function firstInList(
     }
     const piped = list[i + 1]?.piped === true;
     const { tokens } = unwrap(cmd.words);
-    const scripts = depth < MAX_DEPTH ? inlineScripts(binName(tokens[0]), tokens.slice(1)) : [];
+    const bin = binName(tokens[0]);
+    const scripts = depth < MAX_DEPTH ? inlineScripts(bin, tokens.slice(1), cmd) : [];
     for (const script of scripts) {
       const inner = parseShell(script.text, script.dialect);
       const into = feeds || piped || script.feeds === true;
-      const found = firstInList(inner, here, depth + 1, check, into);
+      const found = firstInList(inner, scriptContext(script, here), depth + 1, check, into);
       if (found) return found;
     }
     const found = check(cmd, here, feeds || piped);
@@ -174,35 +184,12 @@ function classifyList(
 }
 
 /**
- * The context after `cmd` when it changes directory (`cd dir`, `Set-Location -Path dir`). A `cd`
- * onto a PowerShell drive that isn't the filesystem (`cd HKCU:\Software`, then `cd Foo`) moves
- * relative paths there (`psDrive`) until a `cd` back to a folder.
+ * Where an inline script runs: in its own folder when it names one (`Start-Process
+ * -WorkingDirectory`), in a new process, which starts with a location stack of its own.
  */
-function afterCd(cmd: SimpleCommand, ctx: RiskContext): RiskContext {
-  const { tokens } = unwrap(cmd.words);
-  if (!CD.has(binName(tokens[0]))) return ctx;
-  const args = tokens.slice(1);
-  if (args.includes("-")) return ctx;
-  const target =
-    namedArg(args, ["-path", "-literalpath"]) ?? args.find((a) => !a.startsWith("-")) ?? "~";
-  const provider = providerPath(target, ctx);
-  if (provider && provider.path === undefined) return { ...ctx, psDrive: provider.drive };
-  const onDisk = { ...ctx, psDrive: undefined };
-  return { ...onDisk, dir: resolveAgainst(provider?.path ?? target, onDisk) };
-}
-
-/**
- * The value of a PowerShell-style named parameter, if present: `-Path x`, or bound with a
- * colon, `-Path:x`.
- */
-function namedArg(args: string[], names: string[]): string | undefined {
-  for (let i = 0; i < args.length; i += 1) {
-    const arg = (args[i] as string).toLowerCase();
-    if (names.includes(arg)) return args[i + 1];
-    const bound = names.find((name) => arg.startsWith(`${name}:`));
-    if (bound) return (args[i] as string).slice(bound.length + 1);
-  }
-  return undefined;
+function scriptContext(script: InlineScript, ctx: RiskContext): RiskContext {
+  const fresh = { ...ctx, pushed: undefined };
+  return script.dir ? moveTo(script.dir, fresh) : fresh;
 }
 
 /**
@@ -228,10 +215,12 @@ function classifySimple(
   const args = tokens.slice(1);
   const lower = args.map((a) => a.toLowerCase());
 
-  // Inline scripts (`bash -c "…"`) and the commands of cmd's `for` loop.
-  for (const script of depth < MAX_DEPTH ? inlineScripts(bin, args) : []) {
+  // Inline scripts (`bash -c "…"`), the commands of cmd's `for` loop and what Start-Process starts.
+  for (const script of depth < MAX_DEPTH ? inlineScripts(bin, args, cmd) : []) {
+    if (script.elevated) return risky("other", "Runs a command with elevated privileges");
     const output = at.shown && !script.feeds ? "shown" : "feeds";
-    const inner = classifyList(parseShell(script.text, script.dialect), ctx, depth + 1, output);
+    const list = parseShell(script.text, script.dialect);
+    const inner = classifyList(list, scriptContext(script, ctx), depth + 1, output);
     if (inner.risky) return inner;
   }
 
@@ -260,10 +249,18 @@ function classifySimple(
   if (registry) return registry;
 
   const dest = copyDestination(bin, args);
+  // A destination a script block computes (`-Destination { 'C:\Old\' + $_.Name }`): any of its
+  // words may name it.
+  const block = dest !== undefined && isScriptBlock(dest);
+  const dests = !dest
+    ? []
+    : block
+      ? scriptBlockWords(dest).filter((w) => !w.startsWith("-"))
+      : [dest];
   const outputs = [...toolOutputs(bin, args), ...registryExports(bin, args)];
   const items = itemWrites(cmd, ctx, at.source);
-  const written = [...(dest ? [dest] : []), ...outputs, ...items.words];
-  const targets = [...(dest ? copyTargets(bin, args, dest, ctx) : []), ...outputs];
+  const written = [...dests, ...outputs, ...items.words];
+  const targets = [...(dest && !block ? copyTargets(bin, args, dest, ctx) : dests), ...outputs];
   for (const target of [...targets, ...items.targets]) {
     const write = classifyWrite(target, ctx);
     if (write.risky) return write;
@@ -292,9 +289,10 @@ function operands(bin: string, args: string[]): string[] {
   );
 }
 
-/** Where a copy, move or file-writing command writes. */
-function copyDestination(bin: string, args: string[]): string | undefined {
+/** Where a copy, move or file-writing command writes: a path, or a script block computing one. */
+function copyDestination(bin: string, words: string[]): string | undefined {
   if (!COPIES.includes(bin) && !WRITERS.includes(bin)) return undefined;
+  const args = joinScriptBlocks(words);
   const named = WRITERS.includes(bin)
     ? namedArg(args, ["-path", "-filepath", "-literalpath"])
     : namedArg(args, ["-destination"]);

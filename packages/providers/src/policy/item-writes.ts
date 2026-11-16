@@ -1,4 +1,10 @@
-import { binName, unwrap } from "./command-words";
+import {
+  binName,
+  isScriptBlock,
+  joinScriptBlocks,
+  scriptBlockWords,
+  unwrap,
+} from "./command-words";
 import { listedPaths } from "./deletes";
 import { type PathContext, providerPath } from "./paths";
 import { type SimpleCommand, wordPaths } from "./shell";
@@ -16,7 +22,11 @@ import { type SimpleCommand, wordPaths } from "./shell";
  * on disk; on a PowerShell drive it is a registry key or the like, which asks.
  *
  * Parameters are read the way PowerShell binds them, so a value (`-Value C:\x.exe`, `-Name Run`)
- * is never taken for a path: every named parameter but a switch takes the next word.
+ * is never taken for a path: every named parameter but a switch takes the next word, and a script
+ * block (`-NewName { $_.Name + '.bak' }`) is one argument (#541). So `Get-ChildItem C:\Docs |
+ * Rename-Item -NewName { … }` renames the items the pipe hands it, like `-NewName x.bak` does. A
+ * script block given as the path (`-LiteralPath { $_.FullName }`) works on the piped items too, and
+ * its words may name paths.
  */
 
 interface ItemCmdlet {
@@ -99,12 +109,16 @@ export function itemWrites(
   const { tokens } = unwrap(cmd.words);
   const cmdlet = CMDLETS[binName(tokens[0])];
   if (!cmdlet) return NONE;
-  const { named, positional } = readParams(tokens.slice(1));
+  const { named, positional } = readParams(joinScriptBlocks(tokens.slice(1)));
   const at =
     cmdlet.positions === "all" ? positional : cmdlet.positions.flatMap((k) => positional[k] ?? []);
   const words = [...at, ...cmdlet.named.flatMap((name) => valuesOf(named, name))];
-  let paths = words.flatMap((w) => wordPaths(cmd, w));
-  if (paths.length === 0 && cmdlet.here) paths = source ? listedPaths(source) : ["."];
+  let paths = words.flatMap((w) =>
+    isScriptBlock(w) ? scriptBlockWords(w).filter((b) => !b.startsWith("-")) : wordPaths(cmd, w),
+  );
+  if ((paths.length === 0 || words.some(isScriptBlock)) && cmdlet.here) {
+    paths = [...paths, ...(source ? listedPaths(source) : ["."])];
+  }
   const name = cmdlet.creates ? valuesOf(named, "name")[0] : undefined;
   let targets = name ? paths.map((p) => `${p.replace(/[\\/]+$/, "")}\\${name}`) : paths;
   const type = valuesOf(named, "itemtype")[0] ?? valuesOf(named, "type")[0];
