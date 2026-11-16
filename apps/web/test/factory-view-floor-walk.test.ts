@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import {
   cellAt,
   cellCentre,
-  DESK,
   floorSeats,
   type LayoutSeat,
+  WALKWAY,
   type WalkGrid,
   workshopLayout,
 } from "@/components/factory-view/scene/layout";
@@ -77,8 +77,8 @@ describe("the Workshop's walk grid (#476)", () => {
   it("puts a cell's centre inside it", () => {
     const t = { c: 7, r: 3 };
     expect(cellAt(grid, cellCentre(grid, t))).toEqual(t);
-    // Rows line up with the desks: the first desk row's centre is the middle of a cell.
-    expect(((DESK.d / 2 + 1) / grid.cell) % 1).toBeCloseTo(0.5);
+    // Rows line up with the desks: the first desk row's front edge is a cell boundary.
+    expect((WALKWAY / grid.cell) % 1).toBeCloseTo(0);
   });
 
   it("finds the nearest free cell around a taken one", () => {

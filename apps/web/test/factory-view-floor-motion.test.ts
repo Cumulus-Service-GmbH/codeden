@@ -74,7 +74,13 @@ describe("Floor mode's motion (#476)", () => {
   });
 
   it("has the builder carry its crate to the reviewer as a ghost, walk back and leave", () => {
-    const before = sceneFor({ inProgress: [build] });
+    // Its bench is in the middle of a full row: it walks out behind its neighbours.
+    const row = [1, 2, 3].map((i) =>
+      w(`n${i}`, 40 + i, { stage: "building", step: "implement", sessionId: `n${i}` }),
+    );
+    const before = sceneFor({
+      inProgress: [row[0], build, row[1], row[2]].filter(Boolean) as never,
+    });
     const reviewing = w("build", 4, {
       stage: "verifying",
       step: "review",
@@ -82,13 +88,26 @@ describe("Floor mode's motion (#476)", () => {
       sessionId: "s4",
       reviewerSessionId: "r4",
     });
-    const after = sceneFor({ inProgress: [reviewing] }, before);
+    const after = sceneFor({ inProgress: [...row, reviewing] }, before);
     const m = new FloorMotion();
     m.play(after, layout, sceneEvents(before, after), 0);
-    const frames = run(m, after, 0, 40);
+    const frames = run(m, after, 0, 60);
     const ghosts = frames.map((list) => list.find((f) => f.ghost));
     expect(ghosts[0]?.carry).toBe("crate");
     expect(ghosts.some((g) => g && g.carry === null)).toBe(true);
+    // It walks all the way, a cell at a time, to the reviewer's desk and back: no jumps.
+    const seen = ghosts.filter((g) => g !== undefined);
+    for (let i = 1; i < seen.length; i++) {
+      const a = seen[i - 1];
+      const b = seen[i];
+      if (a && b) expect(Math.hypot(b.x - a.x, b.z - a.z)).toBeLessThan(layout.walk.cell * 1.5);
+    }
+    const reviewer = after.seating.seats.get("item:build:reviewer");
+    const desk = reviewer ? seatAt(layout, reviewer.station, reviewer.tile)?.desk : null;
+    const nearest = Math.min(
+      ...seen.map((g) => (desk ? Math.hypot(g.x - desk.x, g.z - desk.z) : 99)),
+    );
+    expect(nearest).toBeLessThan(0.8);
     // Gone once it walked back to its bench.
     expect(ghosts.at(-1)).toBeUndefined();
     // Nobody ever shares a cell with another walker.

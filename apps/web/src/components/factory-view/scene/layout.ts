@@ -83,8 +83,11 @@ export interface LayoutZone {
   rows: number;
 }
 
-/** The walk grid's cells are this wide: fine enough that every desk blocks a row of them. */
-export const WALK_CELL = 0.5;
+/**
+ * The walk grid's cells are this wide: fine enough that every desk blocks a row of them and the
+ * aisle behind a row of seated figures still has a free lane.
+ */
+export const WALK_CELL = 0.25;
 
 /**
  * A grid of square cells over the floor for walking (#476), anchored at the hall's front left:

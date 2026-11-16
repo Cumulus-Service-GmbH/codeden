@@ -131,17 +131,21 @@ export class FloorMotion {
     this.ships = [];
   }
 
-  /** The cells of agents standing still (not walking), and of departed agents standing. */
-  private occupied(scene: Scene, layout: WorkshopLayout): Set<number> {
+  /**
+   * The cells taken by agents standing still (not walking) and departed agents standing: every
+   * cell within a body's reach of where each stands, so walkers pass behind them, not through.
+   */
+  private occupied(scene: Scene, layout: WorkshopLayout, except?: string): Set<number> {
     const grid = layout.walk;
     const walking = new Set(this.movers.filter((m) => !m.ghost).map((m) => m.key));
+    if (except) walking.add(except);
     const out = new Set<number>();
     for (const [key, s] of scene.seating.seats) {
       if (walking.has(key)) continue;
       const seat = seatAt(layout, s.station, s.tile);
-      if (seat && !seat.offFloor) out.add(cellId(grid, cellAt(grid, seat.stand)));
+      if (seat && !seat.offFloor) for (const id of footprint(grid, seat.stand)) out.add(id);
     }
-    for (const s of this.stills) out.add(cellId(grid, cellAt(grid, s.at)));
+    for (const s of this.stills) for (const id of footprint(grid, s.at)) out.add(id);
     return out;
   }
 
@@ -152,7 +156,8 @@ export class FloorMotion {
   ): void {
     this.movers = this.movers.filter((x) => x.key !== m.key);
     const grid = layout.walk;
-    const blocked = this.occupied(scene, layout);
+    // Its own seat doesn't block it.
+    const blocked = this.occupied(scene, layout, m.key);
     const start = cellAt(grid, m.from);
     const goalCell = freeCell(grid, cellAt(grid, m.goal), blocked);
     blocked.delete(cellId(grid, goalCell));
@@ -378,6 +383,25 @@ export class FloorMotion {
     }
     return out;
   }
+}
+
+/** A standing figure keeps others this far from where it stands (its body, and a little room). */
+const BODY_REACH = 0.32;
+
+/** The cells a figure standing at `p` takes: those whose centre lies within its reach. */
+export function footprint(grid: WalkGrid, p: Point): number[] {
+  const at = cellAt(grid, p);
+  const out: number[] = [];
+  const n = Math.ceil(BODY_REACH / grid.cell);
+  for (let dr = -n; dr <= n; dr++)
+    for (let dc = -n; dc <= n; dc++) {
+      const t = { c: at.c + dc, r: at.r + dr };
+      if (t.c < 0 || t.r < 0 || t.c >= grid.cols || t.r >= grid.rows) continue;
+      const c = cellCentre(grid, t);
+      if (dc === 0 && dr === 0) out.push(cellId(grid, t));
+      else if (Math.hypot(c.x - p.x, c.z - p.z) <= BODY_REACH) out.push(cellId(grid, t));
+    }
+  return out;
 }
 
 /** A free cell at or near `t`. */
