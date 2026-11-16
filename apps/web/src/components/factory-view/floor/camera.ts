@@ -46,24 +46,35 @@ interface View {
   zoom: number;
 }
 
-/** The hall's box in screen axes: its 8 corners, projected. */
-function screenBox(box: Box, height: number) {
+/** A box in the world: what the camera frames (a storey, with its walls). */
+export interface Box3D {
+  x0: number;
+  x1: number;
+  y0: number;
+  y1: number;
+  z0: number;
+  z1: number;
+}
+
+/** Boxes in screen axes: their corners, projected. */
+function screenBox(boxes: readonly Box3D[]) {
   let minX = Number.POSITIVE_INFINITY;
   let maxX = Number.NEGATIVE_INFINITY;
   let minY = Number.POSITIVE_INFINITY;
   let maxY = Number.NEGATIVE_INFINITY;
   const p = new Vector3();
-  for (const x of [box.x0, box.x1])
-    for (const y of [0, height])
-      for (const z of [box.z0, box.z1]) {
-        p.set(x, y, z);
-        const sx = p.dot(RIGHT);
-        const sy = p.dot(UP);
-        minX = Math.min(minX, sx);
-        maxX = Math.max(maxX, sx);
-        minY = Math.min(minY, sy);
-        maxY = Math.max(maxY, sy);
-      }
+  for (const box of boxes)
+    for (const x of [box.x0, box.x1])
+      for (const y of [box.y0, box.y1])
+        for (const z of [box.z0, box.z1]) {
+          p.set(x, y, z);
+          const sx = p.dot(RIGHT);
+          const sy = p.dot(UP);
+          minX = Math.min(minX, sx);
+          maxX = Math.max(maxX, sx);
+          minY = Math.min(minY, sy);
+          maxY = Math.max(maxY, sy);
+        }
   return { minX, maxX, minY, maxY };
 }
 
@@ -92,7 +103,12 @@ export class CameraRig {
 
   /** The hall to frame, `height` tall (its walls). */
   setScene(box: Box, height: number): void {
-    this.bounds = screenBox(box, height);
+    this.setBoxes([{ ...box, y0: 0, y1: height }]);
+  }
+
+  /** What to frame: one storey, or both. */
+  setBoxes(boxes: readonly Box3D[]): void {
+    this.bounds = screenBox(boxes);
   }
 
   /** Frames the whole hall; `animate` eases there, else it jumps. */

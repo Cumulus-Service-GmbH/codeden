@@ -32,8 +32,8 @@ export const CURB_H = 0.15;
 export const BOOTH = { w: 2.4, d: 2, h: 0.3 } as const;
 /** Starting seats are laid out for at most this agent limit; growth still adds rows past it. */
 export const MAX_START_LIMIT = 32;
-/** The area reviewers' places (their Lookout storey comes later; they aren't drawn yet). */
-const AREA_SEATS = 4;
+/** The area reviewers' places: one per review area, at their pods on the Lookout storey. */
+const AREA_SEATS = 8;
 
 const INTAKE_W = 2.6;
 const TOWER_W = 0.6;
@@ -67,7 +67,7 @@ export interface LayoutSeat {
   desk: Point | null;
   /** The floor's height under it: 0, or the PM booth's platform. */
   floorY: number;
-  /** Not on the Workshop floor (the scout and area reviewers, drawn in a later part). */
+  /** Not on the Workshop floor (the scout and area reviewers, on the Lookout storey). */
   offFloor: boolean;
 }
 

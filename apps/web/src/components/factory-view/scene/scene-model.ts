@@ -48,8 +48,8 @@ export interface Scene {
   ciRunning: boolean;
   /** Spend against the daily budget, 0..1; null when no budget is set. */
   gauge: number | null;
-  /** Dark factory only. */
-  scout: { round: number; active: boolean } | null;
+  /** Dark factory only; iling while the scout files its round's issues (capsules drop). */
+  scout: { round: number; active: boolean; filing: boolean } | null;
 }
 
 /** Spend today against the daily budget, as the figures measure it (USD first, else tokens). */
@@ -120,7 +120,11 @@ export function sceneOf(inputs: AgentInputs, prev: Seating | null, plan: FloorPl
     gauge: budgetGauge(f),
     scout:
       f.mode === "dark_factory" && f.scout
-        ? { round: f.scout.rounds, active: f.scout.phase !== "idle" }
+        ? {
+            round: f.scout.rounds,
+            active: f.scout.phase !== "idle",
+            filing: f.scout.phase === "filing",
+          }
         : null,
   };
 }

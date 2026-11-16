@@ -7,8 +7,10 @@ import { Button } from "@/components/ui/button";
 import { usePrefersReducedMotion } from "@/lib/motion";
 import { agentCard } from "../scene/agent-card";
 import type { SceneAgent } from "../scene/agents";
+import { lookoutLayout } from "../scene/lookout";
 import { bayCount } from "../scene/repair-bay";
 import { sceneSummary } from "../scene/scene-model";
+import type { StoreyFocus } from "../scene/storeys";
 import { useHover } from "../scene/use-hover";
 import type { SessionInfo, ViewCard, ViewPipeline } from "../stages";
 import { RecentActivity } from "./activity-icons";
@@ -17,6 +19,7 @@ import { FigureLayer, type OverlayHandle } from "./overlay";
 import { useFloorPalette } from "./palette";
 import { PmChat } from "./pm-chat";
 import { ROSTER_SPACE, Roster } from "./roster";
+import { postOf } from "./seat-frames";
 import { FloorStage } from "./stage";
 import { useAgentActivity } from "./use-activity";
 import { useWorkshop } from "./use-workshop";
@@ -50,6 +53,7 @@ export function FloorScene({
   now,
   onOpen,
   chat,
+  focus,
   onUnsupported,
 }: {
   f: FactoryStatus;
@@ -59,6 +63,8 @@ export function FloorScene({
   now: number;
   onOpen: (card: ViewCard) => void;
   chat: SceneChat;
+  /** The storey in focus, or both (a dark factory's Lookout over its Workshop). */
+  focus: StoreyFocus;
   /** WebGL couldn't start, or its context was lost and not restored. */
   onUnsupported: () => void;
 }) {
@@ -82,13 +88,15 @@ export function FloorScene({
   hoverRef.current = hover;
   const tapRef = useRef<(key: string | null) => void>(() => {});
 
-  // The agents drawn on the floor, in the roster's order.
+  // A dark factory's Lookout storey, over the Workshop.
+  const lookout = useMemo(
+    () => (scene.scout ? lookoutLayout(layout) : null),
+    [scene.scout, layout],
+  );
+  // The agents drawn, in the roster's order: the Workshop's, then the Lookout's.
   const onFloor = useMemo(
-    () =>
-      scene.agents.filter(
-        (a) => scene.seating.seats.has(a.key) && a.role !== "scout" && a.role !== "area",
-      ),
-    [scene],
+    () => scene.agents.filter((a) => postOf(a, scene, layout, lookout) !== null),
+    [scene, layout, lookout],
   );
   const lifted = useMemo(
     () =>
@@ -140,8 +148,12 @@ export function FloorScene({
   }, [rosterOpen]);
 
   useEffect(() => {
-    stage.current?.update({ layout, scene, palette });
-  }, [layout, scene, palette]);
+    stage.current?.update({ layout, scene, palette, lookout });
+  }, [layout, scene, palette, lookout]);
+
+  useEffect(() => {
+    stage.current?.setFocus(focus);
+  }, [focus]);
 
   const focusChat = () => {
     chat.setOpen(true);
@@ -229,6 +241,7 @@ export function FloorScene({
           />
           <Roster
             agents={scene.agents}
+            byStorey={lookout !== null}
             now={now}
             open={rosterOpen}
             setOpen={setRosterOpen}

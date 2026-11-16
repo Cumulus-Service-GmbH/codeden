@@ -4,15 +4,19 @@ import { Bot, Factory, MessageSquare } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { EmptyState } from "@/components/common/bits";
 import type { SceneChat } from "@/components/factory-view/floor/floor-scene";
-import { useChatColumn, useNow, useWide } from "@/components/factory-view/hooks";
+import { useChatColumn, useNow, useRoomy, useWide } from "@/components/factory-view/hooks";
 import { ItemSheet } from "@/components/factory-view/item-sheet";
 import { PipelineBoard } from "@/components/factory-view/pipeline-board";
 import { QuickChat } from "@/components/factory-view/quick-chat";
+import { sceneAgents } from "@/components/factory-view/scene/agents";
+import { type StoreyFocus, storeyFocus, storeyTabs } from "@/components/factory-view/scene/storeys";
 import { type SessionInfo, type ViewCard, viewPipeline } from "@/components/factory-view/stages";
 import { StatsStrip } from "@/components/factory-view/stats-strip";
+import { StoreyTabs } from "@/components/factory-view/storey-tabs";
 import { ViewHeader } from "@/components/factory-view/view-header";
 import { useViewMode } from "@/components/factory-view/view-mode";
 import { FloorScene } from "@/components/on-demand";
+import { useRoleSession } from "@/components/orchestration/role-chat";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -90,6 +94,21 @@ export function FactoryViewPage({ projectId }: { projectId: string }) {
   }, [sessionList, itemSessions, providers]);
   const now = useNow();
   const pipeline = useMemo(() => (f ? viewPipeline(f, sessions, now) : null), [f, sessions, now]);
+  // A dark factory's Floor has two storeys: the Workshop and the Lookout above it. Phones show
+  // one at a time.
+  const pm = useRoleSession("pm", projectId);
+  const pmSessionId = pm?.id ?? null;
+  const dark = f?.mode === "dark_factory" && Boolean(f.scout);
+  const oneStorey = !useRoomy();
+  const [storeyPick, setStoreyPick] = useState<StoreyFocus | null>(null);
+  const storeyList = useMemo(
+    () =>
+      f && pipeline && dark
+        ? storeyTabs(sceneAgents({ f, pipeline, sessions, pmSessionId }), dark, oneStorey)
+        : [],
+    [f, pipeline, sessions, pmSessionId, dark, oneStorey],
+  );
+  const focus = storeyFocus(storeyPick, dark, oneStorey);
   const wide = useWide();
   // The chat sits beside the pipeline only where six readable columns still fit next to it.
   const chatColumn = useChatColumn();
@@ -170,6 +189,11 @@ export function FactoryViewPage({ projectId }: { projectId: string }) {
           needsPerson={pipeline.needsPerson}
           failed={pipeline.failed}
           view={view}
+          storeys={
+            floor ? (
+              <StoreyTabs tabs={storeyList} focus={focus} onFocus={setStoreyPick} />
+            ) : undefined
+          }
         />
         <div className="flex min-h-0 flex-1">
           {scene ? (
@@ -190,6 +214,7 @@ export function FactoryViewPage({ projectId }: { projectId: string }) {
                 now={now}
                 onOpen={setSelected}
                 chat={sceneChat}
+                focus={focus}
                 onUnsupported={() => setNoWebgl(true)}
               />
             </main>

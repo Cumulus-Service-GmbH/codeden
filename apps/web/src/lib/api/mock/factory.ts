@@ -233,11 +233,15 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       scout:
         f.mode === "dark_factory"
           ? {
-              phase: "reviewing",
+              // The round moves on by itself in the mock, so Floor's Lookout has work to show:
+              // its area reviewers at their pods, then capsules dropping while it files.
+              phase: Math.floor(Date.now() / 20_000) % 2 ? "filing" : "reviewing",
               sessionId: "s-audit",
               lenses: [
                 { area: "ux", sessionId: "s-a11y", reported: true, active: false },
                 { area: "performance", sessionId: "s-search", reported: false, active: true },
+                { area: "security", sessionId: "s-checkout", reported: false, active: true },
+                { area: "docs", sessionId: "s-docs-audit", reported: false, active: false },
               ],
               findings: 3,
               filed: 0,

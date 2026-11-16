@@ -169,8 +169,8 @@ const SCOUT_ACTIVITY: Record<ScoutStatus["phase"], string> = {
   filing: "Filing issues",
 };
 
-/** At most this many area reviewers sit in the control room. */
-export const AREA_SEATS = 4;
+/** Area reviewers: one per review area, each at its pod on the Lookout. */
+export const AREA_SEATS = 8;
 
 export interface AgentInputs {
   f: FactoryStatus;

@@ -8,6 +8,7 @@ import {
   type WalkGrid,
   type WorkshopLayout,
 } from "../scene/layout";
+import type { LookoutLayout } from "../scene/lookout";
 import type { Scene } from "../scene/scene-model";
 import type { Tile } from "../scene/stations";
 import type { SeatRef, Transition } from "../scene/transitions";
@@ -322,8 +323,13 @@ export class FloorMotion {
     this.movers = this.movers.filter((m) => !done.includes(m));
   }
 
-  /** Everyone to draw at `t`, where they are. */
-  frames(scene: Scene, layout: WorkshopLayout, t: number): FigureFrame[] {
+  /** Everyone to draw at `t`, where they are (the Lookout's crew at their posts up there). */
+  frames(
+    scene: Scene,
+    layout: WorkshopLayout,
+    t: number,
+    lookout: LookoutLayout | null = null,
+  ): FigureFrame[] {
     this.advance(scene, layout, t);
     const k = Math.min(1, Math.max(0, (t - this.stepAt) / STEP_S));
     const out: FigureFrame[] = [];
@@ -365,7 +371,7 @@ export class FloorMotion {
         stamping: false,
         celebrateAt: s.since,
       });
-    for (const f of seatFrames(scene, layout)) {
+    for (const f of seatFrames(scene, layout, lookout)) {
       if (moving.has(f.key)) continue;
       const cheer = this.cheers.get(f.key);
       out.push(cheer === undefined ? f : { ...f, celebrateAt: cheer });

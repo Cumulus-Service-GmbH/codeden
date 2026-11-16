@@ -103,12 +103,15 @@ export function ViewHeader({
   needsPerson,
   failed,
   view,
+  storeys,
 }: {
   project: Project;
   f: FactoryStatus;
   needsPerson: number;
   failed: number;
   view: ViewMode;
+  /** Floor mode's storey tabs, beside the mode toggle (a dark factory only). */
+  storeys?: ReactNode;
 }) {
   const client = useClient();
   const queryClient = useQueryClient();
@@ -169,6 +172,7 @@ export function ViewHeader({
           paused={f.loopState === "paused"}
         />
         <FactoryGuideButton />
+        {storeys}
         {view.available && <ViewModeToggle view={view} />}
         {full.supported && (
           <Button

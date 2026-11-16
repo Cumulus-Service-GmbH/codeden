@@ -301,6 +301,57 @@ export function slatsCanvas(p: FloorPalette): HTMLCanvasElement {
   return canvas;
 }
 
+/** The scout's map: the codebase as a few regions on a grid, with pins where it looked. */
+export function mapCanvas(p: FloorPalette): HTMLCanvasElement {
+  const canvas = canvasOf(256, 128);
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return canvas;
+  ctx.fillStyle = "#e9e3d3";
+  ctx.fillRect(0, 0, 256, 128);
+  ctx.strokeStyle = "rgba(60, 70, 90, 0.18)";
+  ctx.lineWidth = 1;
+  for (let x = 16; x < 256; x += 16) {
+    ctx.beginPath();
+    ctx.moveTo(x, 0);
+    ctx.lineTo(x, 128);
+    ctx.stroke();
+  }
+  for (let y = 16; y < 128; y += 16) {
+    ctx.beginPath();
+    ctx.moveTo(0, y);
+    ctx.lineTo(256, y);
+    ctx.stroke();
+  }
+  const regions: [number, number, number, number, Rgb][] = [
+    [18, 14, 80, 46, p.accent.reviewer],
+    [110, 20, 70, 60, p.accent.pm],
+    [190, 12, 52, 50, p.accent.scout],
+    [30, 72, 96, 42, p.lane],
+    [150, 86, 86, 30, p.accent.rebaser],
+  ];
+  for (const [x, y, w, h, rgb] of regions) {
+    ctx.fillStyle = `${hex(rgb)}55`;
+    ctx.strokeStyle = hex(rgb);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 8);
+    ctx.fill();
+    ctx.stroke();
+  }
+  ctx.fillStyle = hex(p.lamp.red);
+  for (const [x, y] of [
+    [60, 34],
+    [146, 52],
+    [212, 30],
+    [88, 92],
+  ] as const) {
+    ctx.beginPath();
+    ctx.arc(x, y, 5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  return canvas;
+}
+
 /** A small whiteboard with a few marker strokes. */
 export function whiteboardCanvas(p: FloorPalette): HTMLCanvasElement {
   const canvas = canvasOf(128, 80);

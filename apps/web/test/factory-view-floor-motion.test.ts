@@ -61,7 +61,7 @@ describe("Floor mode's motion (#476)", () => {
     expect(start?.carry).toBe("ticket");
     expect(start?.stride).not.toBeNull();
     // It starts by the pallet and ends at its bench, never jumping more than a cell a frame.
-    expect(start && start.z).toBeGreaterThan(layout.pallet.z1);
+    expect(start?.z).toBeGreaterThan(layout.pallet.z1);
     for (let i = 1; i < frames.length; i++) {
       const a = frames[i - 1];
       const b = frames[i];
