@@ -138,6 +138,38 @@ export function samePath(a: string, b: string, ctx: PathContext): boolean {
   return relative(a, b, ctx) === "";
 }
 
+/** A PowerShell provider path: its drive or provider, and the file path it stands for, if any. */
+export interface ProviderPath {
+  /** The drive (`hkcu`, `env`, `cert`) or provider (`registry`, `filesystem`), lower-cased. */
+  drive: string;
+  /** The filesystem path, for a `FileSystem::` path and the `Temp:` drive. */
+  path?: string;
+}
+
+/**
+ * A PowerShell provider path on Windows, which Node's path functions would read as a relative
+ * path: a drive named by more than one letter (`HKCU:\Software\Foo`, `Env:FOO`, `Cert:\`) or a
+ * provider-qualified path (`Registry::HKEY_CURRENT_USER\…`,
+ * `Microsoft.PowerShell.Core\FileSystem::C:\x`). Undefined for a file path, and elsewhere than
+ * Windows, where a colon is an ordinary character in a file name.
+ */
+export function providerPath(target: string, ctx: PathContext): ProviderPath | undefined {
+  if (!isWin(ctx)) return undefined;
+  const value = target.trim().replace(/^["']|["']$/g, "");
+  const qualified = /^(?:[\w.]+\\)?([a-z]\w*)::(.*)$/is.exec(value);
+  if (qualified) {
+    const drive = (qualified[1] as string).toLowerCase();
+    return drive === "filesystem" ? { drive, path: qualified[2] as string } : { drive };
+  }
+  const named = /^([a-z_]\w+):(.*)$/is.exec(value);
+  if (!named) return undefined;
+  const drive = (named[1] as string).toLowerCase();
+  const temp = tempRootsOf(ctx)[0];
+  if (drive !== "temp" || !temp) return { drive };
+  // PowerShell's `Temp:` drive is the user's temp folder.
+  return { drive, path: `${temp}\\${(named[2] as string).replace(/^[\\/]+/, "")}` };
+}
+
 /** True when `target` is inside the worktree or one of the extra roots. */
 export function isInWorkspace(target: string, ctx: PathContext): boolean {
   const abs = resolveAgainst(target, ctx);
