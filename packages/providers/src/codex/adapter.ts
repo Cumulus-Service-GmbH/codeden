@@ -55,6 +55,8 @@ const capabilities: ProviderCapabilities = {
   compact: true,
   // `mcpServer/startupStatus/updated` reports each server's startup for the thread.
   mcpStatus: true,
+  // `hook/started` and `hook/completed` show as `hook_run` items.
+  hookRuns: true,
 };
 
 const CONFIGURED_MODEL = "The model configured in ~/.codex/config.toml";

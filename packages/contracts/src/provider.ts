@@ -70,6 +70,12 @@ export const ProviderCapabilities = z.object({
    * only the configured servers are known (What's loaded lists them from config, §12.4).
    */
   mcpStatus: z.boolean().optional(),
+  /**
+   * The provider reports the hooks from the user's own settings that ran in a turn (event,
+   * outcome, exit code, output) as `hook_run` items (§12.4). False or absent: hook runs stay out
+   * of sight.
+   */
+  hookRuns: z.boolean().optional(),
 });
 export type ProviderCapabilities = z.infer<typeof ProviderCapabilities>;
 

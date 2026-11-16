@@ -47,6 +47,8 @@ const capabilities: ProviderCapabilities = {
   compact: true,
   // `system/init` and `mcpServerStatus()` report each server's state.
   mcpStatus: true,
+  // `includeHookEvents`: the settings hooks that ran show as `hook_run` items.
+  hookRuns: true,
 };
 
 const EFFORTS: ReasoningEffort[] = ["low", "medium", "high", "xhigh", "max"];

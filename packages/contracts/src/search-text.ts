@@ -33,6 +33,8 @@ function parts(item: Item): Array<string | undefined> {
       return [item.title, item.reason, item.command, ...(item.paths ?? [])];
     case "notice":
       return [item.message];
+    case "hook_run":
+      return [`${item.event} hook`, item.label];
     case "error":
       return [item.error.message];
     case "reasoning":

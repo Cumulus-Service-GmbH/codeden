@@ -13,6 +13,7 @@ import { ErrorCard, NoticeCard, PlanCard, TodoCard } from "./cards/simple-cards"
 import { SubagentCard } from "./cards/subagent-card";
 import { ForkFromHere } from "./fork-from-here";
 import { AssistantMessage, UserMessage } from "./messages";
+import { HookRow } from "./work/hook-row";
 import { WorkGroup } from "./work/work-group";
 
 function Working({ startedAt }: { startedAt: string }) {
@@ -98,6 +99,8 @@ export function TimelineRowView({
           focusItemId={focusItemId}
         />
       );
+    case "hook":
+      return <HookRow run={row.item} warn />;
     case "working":
       return <Working startedAt={row.turn.startedAt} />;
     case "turn-end":

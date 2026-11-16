@@ -3,6 +3,7 @@ import {
   type ApprovalDecision,
   type Attachment,
   type FileChange,
+  type HookRunOutcome,
   type Item,
   type ItemOf,
   type ItemStatus,
@@ -192,6 +193,32 @@ export function toolLine(item: ToolCallItem, ctx: ItemContext): string {
   return listItem(block ? `${line}:\n${block}` : line, "*");
 }
 
+const HOOK_OUTCOME: Readonly<Record<HookRunOutcome, string>> = {
+  running: "still running",
+  succeeded: "ran",
+  failed: "failed",
+  blocked: "blocked",
+  cancelled: "cancelled",
+};
+
+/**
+ * One hook run from the user's settings (§12.4) as an item of the tool list it ran between:
+ * its event, what ran, how it ended and, for a failed or blocked run, the reason.
+ */
+export function hookLine(item: ItemOf<"hook_run">, ctx: ItemContext): string {
+  const label = item.label ? ` ${inlineCode(cut(oneLine(item.label), 200, ctx))}` : "";
+  const code = item.exitCode;
+  const exit = typeof code === "number" && code !== 0 ? ` (exit ${code})` : "";
+  const reason =
+    (item.outcome === "failed" || item.outcome === "blocked") && item.output
+      ? `: ${cut(oneLine(item.output), 300, ctx)}`
+      : "";
+  return listItem(
+    `Hook ${item.event}${label} — ${HOOK_OUTCOME[item.outcome]}${exit}${reason}`,
+    "*",
+  );
+}
+
 // ---------------------------------------------------------------- questions and approvals
 
 function unanswered(status: ItemStatus): string {
@@ -279,7 +306,8 @@ export function itemBlock(item: Item, ctx: ItemContext): string | null {
     case "error":
       return quote(`**Error:** ${item.error.message.trim()}`);
     default:
-      // Reasoning and follow-up chips stay out; tool calls and subagents are rendered elsewhere.
+      // Reasoning and follow-up chips stay out; tool calls, hook runs and subagents are
+      // rendered elsewhere.
       return null;
   }
 }

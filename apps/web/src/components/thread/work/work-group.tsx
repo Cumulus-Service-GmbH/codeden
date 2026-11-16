@@ -2,16 +2,24 @@ import { ChevronRight, Layers } from "lucide-react";
 import { useEffect, useState } from "react";
 import { ImageGallery, ImageThumbnail } from "@/components/common/image-viewer";
 import { useClient } from "@/lib/api";
-import { duration } from "@/lib/format";
-import { summarizeWork, type WorkEntry } from "@/lib/transcript/timeline";
+import { duration, plural } from "@/lib/format";
+import {
+  summarizeWork,
+  type WorkEntry,
+  type WorkStep,
+  workSegments,
+} from "@/lib/transcript/timeline";
 import { cn } from "@/lib/utils";
+import { HookBatchRow, HookRow } from "./hook-row";
 import { entryLabel, imageArtifacts } from "./tool-meta";
 import { ToolRow } from "./tool-row";
 
+const isEntry = (s: WorkStep): s is WorkEntry => s.kind !== "hook_run";
+
 /** Images produced by `generate_image` calls stay visible even when the group is collapsed. */
-function GeneratedImages({ entries }: { entries: WorkEntry[] }) {
+function GeneratedImages({ entries }: { entries: WorkStep[] }) {
   const client = useClient();
-  const ids = entries.flatMap(imageArtifacts);
+  const ids = entries.filter(isEntry).flatMap(imageArtifacts);
   if (ids.length === 0) return null;
   const images = ids.map((id, i) => ({
     src: client.artifactUrl(id),
@@ -38,10 +46,27 @@ function GeneratedImages({ entries }: { entries: WorkEntry[] }) {
   );
 }
 
+/** One step's row: a tool call or reasoning, or a hook run. */
+function StepRow({ sessionId, step }: { sessionId: string; step: WorkStep }) {
+  return isEntry(step) ? <ToolRow sessionId={sessionId} entry={step} /> : <HookRow run={step} />;
+}
+
+/** A group's steps, with consecutive succeeded hook runs folded into one row. */
+function Steps({ sessionId, entries }: { sessionId: string; entries: WorkStep[] }) {
+  return workSegments(entries).map((segment) =>
+    segment.type === "hooks" ? (
+      <HookBatchRow key={segment.key} runs={segment.runs} />
+    ) : (
+      <StepRow key={segment.step.id} sessionId={sessionId} step={segment.step} />
+    ),
+  );
+}
+
 /**
- * Consecutive tool calls and reasoning of a turn, collapsed into one sentence
- * ("Edited 2 files, ran 3 commands and 4 more"). While live, the running step shows beneath.
- * Opens by itself when `focusItemId` (a search hit) is one of its steps.
+ * Consecutive tool calls and reasoning of a turn, with the hook runs between them, collapsed
+ * into one sentence ("Edited 2 files, ran 3 commands and 4 more"). While live, the running step
+ * shows beneath. Opens by itself when `focusItemId` (a search hit) is one of its steps. A group
+ * of hook runs alone shows them straight away, busy ones folded ("3 hooks ran").
  */
 export function WorkGroup({
   sessionId,
@@ -50,7 +75,7 @@ export function WorkGroup({
   focusItemId,
 }: {
   sessionId: string;
-  entries: WorkEntry[];
+  entries: WorkStep[];
   live: boolean;
   focusItemId?: string;
 }) {
@@ -59,20 +84,25 @@ export function WorkGroup({
   useEffect(() => {
     if (holdsFocus) setOpen(true);
   }, [holdsFocus]);
+  const work = entries.filter(isEntry);
   if (entries.length === 1 && entries[0]) {
     return (
       <div>
-        <ToolRow sessionId={sessionId} entry={entries[0]} />
+        <StepRow sessionId={sessionId} step={entries[0]} />
         <GeneratedImages entries={entries} />
       </div>
     );
   }
+  if (work.length === 0) return <Steps sessionId={sessionId} entries={entries} />;
+  const hooks = entries.length - work.length;
   const current = live ? [...entries].reverse().find((e) => e.status === "in_progress") : undefined;
-  const failed = entries.filter((e) => e.status === "failed").length;
-  const total = entries.reduce(
-    (ms, e) => ms + (e.kind === "tool_call" ? (e.durationMs ?? 0) : 0),
-    0,
-  );
+  const failed = work.filter((e) => e.status === "failed").length;
+  const total = work.reduce((ms, e) => ms + (e.kind === "tool_call" ? (e.durationMs ?? 0) : 0), 0);
+  const meta = [
+    plural(work.length, "step"),
+    ...(hooks > 0 ? [plural(hooks, "hook")] : []),
+    ...(total > 0 ? [duration(total)] : []),
+  ].join(" · ");
 
   return (
     <div>
@@ -92,9 +122,7 @@ export function WorkGroup({
           </span>
         )}
         <span className="ml-auto flex shrink-0 items-center gap-1.5 pl-2">
-          <span className="text-3xs text-muted-foreground/60 tabular-nums">
-            {entries.length} steps{total > 0 ? ` · ${duration(total)}` : ""}
-          </span>
+          <span className="text-3xs text-muted-foreground/60 tabular-nums">{meta}</span>
           <ChevronRight
             className={cn(
               "size-3 text-muted-foreground/60 transition-transform",
@@ -106,17 +134,17 @@ export function WorkGroup({
 
       {open ? (
         <div className="relative mt-0.5 ml-[13px] border-l border-border pl-2.5">
-          {entries.map((e) => (
-            <ToolRow key={e.id} sessionId={sessionId} entry={e} />
-          ))}
+          <Steps sessionId={sessionId} entries={entries} />
         </div>
       ) : (
         current && (
           <div
             className="relative mt-0.5 ml-[13px] border-l border-border pl-2.5"
-            title={`Now: ${entryLabel(current).verb}`}
+            title={
+              isEntry(current) ? `Now: ${entryLabel(current).verb}` : `Now: ${current.event} hook`
+            }
           >
-            <ToolRow sessionId={sessionId} entry={current} />
+            <StepRow sessionId={sessionId} step={current} />
           </div>
         )
       )}

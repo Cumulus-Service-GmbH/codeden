@@ -10,6 +10,7 @@ import {
 import { str } from "../util/text";
 import { toProviderCommands } from "./commands";
 import { rejectedResetsAt, resultError, type TurnErrorSignals } from "./errors";
+import { ClaudeHookRuns } from "./hook-runs";
 import { toMcpServerStates } from "./mcp-status";
 import { apiRetryNotice, compactedNotice, compactFailedNotice, compactingNotice } from "./notices";
 import { StreamAssembler } from "./stream";
@@ -35,6 +36,8 @@ export interface MapperOptions {
   cwd: string;
   emit: (event: AgentEvent) => void;
   newId?: () => string;
+  /** Clock for hook run durations (tests). */
+  now?: () => number;
   /**
    * A subagent finished with tokens counted from its streamed messages, whose output figures
    * are not final: the session can read its transcript and pass it to `correctSubagentUsage`.
@@ -54,6 +57,7 @@ export class ClaudeEventMapper {
   private readonly newId: () => string;
   private readonly subagents: SubagentTracker;
   private readonly tools: ToolTracker;
+  private readonly hookRuns: ClaudeHookRuns;
   private rootTurnId: string | undefined;
   private readonly stream: StreamAssembler;
   private contextTokens: number | undefined;
@@ -104,6 +108,12 @@ export class ClaudeEventMapper {
       item: (ctx, phase, item) => this.item(ctx, phase, item),
       tools: this.tools,
       newId: this.newId,
+    });
+    this.hookRuns = new ClaudeHookRuns({
+      turn: () =>
+        this.rootTurnId ? { threadId: this.rootThreadId, turnId: this.rootTurnId } : undefined,
+      item: (ctx, phase, item) => this.item(ctx, phase, item),
+      now: opts.now ?? Date.now,
     });
   }
 
@@ -159,6 +169,7 @@ export class ClaudeEventMapper {
     this.signals = {};
     this.lastChainUuid = undefined;
     this.emit({ type: "turn.started", threadId: this.rootThreadId, turnId });
+    this.hookRuns.turnStarted({ threadId: this.rootThreadId, turnId });
     return turnId;
   }
 
@@ -345,6 +356,7 @@ export class ClaudeEventMapper {
   }
 
   private onSystem(msg: Raw): void {
+    if (this.hookRuns.handle(msg)) return;
     if (msg.subtype === "init") {
       const sessionId = str(msg, "session_id");
       const model = str(msg, "model");
@@ -444,6 +456,7 @@ export class ClaudeEventMapper {
     this.stream.finish(status, (item) => this.item(ctx, "item.completed", item));
     if (outcome.type !== "completed") this.subagents.interruptForeground(turnId);
     this.tools.finishTurn(ctx, outcome.type === "completed");
+    this.hookRuns.turnEnded(turnId, outcome.type === "completed");
     this.rootTurnId = undefined;
     this.interruptRequested = false;
     const end = { ...ctx, ...(this.lastChainUuid ? { forkPoint: this.lastChainUuid } : {}) };
@@ -461,5 +474,6 @@ export class ClaudeEventMapper {
   closeAll(): void {
     if (this.rootTurnId) this.endTurn({ type: "interrupted", reason: "user" });
     this.subagents.interruptAll();
+    this.hookRuns.closeAll();
   }
 }

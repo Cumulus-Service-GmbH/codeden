@@ -129,6 +129,8 @@ export function buildQueryOptions(input: QueryOptionsInput): Options {
     permissionMode,
     ...(bypass ? { allowDangerouslySkipPermissions: true } : {}),
     includePartialMessages: true,
+    // Hook runs from the user's settings show in the transcript (`hook_run` items, §12.4).
+    includeHookEvents: true,
     forwardSubagentText: true,
     ...(input.resume ? { resume: input.resume } : {}),
     // Read-only sessions (orchestrator, PMs) never get the edit tools (§11.2).

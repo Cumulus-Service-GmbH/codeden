@@ -23,7 +23,8 @@
   "liveAutonomy": true,
   "readOnly": true,
   "compact": true,
-  "mcpStatus": true
+  "mcpStatus": true,
+  "hookRuns": true
  },
  "preamble": [],
  "turns": [

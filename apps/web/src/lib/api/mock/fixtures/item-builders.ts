@@ -1,6 +1,7 @@
 import {
   type Attachment,
   type FileChange,
+  HOOK_RUN_STATUS,
   type Item,
   type ItemOf,
   type MessageSender,
@@ -183,4 +184,22 @@ export const notice = (
   level,
   code,
   message,
+});
+
+/** A hook from the user's settings that ran (§12.4). */
+export const hookRun = (
+  id: string,
+  event: string,
+  label: string,
+  outcome: ItemOf<"hook_run">["outcome"],
+  extra: Partial<ItemOf<"hook_run">> = {},
+): Item => ({
+  id,
+  kind: "hook_run",
+  status: HOOK_RUN_STATUS[outcome],
+  event,
+  label,
+  source: "~/.claude/settings.json",
+  outcome,
+  ...extra,
 });

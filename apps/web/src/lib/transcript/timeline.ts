@@ -5,11 +5,19 @@ import { threadItems } from "./reducer";
 /** One work entry inside a work group: a tool call or a reasoning block. */
 export type WorkEntry = ToolCallItem | ItemOf<"reasoning">;
 
+/** A hook from the user's settings that ran (§12.4). */
+export type HookRun = ItemOf<"hook_run">;
+
+/** A step of a work group: a work entry, or a hook run that didn't fail or block. */
+export type WorkStep = WorkEntry | HookRun;
+
 /** A row in the rendered transcript. Pure data so it can be virtualised and tested. */
 export type TimelineRow =
   | { key: string; type: "user"; item: ItemOf<"user_message"> }
   | { key: string; type: "assistant"; item: ItemOf<"assistant_message">; streaming: boolean }
-  | { key: string; type: "work"; turnId: string; entries: WorkEntry[]; live: boolean }
+  | { key: string; type: "work"; turnId: string; entries: WorkStep[]; live: boolean }
+  /** A hook run that failed or blocked, on a row of its own so it stands out. */
+  | { key: string; type: "hook"; item: HookRun }
   | { key: string; type: "card"; item: Item }
   | {
       key: string;
@@ -32,13 +40,21 @@ const CARD_KINDS = new Set<Item["kind"]>([
   "error",
 ]);
 
-function isWork(item: Item): item is WorkEntry {
-  return item.kind === "tool_call" || item.kind === "reasoning";
+/** True for a hook run that failed or blocked something: it gets a row of its own. */
+export function hookStandsOut(run: HookRun): boolean {
+  return run.outcome === "failed" || run.outcome === "blocked";
+}
+
+/** A step of a work group, once standing-out hook runs are taken out (`hookStandsOut`). */
+function isWork(item: Item): item is WorkStep {
+  return item.kind === "tool_call" || item.kind === "reasoning" || item.kind === "hook_run";
 }
 
 /**
  * Turn an ordered list of items into display rows:
- * - consecutive tool calls and reasoning in the same turn collapse into one work group;
+ * - consecutive tool calls and reasoning in the same turn collapse into one work group, with
+ *   the hook runs between them (so a hook around every tool call doesn't split the group);
+ * - a hook run that failed or blocked gets a row of its own;
  * - plans, todos, approvals, questions, subagents, notices and errors become cards;
  * - follow-ups are not rows (they render as chips above the composer);
  * - a finished turn gets a slim footer, the running turn a "working" row.
@@ -46,7 +62,7 @@ function isWork(item: Item): item is WorkEntry {
 export function buildTimeline(state: TranscriptState, threadId: string): TimelineRow[] {
   const entries = threadItems(state, threadId);
   const rows: TimelineRow[] = [];
-  let group: { turnId: string; entries: WorkEntry[]; firstId: string } | null = null;
+  let group: { turnId: string; entries: WorkStep[]; firstId: string } | null = null;
   const filesByTurn = new Map<string, Set<string>>();
 
   const flush = () => {
@@ -100,6 +116,11 @@ export function buildTimeline(state: TranscriptState, threadId: string): Timelin
       for (const c of item.changes) set.add(c.path);
       filesByTurn.set(turnId, set);
     }
+    if (item.kind === "hook_run" && hookStandsOut(item)) {
+      flush();
+      rows.push({ key: item.id, type: "hook", item });
+      continue;
+    }
     if (isWork(item)) {
       if (group && group.turnId === turnId) group.entries.push(item);
       else {
@@ -130,6 +151,7 @@ export function rowIndexOfItem(rows: TimelineRow[], itemId: string): number {
     switch (row.type) {
       case "user":
       case "assistant":
+      case "hook":
       case "card":
         return row.item.id === itemId;
       case "work":
@@ -190,10 +212,15 @@ const KIND_PRIORITY: ToolKind[] = [
   "other",
 ];
 
-/** One-sentence summary of a work group, e.g. "Edited 2 files, ran 3 commands and 2 more". */
-export function summarizeWork(entries: WorkEntry[]): string {
+/**
+ * One-sentence summary of a work group, e.g. "Edited 2 files, ran 3 commands and 2 more". Hook
+ * runs only name the group when it has nothing else ("3 hooks ran"); the group counts them aside.
+ */
+export function summarizeWork(steps: WorkStep[]): string {
   const counts = new Map<ToolKind, number>();
   let thoughts = 0;
+  const entries = steps.filter((s): s is WorkEntry => s.kind !== "hook_run");
+  if (entries.length === 0) return hooksRan(steps.length);
   for (const e of entries) {
     if (e.kind === "reasoning") thoughts++;
     else if (e.toolKind === "file_edit") {
@@ -213,4 +240,40 @@ export function summarizeWork(entries: WorkEntry[]): string {
   const rest = kinds.slice(2).reduce((sum, k) => sum + (counts.get(k) ?? 0), 0);
   if (rest > 0) return `${parts.join(", ")} and ${rest} more`;
   return parts.join(" and ").replace(/^(\w)/, (m) => m.toUpperCase());
+}
+
+/** "1 hook ran", "3 hooks ran". */
+export function hooksRan(n: number): string {
+  return `${n} ${n === 1 ? "hook" : "hooks"} ran`;
+}
+
+/** What a work group shows, in order: a step, or a run of hooks that succeeded one after another. */
+export type WorkSegment =
+  | { type: "step"; step: WorkStep }
+  | { type: "hooks"; key: string; runs: HookRun[] };
+
+/**
+ * The rows of an open work group: consecutive succeeded hook runs collapse into one "3 hooks ran"
+ * segment (busy hooks waste no space); every other step, a lone succeeded run included, is its
+ * own. Pure.
+ */
+export function workSegments(steps: WorkStep[]): WorkSegment[] {
+  const out: WorkSegment[] = [];
+  let batch: HookRun[] = [];
+  const flush = () => {
+    const [first] = batch;
+    if (batch.length === 1 && first) out.push({ type: "step", step: first });
+    else if (first) out.push({ type: "hooks", key: `hooks:${first.id}`, runs: batch });
+    batch = [];
+  };
+  for (const step of steps) {
+    if (step.kind === "hook_run" && step.outcome === "succeeded") {
+      batch.push(step);
+      continue;
+    }
+    flush();
+    out.push({ type: "step", step });
+  }
+  flush();
+  return out;
 }

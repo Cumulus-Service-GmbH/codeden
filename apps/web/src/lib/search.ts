@@ -138,6 +138,8 @@ export function hitKindLabel(hit: Pick<TranscriptSearchHit, "kind" | "toolKind">
       return "Approval";
     case "notice":
       return "Notice";
+    case "hook_run":
+      return "Hook";
     case "error":
       return "Error";
     case "tool_call":

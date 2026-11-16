@@ -22,7 +22,7 @@ import {
   usd,
   utcTime,
 } from "./transcript-format";
-import { type ItemContext, itemBlock, toolLine } from "./transcript-items";
+import { hookLine, type ItemContext, itemBlock, toolLine } from "./transcript-items";
 
 /** Everything a session's Markdown export is written from (§13). */
 export interface TranscriptSource {
@@ -265,7 +265,8 @@ function body(src: TranscriptSource, redact: (text: string) => string): string[]
 }
 
 /**
- * A thread's items as Markdown blocks; consecutive tool calls share one list. Literal fold tags
+ * A thread's items as Markdown blocks; consecutive tool calls (and the hook runs between them)
+ * share one list. Literal fold tags
  * in what the items say are escaped (`escapeFolds`), so only a subagent's own fold opens one.
  */
 function renderItems(records: ItemRecord[], ctx: ItemContext, walk: Walk): string[] {
@@ -276,8 +277,8 @@ function renderItems(records: ItemRecord[], ctx: ItemContext, walk: Walk): strin
     tools = [];
   };
   for (const { item } of records) {
-    if (item.kind === "tool_call") {
-      tools.push(toolLine(item, ctx));
+    if (item.kind === "tool_call" || item.kind === "hook_run") {
+      tools.push(item.kind === "tool_call" ? toolLine(item, ctx) : hookLine(item, ctx));
       continue;
     }
     flush();

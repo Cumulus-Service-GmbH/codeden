@@ -10,7 +10,8 @@ import { TimelineRowView } from "./timeline-row";
 
 const gapAfter = (row: TimelineRow, next: TimelineRow | undefined): number => {
   if (!next) return 0;
-  if (row.type === "work" && next.type === "work") return 4;
+  const slim = (r: TimelineRow) => r.type === "work" || r.type === "hook";
+  if (slim(row) && slim(next)) return 4;
   // An assistant message's Copy action hangs 20px below it; the next row would cover it.
   if (row.type === "user" || next.type === "user" || row.type === "assistant") return 24;
   if (next.type === "turn-end" || row.type === "turn-end") return 18;
@@ -68,7 +69,10 @@ export function Transcript({
   const virtualizer = useVirtualizer({
     count: rows.length,
     getScrollElement: () => scrollRef.current,
-    estimateSize: (i) => (rows[i]?.type === "work" ? 30 : rows[i]?.type === "turn-end" ? 24 : 120),
+    estimateSize: (i) => {
+      const type = rows[i]?.type;
+      return type === "work" || type === "hook" ? 30 : type === "turn-end" ? 24 : 120;
+    },
     getItemKey: (i) => rows[i]?.key ?? i,
     // Earlier turns go in above the rows on screen: keep those rows where they are (by key).
     anchorTo: "end",

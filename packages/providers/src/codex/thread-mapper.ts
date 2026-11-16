@@ -1,6 +1,7 @@
 import type { AgentEvent, ErrorKind, Item, ItemOf } from "@codeden/contracts";
 import type { AgentNames } from "./collab";
 import { classifyCodexError, codexErrorCode, usageLimitResetsAt } from "./errors";
+import { CodexHookRuns } from "./hook-runs";
 import { mapThreadItem, startedItem } from "./items";
 import type { ServerNotification } from "./protocol";
 import type { RateLimitSnapshot, ThreadItem, ThreadTokenUsage, Turn } from "./protocol/v2";
@@ -80,8 +81,15 @@ export class CodexThreadMapper {
   private readonly open = new Map<string, Item>();
   private plan: { id: string; todos: Todo[] } | undefined;
   private readonly turnUsage = new CodexTurnUsage();
+  private readonly hookRuns: CodexHookRuns;
 
-  constructor(private readonly o: ThreadMapperOptions) {}
+  constructor(private readonly o: ThreadMapperOptions) {
+    this.hookRuns = new CodexHookRuns({
+      current: () => this.current,
+      beginTurn: (turnId) => this.beginTurn(turnId),
+      emit: (turnId, phase, item) => this.o.emit({ type: phase, ...this.ctx(turnId), item }),
+    });
+  }
 
   get threadId(): string {
     return this.o.threadId;
@@ -101,6 +109,7 @@ export class CodexThreadMapper {
     // Codex reporting on a turn CodeDen already closed (it confirms a stop after the deadline)
     // reopens that turn only to end it as Codex says: that is not new work.
     if (turnId !== this.closedHere) this.o.onTurnStarted?.(turnId);
+    this.hookRuns.turnStarted(turnId);
   }
 
   private ctx(turnId: string): { threadId: string; turnId: string } {
@@ -189,6 +198,10 @@ export class CodexThreadMapper {
         return;
       case "thread/compacted":
         this.notice(n.params.turnId, "info", "Context compacted", "context_compacted", false);
+        return;
+      case "hook/started":
+      case "hook/completed":
+        this.hookRuns.handle(n.params.turnId, n.params.run, n.method === "hook/completed");
         return;
       case "turn/completed":
         this.completeTurn(n.params.turn);
@@ -324,6 +337,7 @@ export class CodexThreadMapper {
       });
       this.plan = undefined;
     }
+    this.hookRuns.turnEnded(turnId, ok);
     this.current = undefined;
     if (outcome.type === "completed")
       this.o.emit({ type: "turn.completed", ...end, stopReason: "end_turn" });

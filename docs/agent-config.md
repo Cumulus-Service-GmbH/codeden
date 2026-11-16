@@ -95,6 +95,26 @@ The **Hooks** tab lists the hooks in each settings file, grouped by file (user, 
 
 Only the `hooks` key is written, and matchers keep their exact text. If a file sets `disableAllHooks: true`, the tab says so: none of that file's hooks run. If a file can't be parsed, or the project's `.claude` folder or settings file is a link that leads outside the project (or outside your home, for user settings), the tab shows the error and leaves it alone. The tab appears for providers whose native config has hooks; today that is Claude Code.
 
+### Hook runs in the transcript
+
+When a hook runs during a session, the session's transcript shows it in the turn where it ran. You can see why an agent stopped, retried or got extra context, without opening a terminal. This works for providers that report their hook runs (`capabilities.hookRuns`), which today are Claude Code and Codex. Other providers show nothing new.
+
+Each run is a one-line row: the event (`PreToolUse`, `PostToolUse`, `Stop`, `UserPromptSubmit`, `SessionStart` and so on), what ran, how it ended and how long it took. Click the row to see the hook's output and its settings file.
+
+- **What ran.** Claude Code names a hook by its event and the tool it ran for, so a `PreToolUse` hook on a Bash call reads `Bash`. Codex names the handler type (`command`, `MCP tool`, `prompt`, `agent`) and its hooks file.
+- **How it ended.** A run is **running**, **ran** (succeeded), **failed** (the hook itself errored), **blocked** or **cancelled**. A run is **blocked** when it stopped what it guards:
+  - Claude Code: exit code 2 (a blocking error), or JSON output with `"decision": "block"`, `"continue": false` or a `deny` permission decision.
+  - Codex: a run Codex reports as blocked or as having stopped the agent.
+
+  The exit code shows when Claude Code reports it.
+- **Failed and blocked runs stand out.** They get a row of their own in the warning colour, with the first line of their reason (the hook's stderr, or Codex's message) shown inline.
+- **Busy hooks stay compact.** Runs that succeed sit inside the turn's group of tool calls, so a hook around every tool call doesn't split it, and the group counts them ("4 steps · 6 hooks"). Successful runs one after another fold into one "3 hooks ran" row that you can expand.
+- **Output is capped.** At most 4,000 characters of output are kept, with the start and the end of longer output.
+- **Live output is throttled.** A long-running hook's output updates the row at most every 5 seconds, so the session's history doesn't record every chunk.
+- **Outside a turn.** A run that happens outside a turn, such as a `SessionStart` hook as the session opens, shows at the start of the next turn.
+
+Claude Code reports command, HTTP and MCP tool hooks; prompt and agent hooks run without a trace. CodeDen's own permission hook never shows. The Markdown export lists each run among the tool calls around it. For failed and blocked runs it includes the reason, with secrets hidden like the rest of the export. Hook runs are searchable by event and by what ran. Editing hooks is unchanged.
+
 ## What's loaded
 
 For any session, **Details → What's loaded** shows which memory files, skills, subagents, MCP servers and hooks are actually in its context, computed the way each provider does it from the session's working directory:
@@ -118,7 +138,7 @@ For providers whose native config has hooks (today Claude Code), a **Hooks** lis
 - `.claude/settings.json` in the session's working folder itself. Claude Code doesn't look in parent folders for this file. A worktree session therefore reads the worktree's checked-out copy, not the main checkout's, so commit a hook (or copy it into the worktree) for worktree sessions to run it;
 - `.claude/settings.local.json` at the repository root, which for a worktree is the main checkout's root. On Windows, outside a git repository, or when the repository is your home folder, Claude Code reads it next to `.claude/settings.json` in the working folder instead. A local file an older Claude Code left in the working folder is still read, so it is listed too.
 
-`disableAllHooks` switches off the hooks of every file for the whole session, not just the file that sets it. The value from the file with the highest precedence wins (local over project over user). When it is on, the list says which file turned hooks off, dims the hooks, and flags any other file that also sets it. When a file sets it but a higher file sets it to `false`, so hooks still run, the list says that too. A file that can't be parsed, or that a link takes outside its folder, is shown with its error. Hooks you disabled on the Hooks tab don't run, so they aren't listed. Hooks from managed policy settings, plugins, and skill or subagent front matter aren't listed. Neither is CodeDen's own permission hook.
+`disableAllHooks` switches off the hooks of every file for the whole session, not just the file that sets it. The value from the file with the highest precedence wins (local over project over user). When it is on, the list says which file turned hooks off, dims the hooks, and flags any other file that also sets it. When a file sets it but a higher file sets it to `false`, so hooks still run, the list says that too. A file that can't be parsed, or that a link takes outside its folder, is shown with its error. Hooks you disabled on the Hooks tab don't run, so they aren't listed. Hooks from managed policy settings, plugins, and skill or subagent front matter aren't listed. Neither is CodeDen's own permission hook. When the session's provider reports its hook runs, a line under the list says that each run shows in the transcript (see [Hook runs in the transcript](#hook-runs-in-the-transcript)).
 
 ## CodeDen's own additions
 

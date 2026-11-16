@@ -68,6 +68,8 @@ export function LoadedConfig({ session }: { session: Session }) {
   const live = mcpStatusSupported(provider) ? session.mcpServers : null;
   const d = loaded.data;
   const project = session.projectId ?? "global";
+  // The provider reports the hooks that ran, so each run shows in the transcript.
+  const hookRuns = provider?.capabilities.hookRuns === true;
   return (
     <section className="space-y-2" data-testid="loaded-config">
       <div className="flex items-baseline justify-between">
@@ -133,6 +135,7 @@ export function LoadedConfig({ session }: { session: Session }) {
           loading={false}
           rows={hookRows(d.hooks)}
           notices={hookNotices(d.hooks)}
+          hint={hookRuns ? "Each run shows in the transcript, with its outcome." : undefined}
           testId="loaded-hooks"
           action={
             <Link
@@ -155,6 +158,7 @@ function LoadedList({
   rows,
   loading,
   notices,
+  hint,
   action,
   testId,
 }: {
@@ -164,6 +168,8 @@ function LoadedList({
   loading: boolean;
   /** Warnings shown above the rows. */
   notices?: ReactNode;
+  /** A quiet line below the rows. */
+  hint?: string;
   /** A link in the header, before the count. */
   action?: ReactNode;
   testId?: string;
@@ -207,6 +213,11 @@ function LoadedList({
           </div>
         ))}
       </div>
+      {hint && (
+        <div className="border-t border-border px-3 py-1 text-3xs text-muted-foreground">
+          {hint}
+        </div>
+      )}
     </div>
   );
 }

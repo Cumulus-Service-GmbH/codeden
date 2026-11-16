@@ -371,6 +371,41 @@ export const NoticeItem = z.object({
  */
 export const AGENT_ALLOW_LIST_NOTICE = "agent_allow_list";
 
+/**
+ * How a hook run ended (`running` until it does). `blocked`: the hook stopped what it guards (a
+ * `PreToolUse` hook that refused the tool with exit code 2 or a `deny`, a `Stop` hook that kept
+ * the agent going, a hook that halted the agent). `failed`: the hook itself errored.
+ */
+export const HookRunOutcome = z.enum(["running", "succeeded", "failed", "blocked", "cancelled"]);
+export type HookRunOutcome = z.infer<typeof HookRunOutcome>;
+
+/**
+ * A hook from the user's own settings that ran in a turn (§12.4), as the provider reports it
+ * (`capabilities.hookRuns`). Started when the hook starts and completed with its outcome; its
+ * `status` follows the outcome (`running` in_progress, `succeeded` completed, `failed` failed,
+ * `blocked` declined, `cancelled` cancelled). CodeDen's own approvals hook is never one.
+ */
+export const HookRunItem = z.object({
+  ...itemBase,
+  kind: z.literal("hook_run"),
+  /** The hook event, in the providers' common PascalCase: `PreToolUse`, `Stop`, `SessionStart`. */
+  event: z.string().min(1),
+  /** What ran, as the provider names it: the hook's name or command, or its handler type. */
+  label: z.string(),
+  /** The settings or hooks file that defines the hook, when the provider says. */
+  source: z.string().optional(),
+  outcome: HookRunOutcome,
+  /** The hook command's exit code, when the provider reports it. */
+  exitCode: z.int().nullable().optional(),
+  durationMs: z.int().nonnegative().optional(),
+  /**
+   * What the hook printed or reported: the reason for a blocked or failed run. At most
+   * `HOOK_OUTPUT_MAX_CHARS` characters (`trimHookOutput`), `outputTruncated` when cut.
+   */
+  output: z.string().optional(),
+  outputTruncated: z.boolean().optional(),
+});
+
 /** An error shown inline in the transcript (the turn may still continue). */
 export const ErrorItem = z.object({
   ...itemBase,
@@ -391,6 +426,7 @@ export const Item = z.discriminatedUnion("kind", [
   SubagentItem,
   FollowupsItem,
   NoticeItem,
+  HookRunItem,
   ErrorItem,
 ]);
 export type Item = z.infer<typeof Item>;

@@ -345,6 +345,51 @@ describe("transcript export: turns", () => {
     expect(md).not.toContain("C:\\Users\\dev");
   });
 
+  it("lists hook runs in the tool list, with the reason a run failed or blocked", () => {
+    const md = sessionTranscriptMarkdown(
+      source({
+        items: [
+          rec({
+            id: "hk1",
+            status: "declined",
+            kind: "hook_run",
+            event: "PreToolUse",
+            label: "Bash",
+            outcome: "blocked",
+            exitCode: 2,
+            output: "rm -rf is\nnot allowed",
+          }),
+          rec({
+            id: "c3",
+            status: "completed",
+            kind: "tool_call",
+            toolKind: "command",
+            toolName: "Bash",
+            command: "ls",
+            exitCode: 0,
+          }),
+          rec({
+            id: "hk2",
+            status: "completed",
+            kind: "hook_run",
+            event: "PostToolUse",
+            label: "",
+            outcome: "succeeded",
+            output: "HOOK OUTPUT HERE",
+          }),
+        ],
+      }),
+    );
+    expect(md).toContain(
+      [
+        "* Hook PreToolUse `Bash` — blocked (exit 2): rm -rf is not allowed",
+        "* Ran `ls`",
+        "* Hook PostToolUse — ran",
+      ].join("\n"),
+    );
+    expect(md).not.toContain("HOOK OUTPUT HERE");
+  });
+
   it("puts a multi-line command in a fence its backticks can't close", () => {
     const md = sessionTranscriptMarkdown(
       source({

@@ -5,6 +5,7 @@ import {
   cmd,
   edit,
   followups,
+  hookRun,
   notice,
   read,
   search,
@@ -159,6 +160,12 @@ export const checkoutTranscript = buildTranscript(
           },
         },
         read("ck-t3", "src/checkout/useCart.ts", 1, 64),
+        hookRun("ck-h1", "PreToolUse", "Bash", "blocked", {
+          exitCode: 2,
+          durationMs: 90,
+          output: "npm is blocked in this repository: use pnpm.\n(.claude/hooks/use-pnpm.sh)",
+        }),
+        hookRun("ck-h2", "PreToolUse", "Bash", "succeeded", { durationMs: 70 }),
         cmd("ck-t4", "pnpm test:e2e checkout --repeat-each=20", failingRun, 1, 41_700),
         assistant("ck-a1", analysis),
         { id: "ck-plan", kind: "plan", status: "completed", text: plan },
@@ -182,6 +189,17 @@ export const checkoutTranscript = buildTranscript(
             ...countLines(specPatch),
           },
         ]),
+        hookRun("ck-h3", "PostToolUse", "Edit", "succeeded", {
+          exitCode: 0,
+          durationMs: 640,
+          output: "prettier: formatted src/checkout/useCart.ts",
+        }),
+        hookRun("ck-h4", "PostToolUse", "Edit", "succeeded", {
+          exitCode: 0,
+          durationMs: 520,
+          output: "prettier: formatted tests/e2e/checkout.spec.ts",
+        }),
+        hookRun("ck-h5", "PostToolUse", "Edit", "succeeded", { exitCode: 0, durationMs: 1_210 }),
         cmd(
           "ck-t6",
           "pnpm typecheck && pnpm lint",
