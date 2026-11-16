@@ -104,7 +104,7 @@ export function Roster({
         <Sheet open={open} onOpenChange={setOpen}>
           <SheetContent
             side="bottom"
-            className="h-[70dvh] gap-0 rounded-t-2xl p-0"
+            className="gap-0 rounded-t-2xl p-0 data-[side=bottom]:h-[70dvh]"
             data-testid="factory-view-floor-roster"
           >
             <SheetTitle className="flex items-center gap-2 border-b border-border px-3 py-2.5 text-sm">
