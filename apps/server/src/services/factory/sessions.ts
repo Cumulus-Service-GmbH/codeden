@@ -310,15 +310,18 @@ export class FactorySessions {
   /**
    * Start an integrator: a fresh session on a factory PR's head branch (fetched by CodeDen) that
    * resolves its merge conflicts because the session that wrote it is gone. Its worktree's
-   * branch is the PR's, so `create_pull_request` updates the same pull request.
+   * branch is the PR's, so `create_pull_request` updates the same pull request. It runs on
+   * `agent`'s provider and model (chosen as the item's builder is, with fallback, `rebase.ts`).
    */
   startIntegrator(
     item: FactoryItem,
     pr: { number: number; headBranch: string },
     text: string,
+    agent: AgentChoice,
   ): Promise<StartSessionResponse> {
     return this.start({
       projectId: item.projectId,
+      ...on(agent),
       purpose: `Factory integration: resolve the conflicts of #${pr.number}`,
       workKey: `factory:integrate:${pr.number}`,
       title: `Integrate #${pr.number}: ${item.title}`.slice(0, 200),

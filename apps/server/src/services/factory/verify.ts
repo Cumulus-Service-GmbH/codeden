@@ -96,7 +96,7 @@ export async function advanceVerifying(
     const stopped = await beforeAgentTurn(item);
     if (stopped) return stopped;
   }
-  const kicking = await kickCi(ctx, project, item, pr);
+  const kicking = await kickCi(ctx, project, loop, item, pr);
   item = ctx.store.item(item.id) ?? item;
 
   const vision = visionOf(project);

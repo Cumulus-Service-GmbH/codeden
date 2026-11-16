@@ -224,6 +224,8 @@ describe("factory PRs without CI (merge conflicts, a new head)", () => {
     env = createFactoryEnv();
     enable();
     const { id, pr, builder } = await verifying();
+    // It ran the turn that opened the PR: it stays the PR's agent (`recover.ts`).
+    env.ranTurn(builder);
     conflicting(pr);
     env.factory.data.updateItem(id, (i) => ({
       ...i,
@@ -241,6 +243,7 @@ describe("factory PRs without CI (merge conflicts, a new head)", () => {
     env = createFactoryEnv();
     enable();
     const { id, pr, builder } = await verifying();
+    env.ranTurn(builder);
     // It failed for missing CI with its revise rounds used up, and cleanup archived its builder
     // (removing the worktree). The audit is required, and none has run on this head yet (as
     // after a restart).

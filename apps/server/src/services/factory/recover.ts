@@ -12,6 +12,7 @@ import { letGoReviewer } from "./cleanup";
 import type { FactoryContext } from "./context";
 import { markStuck } from "./outcomes";
 import { continuePrompt } from "./prompts-integration";
+import { providerFailure, providerWide } from "./provider-failure";
 import { awaitedProvider, noteProviderWaits, type ProviderWait } from "./provider-wait";
 import { prAgent } from "./rebase";
 import { isRecheckObligation } from "./recheck";
@@ -26,9 +27,10 @@ import { ownsTurnRaceFailure } from "./turn-race";
  * Infrastructure failures don't strand work (§10.1). An item that failed for a reason outside
  * its code (its builder or reviewer session died, the builder is gone, CI never started while
  * Actions can run) goes back by itself on the next tick after the cause is gone: to
- * verification when its PR is open (the PR is picked up again, not redone), to building with
- * a "continue" message otherwise, or to the queue for a fresh builder when the old one is gone
- * or never started (it never ran a turn, so its brief never reached the provider).
+ * verification when its PR is open (the PR is picked up again, not redone; a PR agent that is
+ * gone or never started is let go, and a fresh integrator takes the PR over when it needs one),
+ * to building with a "continue" message otherwise, or to the queue for a fresh builder when the
+ * old one is gone or never started (it never ran a turn, so its brief never reached the provider).
  * At most `MAX_RECOVERIES` times per item. Failures recorded before `failureKind` existed are
  * recognised by their reason.
  */
@@ -183,33 +185,54 @@ async function recoverOne(
     // Cleanup archived its sessions; they are needed again (a message brings them back).
     sessionsArchivedAt: null,
   } as const;
+  // A PR agent (an integrator) whose start never reached its provider never got its brief: a
+  // rebase or CI request would be its first and only instruction, so it counts as gone.
+  const lost = builder !== undefined && neverRanTurn(ctx.repo, builder);
   if (pr) {
-    ctx.store.updateItem(item.id, (i) => ({
-      ...i,
-      ...base,
-      stage: "verifying",
-      pr,
-      // A builder that is gone is no PR agent any more: conflicts and CI go to an integrator.
-      builderSessionId: builder ? i.builderSessionId : null,
+    // One its provider refused to open (signed out, a CLI too old) also keeps new work off that
+    // provider, as a builder's refused start does (`progress.ts`), so its successor starts on
+    // another provider.
+    const refused =
+      builder && lost && builder.status === "failed"
+        ? providerFailure(ctx.repo, ctx.inbox, builder)
+        : null;
+    if (builder && refused && providerWide(refused)) {
+      ctx.sessions.providerFailed(builder.provider, refused);
+    }
+    ctx.store.updateItem(item.id, (i) => {
       // A dead reviewer is let go; a fresh one takes whatever review is still owed (the
       // whole review, or only a pending re-check, with the earlier verdict kept). The dead one
       // is archived once the fresh one has started (`cleanup.ts`).
-      ...(reviewerDead ? letGoReviewer(i) : {}),
-      note: "Back in verification after a failure outside its code",
-      // A fresh CI clock: the head is timed again from now. CI that never started is started
-      // again by the verify step (`ci-kick.ts`).
-      nudges: {
-        ...freshNudges(i.nudges, at),
-        verifying: at,
-        ...(noCi ? { [CI_KICK_NUDGE]: at } : {}),
-      },
-    }));
+      const { reviewerSessionId, earlierSessionIds } = reviewerDead ? letGoReviewer(i) : i;
+      return {
+        ...i,
+        ...base,
+        stage: "verifying",
+        pr,
+        // A builder that is gone (or never started) is no PR agent any more: conflicts and CI
+        // go to a fresh integrator, with its brief, on a provider that can take work. One that
+        // never started becomes an earlier session, archived by cleanup; one that opens late
+        // after all is stopped and archived as replaced (`late-start.ts`).
+        builderSessionId: builder && !lost ? i.builderSessionId : null,
+        reviewerSessionId,
+        earlierSessionIds:
+          builder && lost ? [...new Set([...earlierSessionIds, builder.id])] : earlierSessionIds,
+        note: "Back in verification after a failure outside its code",
+        // A fresh CI clock: the head is timed again from now. CI that never started is started
+        // again by the verify step (`ci-kick.ts`).
+        nudges: {
+          ...freshNudges(i.nudges, at),
+          verifying: at,
+          ...(noCi ? { [CI_KICK_NUDGE]: at } : {}),
+        },
+      };
+    });
     ctx.log?.(`factory: ${item.id}: back in verification after an infrastructure failure`);
     return loop;
   }
   // A builder that never ran a turn never got its brief: a "continue" message would be its
   // first and only instruction, so it counts as gone.
-  if (builder && builder.status !== "stopped" && !neverRanTurn(ctx.repo, builder)) {
+  if (builder && builder.status !== "stopped" && !lost) {
     return resume ? resumeBuilder(ctx, project, loop, item, builder) : loop;
   }
   // The builder is gone (or never started): a fresh one picks the work up from the queue with

@@ -108,6 +108,8 @@ describe("restarting CI", () => {
     env = createFactoryEnv({ limits: { maxConcurrentSessions: 1 } });
     await enable();
     const { id, builder } = await verifying("none");
+    // It ran the turn that opened the PR: it stays the PR's agent (`recover.ts`).
+    env.ranTurn(builder);
     const reviewer = item(id).reviewerSessionId as string;
     expect(env.repo.get(reviewer).status).toBe("running");
     later(2 * 60_000);

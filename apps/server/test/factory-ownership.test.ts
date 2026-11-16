@@ -264,6 +264,8 @@ describe("failures outside the work's code", () => {
 
     env.gh.actions = true;
     const on = await verifying("none", "Add a timer", 4);
+    // It ran the turn that opened the PR: it stays the PR's agent (`recover.ts`).
+    env.ranTurn(on.builder);
     later(2 * 60_000);
     await tick();
     expect(item(on.id)).toMatchObject({ stage: "failed", failureKind: "infrastructure" });

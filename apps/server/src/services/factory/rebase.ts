@@ -1,4 +1,5 @@
 import type { FactoryItem, FactoryLoop, Project, Session } from "@codeden/contracts";
+import { builderWanted, chooseAgent } from "./agent-choice";
 import { baseBranchOf, type FactoryContext } from "./context";
 import type { FactoryPr } from "./github-port";
 import { failItem } from "./outcomes";
@@ -194,13 +195,16 @@ async function askToRebase(
  * A fresh integrator takes over the PR when the session that wrote it is gone: a worktree on
  * the PR's head branch, a brief with the issue, the PR description and the review history.
  * It becomes the item's PR agent, so the PR's later follow-ups (conflicts, CI, the audit, the
- * review's worktree) go to it. Waits for a free agent slot; true once it started. `marks` are
- * nudges recorded when it starts. None starts for a PR that merged or closed since the step read
- * it (`pr-gone.ts`).
+ * review's worktree) go to it. Its provider and model are chosen as the item's builder's are
+ * (`chooseAgent`): a provider the factory backed off is skipped for an available one, and while
+ * none is available it waits with the waiting note, holding no slot. Then it waits for a free
+ * agent slot; true once it started. `marks` are nudges recorded when it starts. None starts for
+ * a PR that merged or closed since the step read it (`pr-gone.ts`).
  */
 export async function startIntegrator(
   ctx: FactoryContext,
   project: Project,
+  loop: FactoryLoop,
   item: FactoryItem,
   pr: FactoryPr,
   task: IntegratorTask,
@@ -212,6 +216,13 @@ export async function startIntegrator(
     task === "conflicts"
       ? `Merge conflicts with ${base}`
       : "CI never started on its head and its author's session is gone";
+  const agent = chooseAgent(ctx, project, builderWanted(item, loop.tuning), "integration");
+  if ("waiting" in agent) {
+    if (item.note !== agent.waiting) {
+      ctx.store.updateItem(item.id, (i) => ({ ...i, note: agent.waiting }), { touch: false });
+    }
+    return false;
+  }
   if (!claimSlot(ctx, project, "repair", `repair:${item.id}`)) {
     ctx.store.updateItem(item.id, (i) => ({
       ...i,
@@ -228,6 +239,7 @@ export async function startIntegrator(
       base,
       task,
     ),
+    agent,
   );
   if (res.status !== "started") {
     ctx.store.updateItem(item.id, (i) => ({
@@ -237,11 +249,12 @@ export async function startIntegrator(
     return false;
   }
   const session = ctx.repo.find(res.sessionId)?.session;
+  const chosen = agent.provider === "auto" ? null : agent.provider;
   const at = ctx.now().toISOString();
   ctx.store.updateItem(item.id, (i) => ({
     ...i,
     builderSessionId: res.sessionId,
-    builderProvider: session?.provider ?? i.builderProvider,
+    builderProvider: session?.provider ?? chosen ?? i.builderProvider,
     note: `${what}: an integrator took the pull request over`,
     nudges: { ...i.nudges, ...Object.fromEntries(marks.map((k) => [k, at])) },
     // Finished work's integrator is archived again once its turn is over.
@@ -289,7 +302,8 @@ export async function advanceConflicting(
   const from = asked === 0 && item.stage === "verifying" && pr.headSha;
   const also = from ? [`${CONFLICT_FROM}${pr.headSha}`] : [];
   if (!agent) {
-    await startIntegrator(ctx, project, item, pr, "conflicts", [`${REBASE}${asked + 1}`, ...also]);
+    const marks = [`${REBASE}${asked + 1}`, ...also];
+    await startIntegrator(ctx, project, loop, item, pr, "conflicts", marks);
     return loop;
   }
   // A request to an agent between turns starts a turn: it waits for a free agent, after the

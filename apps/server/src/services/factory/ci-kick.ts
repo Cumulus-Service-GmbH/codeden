@@ -1,4 +1,4 @@
-import type { FactoryItem, Project } from "@codeden/contracts";
+import type { FactoryItem, FactoryLoop, Project } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import type { FactoryContext } from "./context";
 import type { FactoryPr } from "./github-port";
@@ -38,6 +38,7 @@ function note(ctx: FactoryContext, item: FactoryItem, text: string, drop = false
 export async function kickCi(
   ctx: FactoryContext,
   project: Project,
+  loop: FactoryLoop,
   item: FactoryItem,
   pr: FactoryPr,
 ): Promise<boolean> {
@@ -90,8 +91,9 @@ export async function kickCi(
     });
     return true;
   }
-  // The author's session is gone: an integrator takes the PR over and pushes the commit.
-  if (await startIntegrator(ctx, project, item, pr, "ci", [`${KICKED}${sha}`])) {
+  // The author's session is gone: an integrator takes the PR over and pushes the commit, on a
+  // provider that can take work (it waits while none can).
+  if (await startIntegrator(ctx, project, loop, item, pr, "ci", [`${KICKED}${sha}`])) {
     ctx.store.updateItem(item.id, (i) => {
       const { [KICK]: _kick, ...nudges } = i.nudges;
       return { ...i, nudges };
