@@ -6,6 +6,8 @@
  * it is not a full parser.
  */
 
+import { dropAssignments } from "./ps-assignments";
+
 /** Which quoting rules to apply. `auto` is for callers that cannot tell the shell. */
 export type ShellDialect = "posix" | "powershell" | "auto";
 
@@ -26,6 +28,11 @@ export interface SimpleCommand {
    * positions of its unquoted commas. A comma inside quotes or escaped is part of the name.
    */
   lists?: Map<string, number[]>;
+  /**
+   * True when the words are the right-hand side of a PowerShell assignment (`$p = '.env'`,
+   * `$r = Remove-Item …`), whose target `./ps-assignments` dropped.
+   */
+  assigned?: boolean;
 }
 
 /** What a word may stand for as paths, from `from` on (after an attached option, `-fFILE`). */
@@ -68,7 +75,10 @@ class Builder {
   /** Where the word's unquoted commas are: a PowerShell list's element boundaries. */
   private commas: number[] = [];
 
-  constructor(private readonly out: SimpleCommand[]) {}
+  constructor(
+    private readonly out: SimpleCommand[],
+    private readonly dialect: ShellDialect,
+  ) {}
 
   add(text: string): void {
     this.word += text;
@@ -112,7 +122,10 @@ class Builder {
     this.endWord();
     this.target = "word";
     const { cmd } = this;
-    // An empty command keeps its state, so `curl … |` then `sh` on the next line stays piped.
+    // PowerShell runs the right-hand side of `$r = Remove-Item …`: judge it as if it stood alone.
+    if (this.dialect !== "posix") dropAssignments(cmd);
+    // An empty command keeps its state, so `curl … |` then `sh` on the next line stays piped (and
+    // `$x =` then a command on the next line assigns that command, as in PowerShell).
     if (!cmd.words.length && !cmd.writes.length && !cmd.nested.length) return;
     this.out.push(cmd);
     this.cmd = { words: [], writes: [], nested: [] };
@@ -130,7 +143,7 @@ class Lexer {
   /** Read simple commands until `closer` (`)` or a backtick) or the end of the input. */
   list(closer: ")" | "`" | null): SimpleCommand[] {
     const out: SimpleCommand[] = [];
-    const b = new Builder(out);
+    const b = new Builder(out, this.dialect);
     const { src } = this;
     while (this.i < src.length) {
       const c = src[this.i] as string;

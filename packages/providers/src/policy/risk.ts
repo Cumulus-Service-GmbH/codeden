@@ -266,8 +266,12 @@ function classifySimple(
     if (write.risky) return write;
   }
 
-  // Secrets: any argument (or element of a PowerShell list) that reads a credentials file.
-  const secret = secretArgument(bin, args, written, isSecretPath, pathsOf(cmd));
+  // Secrets: any argument (or element of a PowerShell list) that reads a credentials file, and a
+  // value assigned to a variable (`$p = '.env'`), which a later command reads through it.
+  const paths = pathsOf(cmd);
+  const secret =
+    secretArgument(bin, args, written, isSecretPath, paths) ??
+    (cmd.assigned ? secretArgument("", tokens.slice(0, 1), [], isSecretPath, paths) : undefined);
   if (secret) return risky("secrets", `Accesses the secrets file ${secret}`);
 
   if (!at.namesOnly && dumpsEnvironment(bin, args)) {
