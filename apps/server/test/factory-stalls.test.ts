@@ -189,6 +189,7 @@ async function waitingOnProvider(provider: string, title: string, issue: number)
   const res = await env.factory.ctx.sessions.startBuilder(created, "", provider);
   if (res.status !== "started") throw new Error(`builder not started: ${res.status}`);
   const pr = env.gh.openPr({ sessionId: res.sessionId, title, files: ["src/clock.ts"] });
+  env.ranTurn(res.sessionId);
   await env.setStatus(res.sessionId, "failed");
   return env.factory.data.updateItem(
     created.id,

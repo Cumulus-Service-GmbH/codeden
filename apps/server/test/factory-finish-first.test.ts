@@ -34,6 +34,8 @@ async function stalledBuild(title: string, issue: number) {
   const created = backlogItem(title, issue);
   const res = await env.factory.ctx.sessions.startBuilder(created, "", "claude");
   if (res.status !== "started") throw new Error(`builder not started: ${res.status}`);
+  // It worked a turn before it died, so it carries on (one that never did starts afresh).
+  env.ranTurn(res.sessionId);
   await env.setStatus(res.sessionId, "failed");
   return env.factory.data.updateItem(created.id, (i) => ({
     ...i,

@@ -17,7 +17,7 @@ import { prAgent } from "./rebase";
 import { isRecheckObligation } from "./recheck";
 import { isReReviewRecord } from "./rereview";
 import { CLEAN_REVIEW } from "./review-environment";
-import { isBusy } from "./sessions";
+import { isBusy, neverRanTurn } from "./sessions";
 import { claimSlot } from "./slots";
 import { builderOpenPr, isEarlyPrRecord } from "./spec-early-pr";
 import { ownsTurnRaceFailure } from "./turn-race";
@@ -27,7 +27,8 @@ import { ownsTurnRaceFailure } from "./turn-race";
  * its code (its builder or reviewer session died, the builder is gone, CI never started while
  * Actions can run) goes back by itself on the next tick after the cause is gone: to
  * verification when its PR is open (the PR is picked up again, not redone), to building with
- * a "continue" message otherwise, or to the queue for a fresh builder when the old one is gone.
+ * a "continue" message otherwise, or to the queue for a fresh builder when the old one is gone
+ * or never started (it never ran a turn, so its brief never reached the provider).
  * At most `MAX_RECOVERIES` times per item. Failures recorded before `failureKind` existed are
  * recognised by their reason.
  */
@@ -206,11 +207,15 @@ async function recoverOne(
     ctx.log?.(`factory: ${item.id}: back in verification after an infrastructure failure`);
     return loop;
   }
-  if (builder && builder.status !== "stopped") {
+  // A builder that never ran a turn never got its brief: a "continue" message would be its
+  // first and only instruction, so it counts as gone.
+  if (builder && builder.status !== "stopped" && !neverRanTurn(ctx.repo, builder)) {
     return resume ? resumeBuilder(ctx, project, loop, item, builder) : loop;
   }
-  // The builder is gone: a fresh one picks the work up from the queue. Its reviewer is let go
-  // with it; both become earlier sessions, archived once none of them is busy (`cleanup.ts`).
+  // The builder is gone (or never started): a fresh one picks the work up from the queue with
+  // the current brief, on whichever provider can take it. Its reviewer is let go with it; both
+  // become earlier sessions, archived once none of them is busy (`cleanup.ts`). One that opens
+  // late after all is stopped and archived as replaced (`late-start.ts`).
   ctx.store.updateItem(item.id, (i) => {
     const { reviewerSessionId, earlierSessionIds } = letGoReviewer(i);
     return {

@@ -2,6 +2,7 @@ import type { FactoryItem, Project } from "@codeden/contracts";
 import { untilText } from "./availability";
 import { type FactoryContext, factoryNotice } from "./context";
 import { prAgent } from "./rebase";
+import { neverRanTurn } from "./sessions";
 
 /**
  * Work waiting on a provider (§10.1, Provider availability): an item that failed for a reason
@@ -37,7 +38,10 @@ export function awaitedProvider(
   available: readonly string[],
 ): string | null | undefined {
   const builder = prAgent(ctx, item);
-  if (builder && !available.includes(builder.provider)) return builder.provider;
+  // One that never ran a turn holds nothing there: a fresh builder starts anywhere (`recover.ts`).
+  if (builder && !available.includes(builder.provider) && !neverRanTurn(ctx.repo, builder)) {
+    return builder.provider;
+  }
   return available.length === 0 ? null : undefined;
 }
 

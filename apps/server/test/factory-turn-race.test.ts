@@ -99,6 +99,8 @@ async function failedBeforeTheFix(
 ): Promise<{ id: string; builderId: string }> {
   const at = new Date().toISOString();
   const builderId = factorySession("failed");
+  // The race hit it mid-turn: it had run turns.
+  env.ranTurn(builderId);
   env.inbox.raiseRunFailed(env.repo.get(builderId), `send-${n}`, RACE);
   if (builder === "stopped") {
     env.repo.update(builderId, (s) => ({ ...s, status: "stopped", archivedAt: at }));
@@ -227,6 +229,8 @@ describe("factory builders hit by 'turn already running' (#96)", () => {
   it("leaves builders that failed for other reasons to the infrastructure recovery (#159)", async () => {
     factory();
     const { id, builderId } = await building();
+    // It worked a turn before it died (one that never did starts afresh, `recover.ts`).
+    env.ranTurn(builderId);
     await env.setStatus(builderId, "failed");
     env.inbox.raiseRunFailed(env.repo.get(builderId), "start", "Could not open the session");
     await tick();
@@ -366,6 +370,7 @@ describe("telling a builder to carry on, through the real session service (#96)"
   it("fails the item once when its builder can't be started at all, then leaves it to the infrastructure recovery", async () => {
     factory(1);
     const { id, builderId } = await building();
+    env.ranTurn(builderId);
     const { runner } = realDelivery();
     runner.up = true;
     runner.hosted.add(builderId);

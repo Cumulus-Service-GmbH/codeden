@@ -55,6 +55,16 @@ export function isBusy(s: Session): boolean {
   return SLOT_STATUSES.has(s.status);
 }
 
+/**
+ * Whether the session never ran a turn: its start failed before the provider saw its first input
+ * (the runner left `session.start` unanswered, the workspace was never prepared, or the provider
+ * refused to open it). A builder's brief is only that input, so such a builder has nothing to
+ * carry on and nothing that ties its work to its provider (`recover.ts`, `provider-wait.ts`).
+ */
+export function neverRanTurn(repo: Pick<SessionRepo, "turnCount">, s: Session): boolean {
+  return repo.turnCount(s.id) === 0;
+}
+
 export interface FactorySessionsDeps {
   sessions: SessionService;
   repo: SessionRepo;

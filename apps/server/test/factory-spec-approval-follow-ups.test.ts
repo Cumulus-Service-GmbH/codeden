@@ -98,6 +98,7 @@ describe("spec approval follow-ups (#365)", () => {
     await revising(id);
 
     // The builder's session dies while it revises the spec; the loop puts it back.
+    env.ranTurn(builder);
     await env.setStatus(builder, "failed");
     await tick();
     expect(item(id)).toMatchObject({ stage: "failed", failureKind: "infrastructure" });

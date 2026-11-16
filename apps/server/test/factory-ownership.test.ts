@@ -197,6 +197,7 @@ describe("failures outside the work's code", () => {
     await tick();
     // The builder dies before it opens a PR (a runner restart, a message racing its turn).
     const builder = item(id).builderSessionId as string;
+    env.ranTurn(builder);
     await env.setStatus(builder, "failed");
     env.providers = [];
     await tick();

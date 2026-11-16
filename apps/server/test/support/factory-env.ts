@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  type AgentEvent,
+  agentEventToNewEvent,
   type BillingMode,
   FactoryLimits,
   type ModelInfo,
@@ -106,6 +108,12 @@ export interface FactoryEnv {
   now: () => Date;
   /** Set a session's status a few ms later (so `updatedAt` moves past earlier nudges). */
   setStatus: (sessionId: string, status: Session["status"]) => Promise<void>;
+  /**
+   * Record a turn the session ran (its events, through the projections), keeping its status.
+   * Sessions here have none unless a test records one: a builder that never ran a turn never
+   * received its brief, and the recovery starts a fresh one instead (`recover.ts`).
+   */
+  ranTurn: (sessionId: string) => void;
   /** Recreate the service over the same database (a server restart). */
   restart: () => FactoryService;
   updateProject: (patch: Partial<Project>) => Project;
@@ -381,6 +389,18 @@ export function createFactoryEnv(
       const [message] = env.queued.splice(next, 1);
       if (message) deliver(sessionId, message.text);
     }
+  };
+  env.ranTurn = (sessionId) => {
+    const before = repo.get(sessionId);
+    const threadId = before.rootThreadId ?? `t-${sessionId}`;
+    const turnId = `u-${randomUUID()}`;
+    const events = [
+      ...(before.rootThreadId ? [] : [{ type: "thread.started", thread: { id: threadId } }]),
+      { type: "turn.started", threadId, turnId },
+      { type: "turn.completed", threadId, turnId },
+    ] as AgentEvent[];
+    store.append(events.map((e) => agentEventToNewEvent(sessionId, e)));
+    repo.update(sessionId, (s) => ({ ...s, status: before.status }));
   };
   env.updateProject = (patch) => {
     const next = { ...projects.get(project.id), ...patch } as Project;
