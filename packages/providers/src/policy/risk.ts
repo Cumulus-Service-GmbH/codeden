@@ -39,6 +39,7 @@ import {
 } from "./paths";
 import { projectConfigCommand, projectConfigWrite } from "./project-config";
 import { loginRisk, providerLoginCommand, touchesProviderLogin } from "./provider-logins";
+import { keptWords } from "./ps-assignments";
 import { registryChange, registryExports } from "./registry";
 import { pipesDownloadIntoInterpreter } from "./remote-scripts";
 import { braceAlternatives, secretArgument, toolOutputs } from "./secrets";
@@ -137,8 +138,10 @@ function firstInList(
       const found = firstInList(inner, scriptContext(script, here), depth + 1, check, into);
       if (found) return found;
     }
-    const found = check(cmd, here, feeds || piped);
-    if (found) return found;
+    for (const one of withKept(cmd)) {
+      const found = check(one, here, feeds || piped);
+      if (found) return found;
+    }
     here = afterCd(cmd, here);
   }
   return undefined;
@@ -172,15 +175,20 @@ function classifyList(
     }
     const shown = output === "shown" && list[i + 1]?.piped !== true;
     const source = cmd.piped ? list[head] : undefined;
-    const result = classifySimple(cmd, here, depth, {
-      namesOnly: names.listings.has(i),
-      shown,
-      source,
-    });
-    if (result.risky) return result;
+    const at = { namesOnly: names.listings.has(i), shown, source };
+    for (const one of withKept(cmd)) {
+      const result = classifySimple(one, here, depth, at);
+      if (result.risky) return result;
+    }
     here = afterCd(cmd, here);
   }
   return SAFE;
+}
+
+/** `cmd`, then what a PowerShell assignment in it keeps in its variable (`keptWords`). */
+function withKept(cmd: SimpleCommand): SimpleCommand[] {
+  const kept = keptWords(cmd);
+  return kept ? [cmd, kept] : [cmd];
 }
 
 /**
@@ -266,12 +274,8 @@ function classifySimple(
     if (write.risky) return write;
   }
 
-  // Secrets: any argument (or element of a PowerShell list) that reads a credentials file, and a
-  // value assigned to a variable (`$p = '.env'`), which a later command reads through it.
-  const paths = pathsOf(cmd);
-  const secret =
-    secretArgument(bin, args, written, isSecretPath, paths) ??
-    (cmd.assigned ? secretArgument("", tokens.slice(0, 1), [], isSecretPath, paths) : undefined);
+  // Secrets: any argument (or element of a PowerShell list) that reads a credentials file.
+  const secret = secretArgument(bin, args, written, isSecretPath, pathsOf(cmd));
   if (secret) return risky("secrets", `Accesses the secrets file ${secret}`);
 
   if (!at.namesOnly && dumpsEnvironment(bin, args)) {

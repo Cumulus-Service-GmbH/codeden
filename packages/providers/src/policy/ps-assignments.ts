@@ -25,8 +25,7 @@ const ASSIGNMENT = new RegExp(String.raw`${TARGET}(?:\s*,\s*${TARGET})*\s*${OPER
 
 /**
  * Drop the assignments a command starts with, so its words are the command they assign, and mark
- * it `assigned`: a value kept in a variable (`$p = '.env'`) is still checked as a path a later
- * command reads through it.
+ * it `assigned`: what a variable keeps is still checked as paths (`keptWords`).
  */
 export function dropAssignments(cmd: SimpleCommand): void {
   const text = cmd.words.join(" ");
@@ -40,6 +39,20 @@ export function dropAssignments(cmd: SimpleCommand): void {
   if (end === 0) return;
   cmd.words = after(cmd, end);
   cmd.assigned = true;
+}
+
+/**
+ * The words an assignment keeps in its variable, as the arguments of a command that runs nothing
+ * (`$t = 'C:\…\install-token'` gives `= C:\…\install-token`); undefined when `cmd` assigns
+ * nothing. A later command reads or writes them through the variable (`Get-Content $t`,
+ * `Set-Content $p …`), so the classifier judges this command too, with every rule that reads
+ * arguments as paths: secrets, CodeDen's own home and credentials, the agent CLIs' logins, agents'
+ * allow-lists and CodeDen's project config. These are the words those rules saw before the
+ * assignment was dropped, so an assignment never asks less than it did then.
+ */
+export function keptWords(cmd: SimpleCommand): SimpleCommand | undefined {
+  if (!cmd.assigned || !cmd.words.length) return undefined;
+  return { words: ["=", ...cmd.words], writes: [], nested: [], lists: cmd.lists };
 }
 
 /**
