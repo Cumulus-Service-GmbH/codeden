@@ -337,13 +337,13 @@ describe("Codex hook runs", () => {
       type: "item.started",
       threadId: "s1:thread-root",
       turnId: "t1",
-      item: { id: "hook-r1", event: "PreToolUse", label: "command", outcome: "running" },
+      item: { event: "PreToolUse", label: "command", outcome: "running" },
     });
     expect(done).toMatchObject({
       type: "item.completed",
       turnId: "t1",
       item: {
-        id: "hook-r1",
+        id: start?.item.id,
         status: "declined",
         event: "PreToolUse",
         source: "/home/me/.codex/hooks.json",
@@ -353,6 +353,7 @@ describe("Codex hook runs", () => {
           "Blocked a risky command\nfeedback: rm -rf / is not allowed\ncontext: see SECURITY.md",
       },
     });
+    expect(start?.item.id).toMatch(/^hook-/);
     expect(done?.item.exitCode).toBeUndefined();
   });
 
@@ -389,11 +390,12 @@ describe("Codex hook runs", () => {
     });
 
     feed("hook/started", { turnId: "t1", run: run("slow") });
+    const slow = hookEvents(events).at(-1)?.item.id;
     mapper.endTurn({ type: "interrupted" });
     expect(hookEvents(events).at(-1)).toMatchObject({
       type: "item.completed",
       turnId: "t1",
-      item: { id: "hook-slow", outcome: "cancelled", status: "cancelled" },
+      item: { id: slow, outcome: "cancelled", status: "cancelled" },
     });
   });
 
@@ -416,5 +418,101 @@ describe("Codex hook runs", () => {
     expect(runs).toHaveLength(1);
     expect(runs[0]?.threadId).toBe("s1:thread-call-spawn");
     expect(runs[0]?.turnId).toBe("ct");
+  });
+
+  // Codex's `run.id` names the handler, not the run: `<event>:<displayOrder>:<hooks file>`, the
+  // same for every run of it (seen from `codex app-server` 0.160.1).
+  describe("with Codex's real run ids (one per handler)", () => {
+    const HANDLER = "pre-tool-use:0:C:\\Users\\me\\.codex\\hooks.json";
+    const pre = (fields: object = {}) => run(HANDLER, fields);
+    const done = (fields: object = {}) => pre({ status: "completed", durationMs: 5, ...fields });
+
+    /** Each item id with the threads, turns and phases it was emitted in. */
+    const byItem = (events: AgentEvent[]) => {
+      const out = new Map<string, string[]>();
+      for (const e of hookEvents(events)) {
+        const seen = out.get(e.item.id) ?? [];
+        seen.push(`${e.threadId}/${e.turnId}/${e.type}/${e.item.outcome}`);
+        out.set(e.item.id, seen);
+      }
+      return [...out.values()];
+    };
+
+    it("gives two runs of one handler in one turn an item each, paired in order", () => {
+      const { events, feed } = setup();
+      feed("turn/started", { turn: turn("t1") });
+      // Parallel tool calls: both start before either completes.
+      feed("hook/started", { turnId: "t1", run: pre() });
+      feed("hook/started", { turnId: "t1", run: pre() });
+      feed("hook/completed", { turnId: "t1", run: done({ statusMessage: "first" }) });
+      feed("hook/completed", {
+        turnId: "t1",
+        run: done({ status: "blocked", statusMessage: "second" }),
+      });
+      const R = "s1:thread-root/t1";
+      expect(byItem(events)).toEqual([
+        [`${R}/item.started/running`, `${R}/item.completed/succeeded`],
+        [`${R}/item.started/running`, `${R}/item.completed/blocked`],
+      ]);
+      const outputs = hookEvents(events)
+        .filter((e) => e.type === "item.completed")
+        .map((e) => e.item.output);
+      expect(outputs).toEqual(["first", "second"]);
+    });
+
+    it("gives runs in later turns items of their own, in their own turns", () => {
+      const { events, feed } = setup();
+      for (const t of ["t1", "t2"]) {
+        feed("turn/started", { turn: turn(t) });
+        for (let i = 0; i < 2; i++) {
+          feed("hook/started", { turnId: t, run: pre() });
+          feed("hook/completed", { turnId: t, run: done() });
+        }
+        feed("turn/completed", { turn: { ...turn(t), status: "completed" } });
+      }
+      const items = byItem(events);
+      expect(items).toHaveLength(4);
+      expect(items.map((seen) => seen.map((s) => s.split("/")[1]))).toEqual([
+        ["t1", "t1"],
+        ["t1", "t1"],
+        ["t2", "t2"],
+        ["t2", "t2"],
+      ]);
+    });
+
+    it("lands a sub-agent's run of the root's handler on its child thread, as a new item", () => {
+      const { events, feed } = setup();
+      feed("turn/started", { turn: turn("rt") });
+      feed("hook/started", { turnId: "rt", run: pre() });
+      feed("hook/completed", { turnId: "rt", run: done() });
+      feed("item/completed", {
+        turnId: "rt",
+        item: {
+          type: "subAgentActivity",
+          id: "call-spawn",
+          kind: "started",
+          agentThreadId: CHILD,
+          agentPath: "/root/explorer",
+        },
+      });
+      feed("turn/started", { turn: turn("ct") }, CHILD);
+      feed("hook/started", { turnId: "ct", run: pre() }, CHILD);
+      feed("hook/completed", { turnId: "ct", run: done() }, CHILD);
+      expect(byItem(events)).toEqual([
+        ["s1:thread-root/rt/item.started/running", "s1:thread-root/rt/item.completed/succeeded"],
+        [
+          "s1:thread-call-spawn/ct/item.started/running",
+          "s1:thread-call-spawn/ct/item.completed/succeeded",
+        ],
+      ]);
+    });
+
+    it("gives each completion without a start a fresh item", () => {
+      const { events, feed } = setup();
+      feed("turn/started", { turn: turn("t1") });
+      feed("hook/completed", { turnId: "t1", run: done() });
+      feed("hook/completed", { turnId: "t1", run: done() });
+      expect(byItem(events)).toHaveLength(2);
+    });
   });
 });
