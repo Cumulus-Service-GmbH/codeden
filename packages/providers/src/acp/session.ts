@@ -3,6 +3,7 @@ import {
   AGENT_ALLOW_LIST_NOTICE,
   type AgentEvent,
   type AutonomyLevel,
+  type ReasoningEffort,
   type RuntimeResponse,
   type SessionOptions,
   type UserInput,
@@ -29,7 +30,7 @@ import type {
   AcpSessionSetup,
 } from "./protocol";
 import { type AcpRpc, AcpRpcError, METHOD_NOT_FOUND } from "./rpc";
-import { currentMode, openOrLoad, setMode, setModel } from "./setup";
+import { currentMode, openOrLoad, setConfigValue, setMode, setModel } from "./setup";
 import { AcpSubagents } from "./subagents";
 
 /**
@@ -60,6 +61,9 @@ export class AcpSession implements ProviderSession {
   private interrupted = false;
   private model: string | undefined;
   private nextModel: string | null | undefined;
+  /** The reasoning effort to set (`spec.effort`); undefined leaves the agent's own. */
+  private effort: ReasoningEffort | undefined;
+  private nextEffort: ReasoningEffort | null | undefined;
   private instructions: string | undefined;
   private mode: string | undefined;
   private planning: boolean;
@@ -101,6 +105,7 @@ export class AcpSession implements ProviderSession {
     this.planning = opts.planMode && !!config.spec.modes.plan;
     this.policy.planning = this.planning;
     this.model = explicitModel(opts.model);
+    this.effort = opts.effort;
     this.acpSession = opts.resumeToken;
   }
 
@@ -117,6 +122,7 @@ export class AcpSession implements ProviderSession {
 
   async configure(change: SessionConfigChange): Promise<void> {
     if (change.model !== undefined) this.nextModel = change.model;
+    if (change.effort !== undefined) this.nextEffort = change.effort;
   }
 
   /** Applies from the next permission request; read-only also switches to the read-only mode. */
@@ -316,6 +322,7 @@ export class AcpSession implements ProviderSession {
       const setup = this.setup;
       this.setup = await setModel(rpc, opened.sessionId, setup, this.model).catch(() => setup);
     }
+    await this.applyEffort(rpc, opened.sessionId);
     const model = this.model ?? modelsOf(opened.setup)?.current;
     this.events.push({
       type: "session.updated",
@@ -343,13 +350,32 @@ export class AcpSession implements ProviderSession {
 
   private async applyModelChange(rpc: AcpRpc): Promise<void> {
     const next = this.nextModel;
-    if (next === undefined || !this.acpSession) return;
+    const nextEffort = this.nextEffort;
+    if ((next === undefined && nextEffort === undefined) || !this.acpSession) return;
     this.nextModel = undefined;
-    const model = explicitModel(next);
-    if (!model || model === this.model) return;
-    this.setup = await setModel(rpc, this.acpSession, this.setup, model);
-    this.model = model;
-    this.events.push({ type: "session.updated", model });
+    this.nextEffort = undefined;
+    if (nextEffort !== undefined) this.effort = nextEffort ?? undefined;
+    const model = next === undefined ? undefined : explicitModel(next);
+    if (model && model !== this.model) {
+      this.setup = await setModel(rpc, this.acpSession, this.setup, model);
+      this.model = model;
+      this.events.push({ type: "session.updated", model });
+    } else if (nextEffort === undefined) {
+      return;
+    }
+    // A new model may bring its own level, so the effort is set again after it.
+    await this.applyEffort(rpc, this.acpSession);
+  }
+
+  /** Set the session's reasoning effort through the agent's option for it (`spec.effort`). */
+  private async applyEffort(rpc: AcpRpc, sessionId: string): Promise<void> {
+    const spec = this.config.spec.effort;
+    const effort = this.effort;
+    if (!spec || !effort) return;
+    const setup = this.setup;
+    this.setup = await setConfigValue(rpc, sessionId, setup, spec.category, (listed) =>
+      spec.value(effort, listed),
+    ).catch(() => setup);
   }
 
   private onAgentMode(mode: string): void {

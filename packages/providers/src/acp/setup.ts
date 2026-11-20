@@ -1,4 +1,4 @@
-import { findOption, modeIds, optionId } from "./config";
+import { findOption, modeIds, optionId, optionValues } from "./config";
 import type { AcpConfigOption, AcpMcpServer, AcpSessionSetup } from "./protocol";
 import { type AcpRpc, AcpRpcError } from "./rpc";
 
@@ -86,6 +86,25 @@ export async function setModel(
   if (set) return set;
   await rpc.request("session/set_model", { sessionId, modelId: model });
   return setup;
+}
+
+/**
+ * Set the config option of `category` to the value `pick` chooses from the ones it lists, when
+ * the session has that option. Returns the setup with the agent's updated options, unchanged
+ * when there is no such option or nothing to pick.
+ */
+export async function setConfigValue(
+  rpc: AcpRpc,
+  sessionId: string,
+  setup: AcpSessionSetup,
+  category: string,
+  pick: (listed: readonly string[]) => string | undefined,
+): Promise<AcpSessionSetup> {
+  const option = findOption(setup.configOptions, category);
+  if (!option) return setup;
+  const value = pick(optionValues(option).map((v) => v.value));
+  if (!value || value === option.currentValue) return setup;
+  return (await setOption(rpc, sessionId, setup, category, value)) ?? setup;
 }
 
 /**
