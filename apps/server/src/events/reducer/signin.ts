@@ -21,6 +21,7 @@ const NAMES: Record<string, string> = {
   opencode: "OpenCode",
   cursor: "Cursor",
   gemini: "Gemini CLI",
+  antigravity: "Antigravity CLI",
 };
 
 /** The id of a provider's sign-in item: one per provider. */

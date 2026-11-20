@@ -52,6 +52,7 @@ const ORDER: SetupToolId[] = [
   "opencode",
   "cursor",
   "gemini",
+  "antigravity",
   "gh",
   "git",
   "browser",
@@ -64,6 +65,7 @@ export const PROVIDER_CHECKS: readonly SetupToolId[] = [
   "opencode",
   "cursor",
   "gemini",
+  "antigravity",
 ];
 
 /**

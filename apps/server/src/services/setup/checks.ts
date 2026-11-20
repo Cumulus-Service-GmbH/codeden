@@ -1,6 +1,7 @@
 import type { SetupToolId } from "@codeden/contracts";
 import { isElectronRuntime } from "@codeden/providers";
 import { detectBrowser } from "./browsers";
+import { checkAntigravity } from "./check-antigravity";
 import { base, type CheckEnv, type CheckResult, installFix, MIN_NODE_MAJOR } from "./check-base";
 import { checkCursor } from "./check-cursor";
 import { checkGemini } from "./check-gemini";
@@ -332,6 +333,7 @@ export const CHECKS: Record<SetupToolId, (env: CheckEnv) => Promise<CheckResult>
   opencode: checkOpenCode,
   cursor: checkCursor,
   gemini: checkGemini,
+  antigravity: checkAntigravity,
   gh: checkGh,
   git: checkGit,
   browser: checkBrowser,

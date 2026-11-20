@@ -1,5 +1,9 @@
 import type { SetupCheck, SetupCommand, SetupToolId } from "@codeden/contracts";
-import { cursorInstallCommand, GEMINI_INSTALL_COMMAND } from "@codeden/providers";
+import {
+  ANTIGRAVITY_INSTALL_COMMAND,
+  cursorInstallCommand,
+  GEMINI_INSTALL_COMMAND,
+} from "@codeden/providers";
 import type { Exec } from "../exec";
 import type { BrowserProbe } from "./browsers";
 import type { Locate } from "./tool-lookup";
@@ -12,6 +16,7 @@ const LABELS: Record<SetupToolId, string> = {
   opencode: "OpenCode",
   cursor: "Cursor",
   gemini: "Gemini CLI",
+  antigravity: "Antigravity CLI",
   gh: "GitHub CLI",
   git: "git",
   browser: "Browser",
@@ -39,6 +44,12 @@ export function installFix(id: SetupToolId, platform: NodeJS.Platform): SetupCom
       };
     case "gemini":
       return { kind: "install", command: GEMINI_INSTALL_COMMAND, url: "https://geminicli.com" };
+    case "antigravity":
+      return {
+        kind: "install",
+        command: ANTIGRAVITY_INSTALL_COMMAND,
+        url: "https://antigravity.google/docs/cli",
+      };
     case "gh":
       return {
         kind: "install",
