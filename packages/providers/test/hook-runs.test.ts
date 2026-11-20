@@ -19,7 +19,7 @@ describe("hookRuns capability", () => {
   it("is on for Claude and Codex and absent for the providers that report no runs", () => {
     expect(getProvider("claude")?.capabilities().hookRuns).toBe(true);
     expect(getProvider("codex")?.capabilities().hookRuns).toBe(true);
-    for (const id of ["opencode", "cursor", "gemini"]) {
+    for (const id of ["opencode", "cursor", "gemini", "antigravity"]) {
       expect(getProvider(id)?.capabilities().hookRuns).toBeUndefined();
     }
     expect(new FakeProvider().capabilities().hookRuns).toBeUndefined();

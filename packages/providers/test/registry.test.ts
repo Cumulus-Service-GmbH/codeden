@@ -10,6 +10,7 @@ describe("provider registry", () => {
       "opencode",
       "cursor",
       "gemini",
+      "antigravity",
     ]);
     const claude = getProvider("claude");
     const codex = getProvider("codex");
@@ -34,6 +35,17 @@ describe("provider registry", () => {
     expect(gemini?.displayName).toBe("Gemini CLI");
     expect(gemini?.capabilities()).toMatchObject({
       userQuestions: false,
+      planMode: true,
+      steer: false,
+      readOnly: true,
+      liveAutonomy: true,
+    });
+    // Antigravity CLI: its thinking level is CodeDen's effort; no steering over ACP.
+    const antigravity = getProvider("antigravity");
+    expect(antigravity?.displayName).toBe("Antigravity CLI");
+    expect(antigravity?.capabilities()).toMatchObject({
+      reasoningEffort: true,
+      skills: true,
       planMode: true,
       steer: false,
       readOnly: true,

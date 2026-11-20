@@ -1,5 +1,6 @@
 import type { ProviderInfo } from "@codeden/contracts";
 import { type ProviderAdapter, providerInfo, type RefreshModelsOptions } from "./adapter";
+import { AntigravityAdapter } from "./antigravity/adapter";
 import { ClaudeAdapter } from "./claude/adapter";
 import { CodexAdapter } from "./codex/adapter";
 import { CursorAdapter } from "./cursor/adapter";
@@ -61,7 +62,10 @@ export class ProviderRegistry {
   }
 }
 
-/** Fresh instances of the built-in real providers (Claude Code, Codex, OpenCode, Cursor, Gemini CLI). */
+/**
+ * Fresh instances of the built-in real providers (Claude Code, Codex, OpenCode, Cursor, Gemini
+ * CLI, Antigravity CLI).
+ */
 export function builtinProviders(): ProviderAdapter[] {
   return [
     new ClaudeAdapter(),
@@ -69,6 +73,7 @@ export function builtinProviders(): ProviderAdapter[] {
     new OpenCodeAdapter(),
     new CursorAdapter(),
     new GeminiAdapter(),
+    new AntigravityAdapter(),
   ];
 }
 

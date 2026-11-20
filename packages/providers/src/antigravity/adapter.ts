@@ -1,0 +1,202 @@
+import type {
+  ModelInfo,
+  ProviderCapabilities,
+  ProviderStatus,
+  SessionOptions,
+} from "@codeden/contracts";
+import { modeIds } from "../acp/config";
+import { classifyAcpError } from "../acp/errors";
+import type { AcpAgentSpec } from "../acp/extensions";
+import type { AcpInitializeResult, AcpSessionSetup } from "../acp/protocol";
+import { AcpSession } from "../acp/session";
+import { type ProviderAdapter, type ProviderSession, ProviderSessionError } from "../adapter";
+import { ModelCatalog } from "../models";
+import type { ResolvedCommand } from "../util/exec";
+import { findExecutable, type LocateOptions } from "../util/locate";
+import {
+  ANTIGRAVITY_LOGIN_COMMAND,
+  ANTIGRAVITY_UPGRADE_COMMAND,
+  antigravityTooOldMessage,
+  detectAntigravity,
+  isSupportedAntigravityVersion,
+} from "./detect";
+import { antigravityModelInfos, fallbackAntigravityModels, thoughtLevel } from "./models";
+import { ANTIGRAVITY_ACP_ARGS, type AntigravityProbe, probeAntigravity } from "./probe";
+
+export const ANTIGRAVITY_PROVIDER_ID = "antigravity";
+
+/**
+ * How CodeDen drives `agy acp --process-per-session`. No `authMethod`: the ACP server reuses
+ * the login of an interactive `agy`, so CodeDen never authenticates. Agent sessions run in its
+ * `default` mode, which asks before edits and commands; there is no read-only mode, so
+ * read-only sessions stay in `default` and CodeDen's policy refuses edits and commands. Plan
+ * mode is its `plan` mode. CodeDen's reasoning effort is its `thought_level` option
+ * (`thoughtLevel`: `minimal` runs at `low`, a level a model lacks at the nearest one it has).
+ */
+export const ANTIGRAVITY_AGENT: AcpAgentSpec = {
+  label: "Antigravity CLI",
+  args: ANTIGRAVITY_ACP_ARGS,
+  modes: { agent: "default", plan: "plan" },
+  effort: { category: "thought_level", value: thoughtLevel },
+};
+
+/**
+ * Honest flags (Principle 5). Approvals and the read-only level go through the CLI's permission
+ * requests, decided by CodeDen's policy for every call (so autonomy changes apply live). Plan
+ * mode is its `plan` mode; resume is `session/load`; reasoning effort is its thinking level.
+ * Skills: the CLI loads its own, from `~/.gemini/config/skills/<name>/`, in every session.
+ * Not wired up: questions, steering (ACP can't add input to a running prompt), subagents,
+ * rollback and fork. Images and MCP servers (CodeDen's tools are an HTTP MCP server) follow
+ * what the CLI reports in `initialize`; plan mode, what its sessions list.
+ */
+const BASE_CAPABILITIES: ProviderCapabilities = {
+  resume: true,
+  steer: false,
+  interrupt: true,
+  approvals: true,
+  userQuestions: false,
+  subagents: false,
+  rollback: false,
+  fork: false,
+  images: true,
+  planMode: true,
+  reasoningEffort: true,
+  mcp: true,
+  skills: true,
+  liveAutonomy: true,
+  readOnly: true,
+};
+
+export interface AntigravityAdapterOptions {
+  executable?: ResolvedCommand;
+  /** Where to look for the CLI (tests); default PATH, then `~/.local/bin`. */
+  locate?: LocateOptions;
+  /** Max time for a probe (detection). */
+  probeTimeoutMs?: number;
+  startTimeoutMs?: number;
+  interruptTimeoutMs?: number;
+}
+
+/** The Antigravity CLI through its ACP server (`agy acp`), one process per session (§7.2). */
+export class AntigravityAdapter implements ProviderAdapter {
+  readonly id = ANTIGRAVITY_PROVIDER_ID;
+  readonly displayName = "Antigravity CLI";
+  private readonly catalog = new ModelCatalog(fallbackAntigravityModels());
+  private info: AcpInitializeResult | undefined;
+  /** Whether the last session listed a `plan` mode; unknown until one has. */
+  private planListed: boolean | undefined;
+  private found: { command: ResolvedCommand; version: string | null } | undefined;
+
+  constructor(private readonly options: AntigravityAdapterOptions = {}) {}
+
+  /** The CLI to run: a given copy, the one detection found, else one looked up now. */
+  private async executable(): Promise<{ command: ResolvedCommand; version: string | null }> {
+    if (this.options.executable) return { command: this.options.executable, version: null };
+    if (this.found) return this.found;
+    const lookup = await findExecutable("agy", {
+      ...(this.options.probeTimeoutMs ? { timeoutMs: this.options.probeTimeoutMs } : {}),
+      ...this.options.locate,
+    });
+    if (!lookup.command) {
+      throw new Error("The Antigravity CLI is not installed (no `agy` on PATH or in ~/.local/bin)");
+    }
+    this.found = { command: lookup.command, version: lookup.version };
+    return this.found;
+  }
+
+  async detect(): Promise<ProviderStatus> {
+    // A reinstall or an uninstall since the last detection: look again.
+    this.found = undefined;
+    return detectAntigravity({
+      ...(this.options.executable ? { executable: this.options.executable } : {}),
+      ...(this.options.locate ? { locate: this.options.locate } : {}),
+      ...(this.options.probeTimeoutMs ? { timeoutMs: this.options.probeTimeoutMs } : {}),
+      probe: (exe, version) => this.probe(exe, version),
+    });
+  }
+
+  /** What the CLI reported in `initialize` refines resume, images and MCP; sessions, plan mode. */
+  capabilities(): ProviderCapabilities {
+    const caps = this.info?.agentCapabilities;
+    return {
+      ...BASE_CAPABILITIES,
+      ...(caps
+        ? {
+            resume: caps.loadSession === true,
+            images: caps.promptCapabilities?.image === true,
+            mcp: caps.mcpCapabilities?.http === true,
+          }
+        : {}),
+      ...(this.planListed === false ? { planMode: false } : {}),
+    };
+  }
+
+  models(): ModelInfo[] {
+    return this.catalog.list();
+  }
+
+  /**
+   * The CLI lists its models only in a session, so there is no `refreshModels`: Default stands
+   * in until a session reports the account's list.
+   */
+  onModelsChanged(listener: () => void): () => void {
+    return this.catalog.subscribe(listener);
+  }
+
+  async openSession(opts: SessionOptions): Promise<ProviderSession> {
+    const { command, version } = await this.executable();
+    if (version && !isSupportedAntigravityVersion(version)) {
+      throw new ProviderSessionError(
+        "version_unsupported",
+        `${antigravityTooOldMessage(version)}. Update it with \`${ANTIGRAVITY_UPGRADE_COMMAND}\`.`,
+        "setup",
+      );
+    }
+    const session = new AcpSession(opts, {
+      executable: command,
+      spec: ANTIGRAVITY_AGENT,
+      onSetup: (setup, info) => this.onSetup(setup, info),
+      ...(this.options.startTimeoutMs ? { startTimeoutMs: this.options.startTimeoutMs } : {}),
+      ...(this.options.interruptTimeoutMs
+        ? { interruptTimeoutMs: this.options.interruptTimeoutMs }
+        : {}),
+    });
+    try {
+      await session.start();
+    } catch (error) {
+      await session.close();
+      throw signInError(error);
+    }
+    return session;
+  }
+
+  /** A session reported its models and modes: they are the account's current ones. */
+  private onSetup(setup: AcpSessionSetup, info: AcpInitializeResult): void {
+    this.info = info;
+    const modes = modeIds(setup);
+    if (modes.length) this.planListed = modes.includes(ANTIGRAVITY_AGENT.modes.plan ?? "plan");
+    const models = antigravityModelInfos(setup);
+    if (models) this.catalog.set(models);
+  }
+
+  /** Detection found a supported copy: sessions run it, after the handshake shows its flags. */
+  private async probe(exe: ResolvedCommand, version: string | null): Promise<AntigravityProbe> {
+    this.found = { command: exe, version };
+    const result = await probeAntigravity(exe, {
+      ...(this.options.probeTimeoutMs ? { timeoutMs: this.options.probeTimeoutMs } : {}),
+    });
+    if (result.info) this.info = result.info;
+    return result;
+  }
+}
+
+/** A session that couldn't start because the CLI isn't signed in says how to sign in. */
+function signInError(error: unknown): unknown {
+  if (classifyAcpError(error) !== "auth") return error;
+  const message = error instanceof Error ? error.message : String(error);
+  return new ProviderSessionError(
+    "not_logged_in",
+    `The Antigravity CLI is not signed in (${message.replace(/\.$/, "")}). Run \`${ANTIGRAVITY_LOGIN_COMMAND}\` once and sign in.`,
+    "auth",
+  );
+}

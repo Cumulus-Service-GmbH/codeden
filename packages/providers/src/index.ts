@@ -1,6 +1,7 @@
 /** @codeden/providers: provider adapters behind the normalized `ProviderAdapter` interface (§7.1). */
 export * from "./acp";
 export * from "./adapter";
+export * from "./antigravity";
 export { ApprovalBroker, type ItemCtx } from "./approvals";
 export * from "./async-queue";
 export * from "./claude";

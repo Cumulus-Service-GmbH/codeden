@@ -1,0 +1,130 @@
+import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { AgentEvent, SessionOptions } from "@codeden/contracts";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { ProviderSession } from "../src/adapter";
+import { AntigravityAdapter } from "../src/antigravity/adapter";
+
+const fakeAgy = {
+  kind: "node-script" as const,
+  path: process.execPath,
+  script: join(import.meta.dirname, "fixtures", "fake-agy", "agy.mjs"),
+};
+
+type Logged = { method: string; params: Record<string, unknown> };
+let dir: string;
+const logFile = () => join(dir, "acp.log");
+const logged = (method?: string): Logged[] =>
+  existsSync(logFile())
+    ? readFileSync(logFile(), "utf8")
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Logged)
+        .filter((m) => !method || m.method === method)
+    : [];
+/** The `session/set_config_option` calls, as `configId=value`. */
+const configSets = () =>
+  logged("session/set_config_option").map((m) => `${m.params.configId}=${m.params.value}`);
+
+const codeden = {
+  transport: "http" as const,
+  name: "codeden",
+  url: "http://127.0.0.1:4000/mcp",
+  headers: { Authorization: "Bearer test" },
+  trusted: true,
+};
+
+function options(extra: Partial<SessionOptions> = {}): SessionOptions {
+  return {
+    sessionId: "s1",
+    role: "agent",
+    cwd: dir,
+    autonomy: "auto",
+    mcpServers: [],
+    additionalDirectories: [],
+    planMode: false,
+    ...extra,
+    env: { FAKE_AGY_LOG: logFile(), ...extra.env },
+  };
+}
+
+const isTurnEnd = (e: AgentEvent) =>
+  e.type === "turn.completed" || e.type === "turn.failed" || e.type === "turn.interrupted";
+
+const sessions: ProviderSession[] = [];
+async function open(extra: Partial<SessionOptions> = {}) {
+  const adapter = new AntigravityAdapter({ executable: fakeAgy });
+  const session = await adapter.openSession(options(extra));
+  sessions.push(session);
+  const events: AgentEvent[] = [];
+  const it = session.events[Symbol.asyncIterator]();
+  const turn = async (text: string) => {
+    const from = events.length;
+    await session.send({ text, attachments: [] });
+    for (;;) {
+      const next = await it.next();
+      if (next.done) throw new Error("event stream ended");
+      events.push(next.value);
+      if (isTurnEnd(next.value)) return events.slice(from);
+    }
+  };
+  return { session, adapter, turn };
+}
+
+beforeEach(() => {
+  dir = mkdtempSync(join(tmpdir(), "codeden-agy-"));
+});
+
+afterEach(async () => {
+  await Promise.all(sessions.splice(0).map((s) => s.close()));
+});
+
+describe("Antigravity CLI session over ACP", () => {
+  it("runs `acp --process-per-session` on the user's own login with CodeDen's HTTP MCP server", async () => {
+    const { adapter, turn } = await open({ mcpServers: [codeden] });
+    expect(logged("authenticate")).toEqual([]);
+    expect(logged("session/new")[0]?.params.mcpServers).toEqual([
+      {
+        type: "http",
+        name: "codeden",
+        url: "http://127.0.0.1:4000/mcp",
+        headers: [{ name: "Authorization", value: "Bearer test" }],
+      },
+    ]);
+    // Already in `default`, no effort asked for: nothing to set.
+    expect(configSets()).toEqual([]);
+    const events = await turn("hi");
+    expect(events.at(-1)?.type).toBe("turn.completed");
+    // The session's own list replaces Default-only.
+    expect(adapter.models().map((m) => m.id)).toContain("gemini-4-neon");
+  });
+
+  it("sets the model, then its thinking level, at the start and when changed", async () => {
+    const { session, turn } = await open({ model: "gemini-4-argon", effort: "max" });
+    // Argon lists `xhigh` as a thinking level, so `max` runs at it.
+    expect(configSets()).toEqual(["model=gemini-4-argon", "thought_level=xhigh"]);
+    await session.configure?.({ effort: "minimal" });
+    await turn("go");
+    expect(configSets().at(-1)).toBe("thought_level=low");
+    await session.configure?.({ model: "claude-opus-5-5" });
+    await turn("again");
+    // A new model: the effort is checked again after it, and set only when the level changed.
+    expect(configSets().at(-1)).toBe("model=claude-opus-5-5");
+  });
+
+  it("plans in its `plan` mode, and stays in `default` read-only", async () => {
+    await open({ planMode: true });
+    expect(configSets()).toEqual(["mode=plan"]);
+    const readOnly = await open({ autonomy: "read_only" });
+    await readOnly.session.setAutonomy?.("read_only");
+    expect(configSets()).toEqual(["mode=plan"]);
+  });
+
+  it("explains how to sign in when the CLI has no login", async () => {
+    const adapter = new AntigravityAdapter({ executable: fakeAgy });
+    await expect(
+      adapter.openSession(options({ env: { FAKE_AGY_AUTH: "missing" } })),
+    ).rejects.toMatchObject({ code: "not_logged_in", message: expect.stringMatching(/`agy`/) });
+  });
+});

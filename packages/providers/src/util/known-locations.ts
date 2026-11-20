@@ -52,6 +52,9 @@ export function knownLocations(name: string, opts: KnownLocationOptions = {}): s
         p.join(home, ".opencode", "bin", exe("opencode")),
         ...(platform === "darwin" ? ["/opt/homebrew/bin/opencode", "/usr/local/bin/opencode"] : []),
       ];
+    case "agy":
+      // The Antigravity CLI's installer: `~/.local/bin`.
+      return [p.join(home, ".local", "bin", exe("agy"))];
     case "gemini":
       // Homebrew (`brew install gemini-cli`), for apps started from the macOS Finder; npm's
       // global folder is on PATH.
