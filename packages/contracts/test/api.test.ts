@@ -229,9 +229,41 @@ describe("api schemas", () => {
     ).toEqual({ tool: "gemini", command: "gemini", args: [] });
   });
 
+  it("round-trips the Antigravity CLI's setup check and sign-in command", () => {
+    expect(SetupToolId.options).toContain("antigravity");
+    const check = roundTrip(SetupCheck, {
+      id: "antigravity",
+      label: "Antigravity CLI",
+      state: "ok",
+      installed: true,
+      version: "1.5.13",
+      executablePath: "/Users/dev/.local/bin/agy",
+      loggedIn: null,
+      authMethod: null,
+      account: null,
+      loginExpiresAt: null,
+      message: "Uses the login from `agy`",
+      fix: null,
+      durationMs: 90,
+    });
+    expect(check.id).toBe("antigravity");
+    // `agy` has no login command: run on its own, it asks how to sign in.
+    expect(
+      roundTrip(LoginCommandResponse, { tool: "antigravity", command: "agy", args: [] }),
+    ).toEqual({ tool: "antigravity", command: "agy", args: [] });
+  });
+
   it("round-trips OpenCode's setup check, sign-in command and provider info", () => {
     expect(SetupToolId.options).toContain("opencode");
-    expect(LoginToolId.options).toEqual(["claude", "codex", "opencode", "cursor", "gemini", "gh"]);
+    expect(LoginToolId.options).toEqual([
+      "claude",
+      "codex",
+      "opencode",
+      "cursor",
+      "gemini",
+      "antigravity",
+      "gh",
+    ]);
     const check = roundTrip(SetupCheck, {
       id: "opencode",
       label: "OpenCode",

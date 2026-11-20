@@ -590,7 +590,8 @@ export type InboxCounts = z.infer<typeof InboxCounts>;
 
 /**
  * A first-run check (§14): the agent CLIs (`claude`, `codex`, `opencode`, `cursor`: the Cursor
- * CLI, `agent`; `gemini`: Gemini CLI), then `gh`, `git`, the browser and Node.js.
+ * CLI, `agent`; `gemini`: Gemini CLI; `antigravity`: the Antigravity CLI, `agy`), then `gh`,
+ * `git`, the browser and Node.js.
  */
 export const SetupToolId = z.enum([
   "claude",
@@ -598,6 +599,7 @@ export const SetupToolId = z.enum([
   "opencode",
   "cursor",
   "gemini",
+  "antigravity",
   "gh",
   "git",
   "browser",
@@ -607,9 +609,18 @@ export type SetupToolId = z.infer<typeof SetupToolId>;
 
 /**
  * Setup checks whose sign-in command the UI can run in its embedded terminal (`cursor` runs
- * `agent login`; `gemini` runs `gemini`, which asks how to sign in when it has no login).
+ * `agent login`; `gemini` runs `gemini` and `antigravity` runs `agy`, which each ask how to sign
+ * in when they have no login).
  */
-export const LoginToolId = z.enum(["claude", "codex", "opencode", "cursor", "gemini", "gh"]);
+export const LoginToolId = z.enum([
+  "claude",
+  "codex",
+  "opencode",
+  "cursor",
+  "gemini",
+  "antigravity",
+  "gh",
+]);
 export type LoginToolId = z.infer<typeof LoginToolId>;
 
 /** A command the UI runs in its embedded terminal to fix a check (§14 step 3). */
