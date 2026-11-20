@@ -9,6 +9,7 @@ Provider adapters behind one normalized interface (`ProviderAdapter` / `Provider
 | `opencode` | A private `opencode serve --stdio` per session, v2 HTTP API + SSE events | Tested with OpenCode 2.2.7 (minimum 2.2.0); route types in `src/opencode/protocol.ts` |
 | `cursor` | The Cursor CLI's ACP server (`agent acp`), one per session, through the generic ACP client in `src/acp/` | Agent Client Protocol version 1, typed by hand in `src/acp/protocol.ts`; Cursor's extensions in `src/cursor/extensions.ts` |
 | `gemini` | Gemini CLI's ACP server (`gemini --acp`), one per session, through the same generic ACP client | Minimum 0.68.0 (tested against its 0.68 ACP server); its vendor fields and plan approval in `src/gemini/extensions.ts` |
+| `antigravity` | The Antigravity CLI's ACP server (`agy acp --process-per-session`), one per session, through the same generic ACP client | Minimum 1.5.12 (tested against 1.5.13); its thinking level is CodeDen's effort (`src/antigravity/models.ts`) |
 | `fake` | Scripted, deterministic | Demos and tests |
 | `replay` | Plays back recorded fixtures | Contract tests; never spawns a CLI |
 
@@ -38,7 +39,7 @@ The SDK is not redistributed in the published `codeden` package. `loadClaudeSdk(
 
 ## Autonomy mapping (§11.2)
 
-| Level | Claude | Codex | OpenCode / Cursor / Gemini CLI |
+| Level | Claude | Codex | OpenCode / Cursor / Gemini CLI / Antigravity CLI |
 |---|---|---|---|
 | supervised | `default` + PreToolUse hook forces every edit/command to ask | `untrusted`, workspace-write sandbox | every edit and command goes to the user |
 | auto | `acceptEdits` + hook asks only when the classifier flags a call | `on-request`, workspace-write, network off | only calls the classifier flags go to the user |
@@ -101,6 +102,9 @@ OpenCode has no OS sandbox. Its sessions get permission rules that make every `e
 - **Gemini CLI's login has no status command.** `readGeminiAuth` reads `security.auth.selectedType` (or the older `selectedAuthType`) from `~/.gemini/settings.json` (JSON with comments), `google_accounts.json`'s `active` email, whether `oauth_creds.json` exists, and which variables are set. Its OAuth tokens may be in the system keychain instead, so a Google login without either file is unknown, not signed out.
 - **Gemini CLI's shapes.** Sessions report `modes` (`default`, `autoEdit`, `yolo`, `plan`) and `models`, never config options, so mode and model go through `session/set_mode` and `session/set_model`. It sends no `current_mode_update`, even when its `exit_plan_mode` tool leaves plan mode, which is why that permission request (titled `Requesting plan approval for: <file>`) is the plan approval. MCP permission requests carry `_meta["gemini-cli"].mcp` (`server_name`, `tool_name`; 0.67+) and titles of the tool's name only; shell commands are titled with the raw command and say `[in <dir>]` in their content; no request carries `rawInput`. Its `ask_user` tool is dropped in ACP mode. The prompt result has standard `usage`. 0.67 replays a loaded session's history after answering `session/load`; 0.68 before.
 - **Gemini CLI tests** drive `test/fixtures/fake-gemini/gemini.mjs`, a scripted stand-in in its 0.68 shapes that also answers `--version`.
+- **The Antigravity CLI (`src/antigravity/`) never authenticates either.** `agy acp` reuses the login of an interactive `agy`; without one, `session/new` fails with -32000 "Authentication required". It needs `--process-per-session`, or `initialize` reports no `mcpCapabilities`. Gemini CLI's flags (`--acp`, `--admin-policy`) are not passed: `agy` rejects them.
+- **The Antigravity CLI's shapes.** Sessions report `modes`, `models` and config options `model` (each model once), `thought_level` (`low`, `medium`, `high`, `xhigh`) and `mode` (`default`, `accept-edits`, `auto`, `plan`); mode, model and effort go through `session/set_config_option`. `models.availableModels` lists each model at each level (`gemini-4-neon-high`), which gives a model's efforts. The spec's `effort` option (`AcpAgentSpec.effort`) is how the generic session sets a thinking level; `thoughtLevel` picks the nearest one the session lists.
+- **Antigravity CLI tests** drive `test/fixtures/fake-agy/agy.mjs`, which answers `initialize` and `session/new` with the replies of a real agy 1.5.13 (`capture.json`, captured over stdio with no prompt turn).
 
 ## Image generation (`src/image/`, §12.5)
 
