@@ -1,13 +1,16 @@
 import {
+  ArchivedSessionsQuery,
   ListConflictsQuery,
   ListNoticesQuery,
   ResolveConflictRequest,
   RoleMessageRequest,
   type RoleMessageResponse,
   type RoleSessionResponse,
+  type Session,
 } from "@codeden/contracts";
 import { Hono } from "hono";
 import type { AppServices } from "../services/container";
+import { archivedSessionsPage } from "../services/sessions/archived";
 import { jsonBody, queryOf } from "./validate";
 
 /**
@@ -26,6 +29,12 @@ export function orchestrationRoutes(s: AppServices) {
     )
     .post("/orchestrator", async (c) =>
       c.json<RoleSessionResponse>({ session: await o.roles.ensure("orchestrator", null) }),
+    )
+    .get("/orchestrator/archived", queryOf(ArchivedSessionsQuery), (c) =>
+      c.json(archivedSessionsPage(s.db, null, c.req.valid("query"))),
+    )
+    .post("/sessions/:id/start-fresh", async (c) =>
+      c.json<Session>(await o.startFresh(c.req.param("id"))),
     )
     .post("/orchestrator/messages", jsonBody(RoleMessageRequest), async (c) => {
       const { input, whenBusy } = c.req.valid("json");

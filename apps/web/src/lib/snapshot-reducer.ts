@@ -1,10 +1,12 @@
 import {
   type EventEnvelope,
   type Project,
+  type RoleSessionsRef,
   type Session,
   type Snapshot,
   sortProjects,
 } from "@codeden/contracts";
+import type { OrchestrationRole } from "./api/feature-apis";
 import { withOrder } from "./project-order";
 
 function upsert<T extends { id: string }>(list: T[], next: T): T[] {
@@ -21,16 +23,58 @@ function upsertProject(list: Project[], project: Project): Project[] {
   return sortProjects(upsert(list, project));
 }
 
-/** Move a project's archived agent session count by `delta`; projects at zero are left out. */
+/** Move a project's archived session count by `delta`; projects at zero are left out. */
 function shiftArchivedCount(
   counts: Record<string, number>,
   session: Session,
   delta: number,
 ): Record<string, number> {
-  if (delta === 0 || session.role !== "agent" || !session.projectId) return counts;
+  if (delta === 0 || !session.projectId) return counts;
   const { [session.projectId]: current = 0, ...rest } = counts;
   const next = Math.max(0, current + delta);
   return next > 0 ? { ...rest, [session.projectId]: next } : rest;
+}
+
+/** The current conversation for a role, with a fallback for snapshots without role refs. */
+export function activeRoleSession(
+  snap: Snapshot,
+  role: OrchestrationRole,
+  projectId: string | null,
+): Session | undefined {
+  const ref =
+    role === "orchestrator"
+      ? snap.roleSessions?.orchestrator
+      : snap.roleSessions?.pms[projectId ?? ""];
+  const byRef = ref ? snap.sessions.find((session) => session.id === ref) : undefined;
+  if (byRef && !byRef.archivedAt) return byRef;
+  return snap.sessions
+    .filter(
+      (session) => session.role === role && session.projectId === projectId && !session.archivedAt,
+    )
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
+}
+
+function updateRoleRefs(
+  refs: RoleSessionsRef | undefined,
+  session: Session,
+  created: boolean,
+): RoleSessionsRef | undefined {
+  if (session.role === "agent") return refs;
+  const current = refs ?? { orchestrator: null, pms: {} };
+  if (session.role === "orchestrator") {
+    if (session.archivedAt && current.orchestrator === session.id) {
+      return { ...current, orchestrator: null };
+    }
+    return created && !session.archivedAt ? { ...current, orchestrator: session.id } : refs;
+  }
+  if (session.projectId) {
+    const { [session.projectId]: previous, ...pms } = current.pms;
+    if (session.archivedAt && previous === session.id) return { ...current, pms };
+    if (created && !session.archivedAt) {
+      return { ...current, pms: { ...pms, [session.projectId]: session.id } };
+    }
+  }
+  return refs;
 }
 
 /**
@@ -87,6 +131,11 @@ export function applyDomainEvent(snap: Snapshot, env: EventEnvelope): Snapshot {
       const applied = applySession(snap, env.payload.session, env.type === "session.created");
       next.sessions = applied.sessions;
       next.archivedSessionCounts = applied.archivedSessionCounts;
+      next.roleSessions = updateRoleRefs(
+        snap.roleSessions,
+        env.payload.session,
+        env.type === "session.created",
+      );
       break;
     }
     case "inbox.created":

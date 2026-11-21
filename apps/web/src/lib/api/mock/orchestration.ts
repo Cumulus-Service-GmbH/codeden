@@ -8,6 +8,7 @@ import {
   type StartSessionResponse,
   type WorkSummary,
 } from "@codeden/contracts";
+import { activeRoleSession } from "@/lib/snapshot-reducer";
 import type { CodeDenClient } from "../client";
 import { checks, mockIssues, mockPrs, searchPrChecksLater } from "./fixtures/github";
 import { mockPrDiff } from "./fixtures/github-pr-diffs";
@@ -54,12 +55,8 @@ function summary(s: Session): WorkSummary {
 
 /** Orchestration, conflicts and GitHub for the mock client. */
 export function mockOrchestration(world: MockWorld, deps: Deps): OrchestrationParts {
-  const roleSession = (role: "orchestrator" | "pm", projectId: string | null) =>
-    world.snapshot.sessions.find(
-      (s) => s.role === role && (role === "orchestrator" || s.projectId === projectId),
-    );
   const ensure = (role: "orchestrator" | "pm", projectId: string | null): Session => {
-    const found = roleSession(role, projectId);
+    const found = activeRoleSession(world.snapshot, role, projectId);
     if (found) return found;
     const session = makeSession({
       id: uid("s"),
@@ -164,6 +161,49 @@ export function mockOrchestration(world: MockWorld, deps: Deps): OrchestrationPa
     },
     orchestration: {
       ensure: (role, projectId) => delay(ensure(role, projectId)),
+      async startFresh(sessionId) {
+        const old = world.session(sessionId);
+        if (
+          !old ||
+          old.role === "agent" ||
+          activeRoleSession(world.snapshot, old.role, old.projectId)?.id !== old.id
+        ) {
+          throw new Error("Only the current role conversation can start fresh.");
+        }
+        if (["created", "starting", "queued", "running", "waiting"].includes(old.status)) {
+          throw new Error("Wait for the current turn to finish.");
+        }
+        const now = new Date().toISOString();
+        const selected = world.snapshot.settings.providers[old.role];
+        const fresh = makeSession({
+          id: uid("s"),
+          projectId: old.projectId,
+          role: old.role,
+          status: "idle",
+          provider: selected.provider === "auto" ? old.provider : selected.provider,
+          model: selected.model,
+          effort: selected.effort,
+          purpose: old.purpose,
+          workKey: old.workKey,
+          title: old.title,
+          cwd: old.cwd,
+          createdAt: now,
+          updatedAt: now,
+        });
+        world.emitDomain({
+          type: "session.updated",
+          sessionId: old.id,
+          payload: {
+            session: { ...old, status: "stopped", archivedAt: now, updatedAt: now, endedAt: now },
+          },
+        });
+        world.emitDomain({
+          type: "session.created",
+          sessionId: fresh.id,
+          payload: { session: fresh },
+        });
+        return delay(fresh);
+      },
       async send(role, projectId, input, whenBusy = "queue") {
         const session = ensure(role, projectId);
         // Like the server: a message to a busy role session waits in its queue.

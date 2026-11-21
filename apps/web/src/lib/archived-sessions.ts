@@ -3,14 +3,14 @@ import { type InfiniteData, type QueryClient, useInfiniteQuery } from "@tanstack
 import { useClient } from "./api";
 import { sessionRecordKey } from "./queries";
 
-/** A project's archived sessions, a page at a time (the project home's Archived list). */
-export const archivedSessionsKey = (projectId: string) => ["archived-sessions", projectId] as const;
+/** A project or the orchestrator's archived sessions, a page at a time. */
+export const archivedSessionsKey = (projectId: string | null) =>
+  ["archived-sessions", projectId] as const;
 
 /**
- * A project's archived agent sessions, most recently archived first, paged from the server:
- * the snapshot carries only the recent ones (§6).
+ * Archived sessions are paged from the server. The snapshot carries only the recent ones (§6).
  */
-export function useArchivedSessions(projectId: string) {
+export function useArchivedSessions(projectId: string | null) {
   const client = useClient();
   return useInfiniteQuery({
     queryKey: archivedSessionsKey(projectId),
@@ -31,7 +31,7 @@ export function syncSessionQueries(queryClient: QueryClient, env: EventEnvelope)
   const { session } = env.payload;
   const record = sessionRecordKey(session.id);
   if (queryClient.getQueryData<Session>(record)) queryClient.setQueryData(record, session);
-  if (!session.projectId || session.role !== "agent") return;
+  if (!session.projectId && session.role !== "orchestrator") return;
   const key = archivedSessionsKey(session.projectId);
   const list = queryClient.getQueryData<InfiniteData<ArchivedSessionsPage>>(key);
   if (!list) return;

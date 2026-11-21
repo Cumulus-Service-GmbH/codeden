@@ -20,6 +20,7 @@ import {
   Workflow,
   X,
 } from "lucide-react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { StatusDot } from "@/components/common/status-dot";
 import { ReadOnlyBadge, RoleBadge } from "@/components/orchestration/role-badge";
@@ -44,6 +45,11 @@ import { hasRightPanel } from "@/lib/session-workspace";
 import { cn } from "@/lib/utils";
 import { useViewport } from "@/lib/viewport";
 import { useLayoutStore } from "@/stores/layout";
+import {
+  type RoleSessionDialog,
+  RoleSessionDialogs,
+  RoleSessionMenu,
+} from "./role-session-actions";
 import { SessionGithubBadges } from "./session-github-badges";
 
 function Chip({
@@ -105,6 +111,8 @@ export function ThreadHeader({ session, running }: { session: Session; running: 
   const layout = useLayoutStore();
   const { sheetPanels, phone } = useViewport();
   const panelOpen = sheetPanels ? layout.rightSheetOpen : layout.rightOpen;
+  const [roleDialog, setRoleDialog] = useState<RoleSessionDialog | null>(null);
+  const archivedRole = session.role !== "agent" && Boolean(session.archivedAt);
   const stop = useMutation({
     mutationFn: () => client.interrupt(session.id),
     onSuccess: () => toast("Turn stopped"),
@@ -186,7 +194,7 @@ export function ThreadHeader({ session, running }: { session: Session; running: 
       </div>
 
       <div className="ml-auto flex shrink-0 items-center gap-0.5">
-        {running && (
+        {running && !archivedRole && (
           <Button
             size="xs"
             variant="outline"
@@ -197,25 +205,27 @@ export function ThreadHeader({ session, running }: { session: Session; running: 
             <Square className="size-2.5 fill-current" /> Stop
           </Button>
         )}
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              className={cn(
-                "text-muted-foreground",
-                layout.drawerOpen && "bg-accent text-foreground",
-                // Phones use the panel's Terminal tab instead of the bottom drawer.
-                phone && "hidden",
-              )}
-              onClick={() => layout.toggleDrawer()}
-              aria-label="Toggle terminal"
-            >
-              <SquareTerminal />
-            </Button>
-          </TooltipTrigger>
-          <TooltipContent>Terminal · Ctrl J</TooltipContent>
-        </Tooltip>
+        {!archivedRole && (
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className={cn(
+                  "text-muted-foreground",
+                  layout.drawerOpen && "bg-accent text-foreground",
+                  // Phones use the panel's Terminal tab instead of the bottom drawer.
+                  phone && "hidden",
+                )}
+                onClick={() => layout.toggleDrawer()}
+                aria-label="Toggle terminal"
+              >
+                <SquareTerminal />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Terminal · Ctrl J</TooltipContent>
+          </Tooltip>
+        )}
         {hasRightPanel(session) && (
           <Tooltip>
             <TooltipTrigger asChild>
@@ -339,8 +349,18 @@ export function ThreadHeader({ session, running }: { session: Session; running: 
                 )}
               </>
             )}
+            {session.role !== "agent" && (
+              <RoleSessionMenu session={session} running={running} onOpen={setRoleDialog} />
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
+        {roleDialog && (
+          <RoleSessionDialogs
+            session={session}
+            dialog={roleDialog}
+            onClose={() => setRoleDialog(null)}
+          />
+        )}
       </div>
     </header>
   );

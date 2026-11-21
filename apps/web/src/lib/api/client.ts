@@ -149,11 +149,11 @@ export interface CodeDenClient {
    */
   getSessions(sessionIds: readonly string[]): Promise<Session[]>;
   /**
-   * A page of a project's archived agent sessions, most recently archived first. The snapshot
-   * carries only the recent ones (§6).
+   * A page of a project's archived sessions, or the orchestrator's history for a null project.
+   * The snapshot carries only the recent ones (§6).
    */
   listArchivedSessions(
-    projectId: string,
+    projectId: string | null,
     query?: ArchivedSessionsQueryInit,
   ): Promise<ArchivedSessionsPage>;
   /**

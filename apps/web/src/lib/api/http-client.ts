@@ -127,9 +127,11 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
       if (cursor) params.set("cursor", cursor);
       if (limit) params.set("limit", String(limit));
       const qs = params.size ? `?${params}` : "";
-      return get(`/projects/${enc(projectId)}/sessions/archived${qs}`, (v) =>
-        ArchivedSessionsPage.parse(v),
-      );
+      const path =
+        projectId === null
+          ? "/orchestration/orchestrator/archived"
+          : `/projects/${enc(projectId)}/sessions/archived`;
+      return get(`${path}${qs}`, (v) => ArchivedSessionsPage.parse(v));
     },
     getToolOutput: (id, itemId) =>
       get(`/sessions/${enc(id)}/items/${enc(itemId)}/output`, (v) => ToolOutputResponse.parse(v)),

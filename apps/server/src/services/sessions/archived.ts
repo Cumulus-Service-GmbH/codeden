@@ -35,18 +35,12 @@ export function snapshotSessions(db: Db, now = Date.now()): Session[] {
     .map(rowToSession);
 }
 
-/** How many archived agent sessions each project has (projects with none are left out). */
+/** How many archived sessions each project has (projects with none are left out). */
 export function archivedSessionCounts(db: Db): Record<string, number> {
   const rows = db
     .select({ projectId: sessions.projectId, n: count() })
     .from(sessions)
-    .where(
-      and(
-        eq(sessions.role, "agent"),
-        isNotNull(sessions.archivedAt),
-        isNotNull(sessions.projectId),
-      ),
-    )
+    .where(and(isNotNull(sessions.archivedAt), isNotNull(sessions.projectId)))
     .groupBy(sessions.projectId)
     .all();
   const counts: Record<string, number> = {};
@@ -70,12 +64,12 @@ function parseCursor(cursor: string): { at: string; id: string } {
 }
 
 /**
- * A page of a project's archived agent sessions, the most recently archived first (the project
- * home's Archived list). `nextCursor` continues below the last one.
+ * A page of archived sessions for a project or the orchestrator, most recently archived first.
+ * `nextCursor` continues below the last one.
  */
 export function archivedSessionsPage(
   db: Db,
-  projectId: string,
+  projectId: string | null,
   query: ArchivedSessionsQuery,
 ): ArchivedSessionsPage {
   const after = query.cursor ? parseCursor(query.cursor) : null;
@@ -84,8 +78,9 @@ export function archivedSessionsPage(
     .from(sessions)
     .where(
       and(
-        eq(sessions.projectId, projectId),
-        eq(sessions.role, "agent"),
+        projectId === null
+          ? and(isNull(sessions.projectId), eq(sessions.role, "orchestrator"))
+          : eq(sessions.projectId, projectId),
         isNotNull(sessions.archivedAt),
         after
           ? or(

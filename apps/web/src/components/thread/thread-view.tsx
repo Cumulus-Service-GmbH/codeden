@@ -146,10 +146,11 @@ export function ThreadView({
     );
   }
 
+  const archivedRole = session.role !== "agent" && Boolean(session.archivedAt);
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <ThreadHeader session={session} running={running} />
-      <McpNotice session={session} />
+      {!archivedRole && <McpNotice session={session} />}
       {history && (
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-border px-4 py-1 text-xs text-muted-foreground">
           <span>Earlier turn</span>
@@ -180,7 +181,7 @@ export function ThreadView({
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">{empty}</div>
       )}
-      {!history && (
+      {!history && !archivedRole && (
         <>
           {followups && !running && <FollowupChips sessionId={sessionId} suggestions={followups} />}
           <QueuedMessages session={session} running={running} />

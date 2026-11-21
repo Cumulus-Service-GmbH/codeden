@@ -82,12 +82,26 @@ describe("applyDomainEvent: sessions (#323)", () => {
     expect(next.archivedSessionCounts[projectId]).toBe(before + 1);
   });
 
-  it("counts only agent sessions", () => {
-    const { snap, live, projectId } = setup();
-    const pm = { ...live, id: "s-pm", role: "pm" as const };
-    const created = applyDomainEvent(snap, event(snap, pm, "session.created"));
-    const next = applyDomainEvent(created, event(created, { ...pm, archivedAt: ARCHIVED_AT }));
-    expect(next.archivedSessionCounts).toBe(snap.archivedSessionCounts);
-    expect(next.archivedSessionCounts[projectId]).toBe(snap.archivedSessionCounts[projectId]);
-  });
+  it.each(["pm", "orchestrator"] as const)(
+    "moves the current %s ref and keeps its archive",
+    (role) => {
+      const { snap, live, projectId } = setup();
+      const old = { ...live, id: "s-old-role", role, projectId: role === "pm" ? projectId : null };
+      const fresh = { ...old, id: "s-new-role" };
+      const created = applyDomainEvent(snap, event(snap, old, "session.created"));
+      const archived = applyDomainEvent(
+        created,
+        event(created, { ...old, archivedAt: ARCHIVED_AT }),
+      );
+      const rotated = applyDomainEvent(archived, event(archived, fresh, "session.created"));
+
+      expect(rotated.sessions.find((s) => s.id === old.id)?.archivedAt).toBe(ARCHIVED_AT);
+      expect(rotated.archivedSessionCounts[projectId] ?? 0).toBe(
+        (snap.archivedSessionCounts[projectId] ?? 0) + (role === "pm" ? 1 : 0),
+      );
+      expect(
+        role === "pm" ? rotated.roleSessions?.pms[projectId] : rotated.roleSessions?.orchestrator,
+      ).toBe(fresh.id);
+    },
+  );
 });

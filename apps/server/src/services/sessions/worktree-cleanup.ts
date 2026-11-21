@@ -8,7 +8,7 @@ import type {
 } from "@codeden/contracts";
 import type { EventStore } from "../../events/store";
 import type { SandboxService } from "../../execution/sandboxes";
-import { badRequest, errorMessage } from "../errors";
+import { badRequest, conflict, errorMessage } from "../errors";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
 import { type RunnerDeps, runnerErrorCode, runnerForSession } from "../runner-port";
@@ -166,6 +166,10 @@ export class WorktreeCleanup {
 
   /** Show an archived session again. Its worktree comes back with the next message. */
   unarchive(id: string): Session {
+    const session = this.deps.repo.get(id);
+    if (session.role !== "agent" && session.archivedAt) {
+      throw conflict("This conversation is archived", "role_session_archived");
+    }
     this.forced.delete(id);
     return this.deps.repo.update(id, (s) => (s.archivedAt ? { ...s, archivedAt: null } : s));
   }

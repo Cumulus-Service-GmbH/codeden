@@ -18,6 +18,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { splitPinned } from "@/lib/project-order";
 import { useSnapshot } from "@/lib/queries";
+import { activeRoleSession } from "@/lib/snapshot-reducer";
 import { cn } from "@/lib/utils";
 import { useLayoutStore } from "@/stores/layout";
 import { useUiStore } from "@/stores/ui";
@@ -78,7 +79,7 @@ export function Sidebar({ width, onClose }: { width: number | string; onClose?: 
 
   const inbox = data?.inbox.filter((i) => i.status === "open") ?? [];
   const urgent = inbox.some((i) => i.kind === "approval" || i.kind === "question");
-  const orchestrator = data?.sessions.find((s) => s.role === "orchestrator");
+  const orchestrator = data && activeRoleSession(data, "orchestrator", null);
   const waiting = data?.sessions.filter((s) => s.status === "waiting" && s.role === "agent") ?? [];
   const projectName = (id: string | null) => data?.projects.find((p) => p.id === id)?.name ?? "";
   const { pinned, others } = splitPinned(data?.projects ?? []);

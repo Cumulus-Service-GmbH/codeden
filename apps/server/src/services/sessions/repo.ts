@@ -33,7 +33,7 @@ import {
 } from "drizzle-orm";
 import type { Db } from "../../db/client";
 import { rowToItemRecord, rowToSession, rowToTurn } from "../../db/rows";
-import { automationRuns, checkpoints, items, sessions, turns } from "../../db/schema";
+import { automationRuns, checkpoints, inboxItems, items, sessions, turns } from "../../db/schema";
 import { turnsOldestFirst } from "../../db/turn-order";
 import type { EventStore } from "../../events/store";
 import { notFound } from "../errors";
@@ -142,8 +142,8 @@ export class SessionRepo {
     return found.session;
   }
 
-  /** Insert a new session (and its start metadata) in one transaction. */
-  create(session: Session, startMeta: StoredStartMeta): void {
+  /** Insert a new session, atomically archiving its predecessor during role rotation. */
+  create(session: Session, startMeta: StoredStartMeta, archived?: Session): void {
     const chromeOptIn =
       session.role === "agent" &&
       session.provider === "claude" &&
@@ -152,13 +152,40 @@ export class SessionRepo {
         ? true
         : undefined;
     this.store.append(
-      [{ type: "session.created", sessionId: session.id, payload: { session } }],
+      [
+        ...(archived
+          ? [
+              {
+                type: "session.updated" as const,
+                sessionId: archived.id,
+                payload: { session: archived },
+              },
+            ]
+          : []),
+        { type: "session.created", sessionId: session.id, payload: { session } },
+      ],
       (tx) => {
         tx.update(sessions)
           .set({ startMeta: { ...startMeta, chromeOptIn } })
           .where(eq(sessions.id, session.id))
           .run();
       },
+    );
+  }
+
+  hasOpenRequest(sessionId: string): boolean {
+    return Boolean(
+      this.db
+        .select({ id: inboxItems.id })
+        .from(inboxItems)
+        .where(
+          and(
+            eq(inboxItems.sessionId, sessionId),
+            eq(inboxItems.status, "open"),
+            inArray(inboxItems.kind, ["question", "approval"]),
+          ),
+        )
+        .get(),
     );
   }
 

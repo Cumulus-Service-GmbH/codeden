@@ -6,6 +6,7 @@ import { type CSSProperties, useState } from "react";
 import { StatusDot } from "@/components/common/status-dot";
 import { statusTone } from "@/lib/format";
 import { useSnapshotData } from "@/lib/queries";
+import { activeRoleSession } from "@/lib/snapshot-reducer";
 import { cn } from "@/lib/utils";
 import { useLayoutStore } from "@/stores/layout";
 import { childGroup, childRow, NavRow, rowBase, useIsActive } from "./nav-row";
@@ -74,9 +75,7 @@ export function ProjectGroup({
   const homeActive = useIsActive(`/projects/${project.id}`, false);
   const menu = useRowMenu();
   const entries = useProjectMenu(project, position);
-  const pm = sessions
-    .filter((s) => s.role === "pm")
-    .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
+  const pm = useSnapshotData((snap) => activeRoleSession(snap, "pm", project.id), undefined);
   const agents = sortSessions(sessions.filter((s) => s.role === "agent" && !s.archivedAt));
   // Counted by the server: the snapshot carries only the recently archived sessions.
   const archived = useSnapshotData((s) => s.archivedSessionCounts[project.id] ?? 0, 0);

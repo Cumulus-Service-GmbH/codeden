@@ -146,8 +146,9 @@ export class SessionService {
    * or title.
    */
   update(id: string, req: UpdateSessionRequest): Promise<Session> {
+    const session = this.deps.repo.get(id);
+    assertRoleWritable(session);
     if (req.untilChecksPass !== undefined || req.checkRounds !== undefined) {
-      const session = this.deps.repo.get(id);
       if (session.role !== "agent" || !session.checks?.commands.length) {
         throw badRequest(
           "This session has no project checks: add `checks` to .codeden/project.json and start a new session",
@@ -156,7 +157,6 @@ export class SessionService {
       }
     }
     if (req.autonomy === "read_only" || req.planMode !== undefined) {
-      const session = this.deps.repo.get(id);
       if (req.autonomy === "read_only") {
         this.assertReadOnlySupported(session.role, session.provider, req.autonomy, id);
       }
@@ -201,7 +201,12 @@ export class SessionService {
 
   async start(
     req: StartSessionRequest,
-    options: { confirmChrome?: () => Promise<boolean>; chromeApproved?: true } = {},
+    options: {
+      confirmChrome?: () => Promise<boolean>;
+      chromeApproved?: true;
+      /** A role conversation this one replaces ("Start fresh"): archived as this one starts. */
+      replacesRoleId?: string;
+    } = {},
   ): Promise<StartSessionResponse> {
     const { repo, projects } = this.deps;
     // The workspace follows `isGitRepo`: read it once the folder has been checked since start.
@@ -211,6 +216,10 @@ export class SessionService {
     if (!project && req.role !== "orchestrator") {
       throw badRequest("projectId is required for this role", "project_required");
     }
+    const previous = options.replacesRoleId
+      ? this.roleToArchive(options.replacesRoleId)
+      : undefined;
+    if (previous) req = { ...req, provider: this.deps.settings.get().providers[req.role].provider };
     // Refused before the conflict check: a worktree that can't be made is never queued either.
     const workspace = startWorkspace(req.workspace, project);
     if (
@@ -222,7 +231,10 @@ export class SessionService {
     ) {
       if (!(await options.confirmChrome?.())) return { status: "skipped" };
       // Recheck the project and conflicts after waiting for the user, with the provider fixed.
-      return this.start({ ...req, provider: "claude" }, { chromeApproved: true });
+      return this.start(
+        { ...req, provider: "claude" },
+        { chromeApproved: true, replacesRoleId: options.replacesRoleId },
+      );
     }
     const purpose = derivePurpose(req.purpose, req.input?.text);
     const workKey = deriveWorkKey({
@@ -277,10 +289,39 @@ export class SessionService {
       },
       workspace,
       req.input,
+      undefined,
+      previous,
     );
+    if (previous) {
+      // Archived with the new one's creation: it doesn't run on, even while that one waits.
+      this.deps.tokens.revokeSession(previous.id);
+      void this.stop(previous.id).catch(() => undefined);
+    }
     return queued
       ? { status: "queued", sessionId: session.id, behind: queuedBehind }
       : { status: "started", sessionId: session.id };
+  }
+
+  private roleToArchive(id: string): Session {
+    const session = this.deps.repo.get(id);
+    assertRoleWritable(session);
+    if (BUSY.has(session.status) || NOT_STARTED.has(session.status) || this.delivering.has(id)) {
+      throw conflict("Wait for the current turn to finish", "turn_running");
+    }
+    if (this.deps.repo.hasOpenRequest(id)) {
+      throw conflict("Answer or dismiss the open question first", "question_open");
+    }
+    if (this.deps.outbox.count(id) > 0) {
+      throw conflict("Wait for queued messages to be delivered", "messages_queued");
+    }
+    const now = new Date().toISOString();
+    return {
+      ...session,
+      status: FINISHED.has(session.status) ? session.status : "stopped",
+      endedAt: session.endedAt ?? now,
+      archivedAt: now,
+      updatedAt: now,
+    };
   }
 
   private createAndLaunch(
@@ -289,6 +330,7 @@ export class SessionService {
     workspace: WorkspaceRequest,
     input?: UserInput,
     fork?: LaunchFork,
+    archived?: Session,
   ): boolean {
     const { admission, repo } = this.deps;
     const waitingForConflict = session.status === "queued";
@@ -302,11 +344,12 @@ export class SessionService {
             // A pending start keeps pasted images as artifacts, like a queued message.
             pending: { workspace, input: input && this.externalize(session, input), fork },
           },
+          archived,
         );
         if (waitingForSlot) admission?.enqueue(session.id);
         return true;
       }
-      repo.create(session, { ...meta, pending: null });
+      repo.create(session, { ...meta, pending: null }, archived);
       this.launchInBackground(session.id, input, workspace, fork);
       return false;
     } finally {
@@ -398,6 +441,7 @@ export class SessionService {
     from: QueueSender = "user",
   ): Promise<SendMessageResponse> {
     const session = this.deps.repo.get(id);
+    assertRoleWritable(session);
     if (NOT_STARTED.has(session.status)) return this.enqueue(id, req.input, from);
     // A turn on its way to the runner counts as running, though there is nothing to steer yet.
     const delivering = this.delivering.has(id);
@@ -927,4 +971,10 @@ function roleModelDefaults(
   // An unknown provider (runner not connected yet) is let through, as for plan mode.
   const hasEffort = info?.capabilities.reasoningEffort ?? true;
   return { model: defaults.model, effort: hasEffort ? defaults.effort : null };
+}
+
+function assertRoleWritable(session: Session): void {
+  if (session.role !== "agent" && session.archivedAt) {
+    throw conflict("This conversation is archived", "role_session_archived");
+  }
 }
