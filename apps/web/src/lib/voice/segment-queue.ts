@@ -29,7 +29,7 @@ export interface SegmentQueue<T> {
 const SPACELESS =
   "\\p{scx=Han}\\p{scx=Hiragana}\\p{scx=Katakana}\\p{scx=Thai}\\p{scx=Lao}\\p{scx=Khmer}\\p{scx=Myanmar}\\u3000-\\u303f\\uff01-\\uff60";
 const STARTS_SPACELESS = new RegExp(`^[${SPACELESS}]`, "u");
-const MARK = /^\p{M}$/u;
+const MARK = /^\p{M}/u;
 
 /** Return the last code point that is not a mark, or "". */
 function lastBase(text: string): string {
