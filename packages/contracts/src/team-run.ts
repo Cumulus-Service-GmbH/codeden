@@ -1,0 +1,79 @@
+import { z } from "zod";
+import { ReasoningEffort } from "./common";
+import { Team, TeamMember } from "./team";
+
+const id = z.string().min(1);
+
+/** Run budgets. Admission also bounds parallel workers by the current active-session cap. */
+export const TeamRunSettings = z.object({
+  maxParallel: z.int().min(1).max(64),
+  maxAssignments: z.int().min(1),
+  maxRounds: z.int().min(1),
+});
+export type TeamRunSettings = z.infer<typeof TeamRunSettings>;
+
+/** One named Team's role overrides and run budgets. */
+export const NamedTeam = z.object({
+  id,
+  name: id,
+  team: Team,
+  limits: TeamRunSettings,
+});
+export type NamedTeam = z.infer<typeof NamedTeam>;
+
+/** The project's Team list with exactly one default, identified by its stable ID. */
+export const ProjectTeams = z
+  .object({ defaultTeamId: id, teams: z.array(NamedTeam).min(1) })
+  .refine(({ defaultTeamId, teams }) => teams.some((team) => team.id === defaultTeamId), {
+    message: "Default Team must exist",
+    path: ["defaultTeamId"],
+  })
+  .refine(({ teams }) => new Set(teams.map((team) => team.id)).size === teams.length, {
+    message: "Team IDs must be unique",
+    path: ["teams"],
+  });
+export type ProjectTeams = z.infer<typeof ProjectTeams>;
+
+/** Start request scoped to the calling PM's project. The service verifies plan approval. */
+export const StartTeamRun = z.union([
+  z.strictObject({
+    teamId: id.optional(),
+    planSha: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/),
+  }),
+  z.strictObject({ teamId: id.optional(), checklistId: id }),
+]);
+export type StartTeamRun = z.infer<typeof StartTeamRun>;
+
+/** Durable context for resuming an assignment or explaining why it is waiting. */
+export const TeamWorkerCheckpoint = z.object({
+  summary: z.string(),
+  nextSteps: z.string(),
+  blocker: z.string().nullable(),
+  updatedAt: z.int().nonnegative(),
+});
+export type TeamWorkerCheckpoint = z.infer<typeof TeamWorkerCheckpoint>;
+
+/** One assignment in the run. Runner resources are absent until provisioned. */
+export const TeamWorker = z.object({
+  sessionId: id.nullable(),
+  itemId: id,
+  provider: TeamMember.shape.provider,
+  model: id.nullable(),
+  effort: ReasoningEffort.nullable(),
+  branch: id.nullable(),
+  worktree: id.nullable(),
+  status: z.enum(["queued", "running", "waiting", "completed", "failed", "stopped"]),
+  dependsOn: z.array(id),
+  attempt: z.int().nonnegative(),
+  checkpoint: TeamWorkerCheckpoint.nullable(),
+});
+export type TeamWorker = z.infer<typeof TeamWorker>;
+
+/** Application-authored inputs that wake the run's Architect. */
+export const TeamCoordinationMessage = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("worker_finished"), itemId: id, attempt: z.int().positive() }),
+  z.object({ type: z.literal("worker_failed"), itemId: id, attempt: z.int().positive() }),
+  z.object({ type: z.literal("review_done"), itemId: id, attempt: z.int().positive() }),
+  z.object({ type: z.literal("continue") }),
+]);
+export type TeamCoordinationMessage = z.infer<typeof TeamCoordinationMessage>;
