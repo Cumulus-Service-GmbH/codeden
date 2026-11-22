@@ -26,6 +26,7 @@ describe.skipIf(!built)("self-update with a fake registry (§16)", () => {
   let home: string;
   let entry: string;
   let current: string;
+  const savedNpmConfig: NodeJS.ProcessEnv = {};
 
   const run = (args: string[], env: Record<string, string> = {}) =>
     execFileSync(process.execPath, [entry, ...args, "--home", home], {
@@ -36,6 +37,16 @@ describe.skipIf(!built)("self-update with a fake registry (§16)", () => {
 
   beforeAll(async () => {
     base = realpathSync.native(mkdtempSync(join(tmpdir(), "codeden-self-update-")));
+    const npmUserConfig = join(base, "npm-user-config");
+    writeFileSync(npmUserConfig, "");
+    // pnpm exports the user's npm config as npm_config_*; keep it out of the real npm install.
+    for (const key of Object.keys(process.env)) {
+      if (key.toLowerCase().startsWith("npm_config_")) {
+        savedNpmConfig[key] = process.env[key];
+        delete process.env[key];
+      }
+    }
+    process.env.NPM_CONFIG_USERCONFIG = npmUserConfig;
     home = join(base, "home");
     // Linked runtime deps in <base>/node_modules also serve the version installed under <base>/home.
     entry = installPublishedCopy(base, { linkDeps: true });
@@ -45,6 +56,11 @@ describe.skipIf(!built)("self-update with a fake registry (§16)", () => {
   }, 120_000);
 
   afterAll(async () => {
+    delete process.env.NPM_CONFIG_USERCONFIG;
+    for (const key of Object.keys(process.env)) {
+      if (key.toLowerCase().startsWith("npm_config_")) delete process.env[key];
+    }
+    Object.assign(process.env, savedNpmConfig);
     await registry?.close();
     rmSync(base, { recursive: true, force: true, maxRetries: 3 });
   });
