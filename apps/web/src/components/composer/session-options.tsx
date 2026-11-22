@@ -42,6 +42,19 @@ export function appliesFrom(
 }
 
 /**
+ * A model change on a provider whose model list is read when a session starts
+ * (`capabilities.modelListAtStart`): the session uses the new model, but the picker's list
+ * may only show what the switch changed (other models or levels) from the next session.
+ */
+export function modelListNote(
+  patch: UpdateSessionRequest,
+  modelListAtStart: boolean,
+): string | undefined {
+  if (patch.model === undefined || !modelListAtStart) return undefined;
+  return "The model list updates at the next session.";
+}
+
+/**
  * Model, effort, autonomy, plan mode and the checks loop for a session: a change is saved with
  * `PATCH /api/sessions/:id`. Model and effort apply from the next turn (a running turn keeps
  * its settings); autonomy and plan mode apply from the next tool call or the next turn, as the
@@ -55,6 +68,7 @@ export function SessionOptions({ session, running }: { session: Session; running
   const providers = useSnapshotData((s) => s.runner.providers, []);
   const providerInfo = providers.find((p) => p.id === session.provider);
   const liveAutonomy = providerInfo?.capabilities.liveAutonomy ?? false;
+  const modelListAtStart = providerInfo?.capabilities.modelListAtStart ?? false;
   const setHandoff = useUiStore((s) => s.setHandoff);
   const handoffBlocked = useHandoffBlocked(session);
   const update = useMutation({
@@ -65,7 +79,10 @@ export function SessionOptions({ session, running }: { session: Session; running
       );
       toast.success(changeSummary(patch), {
         id: `session-options-${session.id}`,
-        description: appliesFrom(patch, running, liveAutonomy),
+        description:
+          [appliesFrom(patch, running, liveAutonomy), modelListNote(patch, modelListAtStart)]
+            .filter(Boolean)
+            .join(" ") || undefined,
       });
     },
     onError: (e) => toast.error("Couldn't change the session", { description: e.message }),

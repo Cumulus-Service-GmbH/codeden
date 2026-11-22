@@ -109,6 +109,16 @@ describe("Antigravity CLI session over ACP", () => {
     expect(adapter.models().map((m) => m.id)).toContain("gemini-4-neon");
   });
 
+  it("starts a session on the model it was given, before its first prompt, whatever the picker lists", async () => {
+    // The picker shows the probe's list; the chosen model is set on the CLI all the same.
+    const { turn } = await open({ model: "gemini-4-hydrogen" });
+    await turn("hi");
+    const sent = logged().map((m) => m.method);
+    const set = logged("session/set_config_option").find((m) => m.params.configId === "model");
+    expect(set?.params.value).toBe("gemini-4-hydrogen");
+    expect(sent.indexOf("session/set_config_option")).toBeLessThan(sent.indexOf("session/prompt"));
+  });
+
   it("sets the model, then its thinking level, at the start and when changed", async () => {
     const { session, turn } = await open({ model: "gemini-4-argon", effort: "max" });
     // Argon lists `xhigh` as a thinking level, so `max` runs at it.

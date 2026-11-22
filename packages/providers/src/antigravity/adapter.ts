@@ -48,7 +48,8 @@ export const ANTIGRAVITY_AGENT: AcpAgentSpec = {
  * Skills: the CLI loads its own, from `~/.gemini/config/skills/<name>/`, in every session.
  * Not wired up: questions, steering (ACP can't add input to a running prompt), subagents,
  * rollback and fork. Images and MCP servers (CodeDen's tools are an HTTP MCP server) follow
- * what the CLI reports in `initialize`; plan mode, what its sessions list.
+ * what the CLI reports in `initialize`; plan mode, what its sessions list. The model list is
+ * the one a session (or detection's probe) reported when it started (`modelListAtStart`).
  */
 const BASE_CAPABILITIES: ProviderCapabilities = {
   resume: true,
@@ -66,6 +67,7 @@ const BASE_CAPABILITIES: ProviderCapabilities = {
   skills: true,
   liveAutonomy: true,
   readOnly: true,
+  modelListAtStart: true,
 };
 
 export interface AntigravityAdapterOptions {

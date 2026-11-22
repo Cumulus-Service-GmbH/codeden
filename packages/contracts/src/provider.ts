@@ -39,6 +39,13 @@ export const ProviderCapabilities = z.object({
    */
   liveAutonomy: z.boolean().optional(),
   /**
+   * The model list is the one a session reported when it started: a change during a session
+   * (a model switch that lists other models or levels) shows in the picker from the next
+   * session. The model a session is given is always the one it starts with. False or absent:
+   * the list follows the provider's own updates.
+   */
+  modelListAtStart: z.boolean().optional(),
+  /**
    * The `read_only` permission level is enforced natively: no file edits, no writing shell
    * commands, no commits or pushes (§11.2). When false (or absent), sessions on this provider
    * cannot use `read_only`.
