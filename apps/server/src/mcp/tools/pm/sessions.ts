@@ -7,6 +7,7 @@ import {
   SessionStatus,
   StartedBy,
   StartSessionRequest,
+  sessionTeamMember,
   teamMember,
   teamRoleOfTitle,
   WorkKey,
@@ -93,10 +94,13 @@ export const startSession = defineTool({
             url: `https://github.com/${project.github.owner}/${project.github.repo}/issues/${input.issueNumber}`,
           }
         : undefined;
-    // The same order as the session's Team file: the project's Team over the default Team.
+    // The same Team the caller's Team file holds (and the guard checks): the caller's own role
+    // choice over the project's Team over the default Team.
+    const callerSession = sessionId ? services.sessionRepo.find(sessionId)?.session : undefined;
     const { team } = resolveTeam({
       defaults: services.settings.get().teamSetup.team,
       project: services.factory.data.loop(projectId)?.tuning.team ?? [],
+      session: callerSession ? sessionTeamMember(callerSession) : null,
     });
     const member = teamMember(team, teamRoleOfTitle(input.title));
     const models =

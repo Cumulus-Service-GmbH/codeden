@@ -7,7 +7,7 @@ import { type Database, openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
 import { runTool } from "../src/services/exec";
 import {
-  refreshTeamFiles,
+  createTeamFileRefresher,
   type TeamFileDeps,
   teamFileChanges,
   teamFilePath,
@@ -123,28 +123,42 @@ it("rewrites affected files on Team, settings and session changes and fails clos
     payload,
     ts: "2026-11-22T19:00:00.000Z",
   });
+  const refresh = createTeamFileRefresher(deps());
   projectTeams.set(id, [opus]);
-  refreshTeamFiles(deps(), [event("factory.loop.updated", { loop: { projectId: "other" } })]);
+  refresh([event("factory.loop.updated", { loop: { projectId: "other" } })]);
   expect(read(path).team).toEqual([]);
-  refreshTeamFiles(deps(), [event("factory.loop.updated", { loop: { projectId: id } })]);
+  refresh([event("factory.loop.updated", { loop: { projectId: id } })]);
   expect(read(path).team).toEqual([opus]);
   defaults = [astra];
-  refreshTeamFiles(deps(), [event("settings.updated", {})]);
+  refresh([event("settings.updated", {})]);
   expect(read(path).team).toEqual([astra, opus]);
+  sessions.set(session.id, { ...session, title: "[Writer] x", provider: "codex", model: "m" });
+  refresh([event("session.updated", { session: { id: session.id } })]);
+  expect(read(path).sources.writer).toBe("session");
   expect(
     teamFileChanges([event("session.updated", { session: { id: "s9" } })]).sessions.has("s9"),
   ).toBe(true);
-  // A failed rewrite removes the old file; a file whose session is gone is removed.
-  const failing = {
+  // A failed rewrite removes the old file, and the session is retried on the next batch.
+  let down = true;
+  const flaky = createTeamFileRefresher({
     ...deps(),
-    projectTeam: () => {
-      throw new Error("db closed");
+    projectTeam: (projectId) => {
+      if (down) throw new Error("db closed");
+      return projectTeams.get(projectId) ?? [];
     },
-  };
-  refreshTeamFiles(failing, [event("settings.updated", {})]);
+  });
+  flaky([event("settings.updated", {})]);
   expect(existsSync(path)).toBe(false);
+  down = false;
+  flaky([event("inbox.updated", {})]);
+  expect(read(path).sources).toEqual({
+    writer: "session",
+    planReviewer: "default",
+    reviewer: "project",
+  });
+  // A file whose session is gone is removed.
   writeFileSync(teamFilePath(join(dir, "home"), "gone"), "{}");
-  refreshTeamFiles(deps(), [event("settings.updated", {})]);
+  refresh([event("settings.updated", {})]);
   expect(existsSync(teamFilePath(join(dir, "home"), "gone"))).toBe(false);
   expect(() => teamFilePath(join(dir, "home"), "../x")).toThrow(/unsafe/);
 });

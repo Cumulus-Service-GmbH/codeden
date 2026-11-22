@@ -1,5 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import {
   type Project,
@@ -92,39 +100,64 @@ export function teamFileChanges(events: readonly RawEventEnvelope[]) {
   }
   return { all, projects, sessions };
 }
-
 /**
- * Rewrite the existing Team files the events affect. A file whose session is gone is removed;
- * when a rewrite fails the old file is removed too, so tools fail closed instead of using a
- * changed Team. Every error stays within its session.
+ * Keeps the Team files current. On each batch it rewrites the files the events affect: one
+ * session's (looked up by id), a project's (found by the project id inside each file) or all of
+ * them. A file whose session is gone is removed. When a rewrite fails the old file is removed, so
+ * tools fail closed instead of using a changed Team, and that session is retried on every later
+ * batch until its file is written again. Every error stays within its session.
  */
-export function refreshTeamFiles(deps: TeamFileDeps, events: readonly RawEventEnvelope[]) {
-  const { all, projects, sessions } = teamFileChanges(events);
-  if (!all && projects.size === 0 && sessions.size === 0) return;
+export function createTeamFileRefresher(deps: TeamFileDeps) {
+  const failed = new Set<string>();
   const dir = join(deps.home, "teams");
-  if (!existsSync(dir)) return;
-  for (const name of readdirSync(dir)) {
-    if (!name.endsWith(".json")) continue;
-    const sessionId = name.slice(0, -".json".length);
+  const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+  const refresh = (sessionId: string) => {
     try {
       const session = deps.session(sessionId);
-      if (!session?.projectId) {
-        rmSync(join(dir, name), { force: true });
-        continue;
-      }
-      if (all || projects.has(session.projectId) || sessions.has(sessionId)) {
-        writeTeamFile(deps, session);
-      }
+      if (session?.projectId) writeTeamFile(deps, session);
+      else rmSync(teamFilePath(deps.home, sessionId), { force: true });
+      failed.delete(sessionId);
     } catch (error) {
+      failed.add(sessionId);
       let removed = "removed";
       try {
-        rmSync(join(dir, name), { force: true });
+        rmSync(teamFilePath(deps.home, sessionId), { force: true });
       } catch (rmError) {
-        removed = `NOT removed (${rmError instanceof Error ? rmError.message : String(rmError)})`;
+        removed = `NOT removed (${message(rmError)})`;
       }
       deps.log?.(
-        `session ${sessionId}: Team file not written, old file ${removed}: ${error instanceof Error ? error.message : String(error)}`,
+        `session ${sessionId}: Team file not written, old file ${removed}: ${message(error)}`,
       );
     }
-  }
+  };
+  return (events: readonly RawEventEnvelope[]) => {
+    const { all, projects, sessions } = teamFileChanges(events);
+    const targets = new Set(failed);
+    for (const id of sessions) {
+      if (/^[A-Za-z0-9_-]+$/.test(id) && existsSync(teamFilePath(deps.home, id))) targets.add(id);
+    }
+    if (all || projects.size > 0) {
+      let names: string[] = [];
+      try {
+        names = existsSync(dir) ? readdirSync(dir) : [];
+      } catch (error) {
+        deps.log?.(`Team files in ${dir} not listed: ${message(error)}`);
+      }
+      for (const name of names) {
+        if (!name.endsWith(".json")) continue;
+        const id = name.slice(0, -".json".length);
+        if (all) {
+          targets.add(id);
+          continue;
+        }
+        try {
+          const file = JSON.parse(readFileSync(join(dir, name), "utf8")) as { projectId?: unknown };
+          if (typeof file.projectId !== "string" || projects.has(file.projectId)) targets.add(id);
+        } catch {
+          targets.add(id);
+        }
+      }
+    }
+    for (const id of targets) refresh(id);
+  };
 }

@@ -121,3 +121,29 @@ it("uses the legacy docs builder before the Team writer, then falls back to that
     effort: "high",
   });
 });
+
+it("uses the Team's Code Reviewer Fallback when the reviewer's provider is unavailable", () => {
+  const tuning = FactoryTuning.parse({
+    ...legacy,
+    team: [
+      { role: "reviewer", provider: "claude", model: "r-model", effort: "high" },
+      { role: "reviewerFallback", provider: "gemini", model: "f-model", effort: "medium" },
+    ],
+  });
+  expect(reviewer(tuning, ["codex", "gemini"])).toMatchObject({
+    wait: false,
+    provider: "gemini",
+    model: "f-model",
+    effort: "medium",
+    crossProvider: true,
+  });
+  // Never the author's own provider.
+  const sameAsAuthor = FactoryTuning.parse({
+    ...legacy,
+    team: [
+      { role: "reviewer", provider: "claude", model: "r", effort: null },
+      { role: "reviewerFallback", provider: "codex", model: "f", effort: null },
+    ],
+  });
+  expect(reviewer(sameAsAuthor, ["codex", "gemini"])).not.toMatchObject({ model: "f" });
+});
