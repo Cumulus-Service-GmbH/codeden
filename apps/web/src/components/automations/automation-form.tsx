@@ -1,7 +1,7 @@
 import type { AutonomyLevel } from "@codeden/contracts";
 import { ChevronRight, FolderGit2, Globe } from "lucide-react";
 import { useId } from "react";
-import { supportsReadOnly } from "@/components/thread/autonomy";
+import { supportsReadOnly, supportsSupervised } from "@/components/thread/autonomy";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -51,6 +51,8 @@ function AgentSection({
           onChange={(autonomy) => onChange({ ...action, autonomy })}
           disabled={disabled}
           readOnlySupported={supportsReadOnly(provider)}
+          supervisedSupported={supportsSupervised(provider)}
+          providerName={provider?.displayName}
         />
       </EditorSection>
     </>

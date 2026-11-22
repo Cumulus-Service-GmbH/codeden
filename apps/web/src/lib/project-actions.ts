@@ -100,6 +100,23 @@ export function useProjectActions() {
           return false;
         }
       },
+      setAllowUnenforcedProviders: async (project: Project, allow: boolean) => {
+        const set = (value: boolean) =>
+          setProjects((list) =>
+            list.map((p) => (p.id === project.id ? { ...p, allowUnenforcedProviders: value } : p)),
+          );
+        set(allow);
+        try {
+          await client.updateProject(project.id, { allowUnenforcedProviders: allow });
+          return true;
+        } catch (error) {
+          set(project.allowUnenforcedProviders);
+          toast.error(`Couldn't change ${project.name}'s provider rule`, {
+            description: message(error),
+          });
+          return false;
+        }
+      },
       /** Where the project's new agent sessions run (`Project.execution`); refused with a toast. */
       setExecutionBackend: async (project: Project, backend: ProjectExecutionBackend) => {
         const set = (value: ProjectExecutionBackend) =>

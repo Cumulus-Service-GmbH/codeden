@@ -2,9 +2,9 @@ import type { Session, Snapshot, UpdateSessionRequest } from "@codeden/contracts
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
 import { toast } from "sonner";
-import { AUTONOMY, supportsReadOnly } from "@/components/thread/autonomy";
+import { AUTONOMY, supportsReadOnly, supportsSupervised } from "@/components/thread/autonomy";
 import { useClient } from "@/lib/api";
-import { snapshotKey, useSnapshotData } from "@/lib/queries";
+import { snapshotKey, useProject, useSnapshotData } from "@/lib/queries";
 import { NOT_A_REPO_ACTION_REASON, useHandoffBlocked } from "@/lib/session-actions";
 import { useUiStore } from "@/stores/ui";
 import { ChecksToggle } from "./checks-toggle";
@@ -68,6 +68,7 @@ export function SessionOptions({ session, running }: { session: Session; running
   const providers = useSnapshotData((s) => s.runner.providers, []);
   const providerInfo = providers.find((p) => p.id === session.provider);
   const liveAutonomy = providerInfo?.capabilities.liveAutonomy ?? false;
+  const project = useProject(session.projectId);
   const modelListAtStart = providerInfo?.capabilities.modelListAtStart ?? false;
   const setHandoff = useUiStore((s) => s.setHandoff);
   const handoffBlocked = useHandoffBlocked(session);
@@ -109,6 +110,7 @@ export function SessionOptions({ session, running }: { session: Session; running
             : undefined
         }
         value={{ provider: session.provider, model: session.model, effort: session.effort }}
+        project={project ?? null}
         shortcut
         onChange={(next) => {
           const patch: UpdateSessionRequest = {};
@@ -121,6 +123,8 @@ export function SessionOptions({ session, running }: { session: Session; running
         <AutonomyPicker
           value={session.autonomy}
           readOnlySupported={supportsReadOnly(providerInfo)}
+          supervisedSupported={supportsSupervised(providerInfo)}
+          providerName={providerInfo?.displayName}
           onChange={(autonomy) => {
             if (autonomy !== session.autonomy) save({ autonomy });
           }}

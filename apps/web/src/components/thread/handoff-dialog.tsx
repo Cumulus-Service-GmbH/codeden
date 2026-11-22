@@ -10,6 +10,7 @@ import {
   type Availability,
   lowerFirst,
   type ModelChoice,
+  projectRefusal,
   providerAvailability,
 } from "@/components/composer/model-picker/logic";
 import { ModelPicker } from "@/components/composer/model-picker/model-picker";
@@ -24,7 +25,13 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useRecheckSetup, useSession, useSetupStatus, useSnapshotData } from "@/lib/queries";
+import {
+  useProject,
+  useRecheckSetup,
+  useSession,
+  useSetupStatus,
+  useSnapshotData,
+} from "@/lib/queries";
 import { useHandoffBlocked, useHandoffSession } from "@/lib/session-actions";
 import { useUiStore } from "@/stores/ui";
 
@@ -119,7 +126,11 @@ function HandoffForm({
   const recheck = useRecheckSetup();
   const target = providers.find((p) => p.id === choice.provider);
   const name = target?.displayName ?? choice.provider;
-  const availability = providerAvailability(choice.provider, checks);
+  const project = useProject(session.projectId);
+  // A provider the project refuses (the security rules don't cover it) says why before setup does.
+  const availability =
+    (target ? projectRefusal(target, project) : null) ??
+    providerAvailability(choice.provider, checks);
   const problem = blocked ?? handoffTargetProblem(session, target, availability);
   const submit = () => {
     if (problem || handoff.isPending) return;
@@ -153,6 +164,7 @@ function HandoffForm({
             <ModelPicker
               providers={providers}
               value={choice}
+              project={project ?? null}
               onChange={setPicked}
               disabled={handoff.isPending}
             />

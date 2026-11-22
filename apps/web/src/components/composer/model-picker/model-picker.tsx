@@ -26,6 +26,8 @@ import {
   modelName,
   openProviderTabs,
   type PickerTab,
+  type ProjectRule,
+  projectRefusal,
   providerAvailability,
   providerTabs,
   resolvedEfforts,
@@ -62,6 +64,11 @@ export interface ModelPickerProps {
   /** Open with the model picker shortcut (one picker per screen should set this). */
   shortcut?: boolean;
   align?: "start" | "end";
+  /**
+   * The project the choice is for: a provider the machine's security rules don't cover shows
+   * as unavailable, with the reason, unless it allows such providers.
+   */
+  project?: ProjectRule | null;
 }
 
 const valueKey = (v: ModelChoice | null) => (v ? `${v.provider}|${v.model}|${v.effort}` : "");
@@ -83,6 +90,7 @@ export function ModelPicker({
   footer,
   shortcut: listen,
   align = "start",
+  project,
 }: ModelPickerProps) {
   const navigate = useNavigate();
   const checks = useSetupStatus({ staleTime: 60_000 }).data?.checks;
@@ -110,6 +118,7 @@ export function ModelPicker({
   const providers = withCustomModels(listed, custom);
   const tabs = providerTabs(providers, checks, lockedProvider, {
     favorites: true,
+    project,
     ...(handoff ? { handoff: { blocked: handoff.blocked, lasting: handoff.lasting } } : {}),
   });
   const openTabs = openProviderTabs(tabs);
@@ -262,7 +271,10 @@ export function ModelPicker({
           effort={offerEffort ? effort : null}
           levels={offerEffort ? levels : []}
           placeholder={placeholder}
-          ready={!provider || providerAvailability(provider.id, checks).ready}
+          ready={
+            !provider ||
+            (projectRefusal(provider, project) ?? providerAvailability(provider.id, checks)).ready
+          }
         />
       </PopoverTrigger>
       <PopoverContent

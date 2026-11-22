@@ -92,6 +92,7 @@ export function NewSessionPage({ projectId }: { projectId: string }) {
             resolved={resolved}
             checks={checks}
             projectPath={project.path}
+            project={project}
             onChange={(choice) => setChoice(projectId, choice)}
           />
         }

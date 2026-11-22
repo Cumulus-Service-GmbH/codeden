@@ -1,7 +1,8 @@
 import type { ProjectCheck, ProviderInfo } from "@codeden/contracts";
-import { supportsReadOnly } from "@/components/thread/autonomy";
+import { supportsReadOnly, supportsSupervised } from "@/components/thread/autonomy";
 import { type DraftChoice, pickModel, type ResolvedDraft } from "@/lib/new-session";
 import { ChecksToggle } from "./checks-toggle";
+import type { ProjectRule } from "./model-picker/logic";
 import { ModelPicker } from "./model-picker/model-picker";
 import { AutonomyPicker, PlanToggle } from "./pickers";
 import { WorkspacePicker } from "./workspace-picker";
@@ -22,6 +23,7 @@ export function DraftOptions({
   resolved,
   checks,
   projectPath,
+  project,
   onChange,
 }: {
   providers: ProviderInfo[];
@@ -31,6 +33,8 @@ export function DraftOptions({
   resolved: ResolvedDraft;
   /** The project folder, named where the session runs in it. */
   projectPath: string;
+  /** The project the session is for, for the providers it allows. */
+  project?: ProjectRule | null;
   onChange: (next: DraftChoice) => void;
 }) {
   const { provider } = resolved;
@@ -50,6 +54,7 @@ export function DraftOptions({
         providers={providers}
         // The resolved choice, defaults included: what the first send starts.
         value={{ provider: provider.id, model: resolved.model, effort: resolved.effort }}
+        project={project ?? null}
         shortcut
         onChange={(next) => onChange(pickModel(choice, next))}
       />
@@ -57,6 +62,8 @@ export function DraftOptions({
         value={resolved.autonomy}
         heading="Permissions for the new session"
         readOnlySupported={supportsReadOnly(provider)}
+        supervisedSupported={supportsSupervised(provider)}
+        providerName={provider.displayName}
         onChange={(autonomy) => onChange({ ...choice, autonomy })}
       />
       <PlanToggle

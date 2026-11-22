@@ -13,6 +13,7 @@ import { AgentEnvironmentSettings } from "./agent-environment";
 import { CustomModelSettings } from "./custom-models";
 import { ModelVisibilitySettings } from "./model-visibility";
 import { ProviderHistorySettings } from "./provider-history";
+import { ProviderSecuritySettings } from "./provider-security";
 import { Segmented, SettingRow, SettingsSection, useSettings } from "./settings-ui";
 import { TokenSaverSettingsSection } from "./token-saver";
 import { UpdateModeSetting } from "./update-mode";
@@ -98,6 +99,7 @@ export function GeneralSettings() {
       </SettingsSection>
       <TokenSaverSettingsSection />
       <AgentEnvironmentSettings />
+      <ProviderSecuritySettings />
       <SettingsSection title="Background work">
         <SettingRow
           label="Automations"

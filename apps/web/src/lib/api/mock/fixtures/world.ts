@@ -32,6 +32,7 @@ function project(
     killSwitch: false,
     timezone: null,
     agentCiEnv: true,
+    allowUnenforcedProviders: false,
     execution: { backend: "local" as const },
     pinned: false,
     sortOrder: 0,
