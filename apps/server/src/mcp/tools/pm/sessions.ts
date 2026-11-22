@@ -97,6 +97,13 @@ export const startSession = defineTool({
     // The same Team the caller's Team file holds (and the guard checks): the caller's own role
     // choice over the project's Team over the default Team.
     const callerSession = sessionId ? services.sessionRepo.find(sessionId)?.session : undefined;
+    // The guard judged this start by the caller's Team file, which holds its own role layer: without
+    // the caller's row that layer is unknown, so the start is refused rather than judged by another Team.
+    if (sessionId && !callerSession) {
+      throw new ToolError(
+        `TEAM_UNRESOLVED: the calling session ${sessionId} could not be read for its Team`,
+      );
+    }
     const { team } = resolveTeam({
       defaults: services.settings.get().teamSetup.team,
       project: services.factory.data.loop(projectId)?.tuning.team ?? [],

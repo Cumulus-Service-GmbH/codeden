@@ -1,10 +1,12 @@
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
@@ -287,4 +289,28 @@ it("lists every live session for the Team files, past the session list's page li
   }
   expect(repo.listInStatus(["running"], id)).toHaveLength(1004);
   expect(repo.listInStatus(["running"])).toHaveLength(1004);
+});
+
+it("removes leftover files of sessions that are not live at start, and replaces a file others can read", async () => {
+  const id = await addProject();
+  const live: Session = { ...sampleSession, id: "live1", projectId: id, status: "running" };
+  sessions.set(live.id, live);
+  const home = join(dir, "home");
+  mkdirSync(join(home, "teams"), { recursive: true });
+  writeFileSync(teamFilePath(home, "ended1"), "{}");
+  const refresh = createTeamFileRefresher(deps());
+  expect(existsSync(teamFilePath(home, "ended1"))).toBe(false);
+  const path = teamFilePath(home, live.id);
+  expect(existsSync(path)).toBe(true);
+  chmodSync(path, 0o644);
+  refresh([
+    {
+      seq: 1,
+      sessionId: null,
+      type: "session.updated",
+      payload: { session: { id: live.id } },
+      ts: "2026-11-22T19:00:00.000Z",
+    },
+  ]);
+  expect(statSync(path).mode & 0o077).toBe(0);
 });
