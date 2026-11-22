@@ -1,5 +1,6 @@
 import { Outlet, useNavigate, useParams, useRouterState } from "@tanstack/react-router";
 import { useEffect } from "react";
+import { ChecklistSidebar } from "@/components/checklist/checklist-sidebar";
 import { useRoleSession } from "@/components/orchestration/role-chat";
 import { AddProjectDialog } from "@/components/setup/add-project-dialog";
 import { HandoffDialog } from "@/components/thread/handoff-dialog";
@@ -131,6 +132,8 @@ export function AppShell() {
           <RightPanel sessionId={panel} width={layout.rightWidth} />
         </>
       )}
+
+      <ChecklistSidebar />
 
       {(viewport.drawerNav || viewport.railNav) && <MobileNavDrawer />}
       <CommandPalette />

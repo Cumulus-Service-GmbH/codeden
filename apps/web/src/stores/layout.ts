@@ -28,6 +28,14 @@ interface LayoutState {
   drawerOpen: boolean;
   drawerHeight: number;
   expandedProjects: Record<string, boolean>;
+  /** The checklist sidebar is shown (false: nothing in the layout). */
+  checklistOpen: boolean;
+  /** Pinned: an inline column at the right edge; unpinned: an overlay sheet. */
+  checklistPinned: boolean;
+  /** The pinned checklist is a slim rail with the overall percent. */
+  checklistCollapsed: boolean;
+  /** Project sections the user folded in the checklist. */
+  checklistClosedProjects: Record<string, boolean>;
   setSidebarWidth: (w: number) => void;
   toggleSidebar: () => void;
   setRightWidth: (w: number) => void;
@@ -37,6 +45,10 @@ interface LayoutState {
   setDrawerHeight: (h: number) => void;
   toggleDrawer: (open?: boolean) => void;
   toggleProject: (id: string, open?: boolean) => void;
+  toggleChecklist: (open?: boolean) => void;
+  setChecklistPinned: (pinned: boolean) => void;
+  setChecklistCollapsed: (collapsed: boolean) => void;
+  toggleChecklistProject: (id: string) => void;
 }
 
 /** Shell layout: panel sizes, open state and tabs. Persisted per browser. */
@@ -53,6 +65,10 @@ export const useLayoutStore = create<LayoutState>()(
       drawerOpen: false,
       drawerHeight: DRAWER.default,
       expandedProjects: { "p-storefront": true, "p-billing": true },
+      checklistOpen: false,
+      checklistPinned: true,
+      checklistCollapsed: false,
+      checklistClosedProjects: {},
       setSidebarWidth: (w) => set({ sidebarWidth: clamp(w, SIDEBAR.min, SIDEBAR.max) }),
       toggleSidebar: () => set((s) => ({ sidebarCollapsed: !s.sidebarCollapsed })),
       setRightWidth: (w) => set({ rightWidth: clamp(w, RIGHT.min, RIGHT.max) }),
@@ -74,6 +90,16 @@ export const useLayoutStore = create<LayoutState>()(
       toggleProject: (id, open) =>
         set((s) => ({
           expandedProjects: { ...s.expandedProjects, [id]: open ?? !s.expandedProjects[id] },
+        })),
+      toggleChecklist: (open) => set((s) => ({ checklistOpen: open ?? !s.checklistOpen })),
+      setChecklistPinned: (pinned) => set({ checklistPinned: pinned }),
+      setChecklistCollapsed: (collapsed) => set({ checklistCollapsed: collapsed }),
+      toggleChecklistProject: (id) =>
+        set((s) => ({
+          checklistClosedProjects: {
+            ...s.checklistClosedProjects,
+            [id]: !s.checklistClosedProjects[id],
+          },
         })),
     }),
     {

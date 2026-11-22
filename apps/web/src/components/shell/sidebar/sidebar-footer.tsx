@@ -1,5 +1,6 @@
 import { Link } from "@tanstack/react-router";
 import { Keyboard, Moon, Settings, SlidersHorizontal, Sun } from "lucide-react";
+import { ChecklistToggle } from "@/components/checklist/checklist-toggle";
 import { StatusDot } from "@/components/common/status-dot";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -78,6 +79,7 @@ export function SidebarFooter({ compact = false }: { compact?: boolean }) {
           <span className="sr-only">{label}</span>
         </div>
       )}
+      <ChecklistToggle />
       <IconButton label="Keyboard shortcuts" onClick={() => openShortcuts(true)}>
         <Keyboard />
       </IconButton>
