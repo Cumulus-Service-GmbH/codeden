@@ -1,13 +1,5 @@
 import { randomUUID } from "node:crypto";
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import {
   type Project,
@@ -30,6 +22,27 @@ export function teamRoots(project: Pick<Project, "path" | "slug">, worktreesDir:
   return [project.path, join(worktreesDir, project.slug)];
 }
 
+/** Whether the file already holds this Team (all but its time stamp): then it is not rewritten. */
+function sameTeamFile(path: string, body: TeamFile): boolean {
+  try {
+    const { updatedAt: _old, ...current } = TeamFile.parse(JSON.parse(readFileSync(path, "utf8")));
+    const { updatedAt: _new, ...wanted } = body;
+    return JSON.stringify(current) === JSON.stringify(wanted);
+  } catch {
+    return false;
+  }
+}
+
+/** Sessions in these states keep a Team file; any other state has none. */
+export const TEAM_FILE_STATUSES = [
+  "created",
+  "queued",
+  "starting",
+  "running",
+  "waiting",
+  "idle",
+] as const;
+
 /** What a session's Team is resolved from; every model comes from one of these UI choices. */
 export interface TeamFileDeps {
   home: string;
@@ -40,6 +53,8 @@ export interface TeamFileDeps {
   projectTeam: (projectId: string) => Team;
   project: (projectId: string) => Pick<Project, "path" | "slug">;
   session: (sessionId: string) => Session | undefined;
+  /** Sessions that are live (not ended), all or one project's. */
+  liveSessions: (projectId?: string) => Session[];
   log?: (message: string) => void;
 }
 
@@ -64,6 +79,7 @@ export function writeTeamFile(deps: TeamFileDeps, session: Session, now = new Da
     sources,
     updatedAt: now.toISOString(),
   });
+  if (sameTeamFile(path, body)) return path;
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   // A fresh name opened exclusively: never an existing file or a planted symlink.
   const tmp = `${path}.${randomUUID()}.tmp`;
@@ -95,26 +111,35 @@ export function teamFileChanges(events: readonly RawEventEnvelope[]) {
     if (event.type === "factory.loop.updated" && typeof projectId === "string") {
       projects.add(projectId);
     }
-    const sessionId = payload?.session?.id;
-    if (event.type === "session.updated" && typeof sessionId === "string") sessions.add(sessionId);
+    const sessionId = payload?.session?.id ?? event.sessionId;
+    if ((event.type === "session.updated" || event.type === "session.created") && typeof sessionId === "string") {
+      sessions.add(sessionId);
+    }
   }
   return { all, projects, sessions };
 }
+
 /**
- * Keeps the Team files current. On each batch it rewrites the files the events affect: one
- * session's (looked up by id), a project's (found by the project id inside each file) or all of
- * them. A file whose session is gone is removed. When a rewrite fails the old file is removed, so
- * tools fail closed instead of using a changed Team, and that session is retried on every later
- * batch until its file is written again. Every error stays within its session.
+ * Keeps the Team files of live project sessions current. At creation it writes the file of every
+ * live project session, so a server restart repairs files a failed rewrite removed. On each batch it
+ * rewrites: one session's file when that session changed; a project's live sessions' files only
+ * when the project's Team actually changed; every live session's file when the default Team
+ * changed. When a rewrite fails the old file is removed, so tools fail closed instead of using a
+ * changed Team, and the session is retried on every later batch until its file is written again.
+ * A lookup that fails keeps its scope pending for the next batch. Errors stay within their scope.
  */
 export function createTeamFileRefresher(deps: TeamFileDeps) {
   const failed = new Set<string>();
-  const dir = join(deps.home, "teams");
+  const pendingProjects = new Set<string>();
+  let pendingAll = false;
+  const seenProjects = new Map<string, string>();
+  let seenDefaults: string | null = null;
   const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
-  const refresh = (sessionId: string) => {
+  const refresh = (session: Session | undefined, sessionId: string) => {
     try {
-      const session = deps.session(sessionId);
-      if (session?.projectId) writeTeamFile(deps, session);
+      const keeps =
+        session?.projectId && (TEAM_FILE_STATUSES as readonly string[]).includes(session.status);
+      if (session && keeps) writeTeamFile(deps, session);
       else rmSync(teamFilePath(deps.home, sessionId), { force: true });
       failed.delete(sessionId);
     } catch (error) {
@@ -130,34 +155,63 @@ export function createTeamFileRefresher(deps: TeamFileDeps) {
       );
     }
   };
-  return (events: readonly RawEventEnvelope[]) => {
-    const { all, projects, sessions } = teamFileChanges(events);
-    const targets = new Set(failed);
-    for (const id of sessions) {
-      if (/^[A-Za-z0-9_-]+$/.test(id) && existsSync(teamFilePath(deps.home, id))) targets.add(id);
+  const live = (projectId?: string): Session[] | null => {
+    try {
+      return deps.liveSessions(projectId);
+    } catch (error) {
+      deps.log?.(
+        `live sessions${projectId ? ` of project ${projectId}` : ""} not listed: ${message(error)}`,
+      );
+      return null;
     }
-    if (all || projects.size > 0) {
-      let names: string[] = [];
-      try {
-        names = existsSync(dir) ? readdirSync(dir) : [];
-      } catch (error) {
-        deps.log?.(`Team files in ${dir} not listed: ${message(error)}`);
-      }
-      for (const name of names) {
-        if (!name.endsWith(".json")) continue;
-        const id = name.slice(0, -".json".length);
-        if (all) {
-          targets.add(id);
-          continue;
-        }
-        try {
-          const file = JSON.parse(readFileSync(join(dir, name), "utf8")) as { projectId?: unknown };
-          if (typeof file.projectId !== "string" || projects.has(file.projectId)) targets.add(id);
-        } catch {
-          targets.add(id);
-        }
-      }
-    }
-    for (const id of targets) refresh(id);
   };
+  const run = (events: readonly RawEventEnvelope[], initial: boolean) => {
+    const { all, projects, sessions } = teamFileChanges(events);
+    const targets = new Map<string, Session | undefined>();
+    for (const id of [...failed, ...sessions]) {
+      try {
+        targets.set(id, deps.session(id));
+      } catch (error) {
+        failed.add(id);
+        deps.log?.(`session ${id}: not read for its Team file: ${message(error)}`);
+      }
+    }
+    if (all || initial) {
+      try {
+        const key = JSON.stringify(deps.defaults());
+        if (key !== seenDefaults) pendingAll = true;
+        seenDefaults = key;
+      } catch (error) {
+        pendingAll = true;
+        deps.log?.(`default Team not read: ${message(error)}`);
+      }
+    }
+    for (const projectId of projects) {
+      try {
+        const key = JSON.stringify(deps.projectTeam(projectId));
+        if (seenProjects.get(projectId) !== key) pendingProjects.add(projectId);
+        seenProjects.set(projectId, key);
+      } catch (error) {
+        pendingProjects.add(projectId);
+        deps.log?.(`project ${projectId}: Team not read: ${message(error)}`);
+      }
+    }
+    if (pendingAll) {
+      const list = live();
+      if (list) {
+        pendingAll = false;
+        pendingProjects.clear();
+        for (const session of list) targets.set(session.id, session);
+      }
+    }
+    for (const projectId of [...pendingProjects]) {
+      const list = live(projectId);
+      if (!list) continue;
+      pendingProjects.delete(projectId);
+      for (const session of list) targets.set(session.id, session);
+    }
+    for (const [id, session] of targets) refresh(session, id);
+  };
+  run([], true);
+  return (events: readonly RawEventEnvelope[]) => run(events, false);
 }

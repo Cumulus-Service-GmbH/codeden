@@ -18,7 +18,11 @@ import { BrowserService } from "./browser/browser-service";
 import { type Exec, runTool } from "./exec";
 import { type FactoryOptions, FactoryService } from "./factory/factory-service";
 import { type FactoryGithub, GithubFactoryPort } from "./factory/github-port";
-import { createTeamFileRefresher, type TeamFileDeps } from "./factory/team-file";
+import {
+  createTeamFileRefresher,
+  TEAM_FILE_STATUSES,
+  type TeamFileDeps,
+} from "./factory/team-file";
 import { FILE_RESET_NOTICES, reportFileReset } from "./file-reset-notice";
 import { ConfigFiles } from "./files/config-files";
 import { createGitBroker, type GitBroker } from "./git-broker";
@@ -261,6 +265,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     projectTeam: (projectId) => factory.data.loop(projectId)?.tuning.team ?? [],
     project: (projectId) => projects.get(projectId),
     session: (sessionId) => sessionRepo.find(sessionId)?.session,
+    liveSessions: (projectId) => sessionRepo.list({ projectId, status: [...TEAM_FILE_STATUSES] }),
     log: opts.log,
   };
   const launcher = new SessionLauncher({

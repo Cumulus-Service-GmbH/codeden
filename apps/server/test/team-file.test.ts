@@ -1,7 +1,7 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Session, TEAM_FILE_ENV, type Team, TeamFile } from "@codeden/contracts";
+import { type Session, Settings, TEAM_FILE_ENV, type Team, TeamFile } from "@codeden/contracts";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { type Database, openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
@@ -14,6 +14,7 @@ import {
 } from "../src/services/factory/team-file";
 import { ProjectService } from "../src/services/projects/project-service";
 import { type LauncherDeps, SessionLauncher } from "../src/services/sessions/launcher";
+import { SessionRepo } from "../src/services/sessions/repo";
 import { sampleSession } from "./helpers";
 import { removeTree } from "./support/remove-tree";
 
@@ -69,6 +70,10 @@ const deps = (): TeamFileDeps => ({
   projectTeam: (id) => projectTeams.get(id) ?? [],
   project: (id) => projects.get(id),
   session: (id) => sessions.get(id),
+  liveSessions: (projectId) =>
+    [...sessions.values()].filter(
+      (s) => (!projectId || s.projectId === projectId) && s.status !== "completed",
+    ),
 });
 
 const launcher = () =>
@@ -110,12 +115,11 @@ it("writes each project session's Team: its own role over the project's Team ove
   ).toBeUndefined();
 });
 
-it("rewrites affected files on Team, settings and session changes and fails closed", async () => {
+it("keeps live sessions' files current, retries failures and repairs files at start", async () => {
   const id = await addProject();
-  const session: Session = { ...sampleSession, projectId: id };
+  const session: Session = { ...sampleSession, projectId: id, status: "running" };
   sessions.set(session.id, session);
-  const path = launcher().sessionOptions(session).env?.[TEAM_FILE_ENV] as string;
-  expect(read(path).team).toEqual([]);
+  const path = teamFilePath(join(dir, "home"), session.id);
   const event = (type: string, payload: unknown) => ({
     seq: 1,
     sessionId: null,
@@ -123,7 +127,9 @@ it("rewrites affected files on Team, settings and session changes and fails clos
     payload,
     ts: "2026-11-22T19:00:00.000Z",
   });
+  // At creation every live project session's file is written (a restart repairs missing ones).
   const refresh = createTeamFileRefresher(deps());
+  expect(read(path).team).toEqual([]);
   projectTeams.set(id, [opus]);
   refresh([event("factory.loop.updated", { loop: { projectId: "other" } })]);
   expect(read(path).team).toEqual([]);
@@ -134,10 +140,11 @@ it("rewrites affected files on Team, settings and session changes and fails clos
   expect(read(path).team).toEqual([astra, opus]);
   sessions.set(session.id, { ...session, title: "[Writer] x", provider: "codex", model: "m" });
   refresh([event("session.updated", { session: { id: session.id } })]);
-  expect(read(path).sources.writer).toBe("session");
-  expect(
-    teamFileChanges([event("session.updated", { session: { id: "s9" } })]).sessions.has("s9"),
-  ).toBe(true);
+  expect(read(path).sources).toEqual({
+    writer: "session",
+    planReviewer: "default",
+    reviewer: "project",
+  });
   // A failed rewrite removes the old file, and the session is retried on the next batch.
   let down = true;
   const flaky = createTeamFileRefresher({
@@ -147,18 +154,61 @@ it("rewrites affected files on Team, settings and session changes and fails clos
       return projectTeams.get(projectId) ?? [];
     },
   });
-  flaky([event("settings.updated", {})]);
   expect(existsSync(path)).toBe(false);
   down = false;
   flaky([event("inbox.updated", {})]);
-  expect(read(path).sources).toEqual({
-    writer: "session",
-    planReviewer: "default",
-    reviewer: "project",
+  expect(read(path).team).toHaveLength(3);
+  // A listing failure keeps the change pending until a later batch can list.
+  let listing = false;
+  const unlisted = createTeamFileRefresher({
+    ...deps(),
+    liveSessions: (projectId) => {
+      if (!listing) throw new Error("busy");
+      return deps().liveSessions(projectId);
+    },
   });
-  // A file whose session is gone is removed.
-  writeFileSync(teamFilePath(join(dir, "home"), "gone"), "{}");
-  refresh([event("settings.updated", {})]);
-  expect(existsSync(teamFilePath(join(dir, "home"), "gone"))).toBe(false);
+  projectTeams.set(id, []);
+  unlisted([event("factory.loop.updated", { loop: { projectId: id } })]);
+  expect(read(path).team).toHaveLength(3);
+  listing = true;
+  unlisted([event("inbox.updated", {})]);
+  expect(read(path).sources).toEqual({ writer: "session", planReviewer: "default" });
+  // A session that ended keeps no file.
+  sessions.set(session.id, { ...session, status: "completed" });
+  refresh([event("session.updated", { session: { id: session.id } })]);
+  expect(existsSync(path)).toBe(false);
+  expect(
+    teamFileChanges([event("session.updated", { session: { id: "s9" } })]).sessions.has("s9"),
+  ).toBe(true);
   expect(() => teamFilePath(join(dir, "home"), "../x")).toThrow(/unsafe/);
+});
+
+it("follows the events CodeDen's own write paths emit", async () => {
+  const id = await addProject();
+  const store = new EventStore(database.db);
+  const repo = new SessionRepo(database.db, store);
+  repo.create(
+    { ...sampleSession, id: "s7", projectId: id, status: "running" },
+    {
+      workspaceMode: "worktree",
+      workspaceFallback: null,
+      forced: null,
+      queuedBehind: [],
+    },
+  );
+  const refresher = createTeamFileRefresher({
+    ...deps(),
+    session: (sessionId) => repo.find(sessionId)?.session,
+    liveSessions: (projectId) => repo.list({ projectId, status: ["running"] }),
+  });
+  store.subscribe(refresher);
+  const path = teamFilePath(join(dir, "home"), "s7");
+  expect(read(path).team).toEqual([]);
+  repo.update("s7", (s) => ({ ...s, title: "[Writer] Fix", provider: "codex", model: "m" }));
+  expect(read(path).sources).toEqual({ writer: "session" });
+  defaults = [astra];
+  store.append([
+    { type: "settings.updated", sessionId: null, payload: { settings: Settings.parse({}) } },
+  ]);
+  expect(read(path).sources).toEqual({ writer: "session", planReviewer: "default" });
 });

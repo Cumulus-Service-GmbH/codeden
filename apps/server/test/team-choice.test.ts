@@ -147,3 +147,19 @@ it("uses the Team's Code Reviewer Fallback when the reviewer's provider is unava
   });
   expect(reviewer(sameAsAuthor, ["codex", "gemini"])).not.toMatchObject({ model: "f" });
 });
+
+it("keeps a project's wait policy and never claims a cross-provider review for an unknown author", () => {
+  const team = [
+    { role: "reviewer", provider: "claude", model: "r", effort: null },
+    { role: "reviewerFallback", provider: "gemini", model: "f", effort: null },
+  ];
+  const waiting = FactoryTuning.parse({ ...legacy, reviewerFallback: "wait", team });
+  expect(reviewer(waiting, ["codex", "gemini"])).toMatchObject({ wait: true });
+  const unknownAuthor = pickReviewer({
+    tuning: FactoryTuning.parse({ ...legacy, reviewerFallback: "any", team }),
+    available: ["codex", "gemini"],
+    unavailable: [],
+    author: { provider: null, model: null },
+  });
+  expect(unknownAuthor).not.toMatchObject({ model: "f", crossProvider: true });
+});

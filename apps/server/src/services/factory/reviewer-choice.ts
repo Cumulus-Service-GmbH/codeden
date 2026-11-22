@@ -109,9 +109,16 @@ function fallback(
   name: (id: string) => string,
 ): ReviewerChoice | ReviewerWait {
   const { author, available } = input;
-  // The Team's Code Reviewer Fallback comes first, when its provider is available and is not the author's.
+  const mode = input.tuning.reviewerFallback;
+  if (mode === "wait") return { wait: true, note: `Waiting: ${reason}` };
+  // Then the Team's Code Reviewer Fallback, when its provider is available and is known to differ from the author's.
   const member = teamMember(input.tuning.team, "reviewerFallback");
-  if (member && available.includes(member.provider) && member.provider !== author.provider) {
+  if (
+    member &&
+    author.provider &&
+    available.includes(member.provider) &&
+    member.provider !== author.provider
+  ) {
     return {
       wait: false,
       provider: member.provider,
@@ -121,8 +128,6 @@ function fallback(
       note: `${reason}; the review ran on the Team's Code Reviewer Fallback (${name(member.provider)}).`,
     };
   }
-  const mode = input.tuning.reviewerFallback;
-  if (mode === "wait") return { wait: true, note: `Waiting: ${reason}` };
   if (mode === "builder" && author.provider && available.includes(author.provider)) {
     return {
       wait: false,
