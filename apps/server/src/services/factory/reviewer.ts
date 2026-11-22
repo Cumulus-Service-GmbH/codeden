@@ -32,6 +32,7 @@ import { CLEAN_REVIEW, environmentStrikes, replaceBlockedReviewer } from "./revi
 import { pickReviewer, type ReviewerChoice, type ReviewerWait } from "./reviewer-choice";
 import { isBusy } from "./sessions";
 import { claimSlot, reviewTier } from "./slots";
+import { teamTuning } from "./team-role";
 import { mayAutoMerge } from "./trust";
 
 /**
@@ -80,7 +81,7 @@ function chooseReviewer(
       provider: item.builderProvider ?? builder?.provider ?? null,
       model: builder?.model ?? null,
     },
-    tuning: loop.tuning,
+    tuning: teamTuning(ctx, loop.tuning),
     available: ctx.sessions.providers().filter((p) => !skipped.some((s) => s.provider === p)),
     unavailable: [...ctx.sessions.unavailable(), ...skipped],
     name: (id) => ctx.sessions.displayName(id),

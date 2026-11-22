@@ -1,6 +1,7 @@
 import {
   type ModelInfo,
   type ReasoningEffort,
+  resolveTeam,
   type Team,
   teamMember,
   teamRoleOfTitle,
@@ -33,5 +34,19 @@ export function applyTeamRole(
       ...(member.model !== null ? { model: input.model ?? member.model } : {}),
       ...(member.effort !== null ? { effort: input.effort ?? member.effort } : {}),
     },
+  };
+}
+
+/**
+ * A loop's tuning with its Team resolved the way sessions resolve it: the project's Team over
+ * the default Team (Settings, Factory > Team setup). Never saved back into the loop.
+ */
+export function teamTuning<T extends { team: Team }>(
+  ctx: { settings: { get(): { teamSetup: { team: Team } } } },
+  tuning: T,
+): T {
+  return {
+    ...tuning,
+    team: resolveTeam({ defaults: ctx.settings.get().teamSetup.team, project: tuning.team }).team,
   };
 }
