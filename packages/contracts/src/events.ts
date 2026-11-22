@@ -26,6 +26,7 @@ import { ConflictRecord, Notice } from "./orchestration";
 import { PtyId } from "./runner/commands";
 import { RunnerDeletedPayload, RunnerRecordRef, RunnerRegisteredPayload } from "./runners";
 import { Settings } from "./settings";
+import { TechDebtView } from "./tech-debt";
 import { Checkpoint, QueuedMessage, SetupStep } from "./workbench";
 
 /**
@@ -76,6 +77,7 @@ export const EventEnvelope = z.discriminatedUnion("type", [
   agentEvent("item.completed", ItemCompletedEvent),
   agentEvent("usage.updated", UsageUpdatedEvent),
   // Domain events.
+  globalEvent("tech_debt.updated", z.object({ view: TechDebtView })),
   globalEvent("checklist.updated", z.object({ checklist: ProjectChecklist })),
   globalEvent("project.created", z.object({ project: Project })),
   globalEvent("project.updated", z.object({ project: Project })),
