@@ -124,6 +124,33 @@ it("requires a target from the orchestrator, confines the PM and validates reaso
   expect(events()).toEqual(before);
 });
 
+it("scopes PM tools to their project and lets the orchestrator control either project", async () => {
+  const other = { ...project(), id: "p-other", name: "Other", slug: "other", path: env.dir };
+  env.store.append([{ type: "project.created", sessionId: null, payload: { project: other } }]);
+  expect(await result("factory_pause", { reason }, "pm")).toMatchObject({
+    projectId: env.project.id,
+    changed: true,
+  });
+  expect(await result("factory_status", {}, "pm")).toMatchObject({
+    control: { halt: { source: "pm", reason } },
+  });
+  await result("factory_resume", input());
+  for (const name of ["factory_status", "factory_pause"]) {
+    expect(await call(name, { projectId: other.id, reason }, "pm")).toMatchObject({
+      isError: true,
+    });
+  }
+  for (const projectId of [other.id, env.project.id]) {
+    const args = { projectId, reason };
+    expect(await result("factory_pause", args)).toMatchObject({ projectId, changed: true });
+    expect(await result("factory_status", { projectId })).toMatchObject({
+      control: { halt: { source: "orchestrator", reason } },
+    });
+    expect(await result("factory_resume", args)).toMatchObject({ projectId, changed: true });
+    expect(await result("factory_stop", args)).toMatchObject({ projectId, changed: true });
+  }
+});
+
 it("records a PM's drain in the event and projection", async () => {
   await startWork();
   const response = await result("factory_pause", { reason }, "pm");
@@ -698,13 +725,18 @@ it("ignores resolved inbox history when deriving agent notices", async () => {
   if (!history) throw new Error("Expected a factory inbox event");
   const parsed = EventEnvelope.parse(history);
   if (parsed.type !== "inbox.created") throw new Error("Expected inbox history");
-  const item = { ...parsed.payload.item, kind: "run_failed", sessionId: session.id };
-  expect(
-    deriveNotices([{ ...history, payload: { item } }], {
-      session: () => session,
-      finalMessage: () => null,
+  expect(parsed.payload.item).toMatchObject({ kind: "automation_result", status: "resolved" });
+  const lookup = { session: () => session, finalMessage: () => null };
+  expect(deriveNotices([history], lookup)).toEqual([]);
+
+  const failure = { ...parsed.payload.item, kind: "run_failed", sessionId: session.id };
+  expect(deriveNotices([{ ...history, payload: { item: failure } }], lookup)).toEqual([]);
+  const dismissed = { ...failure, status: "dismissed" };
+  expect(deriveNotices([{ ...history, payload: { item: dismissed } }], lookup)).toContainEqual(
+    expect.objectContaining({
+      notice: expect.objectContaining({ type: "session.failed", sessionId: session.id }),
     }),
-  ).toEqual([]);
+  );
 });
 
 it.each(["project", "global"] as const)(
