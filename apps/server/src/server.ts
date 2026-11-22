@@ -130,6 +130,7 @@ export interface StartServerOptions {
   automations?: ServicesOptions["automations"];
   /** Factory loop (§10.1): tick interval, background ticking, a scripted GitHub for tests. */
   factory?: ServicesOptions["factory"];
+  teamRuns?: ServicesOptions["teamRuns"];
   /** Run first-run detection in the background on launch (default true). */
   checkSetupOnStart?: boolean;
   /**
@@ -259,6 +260,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
     github: opts.github,
     automations: opts.automations,
     factory: opts.factory,
+    teamRuns: opts.teamRuns,
     selfUpdate: opts.selfUpdate,
     updates: opts.updates,
     worktreeCleanup: opts.worktreeCleanup,

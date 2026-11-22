@@ -65,6 +65,8 @@ export const TeamWorker = z.object({
   status: z.enum(["queued", "running", "waiting", "completed", "failed", "stopped"]),
   dependsOn: z.array(id),
   attempt: z.int().nonnegative(),
+  /** When this attempt started, used to estimate remaining time. */
+  startedAt: z.int().nonnegative().optional(),
   checkpoint: TeamWorkerCheckpoint.nullable(),
 });
 export type TeamWorker = z.infer<typeof TeamWorker>;
@@ -77,3 +79,21 @@ export const TeamCoordinationMessage = z.discriminatedUnion("type", [
   z.object({ type: z.literal("continue") }),
 ]);
 export type TeamCoordinationMessage = z.infer<typeof TeamCoordinationMessage>;
+
+/** Persisted Team run, including the pinned plan and the resolved role assignments. */
+export const TeamRun = z.object({
+  id,
+  projectId: id,
+  teamId: id,
+  teamName: id,
+  team: Team,
+  limits: TeamRunSettings,
+  revision: id,
+  items: z.array(z.object({ id, text: id, dependsOn: z.array(id) })),
+  assembler: id,
+  coordinatorId: id.nullable(),
+  workers: z.array(TeamWorker),
+  status: z.enum(["running", "waiting", "ready"]),
+  notice: z.string().nullable(),
+});
+export type TeamRun = z.infer<typeof TeamRun>;

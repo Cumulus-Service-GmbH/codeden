@@ -26,6 +26,7 @@ import { ConflictRecord, Notice } from "./orchestration";
 import { PtyId } from "./runner/commands";
 import { RunnerDeletedPayload, RunnerRecordRef, RunnerRegisteredPayload } from "./runners";
 import { Settings } from "./settings";
+import { TeamRun } from "./team-run";
 import { Checkpoint, QueuedMessage, SetupStep } from "./workbench";
 
 /**
@@ -76,6 +77,7 @@ export const EventEnvelope = z.discriminatedUnion("type", [
   agentEvent("item.completed", ItemCompletedEvent),
   agentEvent("usage.updated", UsageUpdatedEvent),
   // Domain events.
+  globalEvent("team_run.updated", z.object({ run: TeamRun })),
   globalEvent("checklist.updated", z.object({ checklist: ProjectChecklist })),
   globalEvent("project.created", z.object({ project: Project })),
   globalEvent("project.updated", z.object({ project: Project })),

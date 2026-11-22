@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TeamRunProgress } from "@/components/workbench/team-workers";
 import { useSnapshot } from "@/lib/queries";
 import { useViewport } from "@/lib/viewport";
 import { useLayoutStore } from "@/stores/layout";
@@ -45,6 +46,7 @@ function HeaderButton({
 
 function ChecklistBody({ inline }: { inline: boolean }) {
   const lists = useChecklists();
+  const { data } = useSnapshot();
   const pinned = useLayoutStore((s) => s.checklistPinned);
   const setPinned = useLayoutStore((s) => s.setChecklistPinned);
   const setCollapsed = useLayoutStore((s) => s.setChecklistCollapsed);
@@ -81,7 +83,10 @@ function ChecklistBody({ inline }: { inline: boolean }) {
         </HeaderButton>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto scroll-thin px-1.5">
-        {lists.length === 0 ? (
+        {data?.teamRuns?.map((run) => (
+          <TeamRunProgress key={run.id} run={run} />
+        ))}
+        {lists.length === 0 && !data?.teamRuns?.length ? (
           <p className="px-4 py-10 text-center text-xs text-muted-foreground">
             No checklist yet. The orchestrator keeps it here.
           </p>

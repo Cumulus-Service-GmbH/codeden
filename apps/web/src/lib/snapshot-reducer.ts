@@ -151,6 +151,13 @@ export function applyDomainEvent(snap: Snapshot, env: EventEnvelope): Snapshot {
     case "settings.updated":
       next.settings = env.payload.settings;
       break;
+    case "team_run.updated": {
+      const { run } = env.payload;
+      const list = snap.teamRuns ?? [];
+      const i = list.findIndex((entry) => entry.id === run.id);
+      next.teamRuns = i === -1 ? [...list, run] : list.with(i, run);
+      break;
+    }
     case "checklist.updated": {
       const checklist = env.payload.checklist;
       const list = snap.checklists ?? [];

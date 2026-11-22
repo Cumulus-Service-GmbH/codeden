@@ -19,6 +19,7 @@ import { UserInput } from "./input";
 import { FollowupsItem } from "./items";
 import { BrokenExecutable, ProviderInfo, RuntimeResponse } from "./provider";
 import { TeamRole } from "./team";
+import { ProjectTeams } from "./team-run";
 import { TokenSaverLevel } from "./token-saver";
 import { ConflictDecision, StartedBy, StartWorkResult, WorkKey } from "./work";
 import { SetupStep } from "./workbench";
@@ -91,6 +92,7 @@ export type CreateProjectResponse = z.infer<typeof CreateProjectResponse>;
 
 /** `PATCH /api/projects/:id`. */
 export const UpdateProjectRequest = z.object({
+  teams: ProjectTeams.optional(),
   name: z.string().trim().min(1).max(100).optional(),
   defaultProvider: ProviderId.nullable().optional(),
   /**

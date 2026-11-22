@@ -9,6 +9,7 @@ import {
   projectChecklists,
   projects,
   sessions,
+  teamRuns,
 } from "../db/schema";
 import { applyFactoryProjection } from "../services/factory/projection";
 import {
@@ -37,6 +38,14 @@ export { applyDelta } from "./reducer/items";
  */
 export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
   switch (e.type) {
+    case "team_run.updated": {
+      const { run } = e.payload;
+      tx.insert(teamRuns)
+        .values({ id: run.id, run })
+        .onConflictDoUpdate({ target: teamRuns.id, set: { run } })
+        .run();
+      return [];
+    }
     case "checklist.updated": {
       const { checklist } = e.payload;
       const { projectId, updatedAt } = checklist;

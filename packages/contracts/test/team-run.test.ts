@@ -1,5 +1,5 @@
 import { expect, it } from "vitest";
-import { ProjectTeams, StartTeamRun, TeamRunSettings, TeamWorker } from "../src";
+import { ProjectTeams, StartTeamRun, TeamRunSettings, TeamWorker, UserInput } from "../src";
 
 it("round-trips named Teams and requires exactly one designated default", () => {
   const limits = { maxParallel: 2, maxAssignments: 5, maxRounds: 3 };
@@ -46,4 +46,14 @@ it("round-trips an assigned worker and its checkpoint", () => {
     },
   };
   expect(TeamWorker.parse(JSON.parse(JSON.stringify(worker)))).toEqual(worker);
+});
+
+it("preserves typed Team coordination through the input boundary", () => {
+  const input = {
+    text: "Worker finished",
+    attachments: [],
+    from: "codeden",
+    teamCoordination: { type: "worker_finished", itemId: "item-1", attempt: 1 },
+  };
+  expect(UserInput.parse(JSON.parse(JSON.stringify(input)))).toEqual(input);
 });

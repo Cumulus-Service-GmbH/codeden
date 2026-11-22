@@ -1,6 +1,8 @@
+import { StartTeamRun } from "@codeden/contracts";
 import { z } from "zod";
 import { formatChecklist } from "../../../services/checklist/checklist-service";
-import { type AnyServerTool, defineTool } from "../../define";
+import { type AnyServerTool, defineTool, ToolError } from "../../define";
+import { projectFor } from "../shared/helpers";
 import { createAutomation, updateAutomation } from "./automation-edit";
 import { listAutomations, reportTriage, runAutomation } from "./automations";
 import { createIssue, getIssue, listIssues, triageIssue } from "./github";
@@ -27,6 +29,24 @@ const readChecklist = defineTool({
     formatChecklist(services.checklist.get(projectId)),
 });
 
+const startTeamRun = defineTool({
+  name: "start_team_run",
+  description: "Start one Team run from an approved plan SHA or checklist ID.",
+  roles: ["pm"],
+  scope: "project",
+  input: StartTeamRun,
+  isAvailable: (services) => services.teamRuns !== undefined,
+  handler: async (input, { services, projectId }) => {
+    projectFor(services, projectId);
+    if (!services.teamRuns) throw new ToolError("Team run integrations are unavailable");
+    try {
+      return await services.teamRuns.start(projectId, input);
+    } catch (error) {
+      throw new ToolError(error instanceof Error ? error.message : String(error));
+    }
+  },
+});
+
 /**
  * Project manager tools (§8.3, §8.4). `ask_user` is shared with agents (`../ask-user`) and
  * `get_pr_status` with agents (`../github`).
@@ -36,6 +56,7 @@ export const pmTools: AnyServerTool[] = [
   listSessions,
   getSession,
   startSession,
+  startTeamRun,
   messageSession,
   stopSession,
   answerQuestion,

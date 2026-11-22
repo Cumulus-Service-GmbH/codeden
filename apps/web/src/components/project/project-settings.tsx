@@ -31,76 +31,97 @@ export function ProjectSettings({ project }: { project: Project }) {
   );
 
   return (
-    <SettingsSection
-      title="New sessions"
-      description="What sessions you start in this project begin with. You can still pick something else in each new session."
-    >
-      <SettingRow
-        label="Default agent"
-        help={
-          inherits ? (
-            <>Not set: new sessions use {toSettings}.</>
-          ) : (
-            <>Used instead of {toSettings} for this project.</>
-          )
-        }
+    <>
+      <SettingsSection
+        title="New sessions"
+        description="What sessions you start in this project begin with. You can still pick something else in each new session."
       >
-        <div className="rounded-lg border border-border px-1 py-0.5" data-testid="project-agent">
-          <ModelPicker
-            providers={providers}
-            align="end"
-            placeholder="Settings default"
-            value={
-              inherits
-                ? null
-                : {
-                    provider: project.defaultProvider as string,
-                    model: project.defaultModel,
-                    effort: project.defaultEffort,
-                  }
-            }
-            onChange={(next) =>
-              void setSessionDefaults(project, {
-                defaultProvider: next.provider,
-                defaultModel: next.model,
-                defaultEffort: next.effort,
-              })
-            }
-            footer={(close) => (
-              <PickerFooterChoice
-                active={inherits}
-                onClick={() => {
-                  void setSessionDefaults(project, {
-                    defaultProvider: null,
-                    defaultModel: null,
-                    defaultEffort: null,
-                  });
-                  close();
-                }}
-              >
-                Settings default: Agent sessions in Settings
-              </PickerFooterChoice>
-            )}
-          />
-        </div>
-      </SettingRow>
-      <SettingRow
-        label="Permissions"
-        help={`Default: ${AUTONOMY[globalAutonomy].short}, from Settings → Autonomy.`}
-        stacked
-      >
-        <Segmented<AutonomyLevel | typeof SETTINGS_DEFAULT>
-          value={project.autonomy ?? SETTINGS_DEFAULT}
-          onChange={(v) =>
-            void setSessionDefaults(project, { autonomy: v === SETTINGS_DEFAULT ? null : v })
+        <SettingRow
+          label="Default agent"
+          help={
+            inherits ? (
+              <>Not set: new sessions use {toSettings}.</>
+            ) : (
+              <>Used instead of {toSettings} for this project.</>
+            )
           }
-          options={[
-            { value: SETTINGS_DEFAULT, label: "Default" },
-            ...AUTONOMY_LEVELS.map((level) => ({ value: level, label: AUTONOMY[level].short })),
-          ]}
-        />
-      </SettingRow>
-      <ProjectTokenSaverRow project={project} />
-    </SettingsSection>
+        >
+          <div className="rounded-lg border border-border px-1 py-0.5" data-testid="project-agent">
+            <ModelPicker
+              providers={providers}
+              align="end"
+              placeholder="Settings default"
+              value={
+                inherits
+                  ? null
+                  : {
+                      provider: project.defaultProvider as string,
+                      model: project.defaultModel,
+                      effort: project.defaultEffort,
+                    }
+              }
+              onChange={(next) =>
+                void setSessionDefaults(project, {
+                  defaultProvider: next.provider,
+                  defaultModel: next.model,
+                  defaultEffort: next.effort,
+                })
+              }
+              footer={(close) => (
+                <PickerFooterChoice
+                  active={inherits}
+                  onClick={() => {
+                    void setSessionDefaults(project, {
+                      defaultProvider: null,
+                      defaultModel: null,
+                      defaultEffort: null,
+                    });
+                    close();
+                  }}
+                >
+                  Settings default: Agent sessions in Settings
+                </PickerFooterChoice>
+              )}
+            />
+          </div>
+        </SettingRow>
+        <SettingRow
+          label="Permissions"
+          help={`Default: ${AUTONOMY[globalAutonomy].short}, from Settings → Autonomy.`}
+          stacked
+        >
+          <Segmented<AutonomyLevel | typeof SETTINGS_DEFAULT>
+            value={project.autonomy ?? SETTINGS_DEFAULT}
+            onChange={(v) =>
+              void setSessionDefaults(project, { autonomy: v === SETTINGS_DEFAULT ? null : v })
+            }
+            options={[
+              { value: SETTINGS_DEFAULT, label: "Default" },
+              ...AUTONOMY_LEVELS.map((level) => ({ value: level, label: AUTONOMY[level].short })),
+            ]}
+          />
+        </SettingRow>
+        <ProjectTokenSaverRow project={project} />
+      </SettingsSection>
+      {project.teams && (
+        <SettingsSection
+          title="Teams"
+          description="Named Teams available for requests in this project."
+        >
+          {project.teams.teams.map((team) => (
+            <SettingRow
+              key={team.id}
+              label={team.name}
+              help={team.id === project.teams?.defaultTeamId ? "Default Team" : undefined}
+            >
+              <span className="text-xs text-muted-foreground">
+                {team.limits.maxParallel} parallel · {team.limits.maxAssignments} assignments ·{" "}
+                {team.limits.maxRounds} rounds
+              </span>
+            </SettingRow>
+          ))}
+        </SettingsSection>
+      )}
+    </>
   );
 }

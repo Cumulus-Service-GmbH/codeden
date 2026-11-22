@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { Id } from "./common";
+import { TeamCoordinationMessage } from "./team-run";
 
 /** Where the bytes of an attachment come from. */
 export const AttachmentSource = z.discriminatedUnion("type", [
@@ -73,6 +74,8 @@ export const UserInput = z.object({
    * else's starts it again. Absent on every other message.
    */
   checksRound: z.int().positive().optional(),
+  /** App-authored notification that wakes a Team Architect. */
+  teamCoordination: TeamCoordinationMessage.optional(),
 });
 export type UserInput = z.infer<typeof UserInput>;
 /** Input shape accepted before defaults are applied (`attachments` optional). */

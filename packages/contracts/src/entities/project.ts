@@ -17,7 +17,11 @@ export const ProjectRemoteWarning = z.object({
 });
 export type ProjectRemoteWarning = z.infer<typeof ProjectRemoteWarning>;
 
+import { ProjectTeams } from "../team-run";
+
 const projectBase = {
+  /** Named Teams and their default. Older projects inherit their existing Team setup. */
+  teams: ProjectTeams.optional(),
   id: Id,
   name: z.string().min(1),
   /** Short, filesystem-safe name used in worktree paths (`wt/<slug>/...`). */
