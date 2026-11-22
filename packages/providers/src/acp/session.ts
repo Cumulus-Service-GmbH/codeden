@@ -18,6 +18,7 @@ import { exitedOutcome, failedPrompt, stopNotice, stopOutcome } from "./errors";
 import { type AcpExtensionHost, type AcpSessionConfig, extensionHost } from "./extensions";
 import { promptBlocks, withInstructions } from "./items";
 import { AcpEventMapper } from "./mapper";
+import { notify } from "./notify";
 import { type AcpPolicy, policyFor, trustedServers } from "./policy";
 import { startAgent } from "./process";
 import type {
@@ -287,11 +288,7 @@ export class AcpSession implements ProviderSession {
       if (this.closed) throw new ProviderSessionError("closed", "Session is closed");
       this.rpc = rpc;
       this.info = info;
-      try {
-        this.config.onInfo?.(info);
-      } catch {
-        // The adapter's bookkeeping failed; the session still opens.
-      }
+      notify(() => this.config.onInfo?.(info));
       await this.openSession(rpc);
       return rpc;
     } catch (error) {
@@ -323,7 +320,7 @@ export class AcpSession implements ProviderSession {
     if (!opened.resumed) this.instructions = this.opts.systemPrompt?.trim() || undefined;
     this.setup = opened.setup;
     this.mode = currentMode(opened.setup);
-    this.config.onSetup?.(opened.setup, this.info);
+    notify(() => this.config.onSetup?.(opened.setup, this.info));
     await this.applyMode();
     if (this.model) {
       const setup = this.setup;
@@ -426,7 +423,7 @@ export class AcpSession implements ProviderSession {
     this.setup = { ...this.setup, configOptions: options };
     const mode = currentMode({ configOptions: options });
     if (mode && mode !== this.mode) this.onAgentMode(mode);
-    this.config.onSetup?.(this.setup, this.info);
+    notify(() => this.config.onSetup?.(this.setup, this.info));
   }
 
   /** The host for an extension call from the ACP session `acpSessionId` (the root or a child). */

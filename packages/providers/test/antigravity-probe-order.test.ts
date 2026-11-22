@@ -96,25 +96,28 @@ describe("the Antigravity CLI's model list and flags", () => {
     probe.onSetup?.(listing("probe-model"));
     expect(adapter.capabilities().images).toBe(false);
     const cwd = mkdtempSync(join(tmpdir(), "codeden-agy-order-"));
-    const opened = await adapter.openSession({
-      sessionId: "s1",
-      role: "agent",
-      cwd,
-      autonomy: "auto",
-      mcpServers: [],
-      additionalDirectories: [],
-      planMode: false,
-    });
     try {
-      // Through AcpSession's own reports: the fake CLI's handshake has images, its list Neon.
-      expect(adapter.capabilities().images).toBe(true);
-      expect(ids(adapter)).toContain("gemini-4-neon");
-      expect(ids(adapter)).not.toContain("probe-model");
-      probe.finish({ acp: true, info: info(false), setup: listing("probe-model") });
-      await done;
-      expect(adapter.capabilities().images).toBe(true);
+      const opened = await adapter.openSession({
+        sessionId: "s1",
+        role: "agent",
+        cwd,
+        autonomy: "auto",
+        mcpServers: [],
+        additionalDirectories: [],
+        planMode: false,
+      });
+      try {
+        // Through AcpSession's own reports: the fake CLI's handshake has images, its list Neon.
+        expect(adapter.capabilities().images).toBe(true);
+        expect(ids(adapter)).toContain("gemini-4-neon");
+        expect(ids(adapter)).not.toContain("probe-model");
+        probe.finish({ acp: true, info: info(false), setup: listing("probe-model") });
+        await done;
+        expect(adapter.capabilities().images).toBe(true);
+      } finally {
+        await opened.close();
+      }
     } finally {
-      await opened.close();
       rmSync(cwd, { recursive: true, force: true });
     }
   });

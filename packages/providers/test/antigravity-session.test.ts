@@ -176,6 +176,21 @@ describe("Antigravity CLI session over ACP", () => {
     expect(logged("session/new")).toHaveLength(1);
   });
 
+  it("opens when the adapter's async reports reject later, with no unhandled rejection", async () => {
+    const session = new AcpSession(options(), {
+      executable: fakeAgy,
+      spec: ANTIGRAVITY_AGENT,
+      onInfo: async () => {
+        throw new Error("adapter failed later");
+      },
+      onSetup: async () => {
+        throw new Error("adapter failed later");
+      },
+    });
+    sessions.push(session);
+    await expect(session.start()).resolves.toBeUndefined();
+  });
+
   it("refuses to open a given CLI that is too old", async () => {
     const adapter = new AntigravityAdapter({ executable: fakeAgy });
     process.env.FAKE_AGY_VERSION = "1.5.11";

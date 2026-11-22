@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AcpSessionSetup } from "../src/acp/protocol";
 import { AntigravityAdapter } from "../src/antigravity/adapter";
 import {
@@ -34,6 +34,7 @@ afterEach(() => {
     "FAKE_AGY_VERSION",
     "FAKE_AGY_NO_ACP",
     "FAKE_AGY_NEW_HANG",
+    "FAKE_AGY_NEW_DELAY_MS",
     "FAKE_AGY_DROP_MODEL",
   ])
     delete process.env[key];
@@ -232,5 +233,21 @@ describe("probeAntigravity's async reports", () => {
       },
     });
     expect(result.acp).toBe(true);
+  });
+});
+
+describe("a throwaway session that answers after its deadline", () => {
+  it("is dropped: no report and no list in the result", async () => {
+    process.env.FAKE_AGY_NEW_DELAY_MS = "600";
+    const onSetup = vi.fn();
+    const result = await probeAntigravity(fakeAgy, {
+      timeoutMs: 10_000,
+      setupTimeoutMs: 150,
+      onSetup,
+    });
+    expect(result.acp).toBe(true);
+    expect(result.setup).toBeUndefined();
+    // The probe closed the CLI before returning, so the late answer can't arrive after this.
+    expect(onSetup).not.toHaveBeenCalled();
   });
 });

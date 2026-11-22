@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { notify } from "../acp/notify";
 import { startAgent } from "../acp/process";
 import type { AcpInitializeResult, AcpSessionSetup } from "../acp/protocol";
 import { type AcpRpc, AcpRpcError, METHOD_NOT_FOUND } from "../acp/rpc";
@@ -29,16 +30,6 @@ export interface AntigravityProbe {
 export interface AntigravityProbeReports {
   onInfo?: (info: AcpInitializeResult) => void;
   onSetup?: (setup: AcpSessionSetup) => void;
-}
-
-/** Run a caller's report; its own failure never makes the probe's handshake count as failed. */
-function report(fn: () => unknown): void {
-  try {
-    // Called now, so reports keep their arrival order; an async one's rejection is caught too.
-    Promise.resolve(fn()).catch(() => undefined);
-  } catch {
-    // The caller's bookkeeping failed; what the CLI answered is unchanged.
-  }
 }
 
 /** How long the throwaway session may take to list the models; then Default stands in. */
@@ -115,10 +106,10 @@ export async function probeAntigravity(
       },
     );
     try {
-      report(() => opts.onInfo?.(started.info));
+      notify(() => opts.onInfo?.(started.info));
       const timeout = opts.setupTimeoutMs ?? SETUP_TIMEOUT_MS;
       const setup = await listSetup(started.rpc, cwd, timeout, (s) =>
-        report(() => opts.onSetup?.(s)),
+        notify(() => opts.onSetup?.(s)),
       );
       return { acp: true, info: started.info, ...(setup ? { setup } : {}) };
     } finally {
