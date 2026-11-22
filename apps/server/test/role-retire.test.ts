@@ -24,6 +24,19 @@ describe("retiring an archived role conversation", () => {
     );
   });
 
+  it("still stops it when revoking the tokens throws", async () => {
+    const warn = vi.fn();
+    const stop = vi.fn(async () => {});
+    const revokeTokens = () => {
+      throw new Error("token store closed");
+    };
+    await expect(retireRoleSession({ stop, revokeTokens, warn }, "o1")).resolves.toBeUndefined();
+    expect(stop).toHaveBeenCalledTimes(1);
+    expect(warn).toHaveBeenCalledWith(
+      "Revoking the tokens of archived role session o1 failed; stopping it anyway",
+    );
+  });
+
   it("gives up after the second failure without rejecting", async () => {
     const warn = vi.fn();
     const stop = vi.fn(async () => {

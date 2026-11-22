@@ -296,7 +296,10 @@ export class SessionService {
     if (previous) {
       // Archived with the new one's creation: it doesn't run on, even while that one waits.
       void retireRoleSession(
-        { stop: (id) => this.stop(id), revokeTokens: (id) => this.deps.tokens.revokeSession(id) },
+        {
+          stop: (id) => this.stop(id, { confirm: true }),
+          revokeTokens: (id) => this.deps.tokens.revokeSession(id),
+        },
         previous.id,
       );
     }
@@ -587,9 +590,10 @@ export class SessionService {
   /**
    * Stop a session: drop its queued messages, end its provider process, revoke its MCP tokens
    * and dismiss its open questions. A session that already finished (completed, failed) keeps
-   * its status.
+   * its status. `confirm` (retiring an archived role conversation) also fails when the runner
+   * is unreachable, so the caller knows the stop was never confirmed.
    */
-  async stop(id: string): Promise<Session> {
+  async stop(id: string, opts: { confirm?: boolean } = {}): Promise<Session> {
     const session = this.deps.repo.get(id);
     this.deps.outbox.clear(id);
     this.deps.admission?.dequeue(id);
@@ -599,7 +603,7 @@ export class SessionService {
         await this.runnerOf(id).request({ name: "session.stop", sessionId: id }, 15_000);
       } catch (error) {
         const code = runnerErrorCode(error);
-        if (code !== "unknown_session" && code !== "runner_unavailable")
+        if (code !== "unknown_session" && (opts.confirm || code !== "runner_unavailable"))
           throw toServiceError(error);
       }
     }
