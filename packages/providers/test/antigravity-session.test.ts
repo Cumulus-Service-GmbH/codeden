@@ -3,8 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentEvent, SessionOptions } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { AcpSession } from "../src/acp/session";
 import type { ProviderSession } from "../src/adapter";
-import { AntigravityAdapter } from "../src/antigravity/adapter";
+import { ANTIGRAVITY_AGENT, AntigravityAdapter } from "../src/antigravity/adapter";
 
 const fakeAgy = {
   kind: "node-script" as const,
@@ -160,6 +161,19 @@ describe("Antigravity CLI session over ACP", () => {
     const ids = adapter.models().map((m) => m.id);
     expect(ids).toContain("gemini-4-neon");
     expect(ids).not.toContain("claude-opus-5-5");
+  });
+
+  it("opens even when the adapter's handshake report throws", async () => {
+    const session = new AcpSession(options(), {
+      executable: fakeAgy,
+      spec: ANTIGRAVITY_AGENT,
+      onInfo: () => {
+        throw new Error("adapter failed");
+      },
+    });
+    sessions.push(session);
+    await expect(session.start()).resolves.toBeUndefined();
+    expect(logged("session/new")).toHaveLength(1);
   });
 
   it("refuses to open a given CLI that is too old", async () => {

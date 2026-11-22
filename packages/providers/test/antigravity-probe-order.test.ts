@@ -1,3 +1,5 @@
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcpInitializeResult, AcpSessionSetup } from "../src/acp/protocol";
@@ -85,6 +87,36 @@ describe("the Antigravity CLI's model list and flags", () => {
     await done;
     expect(adapter.capabilities().images).toBe(true);
     expect(ids(adapter)).toContain("gemini-4-neon");
+  });
+
+  it("take a real session's handshake and list over a probe that reported before it", async () => {
+    const adapter = new AntigravityAdapter({ executable: fakeAgy });
+    const { done, probe } = await probing(adapter);
+    probe.onInfo?.(info(false));
+    probe.onSetup?.(listing("probe-model"));
+    expect(adapter.capabilities().images).toBe(false);
+    const cwd = mkdtempSync(join(tmpdir(), "codeden-agy-order-"));
+    const opened = await adapter.openSession({
+      sessionId: "s1",
+      role: "agent",
+      cwd,
+      autonomy: "auto",
+      mcpServers: [],
+      additionalDirectories: [],
+      planMode: false,
+    });
+    try {
+      // Through AcpSession's own reports: the fake CLI's handshake has images, its list Neon.
+      expect(adapter.capabilities().images).toBe(true);
+      expect(ids(adapter)).toContain("gemini-4-neon");
+      expect(ids(adapter)).not.toContain("probe-model");
+      probe.finish({ acp: true, info: info(false), setup: listing("probe-model") });
+      await done;
+      expect(adapter.capabilities().images).toBe(true);
+    } finally {
+      await opened.close();
+      rmSync(cwd, { recursive: true, force: true });
+    }
   });
 
   it("run one detection at a time", async () => {

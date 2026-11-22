@@ -287,7 +287,11 @@ export class AcpSession implements ProviderSession {
       if (this.closed) throw new ProviderSessionError("closed", "Session is closed");
       this.rpc = rpc;
       this.info = info;
-      this.config.onInfo?.(info);
+      try {
+        this.config.onInfo?.(info);
+      } catch {
+        // The adapter's bookkeeping failed; the session still opens.
+      }
       await this.openSession(rpc);
       return rpc;
     } catch (error) {

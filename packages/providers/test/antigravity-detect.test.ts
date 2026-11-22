@@ -222,3 +222,15 @@ describe("probeAntigravity's reports", () => {
     expect(result.setup?.configOptions?.length).toBeGreaterThan(0);
   });
 });
+
+describe("probeAntigravity's async reports", () => {
+  it("catch a report that rejects later, so it never becomes an unhandled rejection", async () => {
+    const result = await probeAntigravity(fakeAgy, {
+      timeoutMs: 10_000,
+      onInfo: async () => {
+        throw new Error("caller failed later");
+      },
+    });
+    expect(result.acp).toBe(true);
+  });
+});

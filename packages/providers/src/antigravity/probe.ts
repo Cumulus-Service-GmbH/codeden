@@ -32,9 +32,10 @@ export interface AntigravityProbeReports {
 }
 
 /** Run a caller's report; its own failure never makes the probe's handshake count as failed. */
-function report(fn: () => void): void {
+function report(fn: () => unknown): void {
   try {
-    fn();
+    // Called now, so reports keep their arrival order; an async one's rejection is caught too.
+    Promise.resolve(fn()).catch(() => undefined);
   } catch {
     // The caller's bookkeeping failed; what the CLI answered is unchanged.
   }
@@ -55,6 +56,9 @@ async function listSetup(
   onSetup?: (setup: AcpSessionSetup) => void,
 ): Promise<AcpSessionSetup | undefined> {
   let timer: NodeJS.Timeout | undefined;
+  // Checked against a monotonic clock, so a reply past the deadline never counts even when
+  // the timer itself runs late.
+  const due = performance.now() + timeoutMs;
   let late = false;
   const deadline = new Promise<undefined>((resolve) => {
     timer = setTimeout(() => {
@@ -65,7 +69,7 @@ async function listSetup(
   const opened = rpc
     .request<AcpSessionSetup>("session/new", { cwd, mcpServers: [] })
     .then((setup) => {
-      if (!setup || late) return undefined;
+      if (!setup || late || performance.now() > due) return undefined;
       onSetup?.(setup);
       return setup;
     })
