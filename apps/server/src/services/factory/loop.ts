@@ -67,15 +67,7 @@ export async function runTick(
   let loop = ctx.store.loopOrNew(projectId, now);
   const killed = () =>
     ctx.projects.get(projectId).killSwitch || ctx.settings.get().factory.killSwitch;
-  const controlAtStart = loop.lastControl?.at;
-  const saveTick = (next: FactoryLoop) => {
-    if (!killed()) return save(ctx, next, now);
-    const current = ctx.store.loop(projectId);
-    if (current && current.lastControl?.at !== controlAtStart) {
-      return save(ctx, stoppedLoop(current), now);
-    }
-    return save(ctx, stoppedLoop(next), now);
-  };
+  const saveTick = (next: FactoryLoop) => save(ctx, killed() ? stoppedLoop(next) : next, now);
   if (!isFactoryMode(project.autonomyMode) || project.archivedAt) {
     if (loop.state !== "idle" && loop.state !== "stopped") loop = { ...loop, state: "idle" };
     return save(ctx, { ...loop, drain: null }, now);

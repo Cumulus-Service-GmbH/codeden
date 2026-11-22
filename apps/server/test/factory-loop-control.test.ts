@@ -739,6 +739,32 @@ it("ignores resolved inbox history when deriving agent notices", async () => {
   );
 });
 
+it("keeps the daily rollover when Stop now interrupts a tick", async () => {
+  queueWork();
+  const day = loop().day;
+  env.factory.data.saveLoop({ ...loop(), mergesToday: 2 });
+  vi.setSystemTime(new Date(2026, 10, 23, 0, 5));
+  const sessions = env.factory.ctx.sessions;
+  const startBuilder = sessions.startBuilder.bind(sessions);
+  const start = vi.spyOn(sessions, "startBuilder").mockImplementationOnce(async (...args) => {
+    await env.factory.setKillSwitch(env.project.id, true);
+    return startBuilder(...args);
+  });
+
+  await env.factory.tick(env.project.id);
+
+  expect(start).toHaveBeenCalledOnce();
+  expect(loop()).toMatchObject({
+    day: "2026-11-23",
+    lastDigestDay: day,
+    mergesToday: 0,
+    state: "stopped",
+    lastControl: { action: "stop" },
+  });
+  await env.factory.tick(env.project.id);
+  expect(events().filter((event) => event.type === "factory.digest.created")).toHaveLength(1);
+});
+
 it.each(["project", "global"] as const)(
   "prevents a tick from starting work after the %s Stop now has returned",
   async (scope) => {
