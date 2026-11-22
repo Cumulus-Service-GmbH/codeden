@@ -14,6 +14,7 @@ import {
   pipelineStep,
   type ScoutStatus,
 } from "@codeden/contracts";
+import { askedHead } from "./approval";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
 import { drainStatus } from "./drain";
 import { heldFollowUps } from "./follow-ups-held";
@@ -41,6 +42,10 @@ export function workItem(
   cost: FactoryItemCost | null = null,
 ): FactoryWorkItem {
   const step = pipelineStep(i);
+  const rounds = i.reviewRounds ?? [];
+  const asked = askedHead(i);
+  const inReview = Boolean(i.reviewerSessionId && asked && !rounds.some((r) => r.head === asked));
+  const reviewRound = rounds.length + Number(inReview);
   return {
     id: i.id,
     title: i.title,
@@ -51,7 +56,13 @@ export function workItem(
     sessionId: i.builderSessionId,
     reviewerSessionId: i.reviewerSessionId,
     activeSessionId:
-      step === "review" && i.reviewerSessionId ? i.reviewerSessionId : i.builderSessionId,
+      step === "arbiter"
+        ? (i.arbitration?.sessionId ?? i.reviewerSessionId)
+        : step === "review" && i.reviewerSessionId
+          ? i.reviewerSessionId
+          : i.builderSessionId,
+    ...(reviewRound > 0 ? { reviewRound } : {}),
+    ...(i.arbitration ? { arbitration: i.arbitration } : {}),
     stage: i.stage,
     step,
     type: i.type,

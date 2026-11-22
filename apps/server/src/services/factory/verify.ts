@@ -7,6 +7,7 @@ import {
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import { settleApproval, verdictHead } from "./approval";
+import { advanceArbiter, reviewEscalation } from "./arbiter";
 import { codeFiles, evaluateChecks, hasTestResults, sameChecks } from "./checks";
 import { CI_KICK_NUDGE, kickCi } from "./ci-kick";
 import { type FactoryContext, visionOf } from "./context";
@@ -168,6 +169,17 @@ export async function advanceVerifying(
   }));
 
   if (outcome === "escalate") return escalate(ctx, loop, current, checks);
+  if (
+    pr.headSha &&
+    (current.arbitration || reviewEscalation(current, loop.tuning.reviewPolicy ?? {}))
+  ) {
+    if (!current.arbitration) {
+      const stopped = await beforeAgentTurn(current);
+      if (stopped) return stopped;
+    }
+    await advanceArbiter(ctx, project, loop, current, pr.headSha);
+    return loop;
+  }
   if (outcome === "fail") {
     return handleFailure(ctx, project, loop, current, conflicting ? baseBranchOf(project) : null);
   }

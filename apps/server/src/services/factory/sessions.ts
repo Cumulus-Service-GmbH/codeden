@@ -6,6 +6,7 @@ import {
   StartSessionRequest,
   type StartSessionRequestInit,
   type StartSessionResponse,
+  type TeamMember,
   type UserInput,
 } from "@codeden/contracts";
 import { conflict, errorMessage, ServiceError } from "../errors";
@@ -187,6 +188,10 @@ export class FactorySessions {
     };
   }
 
+  providerInfo(id: string) {
+    return this.deps.runner.providers().find((provider) => provider.id === id);
+  }
+
   /** The models a provider lists (aliases with the full ids they run), from the runner. */
   models(provider: string): ModelInfo[] {
     return this.deps.runner.providers().find((p) => p.id === provider)?.models ?? [];
@@ -300,6 +305,38 @@ export class FactorySessions {
       issue: item.issue ?? undefined,
       input: brief(builderPrompt(item, vision, lessons)),
     });
+  }
+
+  startArbiter(item: FactoryItem, arbiter: TeamMember, head: string, text: string) {
+    return this.start({
+      projectId: item.projectId,
+      ...this.on({
+        provider: arbiter.provider,
+        model: arbiter.model,
+        effort: arbiter.effort ?? undefined,
+      }),
+      autonomy: "read_only",
+      purpose: "Review disputed findings",
+      title: "Arbiter",
+      workKey: `factory:arbiter:${item.id}`,
+      workspace: { mode: "worktree", baseRef: head, fetch: true },
+      input: brief(text),
+    });
+  }
+
+  async runToolFreeArbiter(arbiter: TeamMember, prompt: string) {
+    const result = await this.deps.runner.request(
+      {
+        name: "provider.oneShot",
+        providerId: arbiter.provider,
+        requireToolFree: true,
+        prompt,
+        model: arbiter.model ?? undefined,
+        timeoutMs: 90_000,
+      },
+      95_000,
+    );
+    return result.text;
   }
 
   /**

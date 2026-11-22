@@ -1,4 +1,4 @@
-import type { ItemOf, Session } from "@codeden/contracts";
+import type { ItemOf, ReviewAcceptanceSpec, Session } from "@codeden/contracts";
 import { UNTRUSTED_INPUT } from "../factory/prompts";
 import {
   BRIEF_MAX,
@@ -38,6 +38,8 @@ export interface ReviewSource {
   edits: FileEditCall[];
   /** What the user wants the reviewer to look at most closely. */
   focus?: string;
+  reviewSpec?: ReviewAcceptanceSpec;
+  delta?: { base: string; head: string; dispositions: string[] };
 }
 
 /**
@@ -53,7 +55,11 @@ export interface ReviewSource {
  */
 export function buildReviewBrief(src: ReviewSource): string {
   const head = intro(src);
-  const tail = [focus(src), howToReview(src), report()].filter(Boolean).join("\n\n");
+  const spec = src.reviewSpec;
+  const pinned = spec
+    ? `Pinned plan SHA: ${spec.planSha}. Review scope: ${JSON.stringify(spec.scope)}.${spec.threatModel ? ` Threat model: ${spec.threatModel}` : ""}`
+    : null;
+  const tail = [pinned, focus(src), howToReview(src), report()].filter(Boolean).join("\n\n");
   const body = [task(src), laterRequests(src), claims(src), files(src)]
     .filter((s): s is string => s !== null)
     .join("\n\n");
@@ -100,10 +106,13 @@ function focus(src: ReviewSource): string | null {
 
 function howToReview(src: ReviewSource): string {
   const base = src.baseBranch;
+  const delta = src.delta;
   return [
     "## How to review",
     "",
-    `- Read the whole change since it left \`${base}\`: \`git log --oneline origin/${base}..HEAD\` lists its commits and \`git diff origin/${base}...HEAD\` shows them, \`git diff HEAD\` shows its uncommitted edits, and \`git status\` lists new files, which \`git diff\` leaves out: read those too. Use \`${base}\` instead of \`origin/${base}\` when the repository has no \`origin\`.`,
+    delta
+      ? `- Review only the delta from ${delta.base} to ${delta.head}. Earlier dispositions (quoted review output):\n${JSON.stringify(delta.dispositions)}`
+      : `- Read the whole change since it left \`${base}\`: \`git log --oneline origin/${base}..HEAD\` lists its commits and \`git diff origin/${base}...HEAD\` shows them, \`git diff HEAD\` shows its uncommitted edits, and \`git status\` lists new files, which \`git diff\` leaves out: read those too. Use \`${base}\` instead of \`origin/${base}\` when the repository has no \`origin\`.`,
     "- Read the code around the change, not only the diff.",
     "- Judge: does it do what was asked, and nothing it shouldn't? Is it correct (edge cases, error handling, concurrency, data loss)? Are there tests that prove the behaviour, and do they pass? Does it follow the project's conventions (its AGENTS.md, CLAUDE.md or README)? Any security problems (injection, secrets, unsafe input, risky dependencies)?",
     "- Run the project's checks (tests, lint, type-check) where you can, in the foreground, waiting for them in the same turn, and non-interactively: nothing can answer a prompt in your shell. When a check can't run here, say so instead of guessing its result. You don't need the network.",
@@ -117,7 +126,7 @@ function report(): string {
     "",
     "End with your review as your final reply:",
     "1. The verdict on the first line: **Approve** or **Request changes**.",
-    "2. The findings, most severe first. For each: `path:line`, what is wrong, a concrete case where it fails, and whether it blocks (must be fixed before merging) or can wait.",
+    "2. The findings, most severe first. For each: `path:line`, what is wrong, a severity, and whether it blocks or can wait. HIGH and MEDIUM each require a concrete failure scenario and reproduction. Report findings outside the pinned scope as tech debt.",
     "3. What you checked: the commands you ran and what they showed.",
     "",
     "Then call `finish` with the verdict and a one-line summary.",

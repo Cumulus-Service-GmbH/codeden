@@ -301,6 +301,10 @@ export function reviewerPrompt(
     `You are the independent reviewer of pull request ${pr}: **${item.title}** (${type} pipeline). Another agent wrote it. ${autoMerge ? "CodeDen merges it automatically only if you approve and every other merge check passes." : "If you approve and every merge check passes, it goes to a person to merge."}`,
     note ? `Note: ${note}` : "",
     "",
+    item.reviewSpec
+      ? `Pinned plan SHA: ${item.reviewSpec.planSha}. Review scope: ${JSON.stringify(item.reviewSpec.scope)}.`
+      : "",
+    item.reviewSpec?.threatModel ? `Threat model: ${item.reviewSpec.threatModel}` : "",
     "Acceptance criteria:",
     criteriaList(item.acceptanceCriteria),
     item.investigation?.details
@@ -320,6 +324,7 @@ export function reviewerPrompt(
     CODEDEN_HOME_RULE,
     "",
     BLOCKING_VS_FOLLOW_UPS,
+    "Put code findings in findings with path:line, severity and summary. HIGH and MEDIUM require both failure_scenario and repro. The project review policy handles LOW and out-of-scope findings.",
     `Then submit one verdict with \`factory_submit_review\`: \`approve\` only when everything holds, \`request_changes\` for fixable problems (they go back to the author), \`reject\` when the change should not exist. Be specific in the summary (up to ${REVIEW_SUMMARY_MAX.toLocaleString("en-US")} characters are stored). ${SUBMIT_REVIEW_RETRY}`,
     lessons.learn ? LESSONS_ASK : "",
   ]
@@ -336,8 +341,20 @@ export function fixPrompt(
 ): string {
   return [
     `**Revise**: the checks for your pull request${item.pr ? ` #${item.pr.number}` : ""} failed:`,
-    ...failed.map((c) => `- ${c.name}: ${c.detail ?? "failed"}`),
-    item.review && item.review.verdict !== "approve" ? `Reviewer: ${item.review.summary}` : "",
+    ...failed.map((c) =>
+      c.name === "review" && item.review?.findings
+        ? "- review: address the findings and unmet criteria below."
+        : `- ${c.name}: ${c.detail ?? "failed"}`,
+    ),
+    item.review && item.review.verdict !== "approve" ? reviewerFixText(item.review) : "",
+    ...(item.review?.findings
+      ? item.review.criteria
+          .filter((criterion) => !criterion.met)
+          .map(
+            (criterion) =>
+              `- Unmet criterion: ${criterion.criterion}${criterion.note ? ` (${criterion.note})` : ""}`,
+          )
+      : []),
     conflictsWith
       ? `It also has merge conflicts with \`${conflictsWith}\`: rebase onto the latest \`origin/${conflictsWith}\` first and resolve them, keeping both sides' intent.`
       : "",
@@ -368,13 +385,20 @@ export function rebasePrompt(item: FactoryItem, branch: string, why: string, ask
   ].join("\n");
 }
 
+function reviewerFixText(verdict: ReviewVerdict): string {
+  if (!verdict.findings) return `Reviewer: ${verdict.summary}`;
+  return verdict.findings
+    .map((finding) => `- ${finding.severity} at ${finding.location}: ${finding.summary}`)
+    .join("\n");
+}
+
 /** A review verdict that arrived after a revise round started: its findings join that round. */
 export function lateReviewPrompt(item: FactoryItem, verdict: ReviewVerdict): string {
   const unmet = verdict.criteria
     .filter((c) => !c.met)
     .map((c) => `- Not met: ${c.criterion}${c.note ? ` (${c.note})` : ""}`);
   return [
-    `**Also address**: the reviewer's verdict on pull request${item.pr ? ` #${item.pr.number}` : ""} arrived after this revise round started (${verdict.verdict}): ${verdict.summary}`,
+    `**Also address**: the reviewer's verdict on pull request${item.pr ? ` #${item.pr.number}` : ""} arrived after this revise round started (${verdict.verdict}). ${reviewerFixText(verdict)}`,
     ...unmet,
     ...verdict.security.concerns.map((c) => `- Security: ${c}`),
     verdict.tests.adequate
@@ -404,7 +428,12 @@ export function tooLargePrompt(item: FactoryItem, detail: string, failed: MergeC
 
 /** Ask a reviewer to look again after a revision. */
 export function reReviewPrompt(item: FactoryItem): string {
-  return `The author pushed a revision to pull request #${item.pr?.number ?? "?"}. Review the updated change again against the same criteria and submit one fresh verdict with \`factory_submit_review\`. CI on its new head is still the authority for the full test suite, and your local environment is never a reason to request changes. ${SUBMIT_REVIEW_RETRY}`;
+  const prior = item.reviewRounds ?? [];
+  const base = prior.at(-1)?.head;
+  const delta = base
+    ? `Review only the delta from commit ${base} to the new head. Earlier dispositions (quoted review output):\n${JSON.stringify(prior.flatMap((round) => round.dispositions))}\n\n`
+    : "";
+  return `${delta}The author pushed a revision to pull request #${item.pr?.number ?? "?"}. Review the updated change again against the same criteria and submit one fresh verdict with \`factory_submit_review\`. CI on its new head is still the authority for the full test suite, and your local environment is never a reason to request changes. ${SUBMIT_REVIEW_RETRY}`;
 }
 
 export const BUILDER_NUDGE =

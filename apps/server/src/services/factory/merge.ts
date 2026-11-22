@@ -25,6 +25,7 @@ export function prInboxIds(itemId: string): string[] {
     escalatedInboxId(itemId),
     stuckInboxId(itemId),
     stuckDecisionId(itemId),
+    `inbox:factory-owner-decision:${itemId}`,
   ];
 }
 

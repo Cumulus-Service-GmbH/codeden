@@ -105,6 +105,9 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
 
     case "provider.oneShot": {
       const adapter = registry.get(command.providerId);
+      if (command.requireToolFree && adapter?.capabilities().toolFreeRuns !== true) {
+        throw new CommandError("unsupported", "The provider lacks a tool-free lane");
+      }
       const utility = adapter?.utilityModel?.();
       if (!utility) {
         throw new CommandError(

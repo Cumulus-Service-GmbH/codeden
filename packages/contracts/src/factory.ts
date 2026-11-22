@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { LowFindingPolicy } from "./review-policy";
 
 /**
  * Project autonomy modes, the software factory and the dark factory (§10.1). The factory loop
@@ -68,7 +69,7 @@ export type MergePath = z.infer<typeof MergePath>;
  */
 export const FactoryLimits = z.object({
   /** Whether LOW findings are sent back for a fix or deferred to follow-up work. */
-  lowFindings: z.enum(["fix", "defer"]).default("defer"),
+  lowFindings: LowFindingPolicy.default("defer"),
   /** Agents working at once (the swarm): builders, reviewers, the scout and area reviewers. */
   maxConcurrentSessions: z.int().positive().default(2),
   /** Automatic merges per day (only while `autoMerge` is on). */

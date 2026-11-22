@@ -96,6 +96,18 @@ function Verdict({ review, item }: { review: ReviewVerdict; item: FactoryItem })
           ))}
         </ul>
       )}
+      {Boolean(review.techDebt?.length) && (
+        <div className="mt-3 text-[13px]">
+          <p className="font-medium">Tech debt</p>
+          <ul className="list-disc pl-4">
+            {review.techDebt?.map((finding) => (
+              <li key={`${finding.location}:${finding.summary}`}>
+                {finding.location} · {finding.severity} · {finding.summary}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {review.lessons.length > 0 && (
         <div className="mt-3 text-2xs" data-testid="review-lessons">
           <p className="flex items-center gap-1.5 font-medium text-muted-foreground">

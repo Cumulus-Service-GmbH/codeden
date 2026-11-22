@@ -191,6 +191,8 @@ export function stepLabel(step: PipelineStep, type: WorkType | null): string {
           : "Implement feature";
     case "review":
       return type === "bug" ? "Review fix" : type === "docs" ? "Checks" : "Review feature";
+    case "arbiter":
+      return "Arbiter";
     case "merge":
       return "Merge";
     case "ignored":
@@ -241,6 +243,8 @@ export function stepHelp(step: PipelineStep, type: WorkType | null, autoMerge: b
       return type === "docs"
         ? "The merge checks run on the pull request; a change that touches only documentation skips the agent review. With every check green it moves on to Merge."
         : "A separate reviewer agent checks the pull request while the merge checks run. Approved with every check green, it moves on to Merge; otherwise it goes back to the builder to revise.";
+    case "arbiter":
+      return "The Arbiter rules on remaining findings. The reviewer responds before the existing Jev gate and owner decision.";
     case "merge":
       return autoMerge
         ? "With every check green, CodeDen merges the pull request itself and watches CI on main; a regression opens a revert and pauses the factory. Work let in from an untrusted author always waits for you."

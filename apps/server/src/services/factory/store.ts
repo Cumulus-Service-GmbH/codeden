@@ -549,7 +549,12 @@ export function withItemDefaults(item: FactoryItem): FactoryItem {
 function trackedSessions(next: FactoryItem, before?: FactoryItem): string[] {
   const ids = new Set([...(before?.sessionIds ?? []), ...(next.sessionIds ?? [])]);
   for (const i of before ? [before, next] : [next]) {
-    for (const id of [i.builderSessionId, i.reviewerSessionId, ...(i.earlierSessionIds ?? [])]) {
+    for (const id of [
+      i.builderSessionId,
+      i.reviewerSessionId,
+      i.arbitration?.sessionId,
+      ...(i.earlierSessionIds ?? []),
+    ]) {
       if (id) ids.add(id);
     }
   }

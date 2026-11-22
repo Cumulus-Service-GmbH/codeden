@@ -101,7 +101,10 @@ export function mergeQueue(ctx: FactoryContext, project: Project): FactoryItem[]
   if (!isFactoryMode(project.autonomyMode)) return [];
   return ctx.store
     .items(project.id, ["verifying"])
-    .filter((i) => i.pr && i.nudges[MERGE_QUEUED] && mayAutoMerge(i, project.factoryLimits))
+    .filter(
+      (i) =>
+        !i.arbitration && i.pr && i.nudges[MERGE_QUEUED] && mayAutoMerge(i, project.factoryLimits),
+    )
     .sort(compare);
 }
 

@@ -330,6 +330,8 @@ export function PipelineDiagram({ f }: { f: FactoryStatus }) {
               {node("bug", "review", "workspace")}
               <Revise count={revising("bug")} />
             </div>
+            <Arrow dashed />
+            {node("bug", "arbiter", "agent")}
           </Lane>
           <Lane type="feature">
             {node("feature", "analyze", "agent")}
@@ -340,11 +342,15 @@ export function PipelineDiagram({ f }: { f: FactoryStatus }) {
               {node("feature", "review", "workspace")}
               <Revise count={revising("feature")} />
             </div>
+            <Arrow dashed />
+            {node("feature", "arbiter", "agent")}
           </Lane>
           <Lane type="docs">
             {node("docs", "implement", "workspace", "flex-[2]")}
             <Arrow dashed />
             {node("docs", "review", "checks", "flex-1")}
+            <Arrow dashed />
+            {node("docs", "arbiter", "agent")}
           </Lane>
         </div>
         <Fan side="in" />

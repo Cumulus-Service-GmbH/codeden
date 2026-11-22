@@ -1,5 +1,7 @@
 import type { FactoryItem, FactoryLoop, Project, Session } from "@codeden/contracts";
+import { MAX_REVIEW_LINES, pinReviewSpec, reviewRound } from "../review-controls";
 import { withAskedHead } from "./approval";
+import { reviewBudgetReached } from "./arbiter";
 import { type ProviderCause, unavailableText } from "./availability";
 import { letGoReviewer } from "./cleanup";
 import type { FactoryContext } from "./context";
@@ -170,6 +172,36 @@ export async function ensureReviewer(
   vision: string,
   pr: FactoryPr,
 ): Promise<FactoryItem> {
+  if (pr.additions + pr.deletions > MAX_REVIEW_LINES && (!item.review || recheckOf(item))) {
+    return ctx.store.updateItem(
+      item.id,
+      (i) => ({ ...i, note: `Review blocked: the diff exceeds ${MAX_REVIEW_LINES} changed lines` }),
+      { touch: false },
+    );
+  }
+  if ((!item.review || recheckOf(item)) && pr.headSha) {
+    const round = reviewRound(loop.tuning.reviewPolicy ?? {}, item.reviewRounds ?? [], {
+      head: pr.headSha,
+      lines: pr.additions + pr.deletions,
+    });
+    const reason =
+      round.blocked === "round_limit"
+        ? `Review round ${round.number}/${round.limit} blocked by the round limit`
+        : round.blocked === "unchanged_head" && item.nudges.rereview_pending
+          ? "Waiting for a new commit to review"
+          : reviewBudgetReached(ctx, loop)
+            ? "Waiting: daily review spend limit reached"
+            : null;
+    if (reason)
+      return ctx.store.updateItem(item.id, (i) => ({ ...i, note: reason }), { touch: false });
+  }
+  if (item.area === "security" && !item.reviewSpec?.threatModel && !item.review) {
+    return ctx.store.updateItem(
+      item.id,
+      (i) => ({ ...i, note: "Waiting for the PM to pin a security review spec and threat model" }),
+      { touch: false },
+    );
+  }
   const old = recheckOf(item);
   if (item.reviewerSessionId && (!item.review || old)) {
     const reviewer = ctx.repo.find(item.reviewerSessionId)?.session;
@@ -207,6 +239,16 @@ export async function ensureReviewer(
       ...i,
       note: "Waiting for a free agent for the review",
     }));
+  }
+  const source = item.builderSessionId ? ctx.repo.find(item.builderSessionId)?.session : undefined;
+  const scope = source?.scope?.paths?.length ? source.scope.paths : pr.files;
+  if (!item.reviewSpec && scope.length > 0) {
+    const reviewSpec = pinReviewSpec(
+      item.investigation?.details ?? item.summary,
+      item.acceptanceCriteria,
+      scope,
+    );
+    item = ctx.store.updateItem(item.id, (i) => ({ ...i, reviewSpec }));
   }
   const res = await startReviewer(ctx, project, loop, item, vision, pr);
   if ("waiting" in res) return ctx.store.updateItem(item.id, (i) => ({ ...i, note: res.waiting }));
@@ -311,6 +353,7 @@ export async function reviewerStalled(
   loop: FactoryLoop,
   item: FactoryItem,
 ): Promise<FactoryLoop> {
+  if (reviewBudgetReached(ctx, loop)) return loop;
   const rechecking = Boolean(item.review && recheckOf(item) && recheckSentFor(item) !== null);
   if ((item.review && !rechecking) || !item.reviewerSessionId || item.nudges.rereview_pending)
     return loop;

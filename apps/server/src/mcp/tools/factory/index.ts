@@ -5,8 +5,11 @@ import {
   FactoryRetryRequest,
   FactorySetTypeRequest,
   FactoryStatusRequest,
+  LowFindingPolicy,
+  ReviewAcceptanceSpec,
 } from "@codeden/contracts";
-import { type AnyServerTool, defineTool } from "../../define";
+import { z } from "zod";
+import { type AnyServerTool, defineTool, ToolError } from "../../define";
 import { assertMayAdmit, assertMayRetry } from "../pm/issue-trust";
 import { factoryReportReproduction, factorySubmitAnalysis, factorySubmitReview } from "./builder";
 import {
@@ -186,6 +189,46 @@ export const factoryRecordDecision = defineTool({
     asTool(() => services.factory.recordDecision(services.sessionRepo.get(sessionId), input)),
 });
 
+export const factorySetLowFindings = defineTool({
+  name: "factory_set_low_findings",
+  description: "Set this project's LOW findings policy to fix or defer.",
+  roles: ["pm"],
+  scope: "project",
+  input: z.object({ lowFindings: LowFindingPolicy }),
+  isAvailable: inFactoryProject,
+  handler: async ({ lowFindings }, { services, projectId }) => {
+    const project = services.projects.update(projectId, { lowFindings });
+    return { lowFindings: project.factoryLimits.lowFindings };
+  },
+});
+
+export const factoryPinReviewSpec = defineTool({
+  name: "factory_pin_review_spec",
+  description:
+    "Pin the approved plan SHA and repository path scope before the item's first review. Include the threat model for security work.",
+  roles: ["pm"],
+  scope: "project",
+  input: z.object({ itemId: z.string().min(1), spec: ReviewAcceptanceSpec }),
+  isAvailable: inFactoryProject,
+  handler: async ({ itemId, spec }, { services, projectId }) =>
+    asTool(async () => {
+      const item = services.factory.item(projectId, itemId);
+      if (item.reviewSpec || item.reviewerSessionId || item.reviewRounds?.length) {
+        throw new ToolError("The review spec is already pinned or review has already started.");
+      }
+      if (item.area === "security" && !spec.threatModel) {
+        throw new ToolError("A security review requires a threat model.");
+      }
+      return {
+        itemId,
+        spec: services.factory.data.updateItem(itemId, (current) => ({
+          ...current,
+          reviewSpec: spec,
+        })).reviewSpec,
+      };
+    }),
+});
+
 export const factoryTools: AnyServerTool[] = [
   factoryReportReproduction,
   factorySubmitAnalysis,
@@ -199,6 +242,8 @@ export const factoryTools: AnyServerTool[] = [
   factoryStop,
   factoryAdmitIssue,
   factorySetType,
+  factorySetLowFindings,
+  factoryPinReviewSpec,
   factoryAllowLargeChange,
   factoryRetryItem,
   factoryHoldIssue,

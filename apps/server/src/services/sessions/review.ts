@@ -8,6 +8,7 @@ import type {
 } from "@codeden/contracts";
 import { badRequest, conflict, type ServiceError } from "../errors";
 import type { ProjectService } from "../projects/project-service";
+import { pinReviewSpec, reviewRound, reviewVendorsMatch } from "../review-controls";
 import { type RunnerPort, toServiceError } from "../runner-port";
 import { freezeChecks } from "./checks";
 import type { ForkStart } from "./fork";
@@ -108,6 +109,10 @@ export async function planReview(
   if (blocker) throw blocker;
   const project = reviewProject(deps.projects, source);
   const target = reviewerProvider(runner, req.provider);
+  const author = runner.providers().find((provider) => provider.id === source.provider);
+  if (author && reviewVendorsMatch(author, target)) {
+    throw badRequest("The reviewer must use a different model vendor", "same_review_vendor");
+  }
   const { checkpoints } = await runner
     .request(
       { name: "checkpoint.list", cwd: project.path, sessionId: source.id, settled: true },
@@ -116,7 +121,44 @@ export async function planReview(
     .catch((error: unknown) => {
       throw toServiceError(error);
     });
-  const checkpoint = checkpoints.at(-1)?.index ?? null;
+  const latest = checkpoints.at(-1);
+  const checkpoint = latest?.index ?? null;
+  const baseBranch = source.baseBranch ?? project.defaultBranch ?? "main";
+  const head = latest?.commit ?? source.branch ?? "HEAD";
+  const previous = previousReviews(repo, source);
+  const history = previous.map(({ session, review }) => ({
+    head: review.head,
+    dispositions: [lastReply(repo, session)?.slice(0, 4_000) ?? "No review text recorded."],
+  }));
+  const round = reviewRound({}, history, { head, lines: 0 });
+  if (round.blocked === "round_limit") {
+    throw conflict(`Review limit reached after ${round.limit} rounds`, "review_round_limit");
+  }
+  if (round.blocked === "unchanged_head") {
+    throw conflict("The source has no new commit to review", "review_unchanged_head");
+  }
+  const diff = await runner
+    .request(
+      {
+        name: "git.diff",
+        cwd: source.worktreePath ?? project.path,
+        fromRef: round.base ?? baseBranch,
+        toRef: head,
+      },
+      SETTLE_TIMEOUT_MS,
+    )
+    .catch((error: unknown) => {
+      throw toServiceError(error);
+    });
+  const lines =
+    diff.files?.reduce((total, file) => total + file.additions + file.deletions, 0) ??
+    diff.diff.split("\n").length;
+  if (
+    reviewRound({}, history, { head, lines }).blocked ||
+    Buffer.byteLength(diff.diff) > 1_000_000
+  ) {
+    throw badRequest("The diff is too large for one review", "review_diff_size");
+  }
 
   const now = repo.get(source.id);
   const late = reviewBlocker(now, repo.turnCount(source.id));
@@ -127,20 +169,57 @@ export async function planReview(
       "source_changed",
     );
   }
-  const baseBranch = now.baseBranch ?? project.defaultBranch ?? "main";
+  if (previousReviews(repo, source).length !== previous.length) {
+    throw conflict(
+      "Another review started while this review was being prepared",
+      "review_in_progress",
+    );
+  }
+  const requests = repo
+    .rootItems(now, ["user_message"])
+    .flatMap((item) => (item.kind === "user_message" ? [item] : []));
+  const scope = now.scope?.paths?.length ? now.scope.paths : (diff.files ?? []).map((f) => f.path);
+  const pinned = previous.at(-1)?.review.spec;
+  const reviewSpec =
+    pinned ??
+    req.acceptanceSpec ??
+    (scope.length
+      ? pinReviewSpec(
+          now.purpose,
+          requests.map((request) => request.input.text),
+          scope,
+        )
+      : undefined);
   const brief = buildReviewBrief({
     session: now,
     providerName: providerName(runner, now.provider),
     baseBranch,
     restored: checkpoint !== null,
-    requests: repo
-      .rootItems(now, ["user_message"])
-      .flatMap((i) => (i.kind === "user_message" ? [i] : [])),
+    requests,
+    reviewSpec,
+    delta: round.base ? { base: round.base, head, dispositions: round.dispositions } : undefined,
     lastReply: lastReply(repo, now),
     edits: repo.fileEdits(now.id),
     focus: req.focus,
   });
-  return reviewPlan(now, project, target, checkpoint, brief, req);
+  const plan = reviewPlan(now, project, target, checkpoint, brief, req);
+  plan.meta.review = { head, round: round.number, limit: round.limit, spec: reviewSpec };
+  return plan;
+}
+
+function previousReviews(repo: SessionRepo, source: Session) {
+  return repo
+    .list({ workKey: `review:${source.id}` })
+    .filter((session) => session.forkedFrom?.kind === "review" && session.status !== "failed")
+    .flatMap((session) => {
+      const review = repo.find(session.id)?.startMeta?.review;
+      if (!review) return [];
+      if (BUSY.has(session.status) || NOT_STARTED.has(session.status)) {
+        throw conflict("A review is still running", "review_in_progress");
+      }
+      return [{ session, review }];
+    })
+    .sort((a, b) => a.review.round - b.review.round);
 }
 
 /**

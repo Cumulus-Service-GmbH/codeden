@@ -78,6 +78,7 @@ export function sessionsToArchive(ctx: FactoryContext, item: FactoryItem): Sessi
     ...inWorktree,
     ...replacedFailures(ctx, item),
     find(item.reviewerSessionId),
+    find(item.arbitration?.sessionId ?? null),
     builder,
   ].filter((s): s is Session => {
     if (!s || seen.has(s.id)) return false;
