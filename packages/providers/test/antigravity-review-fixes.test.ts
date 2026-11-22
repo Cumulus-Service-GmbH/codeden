@@ -129,6 +129,48 @@ describe("the Antigravity CLI after the provider review", () => {
     expect(sets().at(-1)).toBe("thought_level=medium");
   });
 
+  it("sends nothing when the session picks the model the CLI already runs", async () => {
+    const adapter = new AntigravityAdapter({ executable: fakeAgy });
+    const session = await adapter.openSession(options());
+    sessions.push(session);
+    // gemini-4-neon is the CLI's own model at session/new.
+    await session.configure?.({ model: "gemini-4-neon" });
+    await turn(session);
+    expect(sets().filter((s) => s.startsWith("model="))).toEqual([]);
+  });
+
+  it("sends no level for a model that runs at one fixed level", async () => {
+    const adapter = new AntigravityAdapter({ executable: fakeAgy });
+    const session = await adapter.openSession(
+      options({ model: "gpt-oss-120b-medium", effort: "xhigh" }),
+    );
+    sessions.push(session);
+    expect(sets()).toEqual(["model=gpt-oss-120b-medium"]);
+  });
+
+  it("says so, instead of claiming Default, when the CLI never named its own model", async () => {
+    const session = new AcpSession(options(), { executable: fakeAgy, spec: ANTIGRAVITY_AGENT });
+    const inner = session as unknown as {
+      setup: AcpSessionSetup;
+      acpSession: string;
+      model: string | undefined;
+      openedModel: string | undefined;
+      nextModel: string | null | undefined;
+      events: { push: (e: unknown) => void };
+      applyModelChange: (rpc: unknown) => Promise<void>;
+    };
+    const pushed: unknown[] = [];
+    inner.events = { push: (e) => pushed.push(e) };
+    inner.setup = {};
+    inner.acpSession = "x";
+    inner.model = "gemini-4-argon";
+    inner.openedModel = undefined;
+    inner.nextModel = null;
+    await inner.applyModelChange({});
+    expect(inner.model).toBe("gemini-4-argon");
+    expect(pushed).toContainEqual({ type: "session.updated", model: "gemini-4-argon" });
+  });
+
   it("goes back to the CLI's own model when the session is switched to Default", async () => {
     const adapter = new AntigravityAdapter({ executable: fakeAgy });
     const session = await adapter.openSession(options({ model: "gemini-4-argon" }));
@@ -139,7 +181,7 @@ describe("the Antigravity CLI after the provider review", () => {
     expect(sets().at(-1)).toBe("model=gemini-4-neon");
   });
 
-  it("keeps each model's efforts when a config_option_update replaces the list", async () => {
+  it("keeps its list and efforts through a config_option_update (snapshots only)", async () => {
     const adapter = new AntigravityAdapter({ executable: fakeAgy });
     const session = await adapter.openSession(
       options({ env: { FAKE_AGY_PUSH_DROP_MODEL: "claude-opus-5-5" } }),
@@ -148,7 +190,7 @@ describe("the Antigravity CLI after the provider review", () => {
     const before = adapter.models().find((m) => m.id === "gemini-4-neon")?.efforts;
     expect(before?.length).toBeGreaterThan(0);
     await turn(session);
-    expect(adapter.models().map((m) => m.id)).not.toContain("claude-opus-5-5");
+    expect(adapter.models().map((m) => m.id)).toContain("claude-opus-5-5");
     expect(adapter.models().find((m) => m.id === "gemini-4-neon")?.efforts).toEqual(before);
   });
 

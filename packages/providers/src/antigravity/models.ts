@@ -40,9 +40,16 @@ export function modelThoughtLevel(
 ): string | undefined {
   const model = findOption(setup.configOptions, "model")?.currentValue;
   const variants = (setup.models?.availableModels ?? []).map((m) => m?.modelId);
-  const own =
-    typeof model === "string" ? listed.filter((l) => variants.includes(`${model}-${l}`)) : [];
-  return thoughtLevel(effort, own.length ? own : listed);
+  if (typeof model !== "string") return thoughtLevel(effort, listed);
+  const own = listed.filter((l) => variants.includes(`${model}-${l}`));
+  if (own.length) return thoughtLevel(effort, own);
+  // A model listed on its own, at no level (`gpt-oss-120b-medium`), runs at its one fixed level:
+  // nothing is sent, so the session keeps the level it has.
+  if (variants.includes(model)) {
+    const current = findOption(setup.configOptions, "thought_level")?.currentValue;
+    return typeof current === "string" ? current : undefined;
+  }
+  return thoughtLevel(effort, listed);
 }
 
 export function thoughtLevel(

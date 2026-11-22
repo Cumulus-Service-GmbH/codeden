@@ -78,7 +78,7 @@ describe("what an ACP session reports to its adapter after a config_option_updat
     expect(adapter.models().map((m) => m.id)).toContain("gpt-6");
   });
 
-  it("Antigravity: the update replaces the models, and plan mode stays as session/new said", async () => {
+  it("Antigravity: the picker ignores the update and keeps session/new's snapshot", async () => {
     const dir = mkdtempSync(join(tmpdir(), "codeden-agy-reports-"));
     const adapter = new AntigravityAdapter({ executable: fakeAgy });
     const session = await adapter.openSession({
@@ -96,7 +96,7 @@ describe("what an ACP session reports to its adapter after a config_option_updat
       expect(adapter.models().map((m) => m.id)).toContain("claude-opus-5-5");
       expect(adapter.capabilities().planMode).toBe(true);
       await oneTurn(session);
-      expect(adapter.models().map((m) => m.id)).not.toContain("claude-opus-5-5");
+      expect(adapter.models().map((m) => m.id)).toContain("claude-opus-5-5");
       expect(adapter.capabilities().planMode).toBe(true);
     } finally {
       await session.close();

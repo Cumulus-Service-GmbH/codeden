@@ -191,7 +191,10 @@ export class AntigravityAdapter implements ProviderAdapter {
       executable: command,
       spec: ANTIGRAVITY_AGENT,
       onInfo: (info) => this.onInfo(info),
-      onSetup: (setup) => this.applySetup(setup),
+      // The picker takes complete session/new snapshots only: an update is ignored here.
+      onSetup: (setup, _info, source) => {
+        if (source === "session") this.applySetup(setup);
+      },
       ...(this.options.startTimeoutMs ? { startTimeoutMs: this.options.startTimeoutMs } : {}),
       ...(this.options.interruptTimeoutMs
         ? { interruptTimeoutMs: this.options.interruptTimeoutMs }
@@ -226,8 +229,8 @@ export class AntigravityAdapter implements ProviderAdapter {
       }
       const listed = antigravityModelInfos(setup);
       if (!listed) return;
-      // Each model's efforts come from `models.availableModels`. A `config_option_update`
-      // carries only the options, so a model it names keeps the efforts already known for it.
+      // Each model's efforts come from `models.availableModels`. A snapshot without that list
+      // keeps the efforts already known for each model it names.
       const known = new Map(this.catalog.list().map((m) => [m.id, m]));
       const models = setup.models
         ? listed

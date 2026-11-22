@@ -128,5 +128,7 @@ export async function detectAntigravity(
     });
     return { ...found, supported, loggedIn: false, issues };
   }
+  // Its throwaway session opened: the CLI is signed in.
+  if (probe.setup) return { ...found, supported, loggedIn: true, issues };
   return { ...found, supported, issues };
 }

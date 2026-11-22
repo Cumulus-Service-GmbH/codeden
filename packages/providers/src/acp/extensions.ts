@@ -146,8 +146,16 @@ export interface AcpAgentSpec {
 export interface AcpSessionConfig {
   executable: ResolvedCommand;
   spec: AcpAgentSpec;
-  /** The agent reported its session setup (models, modes): for the adapter's model list. */
-  onSetup?: (setup: AcpSessionSetup, info: AcpInitializeResult) => void;
+  /**
+   * The agent reported its session setup (models, modes): for the adapter's model list.
+   * `source`: `session` for `session/new`'s whole snapshot, `update` for the options a
+   * `config_option_update` sent.
+   */
+  onSetup?: (
+    setup: AcpSessionSetup,
+    info: AcpInitializeResult,
+    source: "session" | "update",
+  ) => void;
   /** The agent answered `initialize` (its capabilities), reported the moment it arrives. */
   onInfo?: (info: AcpInitializeResult) => void;
   startTimeoutMs?: number;

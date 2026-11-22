@@ -111,13 +111,13 @@ describe("Antigravity CLI versions, models and thinking levels", () => {
 describe("detectAntigravity", () => {
   const probe = (exe: ResolvedCommand) => probeAntigravity(exe, { timeoutMs: 10_000 });
 
-  it("reports the version and ACP support of a working CLI, its login as unknown", async () => {
+  it("reports the version and ACP support of a working CLI, signed in once its session opens", async () => {
     const status = await detectAntigravity({ executable: fakeAgy, probe });
     expect(status).toMatchObject({
       providerId: "antigravity",
       installed: true,
       version: "1.5.13",
-      loggedIn: null,
+      loggedIn: true,
       supported: true,
       issues: [],
     });

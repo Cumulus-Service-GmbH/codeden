@@ -350,7 +350,7 @@ export class AcpSession implements ProviderSession {
     if (!opened.resumed) this.instructions = this.opts.systemPrompt?.trim() || undefined;
     this.setup = opened.setup;
     this.mode = currentMode(opened.setup);
-    notify(() => this.config.onSetup?.(opened.setup, this.info));
+    notify(() => this.config.onSetup?.(opened.setup, this.info, "session"));
     await this.applyMode();
     // The agent's own model, put back when the session is switched to Default.
     this.openedModel = modelsOf(opened.setup)?.current;
@@ -401,8 +401,20 @@ export class AcpSession implements ProviderSession {
     if ((next === undefined && nextEffort === undefined) || !sessionId) return;
     const model = next === undefined ? undefined : explicitModel(next);
     // Back to Default from a model CodeDen chose: the agent's own model from the start returns.
-    const target = next !== undefined && !model && this.model ? this.openedModel : model;
-    const switching = !!target && (target !== this.model || !model);
+    const clearing = next !== undefined && !model && !!this.model;
+    const target = clearing ? this.openedModel : model;
+    // The model the agent runs now: a pick of that same model is no switch.
+    const running = this.model ?? this.openedModel;
+    const switching = !!target && target !== running;
+    if (clearing && !target) {
+      // The agent never said which model it started on, so there is none to go back to: it
+      // stays on the chosen one, and the session says so instead of claiming Default.
+      this.events.push({ type: "session.updated", model: this.model });
+    } else if (!switching) {
+      // Already on that model: nothing to send, the choice is just recorded.
+      if (model) this.model = model;
+      else if (clearing) this.model = undefined;
+    }
     if (target && switching) {
       const before = this.setup;
       this.applyReply(before, await setModel(rpc, sessionId, before, target));
@@ -515,7 +527,7 @@ export class AcpSession implements ProviderSession {
     this.setup = { ...this.setup, configOptions: options };
     const mode = currentMode({ configOptions: options });
     if (mode && mode !== this.mode) this.onAgentMode(mode);
-    notify(() => this.config.onSetup?.({ configOptions: options }, this.info));
+    notify(() => this.config.onSetup?.({ configOptions: options }, this.info, "update"));
   }
 
   /** The host for an extension call from the ACP session `acpSessionId` (the root or a child). */
