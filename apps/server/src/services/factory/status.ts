@@ -125,6 +125,7 @@ export async function buildStatus(ctx: FactoryContext, projectId: string): Promi
     experimental: isFactoryMode(project.autonomyMode),
     loopState: project.killSwitch || globalKill ? "stopped" : loop.state,
     pausedReason: loop.pausedReason,
+    lastControl: loop.lastControl,
     killSwitch: project.killSwitch,
     globalKillSwitch: globalKill,
     drain: drainStatus(ctx, projectId, loop),

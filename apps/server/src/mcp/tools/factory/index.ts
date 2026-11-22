@@ -4,11 +4,19 @@ import {
   FactoryDecisionRequest,
   FactoryRetryRequest,
   FactorySetTypeRequest,
+  FactoryStatusRequest,
 } from "@codeden/contracts";
-import { z } from "zod";
 import { type AnyServerTool, defineTool } from "../../define";
 import { assertMayAdmit, assertMayRetry } from "../pm/issue-trust";
 import { factoryReportReproduction, factorySubmitAnalysis, factorySubmitReview } from "./builder";
+import {
+  controlAvailable,
+  controlStatus,
+  controlTarget,
+  factoryPause,
+  factoryResume,
+  factoryStop,
+} from "./control";
 import { factoryFileIssue, factoryPlanRound, factoryReportFindings } from "./scout";
 import { asTool, forSession, inFactoryProject } from "./shared";
 
@@ -18,64 +26,66 @@ import { asTool, forSession, inFactoryProject } from "./shared";
 export const factoryStatus = defineTool({
   name: "factory_status",
   description:
-    "The factory loop of this project: state (draining: the user chose to finish the work in flight, then stop; `drain.inFlight` says how many items are left), limits (auto-merge, trusted authors), spend against the daily budget, each work item's pipeline (bug, feature, docs) and step, issues ignored because their author isn't trusted, the merge checks of open pull requests, recent merges, failures and reverts, and the dark factory's scout.",
-  roles: ["pm"],
-  scope: "project",
+    "Read a factory loop and its last pause, resume or stop, including the actor, time and reason. A PM reads only its own project. The orchestrator must pass projectId. When draining, the factory finishes its current work before stopping and `drain.inFlight` says how many items are left. The result also includes limits (auto-merge, trusted authors), spend against the daily budget, each work item's pipeline (bug, feature, docs) and step, issues ignored because their author isn't trusted, the merge checks of open pull requests, recent merges, failures and reverts, and the dark factory's scout.",
+  roles: ["pm", "orchestrator"],
+  scope: "global",
   alwaysLoad: true,
-  isAvailable: inFactoryProject,
-  input: z.object({}),
-  handler: async (_input, { services, projectId }) => {
-    const s = await services.factory.status(projectId);
-    const brief = (w: (typeof s.backlog)[number]) => ({
-      itemId: w.id,
-      title: w.title,
-      type: w.type,
-      step: w.step,
-      trust: w.trust,
-      author: w.author,
-      issue: w.issue?.number ?? null,
-      pr: w.pr?.number ?? null,
-      note: w.note,
-      reason: w.reason,
-    });
-    return {
-      mode: s.mode,
-      loopState: s.loopState,
-      pausedReason: s.pausedReason,
-      // "Finish current work, then stop": the items still in flight before the loop stops.
-      drain: s.drain,
-      autoMerge: s.limits.autoMerge,
-      trustedAuthors: s.limits.trustedAuthors,
-      githubLogin: s.githubLogin,
-      limits: s.limits,
-      spendToday: s.spendToday,
-      mergesToday: s.mergesToday,
-      consecutiveFailures: s.consecutiveFailures,
-      waiting: s.backlog.map(brief),
-      inProgress: s.inProgress.map(brief),
-      ignored: s.ignored.map(brief),
-      mergeChecks: s.mergeChecks,
-      // The PRs the factory owns: the merge queue first, then the rest and today's merges.
-      pullRequests: s.pullRequests.map((p) => ({
-        pr: p.pr.number,
-        title: p.title,
-        state: p.state,
-        queuePosition: p.queuePosition,
-        note: p.note,
-      })),
-      recent: s.recent.slice(0, 10).map(brief),
-      // Up to 50 review follow-ups can be held for the scout: the count and the first few.
-      scout: s.scout && {
-        ...s.scout,
-        heldFollowUps: s.scout.heldFollowUps.slice(0, 10).map((h) => ({
-          title: h.title,
-          severity: h.severity,
-          pr: h.pr?.number ?? null,
+  isAvailable: controlAvailable,
+  input: FactoryStatusRequest,
+  handler: (input, ctx) =>
+    asTool(async () => {
+      const s = await ctx.services.factory.status(controlTarget(ctx, input.projectId));
+      const brief = (w: (typeof s.backlog)[number]) => ({
+        itemId: w.id,
+        title: w.title,
+        type: w.type,
+        step: w.step,
+        trust: w.trust,
+        author: w.author,
+        issue: w.issue?.number ?? null,
+        pr: w.pr?.number ?? null,
+        note: w.note,
+        reason: w.reason,
+      });
+      return {
+        mode: s.mode,
+        control: controlStatus(s),
+        loopState: s.loopState,
+        pausedReason: s.pausedReason,
+        // "Finish current work, then stop": the items still in flight before the loop stops.
+        drain: s.drain,
+        autoMerge: s.limits.autoMerge,
+        trustedAuthors: s.limits.trustedAuthors,
+        githubLogin: s.githubLogin,
+        limits: s.limits,
+        spendToday: s.spendToday,
+        mergesToday: s.mergesToday,
+        consecutiveFailures: s.consecutiveFailures,
+        waiting: s.backlog.map(brief),
+        inProgress: s.inProgress.map(brief),
+        ignored: s.ignored.map(brief),
+        mergeChecks: s.mergeChecks,
+        // The PRs the factory owns: the merge queue first, then the rest and today's merges.
+        pullRequests: s.pullRequests.map((p) => ({
+          pr: p.pr.number,
+          title: p.title,
+          state: p.state,
+          queuePosition: p.queuePosition,
+          note: p.note,
         })),
-        heldFollowUpCount: s.scout.heldFollowUps.length,
-      },
-    };
-  },
+        recent: s.recent.slice(0, 10).map(brief),
+        // Up to 50 review follow-ups can be held for the scout: the count and the first few.
+        scout: s.scout && {
+          ...s.scout,
+          heldFollowUps: s.scout.heldFollowUps.slice(0, 10).map((h) => ({
+            title: h.title,
+            severity: h.severity,
+            pr: h.pr?.number ?? null,
+          })),
+          heldFollowUpCount: s.scout.heldFollowUps.length,
+        },
+      };
+    }),
 });
 
 /** `factory_admit_issue`: let in an issue the factory ignored because of its author. */
@@ -174,6 +184,9 @@ export const factoryTools: AnyServerTool[] = [
   factoryReportFindings,
   factoryFileIssue,
   factoryStatus,
+  factoryPause,
+  factoryResume,
+  factoryStop,
   factoryAdmitIssue,
   factorySetType,
   factoryAllowLargeChange,

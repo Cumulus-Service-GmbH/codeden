@@ -8,6 +8,7 @@ import {
   type FactoryLoop,
   FactoryTuning,
   LEGACY_SIZE_LIMITS,
+  type NewEvent,
   pipelineStep,
   ScoutState,
   type Settings,
@@ -99,6 +100,7 @@ export class FactoryStore {
     return {
       projectId,
       state: "idle",
+      lastControl: null,
       pausedReason: null,
       consecutiveFailures: 0,
       day: localDay(now),
@@ -125,17 +127,29 @@ export class FactoryStore {
    * panels, while an idle factory ticks every 30 s. What the scout and its area reviewers
    * reported in the round since the caller read the loop is kept (`keepScoutReports`).
    */
-  saveLoop(changed: FactoryLoop, tuning?: Partial<FactoryTuning>): FactoryLoop {
+  saveLoop(
+    changed: FactoryLoop,
+    tuning?: Partial<FactoryTuning>,
+    extra: NewEvent[] = [],
+  ): FactoryLoop {
     const current = this.loop(changed.projectId);
     const remembered = current ? undefined : this.rememberedSetup();
     const loop = {
       ...changed,
+      lastControl:
+        current?.lastControl &&
+        (!changed.lastControl ||
+          Date.parse(current.lastControl.at) > Date.parse(changed.lastControl.at))
+          ? current.lastControl
+          : changed.lastControl,
       scout: current ? keepScoutReports(changed.scout, current.scout) : changed.scout,
       tuning: { ...changed.tuning, ...remembered, ...tuning },
     };
-    if (current && sameLoop(current, loop)) return { ...loop, updatedAt: current.updatedAt };
+    if (!extra.length && current && sameLoop(current, loop))
+      return { ...loop, updatedAt: current.updatedAt };
     const next = { ...loop, updatedAt: new Date().toISOString() };
     this.events.append([
+      ...extra,
       { type: "factory.loop.updated", sessionId: null, payload: { loop: next } },
     ]);
     return next;
@@ -512,6 +526,7 @@ export function upgradeLoop(loop: FactoryLoop): FactoryLoop {
   return upgradeSizeLimits({
     ...loop,
     discovery: loop.discovery ?? [],
+    lastControl: loop.lastControl ?? null,
     fastMergeHold: loop.fastMergeHold ?? null,
     scout: ScoutState.parse(loop.scout ?? {}),
     tuning: { ...TUNING_DEFAULTS, ...loop.tuning },

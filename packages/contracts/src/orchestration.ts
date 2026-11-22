@@ -2,6 +2,7 @@ import { z } from "zod";
 import { GitHubIssueRef, GitHubPrRef, Id, JsonValue, Timestamp } from "./common";
 import { InboxItemKind, InboxItemStatus } from "./entities/inbox";
 import { AutonomyMode, FactoryLoopState } from "./factory";
+import { FactoryLoopControl } from "./factory-control";
 import { ConflictDecision, ScheduledRun, StartedBy, WorkKey, WorkSummary } from "./work";
 
 /**
@@ -298,6 +299,8 @@ export const ProjectStatus = z.object({
   factory: z
     .object({
       loopState: FactoryLoopState,
+      /** The most recent effective pause, resume or stop. */
+      lastControl: FactoryLoopControl.nullable().default(null),
       drainInFlight: z.int().nonnegative().nullable(),
     })
     .nullable()

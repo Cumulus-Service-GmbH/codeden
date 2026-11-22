@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { GitHubIssueRef, GitHubPrRef, Id, ProviderId, Timestamp } from "./common";
 import { AutonomyMode, FactoryLimits, FactoryLoopState, MergePath } from "./factory";
+import { FactoryLoopControl } from "./factory-control";
 import { FactoryItemCost } from "./factory-cost";
 import { DigestFollowUps, FactoryFollowUp, ReviewFollowUps } from "./factory-follow-ups";
 import {
@@ -495,6 +496,8 @@ export type FactoryDrain = z.infer<typeof FactoryDrain>;
 export const FactoryLoop = z.object({
   projectId: Id,
   state: FactoryLoopState,
+  /** The most recent effective pause, resume or stop. */
+  lastControl: FactoryLoopControl.nullable().default(null),
   pausedReason: z.string().nullable(),
   consecutiveFailures: z.int().nonnegative(),
   /** Local day (`YYYY-MM-DD`) the counters below belong to. */
@@ -888,6 +891,8 @@ export const FactoryStatus = z.object({
   mode: AutonomyMode,
   experimental: z.boolean(),
   loopState: FactoryLoopState,
+  /** The most recent effective pause, resume or stop. */
+  lastControl: FactoryLoopControl.nullable().default(null),
   pausedReason: z.string().nullable(),
   /** The project's switch; `globalKillSwitch` stops every project. */
   killSwitch: z.boolean(),

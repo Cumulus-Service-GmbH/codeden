@@ -4,6 +4,7 @@ import {
   type FactoryAdmitRequest,
   type FactoryAllowLargeChangeRequest,
   type FactoryAnalysisReport,
+  type FactoryControlAction,
   type FactoryDecisionRequest,
   type FactoryDigest,
   type FactoryDismissRequest,
@@ -13,7 +14,7 @@ import {
   type FactoryItemResponse,
   type FactoryLesson,
   type FactoryLoop,
-  type FactoryLoopState,
+  type FactoryLoopControl,
   type FactoryPlanRoundRequest,
   type FactoryReproductionReport,
   type FactoryRetryMode,
@@ -26,7 +27,9 @@ import {
   isFactoryMode,
   type KillSwitchMode,
   type KillSwitchResponse,
+  type NewEvent,
   type Project,
+  type ProjectStatus,
   type RawEventEnvelope,
   type ReviewVerdict,
   type ScorecardDays,
@@ -50,7 +53,7 @@ import { flagAllowList, isAllowListNotice } from "./allow-lists";
 import { ProviderAvailability, type ProviderRunnable } from "./availability";
 import { SessionArchiver } from "./cleanup";
 import type { FactoryContext } from "./context";
-import { assertCanEnter, haltProject } from "./controls";
+import { assertCanEnter, haltProject, stoppedLoop } from "./controls";
 import * as decisions from "./decisions";
 import { writeDigest } from "./digest";
 import { advanceDrain, drainInboxId, drainStatus, startDrain } from "./drain";
@@ -128,6 +131,23 @@ function wait(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms).unref?.();
   });
+}
+
+type ControlSource = Pick<FactoryLoopControl, "by" | "sessionId" | "reason">;
+const userControl: ControlSource = { by: "user", sessionId: null, reason: null };
+
+function controlResult<T>(result: T, source: ControlSource | undefined, changed: boolean) {
+  return source ? { ...result, changed } : result;
+}
+
+function controlRecord(
+  loop: FactoryLoop,
+  action: FactoryControlAction,
+  source: ControlSource,
+  now: Date,
+): FactoryLoopControl {
+  const previous = loop.lastControl ? Date.parse(loop.lastControl.at) : -Infinity;
+  return { action, ...source, at: new Date(Math.max(now.getTime(), previous + 1)).toISOString() };
 }
 
 /**
@@ -412,16 +432,41 @@ export class FactoryService {
   async setKillSwitch(
     projectId: string,
     on: boolean,
-    opts: { mode?: KillSwitchMode; drainLimitMin?: number | null } = {},
-  ): Promise<KillSwitchResponse> {
-    if (on && opts.mode === "drain") return this.drain(projectId, opts.drainLimitMin);
-    this.writeKillSwitch(projectId, on);
-    if (on)
-      return { on, stoppedSessions: await this.halt(projectId), draining: false, inFlight: 0 };
-    const drained = this.deps.inbox.find(drainInboxId(projectId));
-    if (drained?.status === "open") this.deps.inbox.close(drained, "resolved", { note: "resumed" });
-    await this.serialize(projectId, "resume after kill", () => this.resumeAfterKill(projectId));
-    return { on, stoppedSessions: [], draining: false, inFlight: 0 };
+    opts: { mode?: KillSwitchMode; drainLimitMin?: number | null; control?: ControlSource } = {},
+  ): Promise<KillSwitchResponse & { changed?: boolean }> {
+    const source = opts.control ?? userControl;
+    if (on && opts.mode === "drain") return this.drain(projectId, opts.drainLimitMin, opts.control);
+    return this.serialize(projectId, on ? "stop" : "resume after kill", async () => {
+      if (!on && opts.control) this.assertCanResume();
+      const project = this.deps.projects.get(projectId);
+      const now = this.ctx.now();
+      const loop = this.data.loopOrNew(projectId, now);
+      const changed = project.killSwitch !== on || loop.drain !== null;
+      if (on) {
+        if (changed) {
+          this.writeKillSwitch(projectId, true, {
+            ...stoppedLoop(loop),
+            lastControl: controlRecord(loop, "stop", source, now),
+          });
+        }
+        return controlResult(
+          { on, stoppedSessions: await this.halt(projectId), draining: false, inFlight: 0 },
+          opts.control,
+          changed,
+        );
+      }
+      if (changed) {
+        this.resumeAfterKill(projectId, controlRecord(loop, "resume", source, now));
+      }
+      const drained = this.deps.inbox.find(drainInboxId(projectId));
+      if (drained?.status === "open")
+        this.deps.inbox.close(drained, "resolved", { note: "resumed" });
+      return controlResult(
+        { on, stoppedSessions: [], draining: false, inFlight: 0 },
+        opts.control,
+        changed,
+      );
+    });
   }
 
   /**
@@ -440,14 +485,34 @@ export class FactoryService {
         DRAIN_PER_PROJECT,
       );
     }
+    const changed = this.deps.settings.get().factory.killSwitch !== on;
     const settings = this.deps.settings.update({ factory: { killSwitch: on } });
     this.deps.store.append([{ type: "settings.updated", sessionId: null, payload: { settings } }]);
     const stoppedSessions: string[] = [];
     for (const p of this.deps.projects.list()) {
-      if (on) {
-        if (this.data.loop(p.id)?.drain) this.writeKillSwitch(p.id, true);
-        stoppedSessions.push(...(await this.halt(p.id)));
-      } else if (!p.killSwitch && this.data.loop(p.id)) this.resumeAfterKill(p.id);
+      await this.serialize(p.id, on ? "global stop" : "global resume", async () => {
+        const project = this.deps.projects.get(p.id);
+        const existing = this.data.loop(p.id);
+        if (on) {
+          if (changed && !project.killSwitch && (existing || isFactoryMode(project.autonomyMode))) {
+            const now = this.ctx.now();
+            const loop = existing ?? this.data.loopOrNew(p.id, now);
+            const stopped = {
+              ...stoppedLoop(loop),
+              lastControl: controlRecord(loop, "stop", userControl, now),
+            };
+            if (loop.drain) this.writeKillSwitch(p.id, true, stopped);
+            else this.data.saveLoop(stopped);
+          }
+          stoppedSessions.push(...(await this.halt(p.id)));
+        } else if (!project.killSwitch && existing) {
+          const control =
+            changed && isFactoryMode(project.autonomyMode)
+              ? controlRecord(existing, "resume", userControl, this.ctx.now())
+              : undefined;
+          this.resumeAfterKill(p.id, control);
+        }
+      });
     }
     return { on, stoppedSessions, draining: false, inFlight: 0 };
   }
@@ -456,35 +521,41 @@ export class FactoryService {
    * Resume a paused loop (resets the failure count). It also cancels a drain: the loop returns
    * to normal. Runs after the ticks already queued, so a tick in flight never brings either back.
    */
-  resume(projectId: string): Promise<FactoryLoop> {
-    const next = this.serialize(projectId, "resume", () => {
+  resume(projectId: string, source?: ControlSource): Promise<FactoryLoop & { changed?: boolean }> {
+    return this.serialize(projectId, "resume", () => {
+      if (source) this.assertCanResume();
       const loop = this.data.loopOrNew(projectId, this.ctx.now());
+      if (loop.state !== "paused" && loop.state !== "draining" && !loop.drain) {
+        return controlResult(loop, source, false);
+      }
       // Work whose revert merged goes back to its builder, also when CI never said green.
       revertsOnResume(this.ctx, projectId);
-      return this.data.saveLoop({
+      const next = this.data.saveLoop({
         ...loop,
         state: "idle",
         pausedReason: null,
         consecutiveFailures: 0,
         drain: null,
+        lastControl: controlRecord(loop, "resume", source ?? userControl, this.ctx.now()),
       });
+      const paused = this.deps.inbox.find(`inbox:factory-paused:${projectId}`);
+      if (paused?.status === "open") {
+        this.deps.inbox.close(paused, "resolved", { note: "resumed" });
+      }
+      this.soon(projectId);
+      return controlResult(next, source, true);
     });
-    const paused = this.deps.inbox.find(`inbox:factory-paused:${projectId}`);
-    if (paused?.status === "open") this.deps.inbox.close(paused, "resolved", { note: "resumed" });
-    this.soon(projectId);
-    return next;
   }
 
   /** The loop for the PM's status digest; null outside the factory modes. */
-  loopSummary(
-    projectId: string,
-  ): { loopState: FactoryLoopState; drainInFlight: number | null } | null {
+  loopSummary(projectId: string): ProjectStatus["factory"] {
     const project = this.deps.projects.get(projectId);
     if (!isFactoryMode(project.autonomyMode)) return null;
     const loop = this.data.loopOrNew(projectId, this.ctx.now());
     const killed = project.killSwitch || this.deps.settings.get().factory.killSwitch;
     return {
       loopState: killed ? "stopped" : loop.state,
+      lastControl: loop.lastControl,
       drainInFlight: drainStatus(this.ctx, projectId, loop)?.inFlight ?? null,
     };
   }
@@ -786,53 +857,85 @@ export class FactoryService {
   private async drain(
     projectId: string,
     limitMin: number | null | undefined,
-  ): Promise<KillSwitchResponse> {
-    const project = this.deps.projects.get(projectId);
-    if (!isFactoryMode(project.autonomyMode)) {
-      throw conflict(
-        "Only the software and dark factory finish their current work before stopping",
-        DRAIN_UNAVAILABLE,
-      );
-    }
-    if (this.deps.settings.get().factory.killSwitch) {
-      throw conflict(
-        "The global kill switch is on: every factory is stopped already",
-        DRAIN_UNAVAILABLE,
-      );
-    }
-    if (project.killSwitch) {
-      return { on: true, stoppedSessions: [], draining: false, inFlight: 0 };
-    }
+    source?: ControlSource,
+  ): Promise<KillSwitchResponse & { changed?: boolean }> {
     const res = await this.serialize(projectId, "drain", async () => {
+      const project = this.deps.projects.get(projectId);
+      if (!isFactoryMode(project.autonomyMode)) {
+        throw conflict(
+          "Only the software and dark factory finish their current work before stopping",
+          DRAIN_UNAVAILABLE,
+        );
+      }
+      if (this.deps.settings.get().factory.killSwitch) {
+        throw conflict(
+          "The global kill switch is on: every factory is stopped already",
+          DRAIN_UNAVAILABLE,
+        );
+      }
+      const now = this.ctx.now();
+      const current = this.data.loopOrNew(projectId, now);
+      if (project.killSwitch) return { loop: current, stoppedSessions: [], changed: false };
+      const control = current.drain
+        ? null
+        : controlRecord(current, "pause", source ?? userControl, now);
       const started = await startDrain(this.ctx, projectId, limitMin);
-      const loop = this.data.saveLoop(await advanceDrain(this.ctx, project, started.loop));
-      return { loop, stoppedSessions: started.stoppedSessions };
+      let finished = false;
+      const ctx = control
+        ? {
+            ...this.ctx,
+            setKillSwitch: () => {
+              finished = true;
+            },
+          }
+        : this.ctx;
+      const next = await advanceDrain(ctx, project, {
+        ...started.loop,
+        lastControl: control ?? started.loop.lastControl,
+      });
+      if (finished) this.writeKillSwitch(projectId, true, next);
+      const loop = finished ? next : this.data.saveLoop(next);
+      return { loop, stoppedSessions: started.stoppedSessions, changed: control !== null };
     });
     this.soon(projectId);
     const draining = res.loop.drain !== null;
-    return {
-      on: !draining,
-      stoppedSessions: res.stoppedSessions,
-      draining,
-      inFlight: drainStatus(this.ctx, projectId, res.loop)?.inFlight ?? 0,
-    };
+    return controlResult(
+      {
+        on: !draining,
+        stoppedSessions: res.stoppedSessions,
+        draining,
+        inFlight: drainStatus(this.ctx, projectId, res.loop)?.inFlight ?? 0,
+      },
+      source,
+      res.changed,
+    );
   }
 
-  /** Write the project's kill switch (a `project.updated` event) when it changes. */
-  private writeKillSwitch(projectId: string, on: boolean): void {
+  private assertCanResume(): void {
+    if (this.deps.settings.get().factory.killSwitch) {
+      throw conflict("The global kill switch is on. Only the user can release it.");
+    }
+  }
+
+  /** Write the switch and an optional loop update in the same event batch. */
+  private writeKillSwitch(projectId: string, on: boolean, loop?: FactoryLoop): void {
     const project = this.deps.projects.get(projectId);
-    if (project.killSwitch === on) return;
-    const next = { ...project, killSwitch: on, updatedAt: new Date().toISOString() } as Project;
-    this.deps.store.append([
-      { type: "project.updated", sessionId: null, payload: { project: next } },
-    ]);
+    const extra: NewEvent[] = [];
+    if (project.killSwitch !== on) {
+      const next = { ...project, killSwitch: on, updatedAt: new Date().toISOString() };
+      extra.push({ type: "project.updated", sessionId: null, payload: { project: next } });
+    }
+    if (loop) this.data.saveLoop(loop, undefined, extra);
+    else if (extra.length) this.deps.store.append(extra);
   }
 
   /** The switch is off: a stopped loop runs again and a drain is cancelled (a pause stays). */
-  private resumeAfterKill(projectId: string): void {
+  private resumeAfterKill(projectId: string, control?: FactoryLoopControl): void {
     const loop = this.data.loopOrNew(projectId, this.ctx.now());
-    if (loop.state === "stopped" || loop.state === "draining" || loop.drain) {
-      const state = loop.state === "paused" ? "paused" : "idle";
+    const state = loop.state === "stopped" || loop.state === "draining" ? "idle" : loop.state;
+    if (control) {
+      this.writeKillSwitch(projectId, false, { ...loop, state, drain: null, lastControl: control });
+    } else if (state !== loop.state || loop.drain) {
       this.data.saveLoop({ ...loop, state, drain: null });
     }
     this.soon(projectId);

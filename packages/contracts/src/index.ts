@@ -28,6 +28,7 @@ export * from "./events";
 export * from "./execution";
 export * from "./factory";
 export * from "./factory-api";
+export * from "./factory-control";
 export * from "./factory-cost";
 export * from "./factory-follow-ups";
 export * from "./factory-lessons";

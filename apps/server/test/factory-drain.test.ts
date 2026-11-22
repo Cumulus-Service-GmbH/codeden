@@ -360,6 +360,13 @@ describe("finish current work, then stop (#286)", () => {
     expect(env.factory.loopSummary(env.project.id)).toEqual({
       loopState: "draining",
       drainInFlight: 1,
+      lastControl: {
+        action: "pause",
+        by: "user",
+        sessionId: null,
+        reason: null,
+        at: expect.any(String),
+      },
     });
     const digest = await env.factory.digestNow(env.project.id);
     expect(digest.text).toContain("Draining: 1 item in flight");
@@ -370,7 +377,7 @@ describe("finish current work, then stop (#286)", () => {
       scheduled: [],
       inbox: { open: 0, items: [] },
       recent: [],
-      factory: { loopState: "draining", drainInFlight: 2 },
+      factory: { loopState: "draining", drainInFlight: 2, lastControl: null },
     });
     expect(pm).toContain("Factory: draining, 2 items in flight");
     expect(await failure(() => env.factory.setGlobalKillSwitch(true, "drain"))).toBe(

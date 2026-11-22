@@ -69,21 +69,10 @@ export async function runTick(
     if (loop.state !== "idle" && loop.state !== "stopped") loop = { ...loop, state: "idle" };
     return save(ctx, { ...loop, drain: null }, now);
   }
+  const today = localDay(now);
+  if (loop.day !== today) loop = await rollDay(project, loop, today, hooks);
   if (killed) return save(ctx, { ...loop, state: "stopped", drain: null }, now);
   if (loop.state === "stopped") loop = { ...loop, state: "idle" };
-
-  // Day rollover: digest for the day that ended, fresh counters; a budget pause ends.
-  const today = localDay(now);
-  if (loop.day !== today) {
-    if (loop.lastDigestDay !== loop.day) {
-      await hooks.digest(project, loop, loop.day);
-      loop = { ...loop, lastDigestDay: loop.day };
-    }
-    loop = { ...loop, day: today, mergesToday: 0 };
-    if (loop.state === "paused" && loop.pausedReason?.startsWith("daily")) {
-      loop = { ...loop, state: "idle", pausedReason: null };
-    }
-  }
 
   // Who is installed and signed in: detected again in the background every few minutes.
   ctx.sessions.refreshAvailability();
@@ -165,7 +154,7 @@ export async function runTick(
   }
 
   if (loop.state !== "paused") {
-    const spend = budgetSpend(ctx, projectId, today, project.factoryLimits);
+    const spend = budgetSpend(ctx, projectId, loop.day, project.factoryLimits);
     const over = budgetExceeded(spend, project.factoryLimits);
     if (over) loop = { ...loop, state: "paused", pausedReason: over };
   }
@@ -366,4 +355,22 @@ async function startBuilder(
     }));
     return false;
   }
+}
+
+async function rollDay(
+  project: Project,
+  loop: FactoryLoop,
+  today: string,
+  hooks: TickHooks,
+): Promise<FactoryLoop> {
+  // Day rollover: digest for the day that ended, fresh counters; a budget pause ends.
+  if (loop.lastDigestDay !== loop.day) {
+    await hooks.digest(project, loop, loop.day);
+    loop = { ...loop, lastDigestDay: loop.day };
+  }
+  loop = { ...loop, day: today, mergesToday: 0 };
+  if (loop.pausedReason?.startsWith("daily")) {
+    loop = { ...loop, state: loop.state === "paused" ? "idle" : loop.state, pausedReason: null };
+  }
+  return loop;
 }

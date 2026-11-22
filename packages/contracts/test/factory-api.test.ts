@@ -641,6 +641,7 @@ describe("factory API contracts (§10.1)", () => {
     expect(status.tuning.requireCi).toBe(true);
     // A status from before drains reads as not draining; a draining one round-trips.
     expect(status.drain).toBeNull();
+    expect(status.lastControl).toBeNull();
     const draining = FactoryStatus.parse({
       ...status,
       loopState: "draining",
