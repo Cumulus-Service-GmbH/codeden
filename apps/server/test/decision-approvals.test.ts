@@ -76,6 +76,33 @@ describe("decision approvals", () => {
     expect(() => service().authorize(owner, "project", production)).not.toThrow();
   });
 
+  it("allows only exact ordered steps under one owner approval", async () => {
+    const { service, store } = setup();
+    const first = { action: "stop_session", args: { sessionId: "worker" } };
+    const second = { action: "resume_automation", args: { automationId: "nightly" } };
+    const card = service().raise(orchestrator, "project", { kind: "plan", steps: [first, second] });
+    const authorize = (step: typeof first | typeof second) =>
+      service().authorize(orchestrator, "project", step, card.id);
+
+    expect(() => authorize(first)).toThrow("confirmed card");
+    await service().confirm(card.id, owner);
+    expect(() => authorize(second)).toThrow("exact action and arguments");
+    expect(() => authorize({ ...first, args: { sessionId: "other" } })).toThrow(
+      "exact action and arguments",
+    );
+    expect(() => authorize(first)).not.toThrow();
+    expect(() => authorize(first)).toThrow("exact action and arguments");
+    expect(() => authorize(second)).not.toThrow();
+    expect(() => authorize(second)).toThrow("exact action and arguments");
+    expect(store.listTypes(["decision.confirmed"]).map(({ payload }) => payload)).toEqual([
+      { id: card.id, by: { role: "owner" } },
+    ]);
+    expect(store.listTypes(["decision.step_consumed"]).map(({ payload }) => payload)).toEqual([
+      { id: card.id, step: first },
+      { id: card.id, step: second },
+    ]);
+  });
+
   it("refuses PM stop requests and requires a distinct second key for the orchestrator", async () => {
     const { service, store } = setup();
     const step = { action: "stop_session", args: { sessionId: "worker" } };
@@ -189,11 +216,12 @@ describe("GitHub approval client", () => {
   });
 });
 
-it("posts the recorded owner decision for the selected pending environments on one run", async () => {
+it("approves only the selected run and environments after the owner clicks, once", async () => {
   const env = createGithubEnv();
   try {
     const runId = 42;
     env.gh.pendingDeployments.set(runId, [3, 8]);
+    env.gh.pendingDeployments.set(runId + 1, [8]);
     const service = new DecisionApprovals(env.store, githubApprovalPort(env.service.client));
     const card = service.raise(pm, "project", {
       kind: "github",
@@ -206,9 +234,11 @@ it("posts the recorded owner decision for the selected pending environments on o
     });
     const writes = () => env.gh.requests.filter(({ method }) => method === "POST");
     await expect(service.postGithub(card.id, pm)).rejects.toThrow();
+    expect(writes()).toEqual([]);
     await service.confirm(card.id, owner);
     expect(writes()).toEqual([]);
     await service.postGithub(card.id, pm);
+    await expect(service.postGithub(card.id, pm)).rejects.toThrow("unused owner approval");
     expect(writes()).toMatchObject([
       {
         path: "/repos/acme/widgets/actions/runs/42/pending_deployments",
