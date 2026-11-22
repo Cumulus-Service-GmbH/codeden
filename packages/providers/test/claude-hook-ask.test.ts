@@ -1,5 +1,11 @@
 import path from "node:path";
-import type { CanUseTool, Options, PermissionResult, Query } from "@anthropic-ai/claude-agent-sdk";
+import type {
+  CanUseTool,
+  HookCallback,
+  Options,
+  PermissionResult,
+  Query,
+} from "@anthropic-ai/claude-agent-sdk";
 import type { AgentEvent, ItemOf, SessionOptions } from "@codeden/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AsyncQueue } from "../src/async-queue";
@@ -43,6 +49,7 @@ const marked = "[approval-required]  Review this call";
 const echo = { command: "echo hi" };
 const write = { file_path: path.join(cwd, "example.txt"), content: "x" };
 const forcePush = { command: "git push --force" };
+const forcePushReason = "Force-pushes, which can overwrite remote history";
 const once = ["allow_once", "deny"];
 const ordinary = ["allow_once", "allow_session", "deny"];
 
@@ -65,7 +72,24 @@ function open(autonomy: SessionOptions["autonomy"]) {
   })();
   const options = sdk.launches[0] as Options;
   const canUseTool = options.canUseTool as CanUseTool;
+  const hook = options.hooks?.PreToolUse?.[0]?.hooks[0] as HookCallback;
   let n = 0;
+  const preToolUse = (tool: string, input: Record<string, unknown>, dir: string) => {
+    const toolUseId = `t${n + 1}`;
+    return hook(
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: tool,
+        tool_input: input,
+        tool_use_id: toolUseId,
+        session_id: "x",
+        transcript_path: "x",
+        cwd: dir,
+      },
+      toolUseId,
+      { signal: new AbortController().signal },
+    );
+  };
   const permission = (tool: string, input: Record<string, unknown>, decisionReason?: string) => {
     n += 1;
     return canUseTool(tool, input, {
@@ -94,7 +118,17 @@ function open(autonomy: SessionOptions["autonomy"]) {
         hookSpecificOutput: { permissionDecision: "ask", permissionDecisionReason: marked },
       })}${padding}`,
     });
-  return { session, permission, approvals, card, answer, pushAsk, messages: sdk.messages, events };
+  return {
+    session,
+    permission,
+    preToolUse,
+    approvals,
+    card,
+    answer,
+    pushAsk,
+    messages: sdk.messages,
+    events,
+  };
 }
 
 describe("Claude settings hooks that require approval", () => {
@@ -150,6 +184,17 @@ describe("Claude settings hooks that require approval", () => {
     await expect(markedCall).resolves.toMatchObject({ behavior: "deny" });
   });
 
+  it("rejects a question answer and keeps the marked card pending", async () => {
+    const run = open("auto");
+    const call = run.permission("Bash", echo, marked);
+    const card = await run.card();
+    await expect(
+      run.session.respond(card.requestId, { kind: "answer", answers: {} }),
+    ).rejects.toMatchObject({ code: "invalid_answer" });
+    await run.answer(card, "allow_once");
+    await expect(call).resolves.toMatchObject({ behavior: "allow" });
+  });
+
   it.each([
     [forcePush, echo],
     [echo, forcePush],
@@ -181,11 +226,7 @@ describe("Claude settings hooks that require approval", () => {
     async (padding) => {
       const run = open("auto");
       run.pushAsk("Bash", padding);
-      const call = run.permission(
-        "Bash",
-        forcePush,
-        "Force-pushes, which can overwrite remote history",
-      );
+      const call = run.permission("Bash", forcePush, forcePushReason);
       const card = await run.card();
       expect(card.options).toEqual(once);
       await run.answer(card, "allow_once");
@@ -205,14 +246,49 @@ describe("Claude settings hooks that require approval", () => {
     expect(run.approvals).toHaveLength(0);
   });
 
-  it("clears marked asks when interrupted", async () => {
-    const run = open("full");
-    run.pushAsk();
+  it("keeps marked asks after interrupt until the result", async () => {
+    const run = open("auto");
     await run.session.send({ text: "go", attachments: [] });
+    run.pushAsk();
     await new Promise((resolve) => setImmediate(resolve));
     await run.session.interrupt();
-    await expect(run.permission("Bash", echo)).resolves.toMatchObject({ behavior: "allow" });
+    const call = run.permission("Bash", forcePush, forcePushReason);
+    const card = await run.card();
+    expect(card.options).toEqual(once);
+    await run.answer(card, "allow_once");
+    await expect(call).resolves.toMatchObject({ behavior: "allow" });
+
+    run.messages.push({ type: "result", subtype: "success", usage: {} });
+    const next = run.permission("Bash", forcePush, forcePushReason);
+    const nextCard = await run.card(2);
+    expect(nextCard.options).toEqual(ordinary);
+    await run.answer(nextCard, "deny");
+    await expect(next).resolves.toMatchObject({ behavior: "deny" });
+  });
+
+  it.each([undefined, marked])("cancels during the yield with reason %j", async (reason) => {
+    const run = open("auto");
+    await run.session.send({ text: "go", attachments: [] });
+    const call = run.permission("Bash", forcePush, reason);
+    await run.session.interrupt();
+    await new Promise((resolve) => setImmediate(resolve));
     expect(run.approvals).toHaveLength(0);
+    await expect(call).resolves.toEqual({
+      behavior: "deny",
+      message: "The request was cancelled.",
+      interrupt: true,
+    });
+  });
+
+  it.each([undefined, marked])("shows the Bash hook's cwd with reason %j", async (reason) => {
+    const run = open("auto");
+    const dir = path.dirname(cwd);
+    await run.preToolUse("Bash", forcePush, dir);
+    const call = run.permission("Bash", forcePush, reason);
+    const card = await run.card();
+    expect(card.cwd).toBe(dir);
+    await run.answer(card, "deny");
+    await expect(call).resolves.toMatchObject({ behavior: "deny" });
   });
 
   it("cancels a permission request when the session closes during the yield", async () => {

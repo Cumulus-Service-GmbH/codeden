@@ -52,13 +52,14 @@ const COMPACT_COMMAND = "/compact";
 
 const markedHookReview: AnswerReview = {
   problem: (response) => {
+    if (response.kind === "cancel") return;
     if (
       response.kind === "approval" &&
-      response.decision !== "allow_once" &&
-      response.decision !== "deny"
+      (response.decision === "allow_once" || response.decision === "deny")
     ) {
-      return "This approval can only be allowed once or denied.";
+      return;
     }
+    return "This approval can only be allowed once or denied.";
   },
 };
 
@@ -100,6 +101,7 @@ export class ClaudeSession implements ProviderSession {
   private abort: AbortController | undefined;
   private stderrTail = "";
   private closed = false;
+  private interrupts = 0;
   // hook_response has no tool_use_id. Match by tool name for the rest of the turn,
   // so we may ask more often, never less.
   private readonly markedHookAsks = new Set<string>();
@@ -260,7 +262,7 @@ export class ClaudeSession implements ProviderSession {
    * (or never answers the interrupt at all), the turn is closed as interrupted anyway.
    */
   async interrupt(): Promise<void> {
-    this.markedHookAsks.clear();
+    this.interrupts += 1;
     const turnId = this.mapper.turnId;
     if (!turnId) return;
     this.mapper.requestInterrupt();
@@ -506,9 +508,10 @@ export class ClaudeSession implements ProviderSession {
     const denied = this.policy.denial(toolName, input, dir);
     if (denied) return { behavior: "deny", message: denied };
     const q = this.q;
+    const interrupts = this.interrupts;
     // Let the pump consume a hook_response read in the same chunk.
     await new Promise((resolve) => setImmediate(resolve));
-    if (this.closed || this.q !== q) {
+    if (this.closed || this.q !== q || this.interrupts !== interrupts) {
       return this.toPermissionResult(toolName, input, dir, { kind: "cancel" });
     }
 
@@ -523,6 +526,7 @@ export class ClaudeSession implements ProviderSession {
         gate.ask && gate.reason !== hookReason ? `${gate.reason}. ${hookReason}` : hookReason;
       const item = this.approvalItem(toolName, input, options, {
         action: gate.ask ? gate.action : defaultApprovalAction(toolName),
+        cwd: dir ?? this.opts.cwd,
         reason,
         options: ["allow_once", "deny"],
       });
@@ -536,6 +540,7 @@ export class ClaudeSession implements ProviderSession {
     const ctx = this.mapper.ctxForTool(options.toolUseID);
     const item = this.approvalItem(toolName, input, options, {
       action: gate.action,
+      cwd: dir ?? this.opts.cwd,
       reason:
         decisionReason && decisionReason !== gate.reason
           ? `${gate.reason}. ${decisionReason}`
@@ -550,19 +555,20 @@ export class ClaudeSession implements ProviderSession {
     toolName: string,
     input: Record<string, unknown>,
     options: Parameters<CanUseTool>[2],
-    approval: Pick<ItemOf<"approval_request">, "action" | "reason" | "options">,
+    approval: Pick<ItemOf<"approval_request">, "action" | "reason" | "options"> & { cwd: string },
   ): ItemOf<"approval_request"> {
+    const { cwd, ...details } = approval;
     return {
       id: `approval-${options.requestId ?? options.toolUseID}`,
       kind: "approval_request",
       status: "in_progress",
       requestId: options.requestId ?? options.toolUseID,
-      ...approval,
+      ...details,
       title: approvalTitle(toolName, input),
       toolName,
       toolInput: toJson(input),
       toolCallItemId: options.toolUseID,
-      ...(str(input, "command") ? { command: str(input, "command"), cwd: this.opts.cwd } : {}),
+      ...(str(input, "command") ? { command: str(input, "command"), cwd } : {}),
       ...(str(input, "file_path") ? { paths: [str(input, "file_path") as string] } : {}),
     };
   }
