@@ -50,14 +50,15 @@ const launcher = (team: Map<string, Team>) =>
     team: (projectId: string) => team.get(projectId) ?? null,
   } as unknown as LauncherDeps);
 
-it("passes TEAM_FILE with the project's current Team, and nothing without a Team", async () => {
+it("passes TEAM_FILE with the project's current Team, empty until the project has one", async () => {
   const id = await addProject();
   const teams = new Map<string, Team>();
   const session = { ...sampleSession, projectId: id };
-  expect(launcher(teams).sessionOptions(session).env?.[TEAM_FILE_ENV]).toBeUndefined();
-  teams.set(id, opus);
   const path = launcher(teams).sessionOptions(session).env?.[TEAM_FILE_ENV];
   expect(path).toBe(teamFilePath(join(dir, "home"), id));
+  expect(TeamFile.parse(JSON.parse(readFileSync(path as string, "utf8"))).team).toEqual([]);
+  teams.set(id, opus);
+  expect(launcher(teams).sessionOptions(session).env?.[TEAM_FILE_ENV]).toBe(path);
   expect(TeamFile.parse(JSON.parse(readFileSync(path as string, "utf8"))).team).toEqual(opus);
   expect(
     launcher(teams).sessionOptions({ ...sampleSession, projectId: null }).env?.[TEAM_FILE_ENV],
