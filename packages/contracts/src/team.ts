@@ -56,3 +56,19 @@ export function teamRoleOfTitle(title: string | undefined): TeamRole | null {
 export function teamMember(team: readonly TeamMember[] | undefined, role: TeamRole | null) {
   return team?.find((member) => member.role === role);
 }
+
+/**
+ * Environment variable that names a session's Team file. Agent sessions inherit it, so the tools
+ * they run (review and role scripts) take each role's provider, model and effort from the
+ * project's Team. It has no `CODEDEN_` prefix because those variables are not passed to agents.
+ */
+export const TEAM_FILE_ENV = "TEAM_FILE";
+
+/** A project's Team as written to the file named by `TEAM_FILE`; rewritten whenever the Team changes. */
+export const TeamFile = z.object({
+  version: z.literal(1),
+  projectId: z.string().min(1),
+  team: Team,
+  updatedAt: z.string(),
+});
+export type TeamFile = z.infer<typeof TeamFile>;

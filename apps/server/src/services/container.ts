@@ -1,3 +1,4 @@
+import { existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { messageFrom, type Session } from "@codeden/contracts";
@@ -18,6 +19,7 @@ import { BrowserService } from "./browser/browser-service";
 import { type Exec, runTool } from "./exec";
 import { type FactoryOptions, FactoryService } from "./factory/factory-service";
 import { type FactoryGithub, GithubFactoryPort } from "./factory/github-port";
+import { loopProjects, teamFilePath, writeTeamFile } from "./factory/team-file";
 import { FILE_RESET_NOTICES, reportFileReset } from "./file-reset-notice";
 import { ConfigFiles } from "./files/config-files";
 import { createGitBroker, type GitBroker } from "./git-broker";
@@ -266,6 +268,8 @@ export function createServices(opts: ServicesOptions): AppServices {
     git: gitBroker,
     sandboxes,
     tokenSaver: () => opts.settings.get().tokenSaver,
+    // `factory` is created below; sessions start only after the container is built.
+    team: (projectId) => factory.data.loop(projectId)?.tuning.team ?? null,
     log: opts.log,
   });
   // Before the session service: a start in a project the start-up check hasn't reached checks it.
@@ -447,6 +451,21 @@ export function createServices(opts: ServicesOptions): AppServices {
     archiveSession: (id) => worktreeCleanup.archive(id),
     options: opts.factory,
     log: opts.log,
+  });
+  // Keep every project's Team file current, so running sessions' tools see a Team change at once.
+  opts.store.subscribe((events) => {
+    for (const projectId of loopProjects(events)) {
+      const team = factory.data.loop(projectId)?.tuning.team ?? [];
+      try {
+        if (team.length || existsSync(teamFilePath(opts.paths.home, projectId))) {
+          writeTeamFile(opts.paths.home, projectId, team);
+        }
+      } catch (error) {
+        opts.log?.(
+          `project ${projectId}: Team file not written: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
   });
   const unwatchedApprovals = new UnwatchedApprovals({
     store: opts.store,

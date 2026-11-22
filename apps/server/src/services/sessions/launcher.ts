@@ -5,6 +5,8 @@ import {
   type Project,
   type Session,
   SessionOptions,
+  TEAM_FILE_ENV,
+  type Team,
   type TokenSaverSettings,
   tokenSaverLevel,
   type UserInput,
@@ -15,6 +17,7 @@ import { codedenSystemPrompt, MCP_SERVER_NAME } from "../../mcp/prompt";
 import type { McpTokenStore } from "../../mcp/tokens";
 import type { ArtifactService } from "../artifacts";
 import { errorMessage, ServiceError } from "../errors";
+import { writeTeamFile } from "../factory/team-file";
 import type { GitBroker } from "../git-broker";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
@@ -67,6 +70,8 @@ export interface LauncherDeps extends RunnerDeps {
   sandboxes?: Pick<SandboxService, "wants" | "place" | "release">;
   /** The token saver settings (`Settings.tokenSaver`, #602); absent means off. */
   tokenSaver?: () => TokenSaverSettings;
+  /** A project's Team (its factory settings); sessions on this disk get it as `TEAM_FILE`. */
+  team?: (projectId: string) => Team | null;
 }
 
 /** Whether this session starts Claude in Chrome on the home runner. */
@@ -372,6 +377,7 @@ export class SessionLauncher {
     const project = this.projectOf(session);
     const runner = runnerForSession(this.deps, session.id);
     const proxyUrl = runner.mcpProxyUrl();
+    const home = runner === (this.deps.runners?.home() ?? this.deps.runner);
     const mcpServers: McpServerConfig[] = [];
     if (proxyUrl && mcpToken) {
       mcpServers.push({
@@ -401,11 +407,24 @@ export class SessionLauncher {
       mcpServers,
       ...(ownBranch(session) ? { ownBranch: ownBranch(session) } : {}),
       ...(project?.agentCiEnv === false ? { ciEnv: false } : {}),
-      ...(runner === (this.deps.runners?.home() ?? this.deps.runner) &&
-      startsWithChrome(session, this.deps.repo)
-        ? { chrome: true }
-        : {}),
+      ...(home ? this.teamEnv(session) : {}),
+      ...(home && startsWithChrome(session, this.deps.repo) ? { chrome: true } : {}),
     });
+  }
+
+  /**
+   * `TEAM_FILE` for a session in a project with a Team. The Team is written to its file first,
+   * so a start or resume always sees the current Team; the container rewrites it on every change.
+   */
+  private teamEnv(session: Session): { env: Record<string, string> } | null {
+    const team = session.projectId ? this.deps.team?.(session.projectId) : null;
+    if (!session.projectId || !team?.length) return null;
+    try {
+      return { env: { [TEAM_FILE_ENV]: writeTeamFile(this.deps.home, session.projectId, team) } };
+    } catch (error) {
+      this.deps.log?.(`session ${session.id}: Team file not written: ${errorMessage(error)}`);
+      return null;
+    }
   }
 
   /**
