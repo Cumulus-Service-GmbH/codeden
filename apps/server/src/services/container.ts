@@ -284,6 +284,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     tokenSaver: () => opts.settings.get().tokenSaver,
 
     teamFiles,
+    childRunsDir: join(opts.paths.home, "child-runs"),
     log: opts.log,
   });
   // Before the session service: a start in a project the start-up check hasn't reached checks it.

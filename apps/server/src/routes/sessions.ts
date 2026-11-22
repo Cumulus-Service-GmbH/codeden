@@ -1,5 +1,7 @@
+import { join } from "node:path";
 import {
   ArchiveSessionRequest,
+  type ChildRunList,
   type CompactSessionResponse,
   EditQueuedMessageRequest,
   ForkSessionRequest,
@@ -22,6 +24,7 @@ import {
 import { Hono } from "hono";
 import type { AppServices } from "../services/container";
 import { badRequest, notFound } from "../services/errors";
+import { readChildRuns } from "../services/sessions/child-runs";
 import { clientItemRecord } from "../services/sessions/client-items";
 import { exportSessionTranscript } from "../services/sessions/transcript-export";
 import { asUserResponse } from "./user-response";
@@ -114,6 +117,13 @@ export function sessionRoutes(s: AppServices, installToken: string) {
         c.json(await s.worktreeCleanup.archive(c.req.param("id"), c.req.valid("json"))),
       )
       .post("/:id/unarchive", (c) => c.json(s.worktreeCleanup.unarchive(c.req.param("id"))))
+      // The worker runs this session's tools logged (`CHILD_RUNS_FILE`), newest first.
+      .get("/:id/child-runs", (c) => {
+        const id = c.req.param("id");
+        s.sessionRepo.get(id);
+        const body: ChildRunList = readChildRuns(join(s.paths.home, "child-runs"), id);
+        return c.json(body);
+      })
       // The queued-message tray. Each answers 409 `already_sent` once delivery took the message.
       .get("/:id/queue", (c) => {
         const body: QueuedMessageList = { messages: s.queue.list(c.req.param("id")) };

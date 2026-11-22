@@ -3,6 +3,7 @@ import type {
   ArchivedSessionsPage,
   ArchivedSessionsQueryInit,
   ArchiveSessionResponse,
+  ChildRunList,
   ClaudeSdkStatus,
   CompactSessionResponse,
   ConflictRecord,
@@ -196,6 +197,8 @@ export interface CodeDenClient {
   unarchiveSession(sessionId: string): Promise<Session>;
   /** Change model, effort or title; model and effort apply from the next turn. */
   updateSession(sessionId: string, patch: UpdateSessionRequest): Promise<Session>;
+  /** Worker runs the session's tools logged (review and role scripts), newest first. */
+  listChildRuns(sessionId: string): Promise<ChildRunList>;
   /** Messages waiting behind a running turn: list, edit, delete, send now. */
   readonly queue: QueueApi;
   /** Full-text search over every transcript, archived sessions included (§13). */
