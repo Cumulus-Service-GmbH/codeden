@@ -57,6 +57,7 @@ import type { Answerer, QuestionBroker } from "./questions";
 import { applyPendingConfig, updateSession } from "./reconfigure";
 import { emptyStartMeta, type SessionRepo, type StoredStartMeta } from "./repo";
 import { planReview } from "./review";
+import { retireRoleSession } from "./role-retire";
 import { BROWSER_OPERATOR_TAG } from "./role-tag";
 import { startWorkspace } from "./start-workspace";
 
@@ -294,8 +295,10 @@ export class SessionService {
     );
     if (previous) {
       // Archived with the new one's creation: it doesn't run on, even while that one waits.
-      this.deps.tokens.revokeSession(previous.id);
-      void this.stop(previous.id).catch(() => undefined);
+      void retireRoleSession(
+        { stop: (id) => this.stop(id), revokeTokens: (id) => this.deps.tokens.revokeSession(id) },
+        previous.id,
+      );
     }
     return queued
       ? { status: "queued", sessionId: session.id, behind: queuedBehind }
