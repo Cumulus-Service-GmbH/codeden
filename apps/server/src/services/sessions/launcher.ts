@@ -6,7 +6,6 @@ import {
   type Session,
   SessionOptions,
   TEAM_FILE_ENV,
-  type Team,
   type TokenSaverSettings,
   tokenSaverLevel,
   type UserInput,
@@ -17,7 +16,7 @@ import { codedenSystemPrompt, MCP_SERVER_NAME } from "../../mcp/prompt";
 import type { McpTokenStore } from "../../mcp/tokens";
 import type { ArtifactService } from "../artifacts";
 import { errorMessage, ServiceError } from "../errors";
-import { teamRoots, writeTeamFile } from "../factory/team-file";
+import { type TeamFileDeps, writeTeamFile } from "../factory/team-file";
 import type { GitBroker } from "../git-broker";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
@@ -70,8 +69,8 @@ export interface LauncherDeps extends RunnerDeps {
   sandboxes?: Pick<SandboxService, "wants" | "place" | "release">;
   /** The token saver settings (`Settings.tokenSaver`, #602); absent means off. */
   tokenSaver?: () => TokenSaverSettings;
-  /** A project's Team (its factory settings); sessions on this disk get it as `TEAM_FILE`. */
-  team?: (projectId: string) => Team | null;
+  /** What sessions on this disk resolve their Team from; they get it as `TEAM_FILE`. */
+  teamFiles?: TeamFileDeps;
 }
 
 /** Whether this session starts Claude in Chrome on the home runner. */
@@ -425,16 +424,10 @@ export class SessionLauncher {
    * so a start or resume always sees the current Team; the container rewrites it on every change.
    */
   private teamEnv(session: Session): { env: Record<string, string> } | null {
-    if (!session.projectId || !this.deps.team) return null;
-    // A strict lookup: a project session whose project can't be read must not run without its Team.
-    const project = this.deps.projects.get(session.projectId);
-    // Every project session gets the path, even with no Team yet (an empty Team), so a Team set
-    // later reaches it. A failed write fails the start: never run on a stale or missing Team.
-    const team = this.deps.team(session.projectId) ?? [];
-    const roots = teamRoots(project, this.deps.worktreesDir);
-    return {
-      env: { [TEAM_FILE_ENV]: writeTeamFile(this.deps.home, session.projectId, team, roots) },
-    };
+    if (!session.projectId || !this.deps.teamFiles) return null;
+    // Every project session gets the path, even before any Team is set, so a Team set later
+    // reaches it. A failed write (or an unreadable project) fails the start: never run without it.
+    return { env: { [TEAM_FILE_ENV]: writeTeamFile(this.deps.teamFiles, session) } };
   }
 
   /**

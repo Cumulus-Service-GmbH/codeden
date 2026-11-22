@@ -3,6 +3,7 @@ import {
   messageFrom,
   ProviderId,
   ReasoningEffort,
+  resolveTeam,
   SessionStatus,
   StartedBy,
   StartSessionRequest,
@@ -92,7 +93,11 @@ export const startSession = defineTool({
             url: `https://github.com/${project.github.owner}/${project.github.repo}/issues/${input.issueNumber}`,
           }
         : undefined;
-    const team = services.factory.data.loop(projectId)?.tuning.team ?? [];
+    // The same order as the session's Team file: the project's Team over the default Team.
+    const { team } = resolveTeam({
+      defaults: services.settings.get().teamSetup.team,
+      project: services.factory.data.loop(projectId)?.tuning.team ?? [],
+    });
     const member = teamMember(team, teamRoleOfTitle(input.title));
     const models =
       member?.model && input.model ? services.factory.ctx.sessions.models(member.provider) : [];
