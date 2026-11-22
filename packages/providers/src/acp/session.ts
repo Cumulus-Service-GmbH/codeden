@@ -427,15 +427,18 @@ export class AcpSession implements ProviderSession {
 
   /**
    * Take what a change of model, mode or effort brought, given the setup it started from. An
-   * option list the agent answered with is the newest: it replaces the setup and is reported, so
-   * the adapter's list follows (a new model can list other models or levels). A reply without
-   * one (`session/set_mode`, `session/set_model`) keeps the live setup, options reported while
-   * the request ran included, and takes only the mode it acknowledged; nothing is reported.
+   * option list the agent answered with is the newest: it replaces the live options and only it
+   * is reported, so the adapter's list follows (a new model can list other models or levels).
+   * A reply without one (`session/set_mode`, `session/set_model`) keeps the live setup, options
+   * reported while the request ran included, and takes only the mode it acknowledged; nothing
+   * is reported.
    */
   private applyReply(before: AcpSessionSetup, next: AcpSessionSetup): void {
     if (next.configOptions !== before.configOptions) {
-      this.setup = next;
-      notify(() => this.config.onSetup?.(next, this.info));
+      // Only the options are the reply's: the rest of `next` is the request's starting copy.
+      const configOptions = next.configOptions;
+      this.setup = { ...this.setup, configOptions };
+      notify(() => this.config.onSetup?.({ configOptions }, this.info));
       return;
     }
     if (next.modes !== before.modes) this.setup = { ...this.setup, modes: next.modes };

@@ -4,7 +4,7 @@ import type {
   ProviderStatus,
   SessionOptions,
 } from "@codeden/contracts";
-import { modeIds } from "../acp/config";
+import { findOption, modeIds } from "../acp/config";
 import { classifyAcpError } from "../acp/errors";
 import type { AcpAgentSpec } from "../acp/extensions";
 import type { AcpInitializeResult, AcpSessionSetup } from "../acp/protocol";
@@ -89,6 +89,8 @@ export class AntigravityAdapter implements ProviderAdapter {
   /** Whether the last session listed a `plan` mode; unknown until one has. */
   private planListed: boolean | undefined;
   private detecting: Promise<ProviderStatus> | undefined;
+  /** The newest setup whose models are on show (merged from the reports that built it). */
+  private taken: AcpSessionSetup = {};
   private found: { command: ResolvedCommand; version: string | null } | undefined;
 
   constructor(private readonly options: AntigravityAdapterOptions = {}) {}
@@ -203,15 +205,21 @@ export class AntigravityAdapter implements ProviderAdapter {
   /**
    * The newest complete list wins: a setup replaces the models and modes shown when it has
    * models. Probes and sessions report the moment their reply arrives, so the last one to
-   * arrive is the newest. An empty or malformed one changes nothing.
+   * arrive is the newest. A report may carry only what changed (a reply's options): the fields
+   * it has replace those of the newest report taken. An empty or malformed one changes nothing.
    */
   private applySetup(setup: AcpSessionSetup): void {
     try {
-      const models = antigravityModelInfos(setup);
+      const merged = { ...this.taken, ...setup };
+      const models = antigravityModelInfos(merged);
       if (!models) return;
-      const modes = modeIds(setup);
-      if (modes.length) this.planListed = modes.includes(ANTIGRAVITY_AGENT.modes.plan ?? "plan");
+      // A setup that says which modes it has (even none) decides plan mode; one that doesn't
+      // leaves it as it was.
+      if (merged.modes !== undefined || findOption(merged.configOptions, "mode")) {
+        this.planListed = modeIds(merged).includes(ANTIGRAVITY_AGENT.modes.plan ?? "plan");
+      }
       this.catalog.set(models);
+      this.taken = merged;
     } catch {
       // A malformed reply: Default (or the last good list) stands.
     }

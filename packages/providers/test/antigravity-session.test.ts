@@ -146,6 +146,8 @@ describe("Antigravity CLI session over ACP", () => {
     await session.start();
     // Only session/new's own list: the refusal republishes no older one.
     expect(reported).toHaveLength(1);
+    // The start did ask, and the agent refused it.
+    expect(configSets()).toContain("thought_level=medium");
   });
 
   it("fails a turn whose asked-for effort the agent refuses, and retries it next turn", async () => {

@@ -137,6 +137,23 @@ describe("the Antigravity CLI's model list and flags", () => {
     expect(pending).toHaveLength(1);
   });
 
+  it("merge a report of options only with the newest setup taken, and clear plan mode on an empty mode list", async () => {
+    const adapter = new AntigravityAdapter({ executable: fakeAgy });
+    const s = session(adapter);
+    s.setup({
+      ...listing("gemini-4-neon"),
+      modes: { availableModes: [{ id: "plan", name: "Plan" }] },
+    });
+    expect(adapter.capabilities().planMode).toBe(true);
+    // A reply's options only: the models change, plan mode stays as the last report said.
+    s.setup({ configOptions: listing("gemini-4-argon").configOptions });
+    expect(ids(adapter)).toContain("gemini-4-argon");
+    expect(adapter.capabilities().planMode).toBe(true);
+    // A setup that says it has no modes at all clears plan mode.
+    s.setup({ ...listing("gemini-4-argon"), modes: { availableModes: [] } });
+    expect(adapter.capabilities().planMode).toBe(false);
+  });
+
   it("keep a list over an empty one and over a malformed one", async () => {
     const adapter = new AntigravityAdapter({ executable: fakeAgy });
     const first = await probing(adapter);
