@@ -63,13 +63,13 @@ export function GeneralSettings() {
         description="What CodeDen does by itself to keep agent sessions going."
       >
         <SettingRow
-          label="Agents at once"
-          help="Agent sessions that can run at the same time, across all projects. More wait in a queue and start in order as slots free. Project managers and the orchestrator don't count."
+          label="Agent sessions across projects"
+          help="How many agent sessions can work at once, across all projects. More wait in a queue and start in order as slots free. Project checks count. Project managers and the orchestrator are exempt (one per project plus one)."
         >
           <NumberField
             min={1}
             max={64}
-            aria-label="Agents at once"
+            aria-label="Agent sessions across projects"
             value={settings.limits.maxActiveSessions}
             onChange={(maxActiveSessions) => update({ limits: { maxActiveSessions } })}
             wrapperClassName="w-20"

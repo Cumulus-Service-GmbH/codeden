@@ -1,11 +1,16 @@
-import type { AdmissionStatus, Session } from "@codeden/contracts";
+import { type AdmissionStatus, AT_CAPACITY_CODE, type Session } from "@codeden/contracts";
+import { runnerErrorCode } from "../runner-port";
+import { isTurnRunningError } from "./outbox-holds";
 import { emptyStartMeta, type SessionRepo } from "./repo";
 
 const ACTIVE = new Set(["starting", "running", "waiting"]);
 
+export function isSendBusyError(error: unknown): boolean {
+  return isTurnRunningError(error) || runnerErrorCode(error) === AT_CAPACITY_CODE;
+}
+
 export class SessionAdmission {
   private readonly reserved = new Map<string, Session["role"]>();
-  private readonly held = new Set<string>();
 
   constructor(
     private readonly repo: SessionRepo,
@@ -16,10 +21,14 @@ export class SessionAdmission {
   ) {}
 
   tryReserve(id: string, role: Session["role"], head = false): boolean {
-    const { agents, controls, active, exemption } = this.counts();
-    if (agents.has(id) || controls.has(id)) return true;
-    if (role === "agent" || controls.size >= exemption) {
-      if (active >= this.limit() || (!head && this.waiters().length > 0)) return false;
+    const rows = this.repo.admissionRows();
+    const { agents, controls, active, exemption } = this.counts(rows);
+    if (this.reserved.has(id) || rows.some((row) => row.id === id && ACTIVE.has(row.status))) {
+      return true;
+    }
+    // Keep the slot reserved when a new turn takes over from a check run.
+    if (!agents.has(id) && (role === "agent" || controls.size >= exemption)) {
+      if (active + (head ? 0 : this.waiters(rows).length) >= this.limit()) return false;
     }
     this.reserved.set(id, role);
     return true;
@@ -29,20 +38,8 @@ export class SessionAdmission {
     if (this.reserved.delete(id)) this.onRelease?.();
   }
 
-  hold(id: string): void {
-    this.held.add(id);
-  }
-
-  unhold(id: string): void {
-    if (this.held.delete(id)) this.onRelease?.();
-  }
-
   scheduleDrain(): void {
     this.onRelease?.();
-  }
-
-  isHeld(id: string): boolean {
-    return this.held.has(id);
   }
 
   enqueue(id: string): void {
@@ -66,26 +63,30 @@ export class SessionAdmission {
     this.onRelease?.();
   }
 
-  waiters() {
-    return this.repo
-      .admissionRows()
+  waiters(rows = this.repo.admissionRows()) {
+    return rows
       .flatMap(({ id, status, meta }) =>
         meta?.admission ? [{ id, status, ...meta.admission }] : [],
       )
       .sort((a, b) => a.seq - b.seq);
   }
 
-  free(): number {
-    return Math.max(0, this.limit() - this.counts().active - this.waiters().length);
+  free(except?: string): number {
+    const rows = this.repo.admissionRows();
+    const { active, agents, controls, exemption } = this.counts(rows);
+    const credit =
+      except && (agents.has(except) || (controls.has(except) && controls.size > exemption));
+    return Math.max(0, this.limit() - active - this.waiters(rows).length) + (credit ? 1 : 0);
   }
 
   status(): AdmissionStatus {
-    const { active, controls } = this.counts();
+    const rows = this.repo.admissionRows();
+    const { active, controls } = this.counts(rows);
     return {
       limit: this.limit(),
       active,
       control: controls.size,
-      waiting: this.waiters().map(({ id, status, since }, index) => ({
+      waiting: this.waiters(rows).map(({ id, status, since }, index) => ({
         sessionId: id,
         kind: status === "queued" ? "start" : "turn",
         since,
@@ -94,13 +95,13 @@ export class SessionAdmission {
     };
   }
 
-  private counts() {
-    // A check run starting in the same tick a waiter is admitted can exceed the cap by one.
-    const agents = new Set(this.held);
+  private counts(rows: ReturnType<SessionRepo["admissionRows"]>) {
+    // Check runs count toward the limit but never wait; several finishing at once can exceed it.
+    const agents = new Set<string>();
     for (const id of this.checking()) agents.add(id);
     const controls = new Set<string>();
     for (const [id, role] of this.reserved) (role === "agent" ? agents : controls).add(id);
-    for (const row of this.repo.admissionRows()) {
+    for (const row of rows) {
       if (ACTIVE.has(row.status)) (row.role === "agent" ? agents : controls).add(row.id);
     }
     const exemption = 1 + this.projectCount();

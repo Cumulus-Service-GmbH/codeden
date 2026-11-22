@@ -96,7 +96,6 @@ export class FactoryStore {
   loopOrNew(projectId: string, now = new Date()): FactoryLoop {
     const existing = this.loop(projectId);
     if (existing) return existing;
-    const setup = this.settings().teamSetup;
     return {
       projectId,
       state: "idle",
@@ -112,7 +111,7 @@ export class FactoryStore {
       enabledAt: null,
       seenFailedShas: [],
       fastMergeHold: null,
-      tuning: FactoryTuning.parse(setup.remembered ? setup : {}),
+      tuning: FactoryTuning.parse({}),
       drain: null,
       failedSessionsSweptAt: null,
       lastTickAt: null,
@@ -126,11 +125,17 @@ export class FactoryStore {
    * panels, while an idle factory ticks every 30 s. What the scout and its area reviewers
    * reported in the round since the caller read the loop is kept (`keepScoutReports`).
    */
-  saveLoop(changed: FactoryLoop): FactoryLoop {
+  saveLoop(changed: FactoryLoop, tuning?: Partial<FactoryTuning>): FactoryLoop {
     const current = this.loop(changed.projectId);
-    const loop = current
-      ? { ...changed, scout: keepScoutReports(changed.scout, current.scout) }
-      : changed;
+    const setup = current ? undefined : this.settings().teamSetup;
+    const remembered = setup?.remembered
+      ? { team: setup.team, resultSummaryBytes: setup.resultSummaryBytes }
+      : undefined;
+    const loop = {
+      ...changed,
+      scout: current ? keepScoutReports(changed.scout, current.scout) : changed.scout,
+      tuning: { ...changed.tuning, ...remembered, ...tuning },
+    };
     if (current && sameLoop(current, loop)) return { ...loop, updatedAt: current.updatedAt };
     const next = { ...loop, updatedAt: new Date().toISOString() };
     this.events.append([

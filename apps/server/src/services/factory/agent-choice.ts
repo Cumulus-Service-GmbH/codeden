@@ -46,16 +46,17 @@ export function builderWanted(
   > &
     Partial<Pick<FactoryTuning, "team">>,
 ): AgentWanted {
-  const member = teamMember(tuning.team, item.type === "docs" ? "agentsMdWriter" : "writer");
+  const docsMember = item.type === "docs" ? teamMember(tuning.team, "agentsMdWriter") : undefined;
+  if (item.type === "docs" && !docsMember && tuning.docsBuilderProvider) {
+    return { provider: tuning.docsBuilderProvider, model: tuning.docsBuilderModel };
+  }
+  const member = docsMember ?? teamMember(tuning.team, "writer");
   if (member) {
     return {
       provider: member.provider,
       model: member.model,
       ...(member.effort ? { effort: member.effort } : {}),
     };
-  }
-  if (item.type === "docs" && tuning.docsBuilderProvider) {
-    return { provider: tuning.docsBuilderProvider, model: tuning.docsBuilderModel };
   }
   return { provider: tuning.builderProvider, model: tuning.builderModel };
 }
@@ -64,6 +65,7 @@ export function builderWanted(
 export interface ScoutAgent {
   wanted: AgentWanted;
   choice: AgentChoice | AgentWait;
+  reasoningEffort?: boolean;
 }
 
 /** The scout's and its area reviewers' provider and model (`scoutProvider`, `scoutModel`). */
@@ -81,7 +83,13 @@ export function scoutAgent(
         ...(member.effort ? { effort: member.effort } : {}),
       }
     : { provider: tuning.scoutProvider, model: tuning.scoutModel };
-  return { wanted, choice: chooseAgent(ctx, project, wanted, "scout") };
+  const choice = chooseAgent(ctx, project, wanted, "scout");
+  return {
+    wanted,
+    choice,
+    reasoningEffort:
+      !("waiting" in choice) && ctx.sessions.supportsReasoningEffort(choice.provider),
+  };
 }
 
 /**
@@ -130,11 +138,14 @@ export function chooseAgent(
  */
 export function needsFreshSession(
   session: Pick<Session, "provider" | "model"> & Partial<Pick<Session, "effort">>,
-  { wanted, choice }: ScoutAgent,
+  { wanted, choice, reasoningEffort }: ScoutAgent,
   models: readonly ModelInfo[],
 ): boolean {
   if (wanted.provider === "auto" || "waiting" in choice || choice.provider === "auto") return false;
-  if (session.provider !== choice.provider || (choice.effort && session.effort !== choice.effort))
+  if (
+    session.provider !== choice.provider ||
+    (reasoningEffort && choice.effort && session.effort != null && session.effort !== choice.effort)
+  )
     return true;
   return choice.model !== null && !modelMatches(models, choice.model, session.model);
 }

@@ -367,21 +367,23 @@ export class FactoryService {
     ]);
     const saved = this.serialize(projectId, "set mode", () => {
       const loop = this.data.loopOrNew(projectId, this.ctx.now());
-      this.data.saveLoop({
-        ...loop,
-        tuning: { ...loop.tuning, ...req.tuning },
-        ...(entering && !wasFactory
-          ? {
-              enabledAt: this.ctx.now().toISOString(),
-              consecutiveFailures: 0,
-              pausedReason: null,
-              state: "idle" as const,
-            }
-          : {}),
-        ...(!entering
-          ? { state: "idle" as const, drain: null, scout: { ...loop.scout, round: null } }
-          : {}),
-      });
+      this.data.saveLoop(
+        {
+          ...loop,
+          ...(entering && !wasFactory
+            ? {
+                enabledAt: this.ctx.now().toISOString(),
+                consecutiveFailures: 0,
+                pausedReason: null,
+                state: "idle" as const,
+              }
+            : {}),
+          ...(!entering
+            ? { state: "idle" as const, drain: null, scout: { ...loop.scout, round: null } }
+            : {}),
+        },
+        req.tuning,
+      );
     });
     this.soon(projectId);
     return saved.then(() => ({ projectId, mode: req.mode, limits, experimental: entering }));

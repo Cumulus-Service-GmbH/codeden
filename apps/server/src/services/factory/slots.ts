@@ -172,7 +172,7 @@ export function slotsFor(
 ): number {
   const free = Math.min(
     freeSlots(busySlots(ctx, project.id, except), project.factoryLimits),
-    ctx.admission.free(),
+    ctx.admission.free(except),
   );
   return Math.max(0, free - ctx.slots.ahead(project.id, tier, key));
 }

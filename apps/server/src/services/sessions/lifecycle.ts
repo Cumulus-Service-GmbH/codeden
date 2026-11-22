@@ -98,14 +98,31 @@ export class SessionLifecycle {
         admission.dequeue(id);
         continue;
       }
-      if (blocked.has(id) || admission.isHeld(id) || sessions.isDelivering(id)) continue;
-      if (session.status !== "queued" && !sessions.canFlushOutbox(session, true)) continue;
+      if (blocked.has(id) || sessions.isDelivering(id)) continue;
+      if (session.status !== "queued") {
+        if (!sessions.canWaitForOutbox(session)) {
+          admission.dequeue(id);
+          continue;
+        }
+        if (!sessions.canFlushOutbox(session)) continue;
+      }
       if (!admission.tryReserve(id, session.role, true)) break;
       if (session.status === "queued") sessions.startQueued(session);
       else
         void sessions
           .flushOutbox(id, true)
           .catch((error) => this.deps.log?.(`queue: ${errorMessage(error)}`));
+    }
+    // Archived rows cannot hold a place in the admission queue. Normal outbox delivery
+    // can still reopen a flushable archived session when a slot becomes available.
+    if (admission.free() > 0) {
+      for (const id of sessions.sessionsWithQueuedMessages()) {
+        if (repo.find(id)?.session.archivedAt) {
+          void sessions
+            .flushOutbox(id)
+            .catch((error) => this.deps.log?.(`queue: ${errorMessage(error)}`));
+        }
+      }
     }
   }
 
@@ -116,6 +133,9 @@ export class SessionLifecycle {
         sessionsChanged = true;
         const { session } = e.payload as { session: Session };
         if (ENDED.has(session.status)) this.deps.tokens.revokeSession(session.id);
+        if (session.archivedAt && this.deps.repo.find(session.id)?.session.archivedAt) {
+          this.deps.admission?.dequeue(session.id);
+        }
         const settled = session.status === "idle" || session.status === "failed";
         if (settled && this.deps.sessions.hasOutbox(session.id)) {
           setImmediate(() => void this.deps.sessions.flushOutbox(session.id));

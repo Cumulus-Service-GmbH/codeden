@@ -1,7 +1,8 @@
 import type { Session } from "@codeden/contracts";
 import { expect, it } from "vitest";
-import { capSummary, compactSession } from "../src/mcp/tools/shared/helpers";
+import { compactSession } from "../src/mcp/tools/shared/helpers";
 import { deriveNotices } from "../src/services/orchestration/notices";
+import { capSummary } from "../src/services/summary-cap";
 import { sampleSession } from "./helpers";
 
 it("cuts at a UTF-8 code-point boundary and budgets for the marker", () => {
@@ -47,6 +48,13 @@ it("caps the PM completion notice and the compact tool result while preserving t
     expect.objectContaining({ summary: capSummary(summary, 256) }),
     expect.objectContaining({ summary }),
   ]);
-  expect(compactSession(session, 256).result?.summary).toBe(capSummary(summary, 256));
+  expect(compactSession(session, { summaryBytes: 256 }).result?.summary).toBe(
+    capSummary(summary, 256),
+  );
   expect(session.result?.summary).toBe(summary);
+});
+
+it("uses the whole budget for the prefix when the marker does not fit", () => {
+  expect(capSummary("é😀tail", 5)).toBe("é");
+  expect(capSummary("abcdef", 2)).toBe("ab");
 });

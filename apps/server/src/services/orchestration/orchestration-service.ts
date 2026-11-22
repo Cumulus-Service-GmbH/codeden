@@ -20,6 +20,7 @@ import { errorMessage } from "../errors";
 import type { TrustedAuthors } from "../github/review-trust";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
+import { isSendBusyError } from "../sessions/admission";
 import { mayHaveStarted } from "../sessions/input-decorator";
 import type { SessionRepo } from "../sessions/repo";
 import type { SessionService } from "../sessions/session-service";
@@ -450,11 +451,16 @@ export class OrchestrationService {
     if (this.notices.undelivered(role, projectId).length === 0) return "empty";
     const session = await this.roles.ensure(role, projectId);
     if (NOT_READY.has(session.status)) return "busy";
-    await this.deps.sessions.send(
-      session.id,
-      { input: { text: WAKE_TEXT, attachments: [] }, whenBusy: "reject" },
-      "codeden",
-    );
+    try {
+      await this.deps.sessions.send(
+        session.id,
+        { input: { text: WAKE_TEXT, attachments: [] }, whenBusy: "reject" },
+        "codeden",
+      );
+    } catch (error) {
+      if (isSendBusyError(error)) return "busy";
+      throw error;
+    }
     return "sent";
   }
 

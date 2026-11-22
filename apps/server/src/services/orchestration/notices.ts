@@ -14,8 +14,8 @@ import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, or, type SQL } from 
 import type { Db } from "../../db/client";
 import { notices } from "../../db/schema-orchestration";
 import type { EventStore } from "../../events/store";
-import { capSummary } from "../../mcp/tools/shared/helpers";
 import type { SessionRepo } from "../sessions/repo";
+import { capSummary } from "../summary-cap";
 import { clipKeepingEnd } from "./digest";
 
 /** A notice before it is stored (`deliveredAt` is set by delivery). */

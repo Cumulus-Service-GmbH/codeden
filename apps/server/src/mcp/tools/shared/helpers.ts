@@ -2,6 +2,7 @@ import type { Project, Session, WorkSummary } from "@codeden/contracts";
 import { and, eq, like } from "drizzle-orm";
 import { sessions } from "../../../db/schema";
 import type { AppServices } from "../../../services/container";
+import { capSummary } from "../../../services/summary-cap";
 import { ToolError } from "../../define";
 
 /** A project by id, as a tool error when it does not exist or is archived. */
@@ -71,19 +72,8 @@ function byPrefix(services: AppServices, prefix: string, projectId: string): str
   return rows[0]?.id;
 }
 
-// Ported from PandaCode v0.3.137 (src-tauri/src/architect.rs floor_char), https://github.com/aicodeking/pandacode. Copyright (c) 2026 PandaCode contributors. MIT License with an attribution requirement; see THIRD_PARTY_NOTICES.md.
-export function capSummary(text: string, bytes: number | null): string {
-  if (bytes === null || Buffer.byteLength(text) <= bytes) return text;
-  const marker = `… [truncated to ${bytes} bytes; full transcript in the session]`;
-  const utf8 = Buffer.from(text);
-  let end = bytes - Buffer.byteLength(marker);
-  if (end < 0) return "";
-  while ((utf8.readUInt8(end) & 0xc0) === 0x80) end--;
-  return utf8.toString("utf8", 0, end) + marker;
-}
-
 /** A session as tools report it: enough to identify and judge the work. */
-export function compactSession(s: Session, bytes: number | null) {
+export function compactSession(s: Session, opts?: { summaryBytes?: number | null }) {
   return {
     id: s.id,
     title: s.title,
@@ -99,7 +89,10 @@ export function compactSession(s: Session, bytes: number | null) {
     issue: s.issue?.number ?? null,
     pr: s.pr ? { number: s.pr.number, state: s.pr.state, url: s.pr.url } : null,
     result: s.result
-      ? { outcome: s.result.outcome, summary: capSummary(s.result.summary, bytes) }
+      ? {
+          outcome: s.result.outcome,
+          summary: capSummary(s.result.summary, opts?.summaryBytes ?? null),
+        }
       : null,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,

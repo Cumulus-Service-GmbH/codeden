@@ -40,7 +40,10 @@ export const listSessions = defineTool({
       .filter((s) => input.status || input.includeEnded || !ENDED.has(s.status))
       .slice(0, input.limit ?? 20);
     const bytes = services.factory.data.loop(projectId)?.tuning.resultSummaryBytes ?? null;
-    return { count: list.length, sessions: list.map((session) => compactSession(session, bytes)) };
+    return {
+      count: list.length,
+      sessions: list.map((session) => compactSession(session, { summaryBytes: bytes })),
+    };
   },
 });
 
@@ -92,7 +95,9 @@ export const startSession = defineTool({
     const member = teamMember(team, teamRoleOfTitle(input.title));
     const models =
       member?.model && input.model ? services.factory.ctx.sessions.models(member.provider) : [];
-    const { provider, model, effort } = applyTeamRole(input, team, models);
+    const { choice, mismatch } = applyTeamRole(input, team, models);
+    if (!choice) throw new ToolError(mismatch);
+    const { provider, model, effort } = choice;
     const req = StartSessionRequest.parse({
       projectId,
       role: "agent",

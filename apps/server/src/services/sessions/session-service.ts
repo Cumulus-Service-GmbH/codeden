@@ -23,6 +23,7 @@ import type {
   UserInput,
   WorkspaceRequest,
 } from "@codeden/contracts";
+import { AT_CAPACITY_CODE } from "@codeden/contracts";
 import type { SandboxService } from "../../execution/sandboxes";
 import type { McpTokenStore } from "../../mcp/tokens";
 import type { SettingsStore } from "../../settings-store";
@@ -271,6 +272,7 @@ export class SessionService {
     meta: StoredStartMeta,
     workspace: WorkspaceRequest,
     input?: UserInput,
+    fork?: LaunchFork,
   ): boolean {
     const { admission, repo } = this.deps;
     const waitingForConflict = session.status === "queued";
@@ -282,14 +284,14 @@ export class SessionService {
           {
             ...meta,
             // A pending start keeps pasted images as artifacts, like a queued message.
-            pending: { workspace, input: input && this.externalize(session, input) },
+            pending: { workspace, input: input && this.externalize(session, input), fork },
           },
         );
         if (waitingForSlot) admission?.enqueue(session.id);
         return true;
       }
       repo.create(session, { ...meta, pending: null });
-      this.launchInBackground(session.id, input, workspace, meta.forkStart?.fork);
+      this.launchInBackground(session.id, input, workspace, fork);
       return false;
     } finally {
       if (!this.launching.has(session.id)) admission?.release(session.id);
@@ -312,7 +314,7 @@ export class SessionService {
     const { repo, projects } = this.deps;
     await this.sourceProjectChecked(id);
     const plan = await planFork({ repo, projects, runner: this.runnerOf(id) }, id, req);
-    this.createAndLaunch(plan.session, plan.meta, plan.start.workspace);
+    this.createAndLaunch(plan.session, plan.meta, plan.start.workspace, undefined, plan.start.fork);
     return { sessionId: plan.session.id };
   }
 
@@ -326,7 +328,7 @@ export class SessionService {
     const { repo, projects, utility } = this.deps;
     await this.sourceProjectChecked(id);
     const plan = await planHandoff({ repo, projects, runner: this.runnerOf(id), utility }, id, req);
-    this.createAndLaunch(plan.session, plan.meta, plan.start.workspace);
+    this.createAndLaunch(plan.session, plan.meta, plan.start.workspace, undefined, plan.start.fork);
     return { sessionId: plan.session.id };
   }
 
@@ -340,7 +342,7 @@ export class SessionService {
     const { repo, projects } = this.deps;
     await this.sourceProjectChecked(id);
     const plan = await planReview({ repo, projects, runner: this.runnerOf(id) }, id, req);
-    this.createAndLaunch(plan.session, plan.meta, plan.start.workspace);
+    this.createAndLaunch(plan.session, plan.meta, plan.start.workspace, undefined, plan.start.fork);
     return { sessionId: plan.session.id };
   }
 
@@ -365,8 +367,8 @@ export class SessionService {
       this.launchInBackground(
         session.id,
         pending.input,
-        meta?.forkStart?.workspace ?? pending.workspace,
-        meta?.forkStart?.fork,
+        meta?.pending?.workspace ?? meta?.forkStart?.workspace ?? pending.workspace,
+        pending.fork ?? meta?.forkStart?.fork,
       );
     } finally {
       if (!this.launching.has(session.id)) admission?.release(session.id);
@@ -401,10 +403,12 @@ export class SessionService {
       !isFactorySession(session) &&
       (repo.find(id)?.startMeta?.admission || !this.reserve(session))
     ) {
-      if (req.whenBusy === "reject") throw conflict("All agent slots are in use", "turn_running");
+      if (req.whenBusy === "reject" || !this.canWaitForOutbox(session)) {
+        throw conflict("All agent slots are in use", AT_CAPACITY_CODE);
+      }
       const queued = this.enqueue(id, req.input, from);
       this.holds.release(id);
-      admission?.enqueue(id);
+      if (!session.archivedAt) admission?.enqueue(id);
       return queued;
     }
     // Its place in the queue, should it end up there: ahead of messages that arrive meanwhile.
@@ -475,8 +479,8 @@ export class SessionService {
     });
     if (refusal) throw refusal;
     const { admission } = this.deps;
-    if (admission && !admission.tryReserve(id, session.role)) {
-      throw conflict("All agent slots are in use; try again when one frees", "turn_running");
+    if (!this.reserve(session)) {
+      throw conflict("All agent slots are in use; try again when one frees", AT_CAPACITY_CODE);
     }
     this.delivering.add(id);
     try {
@@ -545,15 +549,17 @@ export class SessionService {
     );
   }
 
-  canFlushOutbox(session: Session, admissionHead = false): boolean {
-    const id = session.id;
+  canFlushOutbox(session: Session): boolean {
     return (
-      !this.holds.isHeld(id) &&
-      !this.delivering.has(id) &&
-      !this.deps.admission?.isHeld(id) &&
-      (!session.archivedAt || admissionHead) &&
-      (FLUSHABLE.has(session.status) ||
-        (admissionHead && !BUSY.has(session.status) && !NOT_STARTED.has(session.status)))
+      !this.holds.isHeld(session.id) &&
+      !this.delivering.has(session.id) &&
+      FLUSHABLE.has(session.status)
+    );
+  }
+
+  canWaitForOutbox(session: Session): boolean {
+    return (
+      FLUSHABLE.has(session.status) || BUSY.has(session.status) || NOT_STARTED.has(session.status)
     );
   }
 
@@ -565,36 +571,40 @@ export class SessionService {
    */
   async flushOutbox(id: string, admissionHead = false): Promise<void> {
     const { admission, repo, outbox } = this.deps;
-    const found = repo.find(id);
-    if (!found || !this.canFlushOutbox(found.session, admissionHead)) return;
-    const { session, startMeta } = found;
-    const next = outbox.peek(id);
-    if (!next) return;
-    if (!admissionHead) {
-      if (startMeta?.admission) return;
-      if (!this.reserve(session)) {
-        admission?.enqueue(id);
-        return;
-      }
-    }
+    let reserved = admissionHead;
     try {
-      if (admissionHead) admission?.dequeue(id);
-      outbox.remove(next, "sent");
-      await this.sendNow(session, next.input, next.from);
-    } catch (error) {
-      if (isTurnRunningError(error)) {
-        this.deps.outbox.restore(next);
-        this.flushIfSettled(id);
-        return;
+      const found = repo.find(id);
+      if (!found || !this.canFlushOutbox(found.session)) return;
+      const { session, startMeta } = found;
+      const next = outbox.peek(id);
+      if (!next) return;
+      if (!admissionHead) {
+        if (startMeta?.admission && !session.archivedAt) return;
+        if (!this.reserve(session)) {
+          if (!session.archivedAt) admission?.enqueue(id);
+          return;
+        }
+        reserved = true;
       }
-      const transient = isTransientRunnerError(error);
-      this.holds.hold(id, transient);
-      this.deps.outbox.restore(next);
-      if (!transient && session.status !== "failed") {
-        this.deps.launcher.fail(id, `send-${Date.now()}`, error);
+      try {
+        if (admissionHead || session.archivedAt) admission?.dequeue(id);
+        outbox.remove(next, "sent");
+        await this.sendNow(session, next.input, next.from);
+      } catch (error) {
+        if (isTurnRunningError(error)) {
+          outbox.restore(next);
+          this.flushIfSettled(id);
+          return;
+        }
+        const transient = isTransientRunnerError(error);
+        this.holds.hold(id, transient);
+        outbox.restore(next);
+        if (!transient && session.status !== "failed") {
+          this.deps.launcher.fail(id, `send-${Date.now()}`, error);
+        }
       }
     } finally {
-      admission?.release(id);
+      if (reserved) admission?.release(id);
     }
   }
 

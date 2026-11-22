@@ -70,7 +70,11 @@ it("uses the Team choices and replaces a scout with a different pinned effort", 
   const scout = scoutAgent(env.factory.ctx, env.project, tuning);
   expect(scout.choice).toEqual({ provider: "claude", model: "architect", effort: "high" });
   expect(
-    needsFreshSession({ provider: "claude", model: "architect", effort: "low" }, scout, []),
+    needsFreshSession(
+      { provider: "claude", model: "architect", effort: "low" },
+      { ...scout, reasoningEffort: true },
+      [],
+    ),
   ).toBe(true);
   expect(reviewer(tuning)).toMatchObject({ provider: "claude", model: "reviewer", effort: "high" });
   const fallback = reviewer(tuning, ["codex"]);
@@ -99,6 +103,21 @@ it("seeds only new loops when setup is remembered", () => {
   const existing = data.saveLoop(data.loopOrNew(projectId));
   expect(existing.tuning).toMatchObject({ team: [], resultSummaryBytes: null });
   env.settings.update({ teamSetup: { remembered: true } });
-  expect(data.loopOrNew("new-project").tuning).toMatchObject({ team, resultSummaryBytes: 256 });
+  const draft = data.loopOrNew("new-project");
+  expect(draft.tuning).toMatchObject({ team: [], resultSummaryBytes: null });
+  expect(data.loop("new-project")).toBeUndefined();
+  expect(data.saveLoop(draft).tuning).toMatchObject({ team, resultSummaryBytes: 256 });
+  expect(data.loop("new-project")?.tuning).toMatchObject({ team, resultSummaryBytes: 256 });
   expect(data.loopOrNew(projectId)).toEqual(existing);
+});
+
+it("uses the legacy docs builder before the Team writer, then falls back to that writer", () => {
+  const writers = team.filter(({ role }) => role === "writer");
+  const tuning = FactoryTuning.parse({ ...legacy, team: writers });
+  expect(builderWanted({ type: "docs" }, tuning)).toEqual({ provider: "codex", model: "docs" });
+  expect(builderWanted({ type: "docs" }, { ...tuning, docsBuilderProvider: null })).toEqual({
+    provider: "claude",
+    model: "writer",
+    effort: "high",
+  });
 });

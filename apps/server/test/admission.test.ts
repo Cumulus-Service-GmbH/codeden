@@ -1,5 +1,8 @@
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { type ApiContext, createApi } from "../src/routes/api";
 import { SessionAdmission } from "../src/services/sessions/admission";
+import { SettingsStore } from "../src/settings-store";
 import { createGithubEnv } from "./support/github-env";
 
 let env: ReturnType<typeof createGithubEnv>;
@@ -22,18 +25,16 @@ function admission(projects = 0) {
 }
 
 describe("session admission", () => {
-  it("counts active sessions, reservations and holds as a union, and frees released slots", () => {
+  it("counts active sessions and reservations as a union, and frees released slots", () => {
     const slots = admission();
     const { id } = env.addSession({ status: "idle" });
     expect(slots.tryReserve(id, "agent")).toBe(true);
     env.repo.update(id, (s) => ({ ...s, status: "running" }));
-    slots.hold(id);
     expect(slots.status().active).toBe(1);
+    expect(slots.free(id)).toBe(1);
     expect(slots.tryReserve("next", "agent")).toBe(false);
     slots.release(id);
     env.repo.update(id, (s) => ({ ...s, status: "idle" }));
-    expect(slots.free()).toBe(0);
-    slots.unhold(id);
     expect(slots.free()).toBe(1);
     expect(slots.tryReserve("next", "agent")).toBe(true);
   });
@@ -49,10 +50,11 @@ describe("session admission", () => {
       () => checking,
     );
     expect(slots.tryReserve("next", "agent")).toBe(false);
-    slots.hold(id);
     expect(slots.status().active).toBe(1);
-    slots.unhold(id);
+    expect(slots.tryReserve(id, "agent")).toBe(true);
     checking.clear();
+    expect(slots.tryReserve("next", "agent")).toBe(false);
+    slots.release(id);
     expect(slots.tryReserve("next", "agent")).toBe(true);
   });
 
@@ -66,6 +68,19 @@ describe("session admission", () => {
     slots.release("agent");
     expect(slots.tryReserve("extra", "pm")).toBe(true);
     expect(slots.status()).toMatchObject({ active: 1, control: 3 });
+  });
+
+  it("leaves room for new work beyond the slots owed to existing waiters", () => {
+    const slots = new SessionAdmission(
+      env.repo,
+      () => 2,
+      () => 0,
+    );
+    const waiter = env.addSession({ status: "idle" });
+    slots.enqueue(waiter.id);
+    expect(slots.tryReserve("new", "agent")).toBe(true);
+    expect(slots.tryReserve("later", "agent")).toBe(false);
+    expect(slots.tryReserve(waiter.id, "agent", true)).toBe(true);
   });
 
   it("persists FIFO order at tied timestamps and leaves capacity for waiters", () => {
@@ -92,4 +107,25 @@ describe("session admission", () => {
     restarted.release(second.id);
     expect(restarted.free()).toBe(1);
   });
+});
+
+it("PATCH /api/settings persists the session limit and remembered Team setup", async () => {
+  const settings = new SettingsStore(join(env.dir, "settings.json"));
+  const api = createApi({
+    services: { settings, store: env.store, orchestration: {} },
+    network: {},
+  } as ApiContext);
+  const patch = {
+    limits: { maxActiveSessions: 3 },
+    teamSetup: { remembered: true, resultSummaryBytes: 256 },
+  };
+  const response = await api.request("/settings", {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject(patch);
+  const saved = await api.request("/settings");
+  expect(await saved.json()).toMatchObject(patch);
 });

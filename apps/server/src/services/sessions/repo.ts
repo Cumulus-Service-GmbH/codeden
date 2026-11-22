@@ -39,6 +39,7 @@ import type { EventStore } from "../../events/store";
 import { notFound } from "../errors";
 import { ACTIVE_RUN_STATUSES, ACTIVE_SESSION_STATUSES } from "./conflicts";
 import type { ForkStart } from "./fork";
+import type { LaunchFork } from "./launcher";
 import type { UnansweredStart } from "./unanswered-start";
 
 /** Session ids per query of `modelsOf`, so no query has too many parameters. */
@@ -49,6 +50,7 @@ export type FileEditCall = Extract<ToolCallItem, { toolKind: "file_edit" }>;
 
 /** What a queued session needs to start later (kept with its start metadata). */
 export interface PendingStart {
+  fork?: LaunchFork;
   input?: UserInput;
   workspace: WorkspaceRequest;
 }
@@ -289,9 +291,12 @@ export class SessionRepo {
       })
       .from(sessions)
       .where(
-        or(
-          inArray(sessions.status, ["starting", "running", "waiting"]),
-          sql`json_extract(${sessions.startMeta}, '$.admission.seq') is not null`,
+        and(
+          isNull(sessions.archivedAt),
+          or(
+            inArray(sessions.status, ["starting", "running", "waiting"]),
+            sql`json_extract(${sessions.startMeta}, '$.admission.seq') is not null`,
+          ),
         ),
       )
       .all();

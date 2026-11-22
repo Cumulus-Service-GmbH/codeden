@@ -153,6 +153,13 @@ export class FactorySessions {
     return this.runnable(provider, { ignoreFailures: true });
   }
 
+  supportsReasoningEffort(provider: string): boolean {
+    return (
+      this.deps.runner.providers().find((p) => p.id === provider)?.capabilities?.reasoningEffort ===
+      true
+    );
+  }
+
   /** The models a provider lists (aliases with the full ids they run), from the runner. */
   models(provider: string): ModelInfo[] {
     return this.deps.runner.providers().find((p) => p.id === provider)?.models ?? [];

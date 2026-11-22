@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import {
+  agentEventToNewEvent,
   type ProviderInfo,
   type RunnerCommandName,
   type RunnerCommandOf,
@@ -16,11 +17,13 @@ import { SessionAdmission } from "../src/services/sessions/admission";
 import { SessionLauncher } from "../src/services/sessions/launcher";
 import { SessionLifecycle } from "../src/services/sessions/lifecycle";
 import { Outbox } from "../src/services/sessions/outbox";
+import { QueueService } from "../src/services/sessions/queue";
 import { SessionService, type SessionServiceDeps } from "../src/services/sessions/session-service";
 import { SettingsStore } from "../src/settings-store";
 import { createGithubEnv, type GithubEnv } from "./support/github-env";
 
 const capabilities = (fork: boolean): ProviderInfo["capabilities"] => ({
+  readOnly: true,
   resume: true,
   steer: true,
   interrupt: true,
@@ -112,6 +115,7 @@ function createSessions(admission: SessionAdmission, settings: SettingsStore) {
     outbox: new Outbox(env.db.db, env.store),
     admission,
     settings,
+    utility: { handoffSummary: async () => null },
     artifacts: {
       externalizeAttachments: (i: UserInput) => i,
       resolveAttachments: (i: UserInput) => i,
@@ -194,7 +198,7 @@ describe("global session admission", () => {
     expect(second).toMatchObject({ status: "queued", behind: [] });
     const input = { text: "queued turn", attachments: [] };
     await expect(sessions.send(target.id, { input, whenBusy: "reject" })).rejects.toMatchObject({
-      code: "turn_running",
+      code: "at_capacity",
     });
     expect(sessions.hasOutbox(target.id)).toBe(false);
     expect(await sessions.send(target.id, { input, whenBusy: "queue" })).toEqual({
@@ -237,4 +241,84 @@ describe("global session admission", () => {
     for (const key of ["a", "b", "c"]) expect((await start(key)).status).toBe("started");
     await settle(sessions);
   });
+
+  it("preserves the queued message when Send now is refused at capacity", async () => {
+    const settings = new SettingsStore(join(env.dir, "settings.json"));
+    const admission = new SessionAdmission(
+      env.repo,
+      () => 1,
+      () => 2,
+    );
+    const sessions = createSessions(admission, settings);
+    const target = source();
+    env.addSession({ status: "running" });
+    await sessions.send(target.id, {
+      input: { text: "queued", attachments: [] },
+      whenBusy: "queue",
+    });
+    const outbox = new Outbox(env.db.db, env.store);
+    const message = outbox.peek(target.id);
+    if (!message) throw new Error("missing queued message");
+    const queue = new QueueService({
+      outbox,
+      repo: env.repo,
+      admission,
+      sessions,
+      artifacts: { artifactForPath: () => undefined },
+      providers: () => PROVIDERS,
+    });
+
+    await expect(queue.sendNow(target.id, message.id)).rejects.toMatchObject({
+      code: "at_capacity",
+    });
+    expect(outbox.peek(target.id)?.id).toBe(message.id);
+    expect(admission.status().waiting).toHaveLength(1);
+  });
+
+  it.each(["handoff", "review"] as const)(
+    "preserves the %s workspace and checkpoint at the cap",
+    async (kind) => {
+      const settings = new SettingsStore(join(env.dir, "settings.json"));
+      const admission = new SessionAdmission(
+        env.repo,
+        () => 1,
+        () => 2,
+      );
+      const sessions = createSessions(admission, settings);
+      const target = source();
+      env.store.append([
+        agentEventToNewEvent(target.id, { type: "thread.started", thread: { id: "thread" } }),
+        agentEventToNewEvent(target.id, {
+          type: "turn.started",
+          threadId: "thread",
+          turnId: "turn",
+        }),
+        agentEventToNewEvent(target.id, {
+          type: "turn.completed",
+          threadId: "thread",
+          turnId: "turn",
+        }),
+      ]);
+      checkpoints[target.id] = [1];
+      const active = env.addSession({ status: "running" });
+
+      const { sessionId } = await sessions[kind](target.id, { provider: "plain" });
+      expect(env.repo.get(sessionId).status).toBe("queued");
+      expect(env.repo.find(sessionId)?.startMeta?.pending).toMatchObject({
+        workspace: { baseRef: target.branch, fetch: false },
+        fork: { restoreCheckpoint: { sessionId: target.id, index: 1 } },
+      });
+      expect(calls.some(({ name }) => name === "workspace.prepare")).toBe(false);
+
+      env.repo.update(active.id, (s) => ({ ...s, status: "idle" }));
+      expect(admission.tryReserve(sessionId, "agent", true)).toBe(true);
+      sessions.startQueued(env.repo.get(sessionId));
+      await settle(sessions);
+      expect(call("workspace.prepare")).toMatchObject({
+        baseRef: target.branch,
+        restoreCheckpoint: { sessionId: target.id, index: 1 },
+      });
+      expect(call("session.start")).toMatchObject({ sessionId });
+    },
+  );
 });

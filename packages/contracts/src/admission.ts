@@ -2,7 +2,7 @@ import { z } from "zod";
 import { Id, Timestamp } from "./common";
 
 /** Operation waiting for an agent slot. */
-export const AdmissionWaitKind = z.enum(["start", "turn", "checks"]);
+export const AdmissionWaitKind = z.enum(["start", "turn"]);
 export type AdmissionWaitKind = z.infer<typeof AdmissionWaitKind>;
 
 /** A queued operation and its one-based position in the global line. */

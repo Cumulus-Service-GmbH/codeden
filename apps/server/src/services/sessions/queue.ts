@@ -1,5 +1,11 @@
-import type { ProviderInfo, QueuedMessage, SendQueuedNowResponse } from "@codeden/contracts";
+import {
+  AT_CAPACITY_CODE,
+  type ProviderInfo,
+  type QueuedMessage,
+  type SendQueuedNowResponse,
+} from "@codeden/contracts";
 import { badRequest, conflict, notFound } from "../errors";
+import { isFactorySession } from "../factory/starter";
 import type { SessionAdmission } from "./admission";
 import { type ArtifactLookup, clientInput } from "./client-items";
 import type { Outbox } from "./outbox";
@@ -55,23 +61,37 @@ export class QueueService {
   async sendNow(sessionId: string, messageId: string): Promise<SendQueuedNowResponse> {
     const message = this.require(sessionId, messageId);
     const session = this.deps.repo.get(sessionId);
+    const { admission } = this.deps;
+    if (!isFactorySession(session) && admission && !this.deps.sessions.isDelivering(sessionId)) {
+      if (!admission.tryReserve(sessionId, session.role)) {
+        throw conflict("All agent slots are in use", AT_CAPACITY_CODE);
+      }
+      // Active turns already account for their slot. Give back any temporary reservation
+      // before nudging the normal outbox delivery for an idle session.
+      if (!BUSY.has(session.status)) admission.release(sessionId);
+    }
     if (!BUSY.has(session.status)) {
       // Nudge delivery so an idle session with a waiting queue sends its next message, in order.
       void this.deps.sessions.flushOutbox(sessionId).catch(() => undefined);
       throw conflict("No turn is running: the queue sends this message next", "no_turn");
     }
-    const canSteer = this.deps.providers(sessionId).find((p) => p.id === session.provider)
-      ?.capabilities.steer;
-    if (!canSteer) throw conflict("This provider cannot steer a running turn", "unsupported");
-    // Taken out before anything is awaited: delivery can no longer pick it up.
-    this.deps.outbox.remove(message, "sent");
     try {
-      await this.deps.sessions.steer(sessionId, message.input);
-      return { status: "steered" };
-    } catch (error) {
-      this.deps.outbox.restore(message);
-      void this.deps.sessions.flushOutbox(sessionId).catch(() => undefined);
-      throw error;
+      const canSteer = this.deps.providers(sessionId).find((p) => p.id === session.provider)
+        ?.capabilities.steer;
+      if (!canSteer) throw conflict("This provider cannot steer a running turn", "unsupported");
+      // Taken out before anything is awaited: delivery can no longer pick it up.
+      this.deps.outbox.remove(message, "sent");
+      try {
+        await this.deps.sessions.steer(sessionId, message.input);
+        if (!this.deps.outbox.count(sessionId)) admission?.dequeue(sessionId);
+        return { status: "steered" };
+      } catch (error) {
+        this.deps.outbox.restore(message);
+        void this.deps.sessions.flushOutbox(sessionId).catch(() => undefined);
+        throw error;
+      }
+    } finally {
+      if (session.archivedAt) admission?.release(sessionId);
     }
   }
 
