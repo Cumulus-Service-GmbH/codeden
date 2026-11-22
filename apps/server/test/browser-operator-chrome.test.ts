@@ -143,13 +143,18 @@ describe("Claude in Chrome for Browser Operator sessions", () => {
 
 describe("PM Chrome confirmation cards", () => {
   it.each([
-    ["user", "Allow Chrome", "started"],
-    ["user", "Cancel", "skipped"],
-    ["pm", "Allow Chrome", "started"],
-    ["timeout", "", "skipped"],
-    ["abort", "", "skipped"],
-    ["already aborted", "", "skipped"],
-  ] as const)("handles Chrome consent for %s answering %s", async (answerer, answer, status) => {
+    [
+      "the user's answer completes the Chrome launch confirmation",
+      "user",
+      "Allow Chrome",
+      "started",
+    ],
+    ["handles Chrome consent for user answering Cancel", "user", "Cancel", "skipped"],
+    ["a PM's answer leaves the Chrome launch confirmation open", "pm", "Allow Chrome", "started"],
+    ["handles Chrome consent timeout", "timeout", "", "skipped"],
+    ["handles Chrome consent abort", "abort", "", "skipped"],
+    ["handles Chrome consent when already aborted", "already aborted", "", "skipped"],
+  ] as const)("%s", async (_name, answerer, answer, status) => {
     const database = openDatabase(":memory:");
     const controller = new AbortController();
     try {
@@ -228,6 +233,8 @@ describe("PM Chrome confirmation cards", () => {
           questions.respond(sampleSession.id, card.requestId, response, "pm"),
         ).rejects.toMatchObject({ code: "user_confirmation_required" });
         expect(sessionRepo.item(sampleSession.id, card.id)?.item.status).toBe("in_progress");
+      }
+      if (answerer === "pm" || answerer === "user") {
         await expect(
           questions.respond(sampleSession.id, card.requestId, response, "user"),
         ).resolves.toBe(true);
@@ -236,8 +243,6 @@ describe("PM Chrome confirmation cards", () => {
           answers: response.answers,
           decidedBy: "user",
         });
-      } else if (answerer === "user") {
-        await questions.respond(sampleSession.id, card.requestId, response, "user");
       } else if (answerer === "abort") {
         controller.abort();
       }
