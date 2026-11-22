@@ -18,6 +18,7 @@ export * from "./checks";
 export * from "./child-runs";
 export * from "./common";
 export * from "./content-security";
+export * from "./decision-rights";
 export * from "./desktop";
 export * from "./entities/artifact";
 export * from "./entities/automation";
