@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AcpSessionSetup } from "../src/acp/protocol";
+import type { AcpRpc } from "../src/acp/rpc";
 import { AntigravityAdapter } from "../src/antigravity/adapter";
 import {
   ANTIGRAVITY_INSTALL_COMMAND,
@@ -14,7 +15,7 @@ import {
   fallbackAntigravityModels,
   thoughtLevel,
 } from "../src/antigravity/models";
-import { probeAntigravity } from "../src/antigravity/probe";
+import { listSetup, probeAntigravity } from "../src/antigravity/probe";
 import type { ResolvedCommand } from "../src/util/exec";
 import { clearExecutableCache } from "../src/util/locate";
 
@@ -233,6 +234,27 @@ describe("probeAntigravity's async reports", () => {
       },
     });
     expect(result.acp).toBe(true);
+  });
+});
+
+describe("listSetup's deadline", () => {
+  it("drops a reply delivered after the deadline even before the timer has run", async () => {
+    let reply: (setup: AcpSessionSetup) => void = () => undefined;
+    const rpc = {
+      request: () => new Promise<AcpSessionSetup>((resolve) => (reply = resolve)),
+    } as unknown as AcpRpc;
+    const now = vi.spyOn(performance, "now").mockReturnValue(1_000);
+    try {
+      const onSetup = vi.fn();
+      // A long timer that won't run during the test; only the monotonic check can drop it.
+      const listed = listSetup(rpc, "/tmp", 60_000, onSetup);
+      now.mockReturnValue(1_000 + 60_001);
+      reply({ configOptions: [] });
+      await expect(listed).resolves.toBeUndefined();
+      expect(onSetup).not.toHaveBeenCalled();
+    } finally {
+      now.mockRestore();
+    }
   });
 });
 

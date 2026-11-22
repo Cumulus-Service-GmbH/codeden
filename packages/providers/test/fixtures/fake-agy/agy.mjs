@@ -49,12 +49,12 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         return send({ id: msg.id, error: { code: -32000, message: "Authentication required" } });
       }
       if (env.FAKE_AGY_NEW_HANG === "1") return;
-      if (env.FAKE_AGY_NEW_DELAY_MS) {
-        return setTimeout(() => send({ id: msg.id, result: setup }), Number(env.FAKE_AGY_NEW_DELAY_MS));
-      }
       if (env.FAKE_AGY_DROP_MODEL) {
         const model = setup.configOptions.find((o) => o.id === "model");
         if (model) model.options = model.options.filter((o) => o.value !== env.FAKE_AGY_DROP_MODEL);
+      }
+      if (env.FAKE_AGY_NEW_DELAY_MS) {
+        return setTimeout(() => send({ id: msg.id, result: setup }), Number(env.FAKE_AGY_NEW_DELAY_MS));
       }
       return send({ id: msg.id, result: setup });
     case "session/load":

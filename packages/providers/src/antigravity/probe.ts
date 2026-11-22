@@ -40,7 +40,7 @@ const SETUP_TIMEOUT_MS = 8_000;
  * thinking levels, reported through `onSetup` as it arrives. Undefined when it fails or is
  * slow (a signed-out CLI, an old one, a hang); a reply after the deadline is dropped.
  */
-async function listSetup(
+export async function listSetup(
   rpc: AcpRpc,
   cwd: string,
   timeoutMs: number,

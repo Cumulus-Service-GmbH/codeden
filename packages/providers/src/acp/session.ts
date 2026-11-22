@@ -325,6 +325,7 @@ export class AcpSession implements ProviderSession {
     if (this.model) {
       const setup = this.setup;
       this.setup = await setModel(rpc, opened.sessionId, setup, this.model).catch(() => setup);
+      this.reportSetup(setup);
     }
     await this.applyEffort(rpc, opened.sessionId, this.effort);
     const model = this.model ?? modelsOf(opened.setup)?.current;
@@ -348,7 +349,9 @@ export class AcpSession implements ProviderSession {
     if (!rpc || !this.acpSession || want === this.mode) return;
     const next = await setMode(rpc, this.acpSession, this.setup, want);
     if (!next) return;
+    const before = this.setup;
     this.setup = next;
+    this.reportSetup(before);
     this.mode = want;
   }
 
@@ -363,7 +366,9 @@ export class AcpSession implements ProviderSession {
     const model = next === undefined ? undefined : explicitModel(next);
     const switching = !!model && model !== this.model;
     if (model && switching) {
-      this.setup = await setModel(rpc, sessionId, this.setup, model);
+      const before = this.setup;
+      this.setup = await setModel(rpc, sessionId, before, model);
+      this.reportSetup(before);
       this.model = model;
       // A new model brings its own level, so the effort is set again after it.
       this.agentEffort = undefined;
@@ -406,6 +411,7 @@ export class AcpSession implements ProviderSession {
     const setup = this.setup;
     const applied = setConfigValue(rpc, sessionId, setup, spec.category, pick);
     this.setup = strict ? await applied : await applied.catch(() => setup);
+    this.reportSetup(setup);
     if (!effort) this.agentEffort = undefined;
   }
 
@@ -417,6 +423,15 @@ export class AcpSession implements ProviderSession {
       this.policy.planning = false;
       this.events.push({ type: "session.updated", planMode: false });
     }
+  }
+
+  /**
+   * Report the setup a change of model, mode or effort brought (the agent's reply lists every
+   * option, and a new model can list other models or levels), so the adapter's list follows.
+   */
+  private reportSetup(before: AcpSessionSetup): void {
+    if (this.setup === before) return;
+    notify(() => this.config.onSetup?.(this.setup, this.info));
   }
 
   private onConfigOptions(options: AcpConfigOption[]): void {
