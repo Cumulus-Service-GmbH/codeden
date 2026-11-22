@@ -809,9 +809,10 @@ describe("global session admission", () => {
     expect(env.repo.get(fork.sessionId).status).toBe("queued");
     idle(target.id);
     await drain();
+    const forkResume = "claude-source:fork";
     expect(env.repo.get(fork.sessionId)).toMatchObject({
       status: "idle",
-      resumeToken: "claude-source:fork",
+      resumeToken: forkResume,
     });
 
     settings.update({ limits: defaultLimits });
