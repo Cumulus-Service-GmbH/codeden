@@ -215,9 +215,13 @@ describe("orchestration contracts (§8)", () => {
     const draining: ProjectStatus = {
       ...status,
       project: { ...status.project, mode: "dark_factory" },
-      factory: { loopState: "draining", drainInFlight: 2 },
+      factory: { loopState: "draining", drainInFlight: 2, lastControl: null, halt: null },
     };
     expect(ProjectStatus.parse(JSON.parse(JSON.stringify(draining)))).toEqual(draining);
+    const legacyFactory = { loopState: "draining", drainInFlight: 2 };
+    expect(ProjectStatus.parse({ ...draining, factory: legacyFactory }).factory).toEqual(
+      draining.factory,
+    );
     expect(
       ProjectStatus.safeParse({
         ...draining,

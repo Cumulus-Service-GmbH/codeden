@@ -131,6 +131,7 @@ export async function revertStartFailed(
   const merged = revertedName(ctx, item);
   return revertBlocked(ctx, project, loop, requeued, why, {
     title: `${branch} is red and the revert of ${merged} couldn't start: ${why}`,
+    pauseDetail: `of ${merged} couldn't start: ${why}`,
     body: `CI on ${branch} failed after ${merged} merged, and the agent writing its automatic revert couldn't start (${MAX_REVERT_STARTS} tries): ${why}. The factory loop stays paused: Retry the revert, or fix ${branch} by hand (revert ${merged} yourself) and resume the loop.`,
   });
 }

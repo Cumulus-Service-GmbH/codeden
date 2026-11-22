@@ -5,6 +5,8 @@ import { escalatedInboxId } from "./merge";
 import { shouldPause } from "./policy";
 import { isDarkFactory, raiseStuck, recordStuckDecision } from "./stuck";
 
+export const failureStreakPauseSuffix = " failed merge checks or reverts in a row";
+
 const AUDIT_TIMEOUT_MS = 5 * 60_000;
 
 /**
@@ -50,15 +52,10 @@ export function failItem(
   const next = { ...loop, consecutiveFailures: loop.consecutiveFailures + 1 };
   const project = ctx.projects.get(item.projectId);
   if (shouldPause(next.consecutiveFailures, project.factoryLimits)) {
-    return pauseLoop(
-      ctx,
-      next,
-      `${next.consecutiveFailures} failed merge checks or reverts in a row`,
-      {
-        inbox: true,
-        items: [item],
-      },
-    );
+    return pauseLoop(ctx, next, `${next.consecutiveFailures}${failureStreakPauseSuffix}`, {
+      inbox: true,
+      items: [item],
+    });
   }
   return next;
 }

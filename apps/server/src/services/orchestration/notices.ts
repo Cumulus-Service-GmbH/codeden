@@ -143,6 +143,7 @@ export function deriveNotices(events: RawEventEnvelope[], lookup: NoticeLookup):
       }
     } else if (e.type === "inbox.created" || e.type === "inbox.updated") {
       const { item } = e.payload as { item: InboxItem };
+      if (item.status !== "open") continue;
       // A session that fails again updates its open `run_failed` item in place (one item per
       // run): each new failure still reaches the PM, the orchestrator and automations.
       if (e.type === "inbox.updated" && !isRepeatFailure(item)) continue;

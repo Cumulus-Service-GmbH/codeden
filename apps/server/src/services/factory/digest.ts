@@ -11,6 +11,7 @@ import {
   factoryNeedLabel,
   HELD_FOLLOW_UP_DAYS,
   HELD_FOLLOW_UPS_MAX,
+  haltLine,
   type InboxItem,
   type Project,
   SPOT_CHECK_WINDOW_DAYS,
@@ -28,6 +29,7 @@ import { recoverable } from "./recover";
 import { specInboxId, specPending } from "./spec-approval";
 import { digestSpotChecks, spotCheckInboxId } from "./spot-checks";
 import { lastMergeReverted } from "./stats";
+import { factoryHalt } from "./status";
 import { OWNED_STAGES } from "./store";
 import { DECISION_INBOX_PREFIX } from "./unattended";
 
@@ -52,6 +54,10 @@ export async function writeDigest(
     spend: budgetSpend(ctx, project.id, day, project.factoryLimits),
     limits: project.factoryLimits,
     pausedReason: loop.state === "paused" ? loop.pausedReason : null,
+    control: haltLine(
+      factoryHalt(ctx.settings.get().factory.killSwitch, project.killSwitch, loop),
+      loop.lastControl,
+    ),
     draining: drainLine(ctx, project.id, loop),
     spotChecks: digestSpotChecks(ctx, project.id, day),
     lessons: digestLessons(ctx, project.id, day),
@@ -134,6 +140,7 @@ export function buildDigest(opts: {
   pausedReason: string | null;
   /** "Draining: 2 items in flight" while the kill switch's drain runs. */
   draining?: string | null;
+  control?: string | null;
   /** Spot-checks of the day and the window (`digestSpotChecks`); none by default. */
   spotChecks?: DigestSpotChecks;
   /** Lessons first learned during the day (`digestLessons`); none by default. */
@@ -221,7 +228,13 @@ export function buildDigest(opts: {
   };
   return {
     ...digest,
-    text: renderDigest(opts.projectName, digest, opts.pausedReason, opts.draining ?? null),
+    text: renderDigest(
+      opts.projectName,
+      digest,
+      opts.pausedReason,
+      opts.draining ?? null,
+      opts.control ?? null,
+    ),
   };
 }
 
@@ -290,6 +303,7 @@ export function renderDigest(
   d: Omit<FactoryDigest, "text">,
   pausedReason: string | null,
   draining: string | null = null,
+  control: string | null = null,
 ): string {
   const budget = [
     d.spend.budgetUsd !== null
@@ -300,7 +314,8 @@ export function renderDigest(
       : `${d.spend.tokens} tokens`,
   ].join(", ");
   const lines = [`Factory digest for ${projectName}, ${d.day}`, ""];
-  if (pausedReason) lines.push(`The loop is paused: ${pausedReason}.`, "");
+  if (control) lines.push(`${control}.`, "");
+  if (pausedReason && !control) lines.push(`The loop is paused: ${pausedReason}.`, "");
   if (draining) {
     lines.push(`${draining}: the factory takes on no new work and stops once they finish.`, "");
   }
