@@ -14,6 +14,7 @@ import { and, asc, desc, eq, gt, gte, inArray, isNull, lte, or, type SQL } from 
 import type { Db } from "../../db/client";
 import { notices } from "../../db/schema-orchestration";
 import type { EventStore } from "../../events/store";
+import { capSummary } from "../../mcp/tools/shared/helpers";
 import type { SessionRepo } from "../sessions/repo";
 import { clipKeepingEnd } from "./digest";
 
@@ -33,6 +34,7 @@ export interface DerivedNotice {
 /** What `deriveNotices` needs to look up while reading events. */
 export interface NoticeLookup {
   session(id: string): Session | undefined;
+  resultSummaryBytes?(projectId: string): number | null;
   /** Text of the final assistant message of a turn. */
   finalMessage(sessionId: string, turnId: string): string | null;
   /** What a turn was for (`Turn.kind`): a compaction finishes no work. Absent: work. */
@@ -114,6 +116,7 @@ export function deriveNotices(events: RawEventEnvelope[], lookup: NoticeLookup):
       // A compaction ("Compact now", between scout rounds) is no news: no notice, no wake.
       if (lookup.turnKind?.(s.id, event.turnId) === "compact") continue;
       const final = lookup.finalMessage(s.id, event.turnId);
+      const summary = s.result?.summary ?? (final ? clipKeepingEnd(final) : null);
       const finished: NoticeDraft = {
         id: `session.finished:${s.id}:${event.turnId}`,
         type: "session.finished",
@@ -123,11 +126,17 @@ export function deriveNotices(events: RawEventEnvelope[], lookup: NoticeLookup):
         title: `Finished: ${s.title ?? s.purpose}`,
         data: {
           ...workRef(s),
-          summary: s.result?.summary ?? (final ? clipKeepingEnd(final) : null),
+          summary,
           outcome: s.result?.outcome ?? null,
         },
       };
-      out.push({ wake: wakesPm(s), notice: finished });
+      const bytes = s.projectId ? (lookup.resultSummaryBytes?.(s.projectId) ?? null) : null;
+      const pmSummary = summary === null ? null : capSummary(summary, bytes);
+      const pmNotice =
+        pmSummary === summary
+          ? finished
+          : { ...finished, data: { ...finished.data, summary: pmSummary } };
+      out.push({ wake: wakesPm(s), notice: pmNotice });
       // Once per `finish` call: a turn without a result is the PM's business only.
       if (reportsToOrchestrator(s) && s.result) {
         out.push(forOrchestrator(finished, `session.finished:orchestrator:${s.id}:${s.result.at}`));

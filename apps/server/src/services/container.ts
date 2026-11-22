@@ -280,6 +280,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     () => opts.settings.get().limits.maxActiveSessions,
     () => projects.list().length,
     () => lifecycle.scheduleDrain(),
+    () => checksLoop.runningIds(),
   );
   sessions = new SessionService({
     admission,
@@ -312,6 +313,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     runnerOf: (id) => runners.forSession(id),
     send: (id, input) => sessions.send(id, { input, whenBusy: "queue" }, "codeden"),
     hasPendingMessage: (id) => sessions.hasOutbox(id) || sessions.isDelivering(id),
+    onRelease: () => admission.scheduleDrain(),
     log: opts.log,
   });
   sessions.setCheckRuns(checksLoop);
@@ -406,6 +408,8 @@ export function createServices(opts: ServicesOptions): AppServices {
     timezone: () => usage.timezone(),
     // The factory is created below; the digest asks it at wake time.
     factoryLoop: (projectId) => factory.loopSummary(projectId),
+    resultSummaryBytes: (projectId) =>
+      factory.data.loop(projectId)?.tuning.resultSummaryBytes ?? null,
     options: opts.orchestration,
     log: opts.log,
   });

@@ -35,8 +35,12 @@ function brief(text: string): UserInput {
 }
 
 /** A start request's provider and model: a model only when one is chosen. */
-function on(agent: AgentChoice): Pick<StartSessionRequestInit, "provider" | "model"> {
-  return { provider: agent.provider, ...(agent.model ? { model: agent.model } : {}) };
+function on(agent: AgentChoice): Pick<StartSessionRequestInit, "provider" | "model" | "effort"> {
+  return {
+    provider: agent.provider,
+    ...(agent.model ? { model: agent.model } : {}),
+    ...(agent.effort ? { effort: agent.effort } : {}),
+  };
 }
 
 /** Statuses that hold a session slot (`maxConcurrentSessions`). */
@@ -243,12 +247,12 @@ export class FactorySessions {
     model: string | null = null,
     /** The project's lessons for its brief (`lessons.ts`). */
     lessons: BriefLessons = NO_LESSONS,
+    effort?: AgentChoice["effort"],
   ): Promise<StartSessionResponse> {
     const step = item.type ? ` (${item.type})` : "";
     return this.start({
       projectId: item.projectId,
-      provider,
-      ...(model ? { model } : {}),
+      ...on({ provider, model, effort }),
       purpose: `Factory${step}: ${item.title}`.slice(0, 300),
       workKey: item.workKey,
       title: stripLeadingTags(item.title).slice(0, 200) || "Factory item",
@@ -266,7 +270,7 @@ export class FactorySessions {
   startReviewer(
     item: FactoryItem,
     vision: string,
-    reviewer: { provider: string; model: string | null },
+    reviewer: AgentChoice,
     note: string | null,
     /** The PR's head to review in a fresh worktree; null to use the builder's worktree. */
     pr: { headBranch: string; baseBranch: string } | null,
@@ -297,8 +301,7 @@ export class FactorySessions {
     }
     return this.start({
       projectId: item.projectId,
-      provider: reviewer.provider,
-      ...(reviewer.model ? { model: reviewer.model } : {}),
+      ...on(reviewer),
       purpose: `Factory review: ${item.title}`.slice(0, 300),
       workKey: `${REVIEW_WORK_KEY_PREFIX}${item.pr?.number ?? item.id}`,
       title: `Review: ${item.title}`.slice(0, 200),

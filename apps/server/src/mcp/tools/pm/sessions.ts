@@ -6,9 +6,12 @@ import {
   SessionStatus,
   StartedBy,
   StartSessionRequest,
+  teamMember,
+  teamRoleOfTitle,
   WorkKey,
 } from "@codeden/contracts";
 import { z } from "zod";
+import { applyTeamRole } from "../../../services/factory/team-role";
 import { defineTool, ToolError } from "../../define";
 import { agentSessionOf, compactSession, compactWork, projectFor } from "../shared/helpers";
 import { assertMayStartOnIssues, issuesNamed } from "./issue-trust";
@@ -36,7 +39,8 @@ export const listSessions = defineTool({
       .filter((s) => !input.startedBy || s.startedBy.kind === input.startedBy)
       .filter((s) => input.status || input.includeEnded || !ENDED.has(s.status))
       .slice(0, input.limit ?? 20);
-    return { count: list.length, sessions: list.map(compactSession) };
+    const bytes = services.factory.data.loop(projectId)?.tuning.resultSummaryBytes ?? null;
+    return { count: list.length, sessions: list.map((session) => compactSession(session, bytes)) };
   },
 });
 
@@ -84,12 +88,17 @@ export const startSession = defineTool({
             url: `https://github.com/${project.github.owner}/${project.github.repo}/issues/${input.issueNumber}`,
           }
         : undefined;
+    const team = services.factory.data.loop(projectId)?.tuning.team ?? [];
+    const member = teamMember(team, teamRoleOfTitle(input.title));
+    const models =
+      member?.model && input.model ? services.factory.ctx.sessions.models(member.provider) : [];
+    const { provider, model, effort } = applyTeamRole(input, team, models);
     const req = StartSessionRequest.parse({
       projectId,
       role: "agent",
-      provider: input.provider,
-      model: input.model,
-      effort: input.effort,
+      ...(provider !== undefined ? { provider } : {}),
+      ...(model !== undefined ? { model } : {}),
+      ...(effort !== undefined ? { effort } : {}),
       purpose: input.purpose,
       workKey: input.workKey ?? (input.issueNumber ? `issue:${input.issueNumber}` : undefined),
       scope: input.scope,

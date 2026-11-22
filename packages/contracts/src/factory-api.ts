@@ -29,6 +29,7 @@ import {
   SpotCheck,
   SpotCheckPercent,
 } from "./factory-spot-checks";
+import { Team } from "./team";
 
 /**
  * The factory loop of software-factory and dark-factory projects (§10.1): work items, merge
@@ -337,6 +338,9 @@ export type ReviewerFallback = z.infer<typeof ReviewerFallback>;
 
 /** Knobs of the loop beyond the required limits; all have safe defaults. */
 export const FactoryTuning = z.object({
+  team: Team.default([]),
+  /** UTF-8 byte cap for PM-facing summaries. Null leaves them uncapped. */
+  resultSummaryBytes: z.int().min(256).max(65536).nullable().default(null),
   /**
    * Largest change merged automatically: added + deleted lines, not counting lockfiles and
    * generated or vendored files. `null`: no limit.

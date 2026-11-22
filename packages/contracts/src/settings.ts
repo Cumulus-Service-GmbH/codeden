@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { AutonomyLevel, ProviderId, QuietHours, ReasoningEffort } from "./common";
+import { Team } from "./team";
 import { UpdateMode } from "./updates";
 import { DictationEngine, WhisperModelId } from "./voice-api";
 
@@ -95,6 +96,14 @@ const CustomModelList = z
  * older files keep working as fields are added.
  */
 export const Settings = z.object({
+  /** Save setup in Factory → Team; when `remembered`, a new project's factory settings start from it. */
+  teamSetup: z
+    .object({
+      remembered: z.boolean().default(false),
+      team: Team.default([]),
+      resultSummaryBytes: z.int().min(256).max(65536).nullable().default(null),
+    })
+    .prefault({}),
   schemaVersion: z.literal(1).default(1),
   /**
    * Agent sessions starting, running a turn or waiting on the user, across all projects.

@@ -327,7 +327,14 @@ async function startBuilder(
   const { provider, model } = choice;
   try {
     const lessons = await briefLessons(ctx, item);
-    const res = await ctx.sessions.startBuilder(item, vision, provider, model, lessons);
+    const res = await ctx.sessions.startBuilder(
+      item,
+      vision,
+      provider,
+      model,
+      lessons,
+      choice.effort,
+    );
     if (res.status === "conflict") {
       const other = res.existing.map((w) => w.workKey).join(", ");
       ctx.store.updateItem(item.id, (i) => ({

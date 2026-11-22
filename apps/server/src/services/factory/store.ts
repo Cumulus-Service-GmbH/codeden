@@ -10,6 +10,7 @@ import {
   LEGACY_SIZE_LIMITS,
   pipelineStep,
   ScoutState,
+  type Settings,
 } from "@codeden/contracts";
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "../../db/client";
@@ -70,6 +71,7 @@ export class FactoryStore {
   constructor(
     private readonly db: Db,
     private readonly events: EventStore,
+    private readonly settings: () => Settings,
   ) {
     this.reads = new ItemReads((projectId) =>
       this.db
@@ -92,29 +94,30 @@ export class FactoryStore {
 
   /** The project's loop, or a fresh idle one (not saved). */
   loopOrNew(projectId: string, now = new Date()): FactoryLoop {
-    return (
-      this.loop(projectId) ?? {
-        projectId,
-        state: "idle",
-        pausedReason: null,
-        consecutiveFailures: 0,
-        day: localDay(now),
-        mergesToday: 0,
-        discovery: [],
-        nextArea: 0,
-        lastDiscoveryAt: null,
-        scout: ScoutState.parse({}),
-        lastDigestDay: null,
-        enabledAt: null,
-        seenFailedShas: [],
-        fastMergeHold: null,
-        tuning: FactoryTuning.parse({}),
-        drain: null,
-        failedSessionsSweptAt: null,
-        lastTickAt: null,
-        updatedAt: now.toISOString(),
-      }
-    );
+    const existing = this.loop(projectId);
+    if (existing) return existing;
+    const setup = this.settings().teamSetup;
+    return {
+      projectId,
+      state: "idle",
+      pausedReason: null,
+      consecutiveFailures: 0,
+      day: localDay(now),
+      mergesToday: 0,
+      discovery: [],
+      nextArea: 0,
+      lastDiscoveryAt: null,
+      scout: ScoutState.parse({}),
+      lastDigestDay: null,
+      enabledAt: null,
+      seenFailedShas: [],
+      fastMergeHold: null,
+      tuning: FactoryTuning.parse(setup.remembered ? setup : {}),
+      drain: null,
+      failedSessionsSweptAt: null,
+      lastTickAt: null,
+      updatedAt: now.toISOString(),
+    };
   }
 
   /**

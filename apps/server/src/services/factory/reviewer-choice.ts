@@ -1,4 +1,4 @@
-import type { FactoryTuning } from "@codeden/contracts";
+import { type FactoryTuning, type ReasoningEffort, teamMember } from "@codeden/contracts";
 import { earliestUntil, type Unavailable, unavailableText, untilText } from "./availability";
 
 /**
@@ -14,6 +14,7 @@ export interface ReviewerChoice {
   provider: string;
   /** Null: the provider's default model. */
   model: string | null;
+  effort: ReasoningEffort | null;
   /** True when the reviewer runs on a different provider from the author. */
   crossProvider: boolean;
   /** Why the review doesn't run where the settings ask (fallback, same provider). */
@@ -29,7 +30,8 @@ export interface ReviewerWait {
 export interface ReviewerInput {
   /** The builder's provider and model (null when not known). */
   author: { provider: string | null; model: string | null };
-  tuning: Pick<FactoryTuning, "reviewerProvider" | "reviewerModel" | "reviewerFallback">;
+  tuning: Pick<FactoryTuning, "reviewerProvider" | "reviewerModel" | "reviewerFallback"> &
+    Partial<Pick<FactoryTuning, "team">>;
   /** Providers that can take new work now. */
   available: readonly string[];
   /** Providers the runner offers that can't, and why. */
@@ -52,14 +54,17 @@ export function pickReviewer(input: ReviewerInput): ReviewerChoice | ReviewerWai
     const until = earliestUntil(input.unavailable);
     return { wait: true, note: `Waiting: no review provider available${untilText(until)}` };
   }
+  const member = teamMember(tuning.team, "reviewer");
+  const provider = member?.provider ?? tuning.reviewerProvider;
   let wanted: string;
-  if (tuning.reviewerProvider !== "auto") {
-    wanted = tuning.reviewerProvider;
+  if (provider !== "auto") {
+    wanted = provider;
     if (available.includes(wanted)) {
       return {
         wait: false,
         provider: wanted,
-        model: tuning.reviewerModel,
+        model: member ? member.model : tuning.reviewerModel,
+        effort: member?.effort ?? null,
         crossProvider: wanted !== author.provider,
         note: null,
       };
@@ -68,7 +73,14 @@ export function pickReviewer(input: ReviewerInput): ReviewerChoice | ReviewerWai
     const others = available.filter((p) => p !== author.provider);
     const preferred = [...REVIEW_ORDER, ...others].find((p) => others.includes(p));
     if (preferred) {
-      return { wait: false, provider: preferred, model: null, crossProvider: true, note: null };
+      return {
+        wait: false,
+        provider: preferred,
+        model: null,
+        effort: null,
+        crossProvider: true,
+        note: null,
+      };
     }
     const blocked = input.unavailable.find((u) => u.provider !== author.provider);
     if (!blocked) {
@@ -79,6 +91,7 @@ export function pickReviewer(input: ReviewerInput): ReviewerChoice | ReviewerWai
         wait: false,
         provider: same as string,
         model: same === author.provider ? author.model : null,
+        effort: null,
         crossProvider: false,
         note: `No provider other than ${name(same as string)} is available; the review ran on the same provider as the author.`,
       };
@@ -105,6 +118,7 @@ function fallback(
       wait: false,
       provider: author.provider,
       model: author.model,
+      effort: null,
       crossProvider: false,
       note: `${reason}; the review ran on the builder's provider (${name(author.provider)}) in a fresh session.`,
     };
@@ -117,6 +131,7 @@ function fallback(
     wait: false,
     provider: other,
     model: other === author.provider ? author.model : null,
+    effort: null,
     crossProvider: other !== author.provider,
     note: `${reason}; the review ran on ${name(other)}.`,
   };

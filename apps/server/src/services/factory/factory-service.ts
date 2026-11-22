@@ -152,7 +152,7 @@ export class FactoryService {
   private unsubscribe: (() => void) | undefined;
 
   constructor(private readonly deps: FactoryServiceDeps) {
-    this.data = new FactoryStore(deps.db, deps.store);
+    this.data = new FactoryStore(deps.db, deps.store, () => deps.settings.get());
     this.archiver = new SessionArchiver({
       repo: deps.repo,
       archive: deps.archiveSession,

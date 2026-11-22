@@ -42,6 +42,7 @@ import {
   formServerOf,
   isRepeatFailure,
   type NoticeDraft,
+  type NoticeLookup,
   NoticeStore,
 } from "./notices";
 import {
@@ -79,6 +80,7 @@ export interface OrchestrationDeps {
   automation?: AutomationPort;
   /** The user's IANA timezone (the usage settings', else the machine's). Default: the machine's. */
   timezone?: () => string;
+  resultSummaryBytes?: NoticeLookup["resultSummaryBytes"];
   /** The factory loop of a project, for the status digest (null outside the factory modes). */
   factoryLoop?: (projectId: string) => ProjectStatus["factory"];
   options?: OrchestrationOptions;
@@ -426,6 +428,7 @@ export class OrchestrationService {
         const derived = [
           ...deriveNotices(events, {
             session,
+            resultSummaryBytes: this.deps.resultSummaryBytes,
             finalMessage: (sessionId, turnId) =>
               finalAssistantMessage(this.deps.db, sessionId, turnId),
             turnKind: (sessionId, turnId) => this.deps.repo.turn(sessionId, turnId)?.kind,

@@ -1,4 +1,12 @@
-import type { FactoryItem, FactoryTuning, ModelInfo, Project, Session } from "@codeden/contracts";
+import {
+  type FactoryItem,
+  type FactoryTuning,
+  type ModelInfo,
+  type Project,
+  type ReasoningEffort,
+  type Session,
+  teamMember,
+} from "@codeden/contracts";
 import { earliestUntil, untilText } from "./availability";
 import type { FactoryContext } from "./context";
 
@@ -14,12 +22,14 @@ export interface AgentWanted {
   provider: string;
   /** Null: the provider's default. Applies only to a chosen provider, never to `auto`. */
   model: string | null;
+  effort?: ReasoningEffort | null;
 }
 
 /** Where a session starts: `auto` lets the session service pick, as it always has. */
 export interface AgentChoice {
   provider: string;
   model: string | null;
+  effort?: ReasoningEffort | null;
 }
 
 /** No provider can take new work: the note to show while it waits. */
@@ -33,8 +43,11 @@ export function builderWanted(
   tuning: Pick<
     FactoryTuning,
     "builderProvider" | "builderModel" | "docsBuilderProvider" | "docsBuilderModel"
-  >,
+  > &
+    Partial<Pick<FactoryTuning, "team">>,
 ): AgentWanted {
+  const member = teamMember(tuning.team, item.type === "docs" ? "agentsMdWriter" : "writer");
+  if (member) return { provider: member.provider, model: member.model, effort: member.effort };
   if (item.type === "docs" && tuning.docsBuilderProvider) {
     return { provider: tuning.docsBuilderProvider, model: tuning.docsBuilderModel };
   }
@@ -51,9 +64,13 @@ export interface ScoutAgent {
 export function scoutAgent(
   ctx: FactoryContext,
   project: Project,
-  tuning: Pick<FactoryTuning, "scoutProvider" | "scoutModel">,
+  tuning: Pick<FactoryTuning, "scoutProvider" | "scoutModel"> &
+    Partial<Pick<FactoryTuning, "team">>,
 ): ScoutAgent {
-  const wanted = { provider: tuning.scoutProvider, model: tuning.scoutModel };
+  const member = teamMember(tuning.team, "architect");
+  const wanted = member
+    ? { provider: member.provider, model: member.model, effort: member.effort }
+    : { provider: tuning.scoutProvider, model: tuning.scoutModel };
   return { wanted, choice: chooseAgent(ctx, project, wanted, "scout") };
 }
 
@@ -72,10 +89,7 @@ export function chooseAgent(
   const available = ctx.sessions.providers();
   const blocked = ctx.sessions.unavailable();
   if (blocked.length === 0) {
-    return {
-      provider: wanted.provider,
-      model: wanted.provider === "auto" ? null : wanted.model,
-    };
+    return wanted.provider === "auto" ? { provider: "auto", model: null } : wanted;
   }
   if (available.length === 0) {
     return {
@@ -83,30 +97,36 @@ export function chooseAgent(
     };
   }
   if (wanted.provider !== "auto" && available.includes(wanted.provider)) {
-    return { provider: wanted.provider, model: wanted.model };
+    return wanted;
   }
   const roleDefault = ctx.settings.get().providers.agent.provider;
   const order = [wanted.provider, project.defaultProvider, roleDefault, ...available];
   const provider = order.find((p): p is string => Boolean(p) && available.includes(p as string));
-  return { provider: provider ?? (available[0] as string), model: null };
+  return {
+    provider: provider ?? (available[0] as string),
+    model: null,
+    ...(wanted.effort !== undefined ? { effort: null } : {}),
+  };
 }
 
 /**
  * Whether a long-lived scout or area reviewer session should be replaced by a fresh one before
  * its next round: the settings name a provider (not `auto`, which reuses any session as it always
  * has) and the session doesn't run where a new one would start, on another provider or, when a
- * model is set, another model (`modelMatches`, given the models its provider lists). A model left
+ * model is set, another model (`modelMatches`, given the models its provider lists), or another
+ * effort when pinned. A model left
  * to the provider's default matches any (sessions keep the default they resolved to). Compared
  * with the choice rather than the settings, so while the chosen provider is unavailable a session
  * on the fallback is kept instead of replaced each round.
  */
 export function needsFreshSession(
-  session: Pick<Session, "provider" | "model">,
+  session: Pick<Session, "provider" | "model"> & Partial<Pick<Session, "effort">>,
   { wanted, choice }: ScoutAgent,
   models: readonly ModelInfo[],
 ): boolean {
   if (wanted.provider === "auto" || "waiting" in choice || choice.provider === "auto") return false;
-  if (session.provider !== choice.provider) return true;
+  if (session.provider !== choice.provider || (choice.effort && session.effort !== choice.effort))
+    return true;
   return choice.model !== null && !modelMatches(models, choice.model, session.model);
 }
 

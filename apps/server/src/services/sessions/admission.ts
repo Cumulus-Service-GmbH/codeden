@@ -12,6 +12,7 @@ export class SessionAdmission {
     private readonly limit: () => number,
     private readonly projectCount: () => number,
     private readonly onRelease?: () => void,
+    private readonly checking: () => Iterable<string> = () => [],
   ) {}
 
   tryReserve(id: string, role: Session["role"], head = false): boolean {
@@ -94,7 +95,9 @@ export class SessionAdmission {
   }
 
   private counts() {
+    // A check run starting in the same tick a waiter is admitted can exceed the cap by one.
     const agents = new Set(this.held);
+    for (const id of this.checking()) agents.add(id);
     const controls = new Set<string>();
     for (const [id, role] of this.reserved) (role === "agent" ? agents : controls).add(id);
     for (const row of this.repo.admissionRows()) {

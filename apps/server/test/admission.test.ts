@@ -38,6 +38,24 @@ describe("session admission", () => {
     expect(slots.tryReserve("next", "agent")).toBe(true);
   });
 
+  it("counts an idle session's running checks as one slot", () => {
+    const { id } = env.addSession({ status: "idle" });
+    const checking = new Set([id]);
+    const slots = new SessionAdmission(
+      env.repo,
+      () => 1,
+      () => 0,
+      undefined,
+      () => checking,
+    );
+    expect(slots.tryReserve("next", "agent")).toBe(false);
+    slots.hold(id);
+    expect(slots.status().active).toBe(1);
+    slots.unhold(id);
+    checking.clear();
+    expect(slots.tryReserve("next", "agent")).toBe(true);
+  });
+
   it("exempts one control session plus one per non-archived project", () => {
     const slots = admission(1);
     expect(slots.tryReserve("agent", "agent")).toBe(true);

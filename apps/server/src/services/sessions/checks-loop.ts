@@ -37,6 +37,7 @@ export interface ChecksLoopDeps {
   send: (sessionId: string, input: UserInput) => Promise<unknown>;
   /** A message waits for the session or is on its way to it: it takes over from the loop. */
   hasPendingMessage: (sessionId: string) => boolean;
+  onRelease?: () => void;
   log?: (message: string) => void;
 }
 
@@ -78,6 +79,10 @@ export class ChecksLoop {
     this.stopped = true;
     this.unsubscribe?.();
     for (const id of [...this.runs.keys()]) void this.cancel(id, "interrupted");
+  }
+
+  runningIds(): Iterable<string> {
+    return this.runs.keys();
   }
 
   /** Whether checks are running for the session now. */
@@ -255,7 +260,10 @@ export class ChecksLoop {
   private end(sessionId: string, run: ActiveRun, outcome: CheckRunOutcome): void {
     if (run.outcome) return;
     run.outcome = outcome;
-    if (this.runs.get(sessionId) === run) this.runs.delete(sessionId);
+    if (this.runs.get(sessionId) === run) {
+      this.runs.delete(sessionId);
+      this.deps.onRelease?.();
+    }
     run.data.checks = run.data.checks.map((c) =>
       c.status === "pending" || c.status === "running"
         ? { ...c, status: "cancelled", exitCode: null }
