@@ -1,17 +1,32 @@
-import { Settings, type StartSessionRequest, type Team } from "@codeden/contracts";
-import { expect, it } from "vitest";
+import {
+  type AutonomyPolicy,
+  Settings,
+  type StartSessionRequest,
+  TEAM_ROLE_TAGS,
+  type Team,
+} from "@codeden/contracts";
+import { expect, it, vi } from "vitest";
 import { openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
-import { startSession } from "../src/mcp/tools/pm/sessions";
+import { setSessionAutonomy, startSession } from "../src/mcp/tools/pm/sessions";
 import type { AppServices } from "../src/services/container";
 import { SessionRepo } from "../src/services/sessions/repo";
+import { SessionService, type SessionServiceDeps } from "../src/services/sessions/session-service";
 import { sampleSession, sampleSessionEvent } from "./helpers";
 
 // A PM start resolves the same Team as the caller's Team file: the caller's own role layer, then
 // the project's Team, then the default Team; the guard checks the start by that same Team.
 async function start(
   input: Record<string, unknown>,
-  opts: { sessionId?: string; project?: Team; defaults?: Team; callerTitle?: string },
+  opts: {
+    sessionId?: string;
+    project?: Team;
+    defaults?: Team;
+    callerTitle?: string;
+    architect?: boolean;
+    pmPolicy?: AutonomyPolicy;
+    teamPolicy?: AutonomyPolicy;
+  },
 ) {
   const database = openDatabase(":memory:");
   try {
@@ -27,10 +42,12 @@ async function start(
           queuedBehind: [],
         }),
         ownTeamPins: true,
+        ...(opts.architect ? { teamArchitect: true } : {}),
       }));
       sessionRepo.update(sampleSession.id, (s) => ({
         ...s,
         title: opts.callerTitle ?? null,
+        projectId: "p1",
         provider: "codex",
         model: "caller-model",
       }));
@@ -41,11 +58,23 @@ async function start(
       projects: { get: () => ({ kind: "local", archivedAt: null }) },
       factory: {
         isUnattended: () => false,
-        data: { loop: () => ({ tuning: { team: opts.project ?? [], resultSummaryBytes: null } }) },
+        data: {
+          loop: () => ({
+            tuning: {
+              team: opts.project ?? [],
+              autonomyPolicy: opts.teamPolicy,
+              resultSummaryBytes: null,
+            },
+          }),
+        },
         ctx: { sessions: { models: () => [] } },
       },
       settings: {
-        get: () => Settings.parse({ teamSetup: { remembered: true, team: opts.defaults ?? [] } }),
+        get: () =>
+          Settings.parse({
+            autonomy: { pmPolicy: opts.pmPolicy },
+            teamSetup: { remembered: true, team: opts.defaults ?? [] },
+          }),
       },
       sessionRepo,
       sessions: {
@@ -61,7 +90,7 @@ async function start(
         services,
         projectId: "p1",
         sessionId: opts.sessionId ?? sampleSession.id,
-        role: "pm",
+        role: opts.callerTitle === "[Architect] Lead" ? "agent" : "pm",
         caller: "mcp",
         signal: new AbortController().signal,
       },
@@ -99,4 +128,121 @@ it("refuses a start whose calling session can't be read for its Team", async () 
   await expect(
     start({ title: "[Writer] Fix it" }, { sessionId: "missing", project: [writer] }),
   ).rejects.toThrow(/TEAM_UNRESOLVED/);
+});
+
+it("opens card-gated work supervised", async () => {
+  const { started } = await start({ purpose: "Production migration" }, {});
+  expect(started[0]?.autonomy).toBe("supervised");
+});
+
+it("accepts an explicit request for supervision", async () => {
+  const { started } = await start({ autonomy: "supervised" }, {});
+  expect(started[0]?.autonomy).toBe("supervised");
+});
+
+it("refuses a request below the purpose policy", async () => {
+  await expect(start({ purpose: "Provisioning", autonomy: "full" }, {})).rejects.toThrow(
+    "supervised",
+  );
+});
+
+it("resolves the PM and Team policies for the role and purpose", async () => {
+  const { started } = await start(
+    { title: "[Writer] Fix it", purpose: "documentation" },
+    {
+      project: [writer],
+      pmPolicy: { writer: { "*": "full" } },
+      teamPolicy: { writer: { documentation: "auto" } },
+    },
+  );
+  expect(started[0]?.autonomy).toBe("auto");
+});
+
+it("raises a running agent to supervised, audits the reason, and refuses a later downgrade", async () => {
+  const database = openDatabase(":memory:");
+  try {
+    const store = new EventStore(database.db);
+    const repo = new SessionRepo(database.db, store);
+    const session = { ...sampleSession, projectId: "p1", autonomy: "full" as const };
+    repo.create(session, {
+      workspaceMode: "repo_root",
+      workspaceFallback: null,
+      forced: null,
+      queuedBehind: [],
+      autonomyFloor: "supervised",
+    });
+    const request = vi.fn(async () => ({}));
+    const sessions = new SessionService({
+      repo,
+      runner: {
+        request,
+        providers: () => [{ id: session.provider, capabilities: { supervised: true } }],
+      },
+    } as unknown as SessionServiceDeps);
+    const services = { sessionRepo: repo, sessions } as AppServices;
+    const ctx = {
+      services,
+      projectId: "p1",
+      sessionId: "pm1",
+      role: "pm" as const,
+      caller: "mcp" as const,
+      signal: new AbortController().signal,
+    };
+    await expect(
+      setSessionAutonomy.handler(
+        { sessionId: session.id, autonomy: "supervised", reason: "Migration approval" },
+        ctx,
+      ),
+    ).resolves.toEqual({ sessionId: session.id, autonomy: "supervised" });
+    expect(request).toHaveBeenCalledWith(
+      { name: "session.configure", sessionId: session.id, autonomy: "supervised" },
+      expect.any(Number),
+    );
+    expect(store.listAfter(0)).toContainEqual(
+      expect.objectContaining({
+        type: "session.autonomy_changed",
+        sessionId: session.id,
+        payload: {
+          autonomy: "supervised",
+          previous: "full",
+          reason: "Migration approval",
+          changedBy: "pm1",
+        },
+      }),
+    );
+    await expect(
+      setSessionAutonomy.handler(
+        { sessionId: session.id, autonomy: "auto", reason: "Try to skip approval" },
+        ctx,
+      ),
+    ).rejects.toThrow("Autonomy policy requires supervised");
+    expect(() => sessions.update(session.id, { autonomy: "full" })).toThrow(
+      "Autonomy policy requires supervised",
+    );
+    expect(request).toHaveBeenCalledTimes(1);
+    expect(repo.get(session.id).autonomy).toBe("supervised");
+  } finally {
+    database.close();
+  }
+});
+
+it.each(Object.entries(TEAM_ROLE_TAGS))("checks every Team role %s", async (tag, role) => {
+  const title = `${tag.toLowerCase()} Work`;
+  await expect(start({ title }, {})).rejects.toThrow("TEAM_ROLE_UNSET");
+  await expect(
+    start({ title, provider: "codex" }, { project: [{ ...writer, role }] }),
+  ).rejects.toThrow("TEAM_MISMATCH");
+});
+
+it("allows only the PM's delegated Architect to open child sessions", async () => {
+  const input = { title: "[Writer] Work", autonomy: "supervised" };
+  await expect(
+    start(input, { project: [writer], callerTitle: "[Architect] Lead" }),
+  ).rejects.toThrow("delegated Team Architect");
+  const result = await start(input, {
+    project: [writer],
+    callerTitle: "[Architect] Lead",
+    architect: true,
+  });
+  expect(result.started[0]).toMatchObject({ autonomy: "supervised", parentSessionId: "s1" });
 });

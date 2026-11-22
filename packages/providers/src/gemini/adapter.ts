@@ -55,6 +55,7 @@ export const GEMINI_AGENT: AcpAgentSpec = {
  * in `initialize`; plan mode, what its sessions list.
  */
 const BASE_CAPABILITIES: ProviderCapabilities = {
+  modelVendor: "google",
   resume: true,
   steer: false,
   interrupt: true,

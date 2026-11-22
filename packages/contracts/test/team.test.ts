@@ -97,3 +97,21 @@ it("refuses a Plan Reviewer at minimal effort, wherever the Team is used", () =>
   expect(Team.safeParse([plan]).success).toBe(false);
   expect(Team.safeParse([{ ...plan, effort: "low" }]).success).toBe(true);
 });
+
+it("round-trips PM autonomy policy, tool inputs and the audit event", async () => {
+  const { AutonomyPolicy, PmStartSessionInput, SetSessionAutonomyInput, SessionAutonomyChanged } =
+    await import("../src");
+  const roundTrip = (schema: { parse(input: unknown): unknown }, input: unknown) => {
+    expect(schema.parse(JSON.parse(JSON.stringify(input)))).toEqual(input);
+  };
+  roundTrip(AutonomyPolicy, { writer: { migration: "supervised" } });
+  roundTrip(PmStartSessionInput, { prompt: "Go", purpose: "migration", autonomy: "supervised" });
+  const change = { sessionId: "s1", autonomy: "supervised", reason: "Review each command" };
+  roundTrip(SetSessionAutonomyInput, change);
+  roundTrip(SessionAutonomyChanged, {
+    previous: "auto",
+    autonomy: change.autonomy,
+    reason: change.reason,
+    changedBy: "pm1",
+  });
+});

@@ -27,7 +27,7 @@ export interface ServerTool<TInput extends z.ZodType = z.ZodType, S extends Tool
    * Hidden when false (e.g. a tool whose engine is not configured, or GitHub tools in a
    * local-only project). `caller` is the token's project and session when known.
    */
-  isAvailable?: (services: AppServices, caller?: ToolAvailabilityContext) => boolean;
+  isAvailable?: (services: AppServices, caller?: ToolAvailabilityContext, role?: Role) => boolean;
   /** Returns text (or a JSON-serialisable value) for the agent. */
   handler: (input: z.output<TInput>, ctx: ServerToolContext<S>) => Promise<unknown>;
 }

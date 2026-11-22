@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AutonomyLevel, ProviderId, QuietHours, ReasoningEffort } from "./common";
-import { Team } from "./team";
+import { AutonomyPolicy, Team } from "./team";
 import { TokenSaverSettings } from "./token-saver";
 import { UpdateMode } from "./updates";
 import { DictationEngine, WhisperModelId } from "./voice-api";
@@ -122,6 +122,7 @@ export const Settings = z.object({
   autonomy: z
     .object({
       default: AutonomyLevel.default("auto"),
+      pmPolicy: AutonomyPolicy.optional(),
     })
     .prefault({}),
   providers: z

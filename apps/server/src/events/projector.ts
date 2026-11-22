@@ -149,6 +149,7 @@ export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
     case "runner.disconnected":
       applyRunnerProjection(tx, e);
       return [];
+    case "session.autonomy_changed":
     case "settings.updated":
     case "automation.updated":
     case "runner.draining":

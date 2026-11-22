@@ -258,12 +258,24 @@ describe("factory loop state machine (§10.1)", () => {
     expect(item(it1.id)).toMatchObject({ stage: "merged", note: "Merged on GitHub" });
   });
 
-  it("falls back to the author's provider for the review when it is the only one", async () => {
+  it("refuses a verdict from an existing reviewer that shares the writer's vendor", async () => {
+    env = createFactoryEnv();
+    enable();
+    const verifying = await toVerifying(backlogItem());
+    const formerReviewer = verifying.reviewerSessionId as string;
+    env.repo.update(formerReviewer, (session) => ({ ...session, provider: "claude" }));
+    expect(() => review(verifying)).toThrow("distinct model vendor");
+    await tick();
+    expect(item(verifying.id).reviewerProvider).toBe("codex");
+    expect(item(verifying.id).reviewerSessionId).not.toBe(formerReviewer);
+  });
+
+  it("waits when only the author's vendor is available", async () => {
     env = createFactoryEnv({ providers: ["claude"] });
     enable();
     const verifying = await toVerifying(backlogItem());
-    expect(verifying.reviewerProvider).toBe("claude");
-    expect(verifying.reviewerNote).toMatch(/same provider/);
+    expect(verifying.reviewerProvider).toBeNull();
+    expect(verifying.note).toMatch(/verified distinct model vendor/);
   });
 
   it("stops the loop and every factory session with the project and global kill switches", async () => {
@@ -317,7 +329,14 @@ describe("factory loop state machine (§10.1)", () => {
     const loop = env.factory.data.loopOrNew(env.project.id);
     expect(loop.state).toBe("paused");
     expect(env.inbox.find(`inbox:factory-regression:${it1.id}`)?.priority).toBe("high");
-    // The revert may merge while the loop is paused.
+    // The generated revert has no verified model vendor after an external push.
+    await tick();
+    expect(item(revert.id)).toMatchObject({
+      reviewerSessionId: null,
+      note: expect.stringContaining("author's model vendor is unknown"),
+    });
+    // A revert attributed to a known writer can still be reviewed while the loop is paused.
+    env.factory.data.updateItem(revert.id, (i) => ({ ...i, builderProvider: "claude" }));
     await tick();
     // No builder worktree: the reviewer gets one on the revert PR's head, fetched by CodeDen,
     // so the review itself is offline.

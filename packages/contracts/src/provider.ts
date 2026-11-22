@@ -7,6 +7,8 @@ import { ApprovalDecider, ApprovalDecision } from "./items";
  * on the provider id (Principle 5).
  */
 export const ProviderCapabilities = z.object({
+  /** Model vendor when the provider runs models from a single known vendor. */
+  modelVendor: z.enum(["anthropic", "openai", "google"]).optional(),
   /** Sessions can be resumed from `resumeToken()`. */
   resume: z.boolean(),
   /** Input can be injected into a running turn. */
