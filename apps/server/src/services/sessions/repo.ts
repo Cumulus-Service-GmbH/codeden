@@ -144,16 +144,20 @@ export class SessionRepo {
 
   /** Insert a new session (and its start metadata) in one transaction. */
   create(session: Session, startMeta: StoredStartMeta): void {
-    const meta: StoredStartMeta =
+    const chromeOptIn =
       session.role === "agent" &&
       session.provider === "claude" &&
-      session.title?.startsWith(BROWSER_OPERATOR_TAG)
-        ? { ...startMeta, chromeOptIn: true }
-        : startMeta;
+      session.title?.startsWith(BROWSER_OPERATOR_TAG) &&
+      (session.startedBy.kind === "user" || startMeta.chromeOptIn)
+        ? true
+        : undefined;
     this.store.append(
       [{ type: "session.created", sessionId: session.id, payload: { session } }],
       (tx) => {
-        tx.update(sessions).set({ startMeta: meta }).where(eq(sessions.id, session.id)).run();
+        tx.update(sessions)
+          .set({ startMeta: { ...startMeta, chromeOptIn } })
+          .where(eq(sessions.id, session.id))
+          .run();
       },
     );
   }

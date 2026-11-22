@@ -20,7 +20,6 @@ import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
 import {
   clonesWorkspaces,
-  isRemoteRunner,
   type RunnerDeps,
   type RunnerPort,
   runnerErrorCode,
@@ -71,12 +70,11 @@ export interface LauncherDeps extends RunnerDeps {
 }
 
 /** Whether this session starts Claude in Chrome on the home runner. */
-function startsWithChrome(session: Session, runner: RunnerPort, repo: SessionRepo): boolean {
+function startsWithChrome(session: Session, repo: SessionRepo): boolean {
   return (
     session.provider === "claude" &&
     session.role === "agent" &&
     (session.title ?? "").startsWith(BROWSER_OPERATOR_TAG) &&
-    !isRemoteRunner(runner) &&
     repo.find(session.id)?.startMeta?.chromeOptIn === true
   );
 }
@@ -403,7 +401,10 @@ export class SessionLauncher {
       mcpServers,
       ...(ownBranch(session) ? { ownBranch: ownBranch(session) } : {}),
       ...(project?.agentCiEnv === false ? { ciEnv: false } : {}),
-      ...(startsWithChrome(session, runner, this.deps.repo) ? { chrome: true } : {}),
+      ...(runner === (this.deps.runners?.home() ?? this.deps.runner) &&
+      startsWithChrome(session, this.deps.repo)
+        ? { chrome: true }
+        : {}),
     });
   }
 

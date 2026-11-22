@@ -63,6 +63,22 @@ const markedHookReview: AnswerReview = {
   },
 };
 
+/** Claude in Chrome: only the user may allow it, and only once. */
+const singleUseReview: AnswerReview = {
+  problem: (response) =>
+    response.kind === "approval" &&
+    (response.decision === "allow_session" ||
+      (response.decision === "allow_once" &&
+        response.decidedBy !== undefined &&
+        response.decidedBy !== "user"))
+      ? "Claude in Chrome requires a one-time user approval."
+      : undefined,
+};
+
+const markedSingleUseReview: AnswerReview = {
+  problem: (response) => markedHookReview.problem(response) ?? singleUseReview.problem(response),
+};
+
 export interface ClaudeSessionConfig {
   executable: ResolvedCommand;
   /** Called with the CLI's model list once a session is initialized. */
@@ -536,7 +552,8 @@ export class ClaudeSession implements ProviderSession {
         options: ["allow_once", "deny"],
       });
       const ctx = this.mapper.ctxForTool(options.toolUseID);
-      const response = await this.broker.request(ctx, item, options.signal, markedHookReview);
+      const review = gate.ask && gate.singleUse ? markedSingleUseReview : markedHookReview;
+      const response = await this.broker.request(ctx, item, options.signal, review);
       return this.toPermissionResult(toolName, input, dir, response, false);
     }
 
@@ -550,9 +567,10 @@ export class ClaudeSession implements ProviderSession {
         decisionReason && decisionReason !== gate.reason
           ? `${gate.reason}. ${decisionReason}`
           : gate.reason,
-      options: ["allow_once", "allow_session", "deny"],
+      options: gate.singleUse ? ["allow_once", "deny"] : ["allow_once", "allow_session", "deny"],
     });
-    const response = await this.broker.request(ctx, item, options.signal);
+    const review = gate.singleUse ? singleUseReview : undefined;
+    const response = await this.broker.request(ctx, item, options.signal, review);
     return this.toPermissionResult(toolName, input, dir, response);
   };
 

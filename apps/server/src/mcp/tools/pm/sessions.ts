@@ -13,6 +13,7 @@ import {
 import { z } from "zod";
 import { applyTeamRole } from "../../../services/factory/team-role";
 import { defineTool, ToolError } from "../../define";
+import { currentTurn } from "../../transcript";
 import { agentSessionOf, compactSession, compactWork, projectFor } from "../shared/helpers";
 import { assertMayStartOnIssues, issuesNamed } from "./issue-trust";
 
@@ -81,7 +82,7 @@ export const startSession = defineTool({
         "'orchestrator' when the orchestrator passed this work on: its finish or failure also reaches the orchestrator, so it can tell the user",
       ),
   }),
-  handler: async (input, { services, projectId, sessionId, caller }) => {
+  handler: async (input, { services, projectId, sessionId, caller, signal }) => {
     const project = projectFor(services, projectId);
     await assertMayStartOnIssues(services, { caller, sessionId }, project, issuesNamed(input));
     const issue =
@@ -116,7 +117,32 @@ export const startSession = defineTool({
       input: { text: input.prompt, from: "pm" },
       conflict: input.conflict,
     });
-    const result = await services.sessions.start(req);
+    const result = await services.sessions.start(req, {
+      confirmChrome: async () => {
+        if (!sessionId || services.factory.isUnattended(sessionId)) return false;
+        const approve = "Allow Chrome";
+        const outcome = await services.questions.ask(
+          sessionId,
+          currentTurn(services, sessionId),
+          {
+            header: "Start with Claude in Chrome?",
+            question: `Allow this session to connect to your browser? ${req.title?.replace(/\s+/g, " ")}`,
+            options: [{ label: approve }, { label: "Cancel" }],
+            allowFreeText: false,
+            multiSelect: false,
+          },
+          signal,
+          { waitOnly: true },
+        );
+        return (
+          !signal.aborted &&
+          outcome.status === "answered" &&
+          outcome.by === "user" &&
+          outcome.answers.q1?.length === 1 &&
+          outcome.answers.q1[0] === approve
+        );
+      },
+    });
     switch (result.status) {
       case "started":
         return { status: "started", sessionId: result.sessionId };

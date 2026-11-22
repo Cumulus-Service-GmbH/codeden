@@ -3,6 +3,7 @@ import { join } from "node:path";
 import {
   type Automation,
   AutomationGuards,
+  type AutomationRun,
   FactoryLimits,
   type Project,
   type StartSessionRequest,
@@ -74,6 +75,44 @@ const automation = (patch: Partial<Automation> = {}): Automation => ({
 });
 
 describe("automation session titles", () => {
+  it.each([
+    ["manual", false, false],
+    ["manual", true, true],
+    ["cron", false, true],
+  ] as const)(
+    "checks Chrome consent for %s when byPerson is %s",
+    async (triggeredBy, byPerson, expected) => {
+      let chromeApproved = false;
+      const action = {
+        type: "start_session" as const,
+        prompt: "Audit",
+        title: "[Browser Operator] Audit",
+      };
+      const executor = new AutomationExecutor({
+        runs: { countToday: () => 0, activeCount: () => 0, save: (run: AutomationRun) => run },
+        repo: { activeWork: () => [] },
+        sessions: {
+          start: async (_request: StartSessionRequest, options?: { chromeApproved?: true }) => {
+            chromeApproved = options?.chromeApproved === true;
+            return { status: "conflict", existing: [] };
+          },
+        },
+        now: () => new Date("2026-11-07T10:00:00.000Z"),
+      } as unknown as ExecutorDeps);
+      const result = await executor.fire({
+        automation: automation({ action, enabled: triggeredBy !== "manual" }),
+        project: { id: "p1" } as Project,
+        triggeredBy,
+        byPerson,
+        timezone: "UTC",
+        vars: {},
+        autonomy: "auto",
+      });
+      expect(result.status).toBe(triggeredBy === "manual" ? "conflict" : "skipped");
+      expect(chromeApproved).toBe(expected);
+    },
+  );
+
   it.each([
     [undefined, "[Browser Operator] Audit", "Audit", "Audit"],
     ["{{project.name}}", "[Browser Operator]", "[Writer]", "Automation"],

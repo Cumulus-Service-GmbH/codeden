@@ -57,6 +57,7 @@ import type { Answerer, QuestionBroker } from "./questions";
 import { applyPendingConfig, updateSession } from "./reconfigure";
 import { emptyStartMeta, type SessionRepo, type StoredStartMeta } from "./repo";
 import { planReview } from "./review";
+import { BROWSER_OPERATOR_TAG } from "./role-tag";
 import { startWorkspace } from "./start-workspace";
 
 export interface SessionServiceDeps extends RunnerDeps {
@@ -198,7 +199,10 @@ export class SessionService {
     };
   }
 
-  async start(req: StartSessionRequest): Promise<StartSessionResponse> {
+  async start(
+    req: StartSessionRequest,
+    options: { confirmChrome?: () => Promise<boolean>; chromeApproved?: true } = {},
+  ): Promise<StartSessionResponse> {
     const { repo, projects } = this.deps;
     // The workspace follows `isGitRepo`: read it once the folder has been checked since start.
     if (req.projectId) await this.deps.projectChecks?.current(req.projectId);
@@ -209,6 +213,17 @@ export class SessionService {
     }
     // Refused before the conflict check: a worktree that can't be made is never queued either.
     const workspace = startWorkspace(req.workspace, project);
+    if (
+      req.role === "agent" &&
+      req.startedBy.kind === "pm" &&
+      req.title?.startsWith(BROWSER_OPERATOR_TAG) &&
+      !options.chromeApproved &&
+      this.resolveProvider(req, project ? projectDefaultProvider(project) : null) === "claude"
+    ) {
+      if (!(await options.confirmChrome?.())) return { status: "skipped" };
+      // Recheck the project and conflicts after waiting for the user, with the provider fixed.
+      return this.start({ ...req, provider: "claude" }, { chromeApproved: true });
+    }
     const purpose = derivePurpose(req.purpose, req.input?.text);
     const workKey = deriveWorkKey({
       workKey: req.workKey,
@@ -258,6 +273,7 @@ export class SessionService {
         workspaceFallback: null,
         forced,
         queuedBehind,
+        chromeOptIn: options.chromeApproved,
       },
       workspace,
       req.input,
