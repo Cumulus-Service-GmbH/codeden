@@ -131,6 +131,27 @@ it("keeps waiting priority messages when the server shuts down", async () => {
   expect(request).toHaveBeenCalledTimes(1);
 });
 
+it("keeps a waiting priority message queued when the runner disconnects", async () => {
+  const { sessions, request } = providerLike({ steer: true });
+  repo.update("s1", (s) => ({ ...s, status: "running" }));
+  request
+    .mockResolvedValueOnce({
+      waitingFor: { itemId: "sleep", turnId: "turn", threadId: "thread", rootTurnId: "turn" },
+    })
+    .mockRejectedValueOnce(new RunnerCommandError("runner_unavailable", "Runner disconnected"));
+  const sending = sessions.send("s1", { input: input("priority"), whenBusy: "steer" });
+  await settle();
+  store.append([
+    {
+      type: "runner.disconnected",
+      sessionId: null,
+      payload: { id: "local", runnerId: "runner", reason: "connection closed" },
+    },
+  ]);
+  await expect(sending).resolves.toEqual({ status: "queued" });
+  expect(texts()).toEqual(["priority"]);
+});
+
 describe("deliveries racing a running turn (#96)", () => {
   it("queues the second of two deliveries racing an idle session, and delivers both in order", async () => {
     const { sessions, launcher, sent, endTurn } = providerLike();

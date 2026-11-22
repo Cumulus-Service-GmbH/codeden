@@ -637,8 +637,8 @@ export class SessionService {
       return "steered";
     } catch (error) {
       if (
-        runnerErrorCode(error) === "priority_suspended" &&
-        (pending || typeof source !== "string")
+        (pending && isTransientRunnerError(error)) ||
+        (runnerErrorCode(error) === "priority_suspended" && (pending || typeof source !== "string"))
       ) {
         return "queued";
       }
