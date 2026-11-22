@@ -14,7 +14,9 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Database, openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
+import { conflictRoutes } from "../src/routes/orchestration";
 import { ArtifactService } from "../src/services/artifacts";
+import type { AppServices } from "../src/services/container";
 import { InboxService } from "../src/services/inbox-service";
 import { ConflictService } from "../src/services/orchestration/conflicts";
 import { Outbox } from "../src/services/sessions/outbox";
@@ -120,6 +122,34 @@ async function sendConflicting(req: StartSessionRequest): Promise<ConflictRecord
 }
 
 describe("deciding a conflict after editing a draft with an implicit work key (#187)", () => {
+  it("resolves the Team provider for a replacement draft that opts in to Chrome", async () => {
+    const resolve = vi.fn(async () => ({}));
+    const api = conflictRoutes({
+      orchestration: { conflicts: { resolve } },
+      settings: { get: () => Settings.parse({}) },
+      factory: {
+        data: {
+          loop: () => ({ tuning: { team: [{ role: "browserOperator", provider: "fake" }] } }),
+        },
+      },
+    } as unknown as AppServices);
+    const res = await api.request("/conflict-id/resolve", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        resolution: "wait",
+        start: { projectId: PROJECT, teamRole: "browserOperator", chrome: true },
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(resolve).toHaveBeenCalledWith(
+      "conflict-id",
+      expect.objectContaining({
+        start: expect.objectContaining({ provider: "fake", chrome: true }),
+      }),
+    );
+  });
+
   it("waits for the running work with the edited text", async () => {
     const old = runningWork();
     const record = await sendConflicting(draft("Fix the login bug"));

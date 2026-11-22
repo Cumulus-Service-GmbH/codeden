@@ -144,7 +144,10 @@ export interface CodeDenClient {
   onConnectionChange(listener: (state: "connecting" | "open" | "closed") => void): () => void;
 
   // Sessions and turns.
-  sessions: { admission(): Promise<AdmissionStatus> };
+  sessions: {
+    admission(): Promise<AdmissionStatus>;
+    runNext(id: string): Promise<AdmissionStatus>;
+  };
   getSessionDetail(sessionId: string): Promise<SessionDetail>;
   /**
    * These sessions, archived or not (at most `SESSION_LOOKUP_MAX` ids); ids that don't exist

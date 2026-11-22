@@ -29,6 +29,8 @@ export const ProviderCapabilities = z.object({
   /** Image attachments are accepted as input. */
   images: z.boolean(),
   planMode: z.boolean(),
+  /** Can connect a local session to Chrome with the user’s consent. */
+  chrome: z.boolean().optional(),
   reasoningEffort: z.boolean(),
   /** MCP servers can be injected (required for CodeDen tools). */
   mcp: z.boolean(),

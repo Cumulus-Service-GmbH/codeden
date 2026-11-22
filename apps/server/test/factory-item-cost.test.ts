@@ -188,6 +188,27 @@ describe("the per-item spend cap (#325)", () => {
     expect(env.inbox.find(stuckDecisionId(created.id))?.status).toBe("open");
   });
 
+  it("stops a review over its own cap before a nudge, independently of builder spend", async () => {
+    env = createFactoryEnv({ limits: { reviewBudget: { usd: 1 } } });
+    await enable();
+    const { id, builder } = await verifying("pending");
+    const reviewer = item(id).reviewerSessionId as string;
+    expect(reviewer).toBeTruthy();
+    env.spendOn(builder, 10);
+    await tick();
+    expect(item(id).stage).toBe("verifying");
+    env.spendOn(reviewer, 1);
+    await env.setStatus(reviewer, "idle");
+    const messages = env.messages.length;
+    await tick();
+    expect(item(id)).toMatchObject({
+      stage: "failed",
+      failureKind: "stuck",
+      reason: "Review spend cap reached: $1.00 of $1.00",
+    });
+    expect(env.messages.slice(messages).filter((m) => m.sessionId === reviewer)).toEqual([]);
+  });
+
   it("never stops an item for its spend without a cap", async () => {
     env = createFactoryEnv();
     await enable();

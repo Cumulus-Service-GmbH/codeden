@@ -4,6 +4,7 @@ import type { FactoryContext } from "./context";
 import type { FactoryPr } from "./github-port";
 import { restoreInherited } from "./inherited-ci";
 import { overBudgetNote, overItemBudget } from "./item-budget";
+import { overReviewBudget } from "./item-cost";
 import { prDecidedOutside } from "./merge";
 import {
   advanceConflicting,
@@ -146,6 +147,11 @@ function settleStopped(
     const over = overItemBudget(ctx, project, item);
     if (over) {
       note(ctx, item, overBudgetNote(over));
+      return loop;
+    }
+    const reviewOver = overReviewBudget(ctx, project.id, item, project.factoryLimits.reviewBudget);
+    if (reviewOver) {
+      note(ctx, item, `Review spend cap reached: ${reviewOver}`);
       return loop;
     }
     const n = autoReReviews(item) + 1;

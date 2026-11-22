@@ -1,5 +1,6 @@
 import {
   ArchivedSessionsQuery,
+  defaultTeam,
   ListConflictsQuery,
   ListNoticesQuery,
   ResolveConflictRequest,
@@ -11,6 +12,7 @@ import {
 import { Hono } from "hono";
 import type { AppServices } from "../services/container";
 import { archivedSessionsPage } from "../services/sessions/archived";
+import { withTeamRole } from "../services/sessions/team-start";
 import { jsonBody, queryOf } from "./validate";
 
 /**
@@ -68,7 +70,15 @@ export function conflictRoutes(s: AppServices) {
   return new Hono()
     .get("/", queryOf(ListConflictsQuery), (c) => c.json(conflicts.list(c.req.valid("query"))))
     .get("/:id", (c) => c.json(conflicts.get(c.req.param("id"))))
-    .post("/:id/resolve", jsonBody(ResolveConflictRequest), async (c) =>
-      c.json(await conflicts.resolve(c.req.param("id"), c.req.valid("json"))),
-    );
+    .post("/:id/resolve", jsonBody(ResolveConflictRequest), async (c) => {
+      const request = c.req.valid("json");
+      const start = request.start;
+      if (start?.teamRole && start.chrome !== undefined) {
+        request.start = withTeamRole(start, {
+          defaults: defaultTeam(s.settings.get()),
+          project: start.projectId ? (s.factory.data.loop(start.projectId)?.tuning.team ?? []) : [],
+        });
+      }
+      return c.json(await conflicts.resolve(c.req.param("id"), request));
+    });
 }

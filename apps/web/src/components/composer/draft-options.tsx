@@ -76,6 +76,16 @@ export function DraftOptions({
         }
         onChange={(planMode) => onChange({ ...choice, planMode })}
       />
+      {resolved.chromeAvailable && (
+        <label className="flex items-center gap-1 px-2 text-xs">
+          <input
+            type="checkbox"
+            checked={resolved.chrome ?? false}
+            onChange={(event) => onChange({ ...choice, chrome: event.target.checked })}
+          />
+          Claude in Chrome
+        </label>
+      )}
       <TeamRolePicker
         value={resolved.teamRole}
         onChange={(teamRole) => onChange({ ...choice, teamRole })}

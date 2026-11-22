@@ -27,6 +27,7 @@ import { ClaudeSession } from "./session";
 export const CLAUDE_PROVIDER_ID = "claude";
 
 const capabilities: ProviderCapabilities = {
+  chrome: true,
   resume: true,
   steer: true,
   interrupt: true,

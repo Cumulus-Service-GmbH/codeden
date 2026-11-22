@@ -15,6 +15,7 @@ export type OrchestrationRole = "orchestrator" | "pm";
  * starts fresh. Provider, model and effort come from `settings.providers.<role>`.
  */
 export class RoleSessions {
+  private readonly replacing = new Map<string, Promise<Session>>();
   private readonly creating = new Map<string, Promise<Session>>();
 
   constructor(
@@ -83,6 +84,8 @@ export class RoleSessions {
   }
 
   async startFresh(id: string): Promise<Session> {
+    const pending = this.replacing.get(id);
+    if (pending) return pending;
     const { session } = this.deps.sessions.detail(id);
     if (session.role === "agent" || this.find(session.role, session.projectId)?.id !== id) {
       throw new ServiceError(
@@ -91,7 +94,11 @@ export class RoleSessions {
         "Only the current role conversation can start fresh",
       );
     }
-    return this.create(session.role, session.projectId, session);
+    const replacement = this.create(session.role, session.projectId, session).finally(() =>
+      this.replacing.delete(id),
+    );
+    this.replacing.set(id, replacement);
+    return replacement;
   }
 
   private async create(

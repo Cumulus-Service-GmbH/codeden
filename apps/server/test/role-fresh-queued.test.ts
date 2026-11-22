@@ -8,7 +8,7 @@ import type { SessionService } from "../src/services/sessions/session-service";
 import { sampleSession } from "./helpers";
 
 describe("Start fresh at the session limit", () => {
-  it("returns the replacement that waits for a free slot instead of failing", async () => {
+  it("shares one queued replacement across concurrent Start fresh requests", async () => {
     const database = openDatabase(":memory:");
     try {
       const store = new EventStore(database.db);
@@ -27,7 +27,11 @@ describe("Start fresh at the session limit", () => {
         sessions: { start, detail } as unknown as SessionService,
         projects: {} as ProjectService,
       });
-      await expect(roles.startFresh("o1")).resolves.toMatchObject({ id: "o2", status: "queued" });
+      const first = roles.startFresh("o1");
+      const duplicate = roles.startFresh("o1");
+      await expect(first).resolves.toMatchObject({ id: "o2", status: "queued" });
+      await expect(duplicate).resolves.toMatchObject({ id: "o2", status: "queued" });
+      expect(start).toHaveBeenCalledTimes(1);
       expect(start).toHaveBeenCalledWith(expect.anything(), { replacesRoleId: "o1" });
     } finally {
       database.close();

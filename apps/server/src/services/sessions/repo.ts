@@ -64,6 +64,8 @@ export interface PendingStart {
 export type StoredStartMeta = SessionStartMeta & {
   /** The new Claude agent session was explicitly titled as a Browser Operator. */
   chromeOptIn?: true;
+  /** The user selected a Chrome setting when starting this session from the composer. */
+  chromeRequested?: boolean;
   /** Its provider or model was the caller's own choice, not filled from the Team (`ownTeamPins`). */
   ownTeamPins?: true;
   pending?: PendingStart | null;

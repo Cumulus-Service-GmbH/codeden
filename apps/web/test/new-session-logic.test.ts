@@ -75,6 +75,21 @@ const defaults = (over: Partial<DraftDefaults> = {}): DraftDefaults => ({
 });
 const choice = (over: Partial<DraftChoice> = {}): DraftChoice => ({ ...emptyChoice, ...over });
 
+it("opts in to Chrome only for a capable local provider", () => {
+  const chrome = { ...planner, capabilities: caps({ chrome: true }) };
+  const request = (d: DraftDefaults) =>
+    buildStartRequest("p1", { text: "Go" }, resolveDraftChoice(choice({ chrome: true }), d), "");
+  expect(request(defaults({ providers: [chrome] }))).toMatchObject({ chrome: true });
+  const unchecked = resolveDraftChoice(choice(), defaults({ providers: [chrome] }));
+  expect(buildStartRequest("p1", { text: "Go" }, unchecked, "")).toMatchObject({ chrome: false });
+  expect(request(defaults())).not.toHaveProperty("chrome");
+  expect(
+    request(
+      defaults({ providers: [chrome], project: projectWith({ execution: { backend: "docker" } }) }),
+    ),
+  ).not.toHaveProperty("chrome");
+});
+
 describe("resolveDraftChoice (the New session draft's defaults)", () => {
   it("picks the provider: chosen, then project default, then agent default, then the first", () => {
     const id = (c: DraftChoice, d: DraftDefaults) => resolveDraftChoice(c, d).provider?.id;

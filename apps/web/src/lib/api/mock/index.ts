@@ -100,6 +100,9 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
       return () => {};
     },
     sessions: {
+      runNext: async () => {
+        throw new Error("This session is no longer waiting for a slot");
+      },
       admission: async () => {
         const active = world.snapshot.sessions.filter(
           (s) => s.status === "starting" || s.status === "running" || s.status === "waiting",
