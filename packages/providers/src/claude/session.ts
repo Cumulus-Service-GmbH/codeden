@@ -76,7 +76,8 @@ const singleUseReview: AnswerReview = {
 };
 
 const markedSingleUseReview: AnswerReview = {
-  problem: (response) => markedHookReview.problem(response) ?? singleUseReview.problem(response),
+  problem: (response) =>
+    markedHookReview.problem?.(response) ?? singleUseReview.problem?.(response),
 };
 
 export interface ClaudeSessionConfig {
