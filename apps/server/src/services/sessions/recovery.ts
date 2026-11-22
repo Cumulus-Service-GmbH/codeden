@@ -82,13 +82,12 @@ export class SessionRecovery {
       );
     };
     const initiallyHosted = await this.hostedSessions(runner);
-    if (!initiallyHosted) return;
     // Clear stale active statuses before any continuation asks admission for a slot.
     // The runner can still open a session between replying and our read, the same window
     // the first loop iteration had before.
     const toResume: { id: string; closedOrphans: boolean }[] = [];
     for (const id of candidates) {
-      if (initiallyHosted.has(id) || !stillCutOff(id)) continue;
+      if (!initiallyHosted || initiallyHosted.has(id) || !stillCutOff(id)) continue;
       let session = repo.find(id)?.session;
       if (!session || !isCutOff(session.status)) continue;
       // A dead approval can keep a resumed session waiting.
@@ -129,7 +128,8 @@ export class SessionRecovery {
       await sessions.flushOutbox(id).catch(() => undefined);
     }
 
-    // Sessions resumed above are mid-turn again (and hosted): the sweep leaves them alone.
+    // Over-limit sessions wait unhosted with a queued continuation. The sweep skips them
+    // along with sessions that are launching or delivering.
     this.sweepAfterRecovery(runnerId ?? "", runner);
   }
 
@@ -146,7 +146,7 @@ export class SessionRecovery {
     const sweep = before.then(async () => {
       const swept = await sweepVendorHistory(
         runner,
-        (id) => sessions.launching.has(id) || sessions.isDelivering(id),
+        (id) => sessions.launching.has(id) || sessions.isDelivering(id) || sessions.hasOutbox(id),
       ).catch(() => undefined);
       if (swept?.hidden.length || swept?.failed) {
         this.deps.log?.(
@@ -199,6 +199,9 @@ export class SessionRecovery {
     } catch (error) {
       // A turn is running: the session came back by another path, so there is nothing to resume.
       if (isTurnRunningError(error)) {
+        this.deps.repo.update(session.id, (s) =>
+          s.status === "interrupted" ? { ...s, status: "running" } : s,
+        );
         this.deps.log?.(`recovery: session ${session.id} already has a turn running`);
         return;
       }

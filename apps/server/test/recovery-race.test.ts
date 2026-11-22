@@ -61,6 +61,7 @@ describe("session recovery", () => {
       isDelivering: (id: string) => delivering.has(id),
       continueAfterRestart,
       sessionsWithQueuedMessages: () => [...queued],
+      hasOutbox: (id: string) => queued.has(id),
       releaseOutboxes,
       flushOutbox,
     } as unknown as SessionService;
@@ -296,6 +297,21 @@ describe("session recovery", () => {
     finishSweep();
     await vi.waitFor(() => expect(sweep).toHaveBeenCalledTimes(2));
     finishSweep();
+  });
+
+  it("restores the running status when a continuation finds a live turn", async () => {
+    const t = setup([
+      { ...sampleSession, id: "cut", status: "running", provider: "fake", resumeToken: "r" },
+    ]);
+    t.continueAfterRestart.mockImplementationOnce(async () => {
+      expect(t.sessions.get("cut")?.status).toBe("interrupted");
+      throw Object.assign(new Error("A turn is already running"), { code: "turn_running" });
+    });
+
+    await t.recovery.onRunnerReady();
+
+    expect(t.sessions.get("cut")?.status).toBe("running");
+    expect(t.fail).not.toHaveBeenCalled();
   });
 
   it("flushes outboxes and sweeps after a mid-loop status failure", async () => {
