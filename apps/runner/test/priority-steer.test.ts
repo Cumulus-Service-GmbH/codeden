@@ -1,8 +1,8 @@
 import { tmpdir } from "node:os";
-import type { AgentEvent } from "@codeden/contracts";
+import type { AgentEvent, ToolCallItem } from "@codeden/contracts";
 import { FakeProvider, ProviderRegistry } from "@codeden/providers";
 import { afterEach, expect, it, vi } from "vitest";
-import { canInterruptShell } from "../src/priority-steer";
+import { ActiveTools, canInterruptShell } from "../src/priority-steer";
 import { SessionHost } from "../src/session-host";
 
 let host: SessionHost | undefined;
@@ -24,6 +24,25 @@ it.each([
   ["sh -c 'sleep 600; npm install'", false],
 ])("classifies %s", (command, allowed) => {
   expect(canInterruptShell(command)).toBe(allowed);
+});
+
+it("never interrupts an edit, git or install command", () => {
+  const call = { itemId: "protected", threadId: "thread", turnId: "turn" };
+  const base = { kind: "tool_call", id: call.itemId, status: "in_progress" } as const;
+  const protectedTools: ToolCallItem[] = [
+    { ...base, toolKind: "file_edit", toolName: "edit", changes: [] },
+    ...["git status", "pnpm install", "sed -i s/a/b/ file"].map((command) => ({
+      ...base,
+      toolKind: "command" as const,
+      toolName: "shell",
+      command,
+    })),
+  ];
+  for (const item of protectedTools) {
+    const active = new ActiveTools();
+    active.track({ type: "item.started", threadId: call.threadId, turnId: call.turnId, item });
+    expect(active.canInterrupt(call)).toBe(false);
+  }
 });
 
 it.each([true, false])(

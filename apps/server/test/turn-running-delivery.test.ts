@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { UserInput } from "@codeden/contracts";
+import { Settings, type UserInput } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Database, openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
@@ -53,7 +53,14 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
  * session: one turn at a time, and `session.send` during a turn fails the way runners before
  * the `turn_running` code reported it (`command_failed`, "A turn is already running").
  */
-function providerLike(opts: { turnRunning?: boolean; steer?: boolean } = {}) {
+function providerLike(
+  opts: {
+    turnRunning?: boolean;
+    steer?: boolean;
+    interruptToolCall?: boolean;
+    interruptMinutes?: number;
+  } = {},
+) {
   repo.update("s1", (s) => ({ ...s, status: "idle" }));
   const state = { turn: opts.turnRunning ?? false };
   const sent: string[] = [];
@@ -66,7 +73,10 @@ function providerLike(opts: { turnRunning?: boolean; steer?: boolean } = {}) {
   });
   const runner = {
     isConnected: () => true,
-    providers: () => (opts.steer ? [{ id: "fake", capabilities: { steer: true } }] : []),
+    providers: () =>
+      opts.steer
+        ? [{ id: "fake", capabilities: { steer: true, interruptToolCall: opts.interruptToolCall } }]
+        : [],
     request,
   } as unknown as RunnerPort;
   // Like the real launcher: a failure marks the session failed.
@@ -83,6 +93,9 @@ function providerLike(opts: { turnRunning?: boolean; steer?: boolean } = {}) {
       externalizeAttachments: (i: UserInput) => i,
       resolveAttachments: (i: UserInput) => i,
     },
+    settings: {
+      get: () => Settings.parse({ priorityInterruptMinutes: opts.interruptMinutes }),
+    },
     outboxRetryMs: 1_000,
   } as unknown as SessionServiceDeps);
   /** The provider ends its turn; the server sees the session go idle and drains its queue. */
@@ -93,6 +106,63 @@ function providerLike(opts: { turnRunning?: boolean; steer?: boolean } = {}) {
   };
   return { sessions, launcher, sent, state, request, endTurn };
 }
+
+it.each([
+  {
+    name: "interrupts only the running shell call after the configured delay",
+    minutes: 3,
+    delay: 180_000,
+  },
+  {
+    name: "interrupts the running shell call after two minutes by default",
+    minutes: undefined,
+    delay: 120_000,
+  },
+  {
+    name: "never interrupts when the provider cannot stop just the tool call",
+    minutes: 3,
+    delay: 180_000,
+    incapable: true,
+  },
+])("$name", async ({ minutes, delay, incapable }) => {
+  vi.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+  vi.setSystemTime(new Date("2026-11-23T10:00:00Z"));
+  const { sessions, request } = providerLike({
+    steer: true,
+    interruptToolCall: !incapable,
+    interruptMinutes: minutes,
+  });
+  repo.update("s1", (s) => ({ ...s, status: "running" }));
+  const shell = { itemId: "sleep", turnId: "turn", threadId: "thread", rootTurnId: "turn" };
+  request.mockResolvedValueOnce({ waitingFor: shell });
+  const steer = {
+    name: "session.steer",
+    sessionId: "s1",
+    input: input("priority"),
+    waitForShell: true,
+  };
+  const sending = sessions.send("s1", { input: steer.input, whenBusy: "steer" });
+  try {
+    await vi.advanceTimersByTimeAsync(delay - 1);
+    expect(request.mock.calls).toEqual([[steer]]);
+    await vi.advanceTimersByTimeAsync(1);
+    if (incapable) {
+      expect(request.mock.calls).toEqual([[steer]]);
+      sessions.suspendPriorityDelivery();
+      await expect(sending).resolves.toEqual({ status: "queued" });
+    } else {
+      expect(request.mock.calls).toEqual([
+        [steer],
+        [{ ...steer, expectedTurnId: shell.rootTurnId, interrupt: shell }],
+      ]);
+      await expect(sending).resolves.toEqual({ status: "steered" });
+    }
+  } finally {
+    sessions.suspendPriorityDelivery();
+    await sending.catch(() => {});
+    vi.useRealTimers();
+  }
+});
 
 it("persists a composer priority message while waiting, until Stop drops it", async () => {
   const { sessions, request } = providerLike({ steer: true });
