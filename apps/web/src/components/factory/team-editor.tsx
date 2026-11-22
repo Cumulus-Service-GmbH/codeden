@@ -39,6 +39,7 @@ export function TeamEditor({
 }) {
   const id = useId();
   const client = useClient();
+  const providers = useSnapshotData((s) => s.runner.providers, []);
   const savedRemembered = useSnapshotData((s) => s.settings.teamSetup.remembered, false);
   const [remembered, setRemembered] = useState<boolean | null>(null);
   const save = useMutation({
@@ -71,6 +72,15 @@ export function TeamEditor({
       {TeamRole.options.map((role) => {
         const label = ROLE_LABEL[role];
         const member = teamMember(team, role);
+        const provider = providers.find((entry) => entry.id === member?.provider);
+        const pinnedModel = member?.model;
+        const staleModel = Boolean(
+          pinnedModel &&
+            provider?.models.length &&
+            !provider.models.some(
+              ({ id, resolvedId }) => id === pinnedModel || resolvedId === pinnedModel,
+            ),
+        );
         return (
           <div
             key={role}
@@ -83,6 +93,7 @@ export function TeamEditor({
                 label={label}
                 provider={member?.provider ?? ""}
                 model={member?.model ?? null}
+                staleModel={staleModel}
                 autoValue=""
                 autoLabel="Not set"
                 onChange={(provider, model) =>
@@ -121,6 +132,22 @@ export function TeamEditor({
             >
               Clear
             </Button>
+            {staleModel && member && provider && (
+              <div className="col-span-full flex flex-wrap items-center gap-2 text-3xs text-muted-foreground">
+                <span>
+                  {member.model} isn't in {provider.displayName}'s current model list. Starts may
+                  fail.
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => changeRole(role, { ...member, model: null })}
+                >
+                  Use the provider's default
+                </Button>
+              </div>
+            )}
           </div>
         );
       })}

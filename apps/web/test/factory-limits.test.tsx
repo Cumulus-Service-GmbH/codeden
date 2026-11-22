@@ -171,3 +171,43 @@ it("saves Team pins with factory tuning and replaces remembered roles in Save se
   const reloaded = await client.factory.status(storefront.id);
   expect(reloaded.tuning).toMatchObject({ team, resultSummaryBytes: 1024 });
 });
+
+it("flags stale Team model pins and lets the member follow the provider default", async () => {
+  const client = createMockClient();
+  const status = await client.factory.status(storefront.id);
+  vi.spyOn(client.factory, "status").mockResolvedValue({
+    ...status,
+    tuning: {
+      ...status.tuning,
+      team: [
+        { role: "writer", provider: "codex", model: "retired-model", effort: "high" },
+        { role: "architect", provider: "claude", model: "haiku", effort: null },
+      ],
+    },
+  });
+  renderWithClient(<AutonomyDialog project={storefront} open onOpenChange={() => {}} />, client, {
+    withRouter: true,
+  });
+
+  const warning = await screen.findByText(
+    "retired-model isn't in Codex's current model list. Starts may fail.",
+  );
+  const model = screen.getByLabelText<HTMLSelectElement>("Writer model");
+  expect(model.value).toBe("retired-model");
+  expect(model.selectedOptions[0]?.textContent).toBe("retired-model (not listed)");
+  expect(screen.getByLabelText<HTMLSelectElement>("Architect model").value).toBe("haiku");
+  expect(screen.getAllByText(/isn't in .* current model list/)).toEqual([warning]);
+
+  fireEvent.click(screen.getByRole("button", { name: "Use the provider's default" }));
+  expect(model.value).toBe("");
+  expect(warning.isConnected).toBe(false);
+
+  fireEvent.click(screen.getByRole("button", { name: "Save setup" }));
+  await screen.findByText("Saved");
+  expect((await client.getSnapshot()).settings.teamSetup.team).toContainEqual({
+    role: "writer",
+    provider: "codex",
+    model: null,
+    effort: "high",
+  });
+});

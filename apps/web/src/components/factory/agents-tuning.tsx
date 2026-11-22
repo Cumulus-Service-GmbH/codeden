@@ -145,6 +145,7 @@ export function AgentPicker({
   hint,
   meanwhile,
   setByTeam = false,
+  staleModel,
   onChange,
 }: {
   id: string;
@@ -159,6 +160,7 @@ export function AgentPicker({
   /** What happens while the chosen provider can't run, e.g. "reviews wait". */
   meanwhile?: string;
   setByTeam?: boolean;
+  staleModel?: boolean;
   onChange: (provider: string, model: string | null) => void;
 }) {
   const providers = useSnapshotData((s) => s.runner.providers, []);
@@ -183,6 +185,7 @@ export function AgentPicker({
         label={`${label} model`}
         provider={providers.find((p) => p.id === provider)}
         value={model}
+        staleModel={staleModel}
         disabled={setByTeam}
         onChange={(next) => onChange(provider, next)}
       />
@@ -265,6 +268,7 @@ function ModelSelect({
   provider,
   value,
   disabled,
+  staleModel,
   onChange,
 }: {
   id: string;
@@ -272,6 +276,7 @@ function ModelSelect({
   provider: ProviderInfo | undefined;
   value: string | null;
   disabled?: boolean;
+  staleModel?: boolean;
   onChange: (model: string | null) => void;
 }) {
   const models = provider?.models ?? [];
@@ -291,7 +296,9 @@ function ModelSelect({
             {m.label}
           </option>
         ))}
-        {!known && value && <option value={value}>{value}</option>}
+        {!known && value && (
+          <option value={value}>{staleModel ? `${value} (not listed)` : value}</option>
+        )}
       </select>
     </Field>
   );
