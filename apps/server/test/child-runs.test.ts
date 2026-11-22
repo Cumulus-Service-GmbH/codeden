@@ -28,7 +28,7 @@ it("passes CHILD_RUNS_FILE and lists what the session's tools logged", () => {
   } as unknown as LauncherDeps);
   const path = launcher.sessionOptions(sampleSession).env?.[CHILD_RUNS_FILE_ENV];
   expect(path).toBe(childRunsFile(runs, sampleSession.id));
-  expect(readChildRuns(runs, sampleSession.id)).toEqual({ runs: [], skipped: 0 });
+  expect(readChildRuns(runs, sampleSession.id)).toEqual({ runs: [], skipped: 0, available: true });
   appendFileSync(path as string, line("running", "2026-11-22T21:00:00.000Z"));
   appendFileSync(path as string, "garbage\n");
   appendFileSync(path as string, line("succeeded", "2026-11-22T21:05:00.000Z"));
@@ -74,4 +74,11 @@ it("drops only a partial first line when the log is longer than its 1 MB window"
   // The window starts one byte into a line: that line is dropped, nothing else.
   writeFileSync(childRunsFile(runs, "s4"), `${"y".repeat(99)}\n${lines}z`);
   expect(readChildRuns(runs, "s4").runs).toHaveLength(4095);
+});
+
+it("is unavailable, never read through a link, where no-follow opening is missing", () => {
+  const runs = join(dir, "child-runs");
+  mkdirSync(runs, { recursive: true });
+  writeFileSync(childRunsFile(runs, "s5"), line("running", "2026-11-22T21:00:00.000Z"));
+  expect(readChildRuns(runs, "s5", 0)).toEqual({ runs: [], skipped: 0, available: false });
 });

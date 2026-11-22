@@ -437,8 +437,14 @@ export class SessionLauncher {
   /** `CHILD_RUNS_FILE`: where the session's tools log the worker runs they start (its folder made first). */
   private childRunsEnv(session: Session): Record<string, string> {
     if (!this.deps.childRunsDir) return {};
-    mkdirSync(this.deps.childRunsDir, { recursive: true, mode: 0o700 });
-    return { [CHILD_RUNS_FILE_ENV]: childRunsFile(this.deps.childRunsDir, session.id) };
+    // Worker logging is optional: a folder that cannot be made is logged and the session starts without it.
+    try {
+      mkdirSync(this.deps.childRunsDir, { recursive: true, mode: 0o700 });
+      return { [CHILD_RUNS_FILE_ENV]: childRunsFile(this.deps.childRunsDir, session.id) };
+    } catch (error) {
+      this.deps.log?.(`session ${session.id}: no worker log: ${errorMessage(error)}`);
+      return {};
+    }
   }
 
   /**

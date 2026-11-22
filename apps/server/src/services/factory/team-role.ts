@@ -1,4 +1,5 @@
 import {
+  defaultTeam,
   type ModelInfo,
   type ReasoningEffort,
   resolveTeam,
@@ -42,11 +43,11 @@ export function applyTeamRole(
  * the default Team (Settings, Factory > Team setup). Never saved back into the loop.
  */
 export function teamTuning<T extends { team: Team }>(
-  ctx: { settings: { get(): { teamSetup: { team: Team } } } },
+  ctx: { settings: { get(): { teamSetup: { remembered: boolean; team: Team } } } },
   tuning: T,
 ): T {
   return {
     ...tuning,
-    team: resolveTeam({ defaults: ctx.settings.get().teamSetup.team, project: tuning.team }).team,
+    team: resolveTeam({ defaults: defaultTeam(ctx.settings.get()), project: tuning.team }).team,
   };
 }

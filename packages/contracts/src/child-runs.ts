@@ -19,7 +19,8 @@ export const ChildRunReport = z.object({
   /** The Team role it runs as (e.g. `planReviewer`, `reviewer`) or the script's own name for it. */
   role: z.string().min(1).max(60),
   provider: z.string().min(1).max(40),
-  model: z.string().min(1).max(120).nullable(),
+  // As long as a Team member's model may be.
+  model: z.string().min(1).nullable(),
   effort: ReasoningEffort.nullable(),
   status: ChildRunStatus,
   at: z.iso.datetime({ offset: true }),
@@ -44,7 +45,12 @@ export const ChildRun = z.object({
 export type ChildRun = z.infer<typeof ChildRun>;
 
 /** `GET /api/sessions/:id/child-runs`: newest first; `skipped` counts log lines that were not valid reports. */
-export const ChildRunList = z.object({ runs: z.array(ChildRun), skipped: z.number().int().min(0) });
+export const ChildRunList = z.object({
+  runs: z.array(ChildRun),
+  skipped: z.number().int().min(0),
+  /** False where the log can't be read safely on this platform: the list is then not shown. */
+  available: z.boolean().default(true),
+});
 export type ChildRunList = z.infer<typeof ChildRunList>;
 
 /**
@@ -92,5 +98,5 @@ export function foldChildRuns(lines: readonly string[]): ChildRunList {
       skipped++;
     }
   }
-  return { runs: [...runs.values()].reverse(), skipped };
+  return { runs: [...runs.values()].reverse(), skipped, available: true };
 }

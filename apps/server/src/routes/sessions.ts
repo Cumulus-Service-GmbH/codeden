@@ -3,6 +3,7 @@ import {
   ArchiveSessionRequest,
   type ChildRunList,
   type CompactSessionResponse,
+  defaultTeam,
   EditQueuedMessageRequest,
   ForkSessionRequest,
   type ForkSessionResponse,
@@ -44,7 +45,7 @@ export function sessionRoutes(s: AppServices, installToken: string) {
         const asked = c.req.valid("json");
         // A Team role chosen in the composer: its tag, and the resolved Team's pins where the user set none.
         const req = withTeamRole(asked, {
-          defaults: s.settings.get().teamSetup.team,
+          defaults: defaultTeam(s.settings.get()),
           project: asked.projectId ? (s.factory.data.loop(asked.projectId)?.tuning.team ?? []) : [],
         });
         const result = await s.sessions.start(req);

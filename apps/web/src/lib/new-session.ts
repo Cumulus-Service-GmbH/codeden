@@ -6,6 +6,7 @@ import {
   type ReasoningEffort,
   type StartSessionRequestInit,
   type StartWorkResult,
+  type Team,
   type TeamRole,
   type TokenSaverLevel,
   type UserInputInit,
@@ -76,6 +77,8 @@ export interface DraftDefaults {
   agent: DefaultAgent | null;
   /** Settings → Autonomy default. */
   defaultAutonomy: AutonomyLevel;
+  /** The project's resolved Team (its Team over the default Team), for a chosen Team role. */
+  team?: Team;
 }
 
 /** The draft's choice with its defaults filled in: what the pickers show and the start sends. */
@@ -97,8 +100,6 @@ export interface ResolvedDraft {
   workspace: "worktree" | "repo_root";
   teamRole: TeamRole | null;
   tokenSaver: TokenSaverLevel | null;
-  /** A Team role with no provider picked: the server takes provider, model and effort from the Team. */
-  pinsFromTeam: boolean;
 }
 
 /** Why a project whose folder isn't a git repository gets no worktree (as the server says). */
@@ -120,8 +121,14 @@ export function resolveDraftChoice(choice: DraftChoice, defaults: DraftDefaults)
   const { providers, project } = defaults;
   const known = (id: string | null | undefined) =>
     id && providers.some((p) => p.id === id) ? id : null;
+  // A Team role with no provider picked runs as the Team's member for it: show and check that one.
+  const member =
+    choice.teamRole && choice.provider === null
+      ? defaults.team?.find((m) => m.role === choice.teamRole)
+      : undefined;
   const providerId =
     known(choice.provider) ??
+    known(member?.provider) ??
     known(project?.defaultProvider) ??
     known(defaults.agent?.provider) ??
     providers[0]?.id ??
@@ -136,7 +143,10 @@ export function resolveDraftChoice(choice: DraftChoice, defaults: DraftDefaults)
         effort: project.defaultEffort,
       }
     : null;
-  const preset = [projectAgent, defaults.agent].find(
+  const teamAgent: DefaultAgent | null = member
+    ? { provider: member.provider, model: member.model, effort: member.effort }
+    : null;
+  const preset = [teamAgent, projectAgent, defaults.agent].find(
     (d) => d && d.provider === provider?.id && (d.model !== null || d.effort !== null),
   );
   const fallback = provider?.models.find((m) => m.isDefault) ?? provider?.models[0];
@@ -154,7 +164,6 @@ export function resolveDraftChoice(choice: DraftChoice, defaults: DraftDefaults)
     workspace: project?.isGitRepo === false ? "repo_root" : "worktree",
     teamRole: choice.teamRole ?? null,
     tokenSaver: choice.tokenSaver ?? null,
-    pinsFromTeam: Boolean(choice.teamRole) && choice.provider === null,
   };
 }
 
@@ -189,10 +198,9 @@ export function buildStartRequest(
       : {}),
     ...(resolved.teamRole ? { teamRole: resolved.teamRole } : {}),
     ...(resolved.tokenSaver ? { tokenSaver: resolved.tokenSaver } : {}),
-    // With a Team role and no provider picked, the Team decides provider, model and effort.
-    ...(!resolved.pinsFromTeam && resolved.provider ? { provider: resolved.provider.id } : {}),
-    ...(!resolved.pinsFromTeam && resolved.model ? { model: resolved.model } : {}),
-    ...(!resolved.pinsFromTeam && resolved.effort ? { effort: resolved.effort } : {}),
+    ...(resolved.provider ? { provider: resolved.provider.id } : {}),
+    ...(resolved.model ? { model: resolved.model } : {}),
+    ...(resolved.effort ? { effort: resolved.effort } : {}),
     ...(key ? { workKey: key } : {}),
     // A git project leaves it to the server (a new worktree); a folder that isn't one says so.
     ...(resolved.workspace === "repo_root" ? { workspace: { mode: "repo_root" as const } } : {}),

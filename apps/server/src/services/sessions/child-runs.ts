@@ -15,18 +15,23 @@ export function childRunsFile(dir: string, sessionId: string): string {
  * The worker runs a session's tools logged, newest first. Only a regular file is read (never a
  * link or a special file), and only its last 1 MB; a missing log means no runs.
  */
-export function readChildRuns(dir: string, sessionId: string): ChildRunList {
-  // Without an atomic no-follow open (Windows) the entry can't be bound to what is read: refuse.
-  if (!constants.O_NOFOLLOW)
-    throw new Error("child-run logs can't be read without following links on this platform");
+export function readChildRuns(
+  dir: string,
+  sessionId: string,
+  noFollow: number | undefined = constants.O_NOFOLLOW,
+): ChildRunList {
+  // Without an atomic no-follow open (Windows) the entry can't be bound to what is read: the
+  // list is unavailable there, never read through a link.
+  if (!noFollow) return { runs: [], skipped: 0, available: false };
   let fd: number;
   try {
     fd = openSync(
       childRunsFile(dir, sessionId),
-      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK,
+      constants.O_RDONLY | noFollow | constants.O_NONBLOCK,
     );
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { runs: [], skipped: 0 };
+    if ((error as NodeJS.ErrnoException).code === "ENOENT")
+      return { runs: [], skipped: 0, available: true };
     throw error;
   }
   try {

@@ -1,5 +1,6 @@
 import {
   ConflictDecision,
+  defaultTeam,
   messageFrom,
   ProviderId,
   ReasoningEffort,
@@ -105,11 +106,18 @@ export const startSession = defineTool({
       );
     }
     const { team } = resolveTeam({
-      defaults: services.settings.get().teamSetup.team,
+      defaults: defaultTeam(services.settings.get()),
       project: services.factory.data.loop(projectId)?.tuning.team ?? [],
       session: callerSession ? sessionTeamMember(callerSession) : null,
     });
-    const member = teamMember(team, teamRoleOfTitle(input.title));
+    const role = teamRoleOfTitle(input.title);
+    const member = teamMember(team, role);
+    // A tagged role the resolved Team does not set has no pin to start on: refused, as the guard refuses it.
+    if (role && !member) {
+      throw new ToolError(
+        `TEAM_ROLE_UNSET: this project's Team (with the default Team) sets no ${input.title?.match(/^\[[^\]]+\]/)?.[0]}; set that role in CodeDen`,
+      );
+    }
     const models =
       member?.model && input.model ? services.factory.ctx.sessions.models(member.provider) : [];
     const { choice, mismatch } = applyTeamRole(input, team, models);

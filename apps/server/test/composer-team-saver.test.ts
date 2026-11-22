@@ -1,4 +1,4 @@
-import { StartSessionRequest, TokenSaverSettings } from "@codeden/contracts";
+import { defaultTeam, Settings, StartSessionRequest, TokenSaverSettings } from "@codeden/contracts";
 import { expect, it } from "vitest";
 import { type LauncherDeps, SessionLauncher } from "../src/services/sessions/launcher";
 import { withTeamRole } from "../src/services/sessions/team-start";
@@ -87,4 +87,28 @@ it("the session's own saver level wins over the project and role defaults", () =
   expect(launcher(undefined).sessionOptions(session).systemPrompt).toContain(
     tokenSaverNote("full") ?? "x",
   );
+});
+
+it("fills a matching provider's unset pins, titles from the first message, and uses the default Team only when it's for new projects", () => {
+  const sameProvider = withTeamRole(
+    StartSessionRequest.parse({
+      projectId: "p1",
+      teamRole: "writer",
+      provider: "claude",
+      input: { text: "Fix the parser\nmore" },
+    }),
+    { defaults: [], project: [writer] },
+  );
+  expect(sameProvider).toMatchObject({
+    title: "[Writer] Fix the parser",
+    provider: "claude",
+    model: "m-project",
+    effort: "high",
+  });
+  expect(defaultTeam(Settings.parse({ teamSetup: { remembered: false, team: [writer] } }))).toEqual(
+    [],
+  );
+  expect(defaultTeam(Settings.parse({ teamSetup: { remembered: true, team: [writer] } }))).toEqual([
+    writer,
+  ]);
 });

@@ -43,7 +43,7 @@ export function ChildRuns({ session }: { session: Session }) {
       <p className="text-3xs text-destructive">Workers could not be listed: {String(runs.error)}</p>
     );
   }
-  if (!list.length && skipped === 0) return null;
+  if (runs.data?.available === false || (!list.length && skipped === 0)) return null;
   return (
     <section aria-labelledby="child-runs-heading" className="space-y-2">
       <h3
