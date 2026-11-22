@@ -266,14 +266,19 @@ describe("side-by-side installs", () => {
     expect(listInstalled(home).map((v) => v.version)).toEqual(["0.2.0"]);
   });
 
-  it("keeps parent npm configuration out of the installer", async () => {
+  it("forwards only allowlisted parent npm configuration to the installer", async () => {
     const home = tempHome();
+    for (const key of Object.keys(process.env)) {
+      if (/^npm_config_/i.test(key)) vi.stubEnv(key, undefined);
+    }
     vi.stubEnv("npm_config_allow_scripts", "parent-allow-scripts");
     vi.stubEnv("NPM_CONFIG_USERCONFIG", "parent-user-config");
-    vi.stubEnv("Npm_Config_Registry", "parent-registry");
+    vi.stubEnv("Npm_Config_Registry", "https://mirror.example/");
     try {
       await installAppVersion({ home, version: "0.2.0", npm: fakeNpm });
       expect(JSON.parse(readFileSync(join(home, "app", "npm-env.json"), "utf8"))).toEqual([
+        "NPM_CONFIG_USERCONFIG",
+        "Npm_Config_Registry",
         "npm_config_global",
         "npm_config_location",
         "npm_config_progress",
