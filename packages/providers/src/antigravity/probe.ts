@@ -67,6 +67,10 @@ export async function probeAntigravity(
         .slice(0, 400),
     };
   } finally {
-    if (cwd) rmSync(cwd, { recursive: true, force: true });
+    try {
+      if (cwd) rmSync(cwd, { recursive: true, force: true });
+    } catch {
+      // A leftover empty scratch folder doesn't change what the probe found.
+    }
   }
 }

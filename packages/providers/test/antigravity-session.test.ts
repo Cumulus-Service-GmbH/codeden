@@ -77,7 +77,11 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
-  await Promise.all(sessions.splice(0).map((s) => s.close()));
+  try {
+    await Promise.all(sessions.splice(0).map((s) => s.close()));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 describe("Antigravity CLI session over ACP", () => {
@@ -131,6 +135,18 @@ describe("Antigravity CLI session over ACP", () => {
     rmSync(reject);
     await turn("again");
     expect(configSets().at(-1)).toBe("thought_level=medium");
+  });
+
+  it("keeps a refused model and effort change pending and applies both next turn", async () => {
+    const reject = join(dir, "reject");
+    const { session, turn } = await open({ env: { FAKE_AGY_REJECT_FILE: reject } });
+    await session.configure?.({ model: "gemini-4-argon", effort: "medium" });
+    writeFileSync(reject, "");
+    await expect(session.send({ text: "go", attachments: [] })).rejects.toThrow(/invalid/);
+    rmSync(reject);
+    await turn("again");
+    expect(configSets().slice(-2)).toEqual(["model=gemini-4-argon", "thought_level=medium"]);
+    expect(logged("session/prompt")).toHaveLength(1);
   });
 
   it("refuses to open a given CLI that is too old", async () => {

@@ -5,7 +5,6 @@ import type { AcpSessionSetup } from "../src/acp/protocol";
 import { AntigravityAdapter } from "../src/antigravity/adapter";
 import {
   ANTIGRAVITY_INSTALL_COMMAND,
-  ANTIGRAVITY_UPGRADE_COMMAND,
   antigravityInstallCommand,
   detectAntigravity,
   isSupportedAntigravityVersion,
@@ -128,7 +127,7 @@ describe("detectAntigravity", () => {
       {
         code: "version_unsupported",
         message: "Antigravity CLI 1.5.11 is too old (needs 1.5.12+). Update it.",
-        fix: { kind: "upgrade", command: ANTIGRAVITY_UPGRADE_COMMAND },
+        fix: { kind: "upgrade", command: antigravityInstallCommand() },
         minVersion: "1.5.12",
       },
     ]);
@@ -159,7 +158,7 @@ describe("detectAntigravity", () => {
     expect(status.installed).toBe(false);
     expect(status.issues[0]).toMatchObject({
       code: "not_installed",
-      fix: { kind: "install", command: ANTIGRAVITY_INSTALL_COMMAND },
+      fix: { kind: "install", command: antigravityInstallCommand() },
     });
   });
 

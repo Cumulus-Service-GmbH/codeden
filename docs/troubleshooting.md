@@ -151,7 +151,7 @@ CodeDen repeats your Gemini CLI rules for commands, edits and MCP tools above it
 
 ### The Antigravity CLI asks for an update, or a session says it isn't signed in
 
-CodeDen needs the Antigravity CLI **1.5.12** or newer, whose ACP server takes `--process-per-session` (needed for CodeDen's tools). Run its installer again to update it (`curl -fsSL https://antigravity.google/cli/install.sh | bash`), then press **Re-check**.
+CodeDen needs the Antigravity CLI **1.5.12** or newer, whose ACP server takes `--process-per-session` (needed for CodeDen's tools). Run its installer again to update it (in Bash: `curl -fsSL https://antigravity.google/cli/install.sh | bash`; on native Windows, follow [its install instructions](https://antigravity.google/docs/cli)), then press **Re-check**.
 
 CodeDen never signs the Antigravity CLI in: its sessions use the login of an interactive `agy`. If a session fails with "The Antigravity CLI is not signed in", run `agy` once in a terminal (or **Sign in** on the setup checklist), sign in, and start the session again.
 
