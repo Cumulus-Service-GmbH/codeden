@@ -425,8 +425,9 @@ export class SessionLauncher {
    * so a start or resume always sees the current Team; the container rewrites it on every change.
    */
   private teamEnv(session: Session): { env: Record<string, string> } | null {
-    const project = this.projectOf(session);
-    if (!session.projectId || !project || !this.deps.team) return null;
+    if (!session.projectId || !this.deps.team) return null;
+    // A strict lookup: a project session whose project can't be read must not run without its Team.
+    const project = this.deps.projects.get(session.projectId);
     // Every project session gets the path, even with no Team yet (an empty Team), so a Team set
     // later reaches it. A failed write fails the start: never run on a stale or missing Team.
     const team = this.deps.team(session.projectId) ?? [];
