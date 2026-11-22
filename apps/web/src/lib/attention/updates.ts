@@ -21,10 +21,10 @@ const MAX_LINE = 120;
 
 /** Whether a new item raises an update toast and notification: its category is switched on. */
 export function notifiesFor(
-  item: Pick<InboxItem, "kind" | "notify">,
+  item: Pick<InboxItem, "kind" | "notify" | "status">,
   notifications: Settings["notifications"],
 ): boolean {
-  if (isBlockingKind(item)) return false;
+  if (item.status !== "open" || isBlockingKind(item)) return false;
   return notifications.categories[item.notify];
 }
 

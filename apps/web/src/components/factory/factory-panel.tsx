@@ -1,4 +1,4 @@
-import type { Project } from "@codeden/contracts";
+import { haltLine, type Project } from "@codeden/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "@tanstack/react-router";
 import { AlertTriangle, Factory, FileText, Newspaper, Play, SlidersHorizontal } from "lucide-react";
@@ -106,6 +106,7 @@ export function FactoryPanel({ project }: { project: Project }) {
   });
 
   if (!f) return <Skeleton className="h-72 w-full rounded-xl" />;
+  const control = haltLine(f.halt, f.lastControl);
   const stopped = f.killSwitch || f.globalKillSwitch || f.loopState === "stopped";
   const readyCount = f.inProgress.filter(
     (w) => w.step === "merge" && w.stage === "verifying",
@@ -171,7 +172,7 @@ export function FactoryPanel({ project }: { project: Project }) {
       </div>
 
       <div className="space-y-4 px-4 py-4">
-        {(f.globalKillSwitch || f.pausedReason || !f.visionExists) && (
+        {(f.globalKillSwitch || !f.visionExists || control) && (
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-status-waiting/30 bg-status-waiting/[0.06] px-3 py-2 text-2xs">
             <AlertTriangle className="size-3.5 text-status-waiting" />
             <span className="min-w-0 flex-1">
@@ -179,7 +180,8 @@ export function FactoryPanel({ project }: { project: Project }) {
                 ? "The global kill switch is on: no project's factory runs."
                 : !f.visionExists
                   ? "The vision file is missing; the loop will not start work without it."
-                  : `Paused: ${f.pausedReason}`}
+                  : null}
+              {control && <span className="block">{control}</span>}
             </span>
             {f.globalKillSwitch && <KillSwitchButton scope="global" on size="xs" />}
           </div>

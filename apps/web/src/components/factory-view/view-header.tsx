@@ -1,4 +1,4 @@
-import type { FactoryStatus, Project } from "@codeden/contracts";
+import { type FactoryStatus, haltLine, type Project } from "@codeden/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { AlertTriangle, Factory, Maximize, Minimize, Play, UserRound, X } from "lucide-react";
@@ -39,14 +39,28 @@ function useFullscreen() {
 function LoopChip({ f }: { f: FactoryStatus }) {
   const stopped = f.killSwitch || f.globalKillSwitch || f.loopState === "stopped";
   const loop = LOOP_LABEL[stopped ? "stopped" : f.loopState];
-  const why = f.globalKillSwitch
-    ? "global kill switch"
-    : f.killSwitch
-      ? "kill switch"
-      : f.loopState === "paused"
-        ? f.pausedReason
-        : null;
-  if (f.drain && !stopped) return <DrainChip f={f} />;
+  const control = haltLine(f.halt, f.lastControl);
+  const why =
+    control ??
+    (f.globalKillSwitch
+      ? "global kill switch"
+      : f.killSwitch
+        ? "kill switch"
+        : f.loopState === "paused"
+          ? f.pausedReason
+          : null);
+  if (f.drain && !stopped) {
+    return (
+      <>
+        <DrainChip f={f} />
+        {control && (
+          <span className="truncate text-2xs" title={control}>
+            {control}
+          </span>
+        )}
+      </>
+    );
+  }
   return (
     <span
       className={cn(

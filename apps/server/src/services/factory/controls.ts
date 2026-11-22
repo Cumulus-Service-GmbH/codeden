@@ -55,16 +55,10 @@ export async function stopWork(ctx: FactoryContext, projectId: string): Promise<
 
 /** A stopped loop: the scout's round closed and any drain over. */
 export function stoppedLoop(loop: FactoryLoop): FactoryLoop {
-  return { ...loop, state: "stopped", drain: null, scout: { ...loop.scout, round: null } };
-}
-
-/**
- * The kill switch's Stop now: stop every factory session of the project, put work that hadn't
- * opened a PR back in the queue, close the scout's round, end a drain and stop the loop. Returns
- * the stopped ids.
- */
-export async function haltProject(ctx: FactoryContext, projectId: string): Promise<string[]> {
-  const stopped = await stopWork(ctx, projectId);
-  ctx.store.saveLoop(stoppedLoop(ctx.store.loopOrNew(projectId, ctx.now())));
-  return stopped;
+  return {
+    ...loop,
+    state: loop.state === "paused" ? "paused" : "stopped",
+    drain: null,
+    scout: { ...loop.scout, round: null },
+  };
 }
