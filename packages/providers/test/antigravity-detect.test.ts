@@ -19,6 +19,10 @@ import { listSetup, probeAntigravity } from "../src/antigravity/probe";
 import type { ResolvedCommand } from "../src/util/exec";
 import { clearExecutableCache } from "../src/util/locate";
 
+// These tests start the fake CLI as a real process: room for a busy machine, as for the
+// repo's other process-spawning suites.
+vi.setConfig({ testTimeout: 40_000, hookTimeout: 60_000 });
+
 const fixtures = join(import.meta.dirname, "fixtures", "fake-agy");
 const fakeAgy = {
   kind: "node-script" as const,

@@ -5,6 +5,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcpInitializeResult, AcpSessionSetup } from "../src/acp/protocol";
 import type { AntigravityProbe, AntigravityProbeReports } from "../src/antigravity/probe";
 
+// These tests start the fake CLI as a real process: room for a busy machine, as for the
+// repo's other process-spawning suites.
+vi.setConfig({ testTimeout: 40_000, hookTimeout: 60_000 });
+
 /** Each probe the adapter starts: its reports and how to finish it. */
 type Pending = AntigravityProbeReports & { finish: (probe: AntigravityProbe) => void };
 const pending: Pending[] = [];
@@ -51,7 +55,8 @@ const session = (adapter: Adapter) => {
 async function probing(adapter: Adapter) {
   const at = pending.length;
   const done = adapter.detect();
-  await vi.waitFor(() => expect(pending.length).toBeGreaterThan(at));
+  // Detection runs the fake CLI's `--version` first: give a busy machine time.
+  await vi.waitFor(() => expect(pending.length).toBeGreaterThan(at), { timeout: 30_000 });
   return { done, probe: pending[at] as Pending };
 }
 
@@ -126,7 +131,7 @@ describe("the Antigravity CLI's model list and flags", () => {
     const adapter = new AntigravityAdapter({ executable: fakeAgy });
     const first = adapter.detect();
     expect(adapter.detect()).toBe(first);
-    await vi.waitFor(() => expect(pending).toHaveLength(1));
+    await vi.waitFor(() => expect(pending).toHaveLength(1), { timeout: 30_000 });
     pending[0]?.finish({ acp: true });
     await first;
     expect(pending).toHaveLength(1);

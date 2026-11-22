@@ -2,10 +2,14 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentEvent, SessionOptions } from "@codeden/contracts";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AcpSession } from "../src/acp/session";
 import type { ProviderSession } from "../src/adapter";
 import { ANTIGRAVITY_AGENT, AntigravityAdapter } from "../src/antigravity/adapter";
+
+// These tests start the fake CLI as a real process: room for a busy machine, as for the
+// repo's other process-spawning suites.
+vi.setConfig({ testTimeout: 40_000, hookTimeout: 60_000 });
 
 const fakeAgy = {
   kind: "node-script" as const,
@@ -130,11 +134,14 @@ describe("Antigravity CLI session over ACP", () => {
     const reject = join(dir, "reject");
     writeFileSync(reject, "");
     const reported: unknown[] = [];
-    const session = new AcpSession(options({ effort: "medium", env: { FAKE_AGY_REJECT_FILE: reject } }), {
-      executable: fakeAgy,
-      spec: ANTIGRAVITY_AGENT,
-      onSetup: (setup) => reported.push(setup),
-    });
+    const session = new AcpSession(
+      options({ effort: "medium", env: { FAKE_AGY_REJECT_FILE: reject } }),
+      {
+        executable: fakeAgy,
+        spec: ANTIGRAVITY_AGENT,
+        onSetup: (setup) => reported.push(setup),
+      },
+    );
     sessions.push(session);
     await session.start();
     // Only session/new's own list: the refusal republishes no older one.

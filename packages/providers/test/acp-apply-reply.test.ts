@@ -43,7 +43,10 @@ function session(live: AcpSessionSetup) {
 }
 
 describe("what an ACP change's reply does to the session's setup", () => {
-  const before: AcpSessionSetup = { configOptions: list("old"), modes: { currentModeId: "default" } };
+  const before: AcpSessionSetup = {
+    configOptions: list("old"),
+    modes: { currentModeId: "default" },
+  };
   const live: AcpSessionSetup = { ...before, configOptions: list("newer") };
 
   it("takes and reports an option list the agent answered with", () => {
