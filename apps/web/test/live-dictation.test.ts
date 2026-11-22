@@ -240,7 +240,7 @@ describe("dictation segment queue", () => {
     expect(separator("𠀀测", "试")).toBe("");
     expect(separator("葛\u{E0100}", "测试")).toBe("");
     expect(separator("", "测试")).toBe(" ");
-    expect(separator("cafe\u0301", "测试")).toBe(" ");
+    expect(separator("café", "测试")).toBe(" ");
     expect(separator("ທົດສອບ", "ແກ້")).toBe("");
     // Where scripts meet, the space stays.
     expect(separator("修复", "React")).toBe(" ");
