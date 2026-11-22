@@ -126,6 +126,21 @@ describe("Antigravity CLI session over ACP", () => {
     expect(configSets()).toEqual(["thought_level=low", "thought_level=high"]);
   });
 
+  it("reports nothing again when the start's effort change is refused", async () => {
+    const reject = join(dir, "reject");
+    writeFileSync(reject, "");
+    const reported: unknown[] = [];
+    const session = new AcpSession(options({ effort: "medium", env: { FAKE_AGY_REJECT_FILE: reject } }), {
+      executable: fakeAgy,
+      spec: ANTIGRAVITY_AGENT,
+      onSetup: (setup) => reported.push(setup),
+    });
+    sessions.push(session);
+    await session.start();
+    // Only session/new's own list: the refusal republishes no older one.
+    expect(reported).toHaveLength(1);
+  });
+
   it("fails a turn whose asked-for effort the agent refuses, and retries it next turn", async () => {
     const reject = join(dir, "reject");
     const { session, turn } = await open({ env: { FAKE_AGY_REJECT_FILE: reject } });
