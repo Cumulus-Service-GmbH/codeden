@@ -16,6 +16,7 @@ function stubSdk() {
       supportedModels: async () => [],
       supportedCommands: async () => [],
       mcpServerStatus: async () => [],
+      interrupt: async () => undefined,
       close: () => messages.close(),
     } as unknown as Query;
   }) as ConstructorParameters<typeof ClaudeSession>[1]["query"];
@@ -82,16 +83,16 @@ function open(autonomy: SessionOptions["autonomy"]) {
     item: ItemOf<"approval_request">,
     decision: "allow_once" | "allow_session" | "deny",
   ) => session.respond(item.requestId, { kind: "approval", decision });
-  const pushAsk = () =>
+  const pushAsk = (tool = "Bash", padding = "") =>
     sdk.messages.push({
       type: "system",
       subtype: "hook_response",
-      hook_name: "PreToolUse:Bash",
+      hook_name: `PreToolUse:${tool}`,
       hook_event: "PreToolUse",
       outcome: "success",
-      stdout: JSON.stringify({
+      stdout: `${padding}${JSON.stringify({
         hookSpecificOutput: { permissionDecision: "ask", permissionDecisionReason: marked },
-      }),
+      })}${padding}`,
     });
   return { session, permission, approvals, card, answer, pushAsk, messages: sdk.messages, events };
 }
@@ -149,25 +150,48 @@ describe("Claude settings hooks that require approval", () => {
     await expect(markedCall).resolves.toMatchObject({ behavior: "deny" });
   });
 
-  it("uses the hook response when CodeDen's own reason hides the marker", async () => {
-    const run = open("auto");
-    run.pushAsk();
-    const call = run.permission(
-      "Bash",
-      forcePush,
-      "Force-pushes, which can overwrite remote history",
-    );
-    const card = await run.card();
-    expect(card.options).toEqual(once);
-    await run.answer(card, "allow_once");
-    await expect(call).resolves.toMatchObject({ behavior: "allow" });
+  it.each([
+    [forcePush, echo],
+    [echo, forcePush],
+  ])(
+    "keeps both overlapping Bash approvals restricted (%j first)",
+    async (firstInput, secondInput) => {
+      const run = open("auto");
+      await run.session.send({ text: "go", attachments: [] });
+      run.pushAsk();
+      const first = run.permission("Bash", firstInput);
+      const second = run.permission("Bash", secondInput);
+      await run.card(2);
+      for (const card of run.approvals) {
+        expect(card.options).toEqual(once);
+        await expect(run.answer(card, "allow_session")).rejects.toMatchObject({
+          code: "invalid_answer",
+        });
+        await run.answer(card, "allow_once");
+      }
+      await expect(Promise.all([first, second])).resolves.toEqual([
+        { behavior: "allow", updatedInput: firstInput },
+        { behavior: "allow", updatedInput: secondInput },
+      ]);
+    },
+  );
 
-    const next = run.permission("Bash", forcePush);
-    const ordinaryCard = await run.card(2);
-    expect(ordinaryCard.options).toEqual(ordinary);
-    await run.answer(ordinaryCard, "deny");
-    await expect(next).resolves.toMatchObject({ behavior: "deny" });
-  });
+  it.each(["", "\n\n"])(
+    "uses hook stdout with padding %j when CodeDen's reason hides the marker",
+    async (padding) => {
+      const run = open("auto");
+      run.pushAsk("Bash", padding);
+      const call = run.permission(
+        "Bash",
+        forcePush,
+        "Force-pushes, which can overwrite remote history",
+      );
+      const card = await run.card();
+      expect(card.options).toEqual(once);
+      await run.answer(card, "allow_once");
+      await expect(call).resolves.toMatchObject({ behavior: "allow" });
+    },
+  );
 
   it("clears leftover asks at the end of a turn", async () => {
     const run = open("full");
@@ -181,6 +205,25 @@ describe("Claude settings hooks that require approval", () => {
     expect(run.approvals).toHaveLength(0);
   });
 
+  it("clears marked asks when interrupted", async () => {
+    const run = open("full");
+    run.pushAsk();
+    await run.session.send({ text: "go", attachments: [] });
+    await new Promise((resolve) => setImmediate(resolve));
+    await run.session.interrupt();
+    await expect(run.permission("Bash", echo)).resolves.toMatchObject({ behavior: "allow" });
+    expect(run.approvals).toHaveLength(0);
+  });
+
+  it("cancels a permission request when the session closes during the yield", async () => {
+    const run = open("full");
+    run.pushAsk();
+    const call = run.permission("Bash", echo);
+    await run.session.close();
+    await expect(call).resolves.toMatchObject({ behavior: "deny", interrupt: true });
+    expect(run.approvals).toHaveLength(0);
+  });
+
   it("still asks after switching from auto to full", async () => {
     const run = open("auto");
     run.pushAsk();
@@ -190,8 +233,11 @@ describe("Claude settings hooks that require approval", () => {
     expect(card.options).toEqual(once);
     await run.answer(card, "allow_once");
     await expect(call).resolves.toMatchObject({ behavior: "allow" });
-    await expect(run.permission("Bash", echo)).resolves.toMatchObject({ behavior: "allow" });
-    expect(run.approvals).toHaveLength(1);
+    const next = run.permission("Bash", echo);
+    const nextCard = await run.card(2);
+    expect(nextCard.options).toEqual(once);
+    await run.answer(nextCard, "deny");
+    await expect(next).resolves.toMatchObject({ behavior: "deny" });
   });
 
   it.each(["auto", "full"] as const)("allows an unmarked safe command at %s", async (autonomy) => {
@@ -212,6 +258,14 @@ describe("Claude settings hooks that require approval", () => {
     expect(card.options).toEqual(ordinary);
     await run.answer(card, "deny");
     await expect(call).resolves.toMatchObject({ behavior: "deny" });
+  });
+
+  it("denies a read-only write after a marked hook response without raising a card", async () => {
+    const run = open("read_only");
+    run.pushAsk("Write");
+    await new Promise((resolve) => setImmediate(resolve));
+    await expect(run.permission("Write", write)).resolves.toMatchObject({ behavior: "deny" });
+    expect(run.approvals).toHaveLength(0);
   });
 
   it.each([undefined, marked])("denies read-only writes with reason %j", async (reason) => {

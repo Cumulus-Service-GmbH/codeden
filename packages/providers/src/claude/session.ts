@@ -100,8 +100,9 @@ export class ClaudeSession implements ProviderSession {
   private abort: AbortController | undefined;
   private stderrTail = "";
   private closed = false;
-  // hook_response has no tool_use_id, so a counted ask is matched by tool name.
-  private readonly markedHookAsks = new Map<string, number>();
+  // hook_response has no tool_use_id. Match by tool name for the rest of the turn,
+  // so we may ask more often, never less.
+  private readonly markedHookAsks = new Set<string>();
   /** The shell's current directory from the latest PreToolUse hook, for relative paths. */
   private readonly shell: ShellState = {};
   /** Current autonomy: a query restarted after the CLI exits starts with it. */
@@ -259,6 +260,7 @@ export class ClaudeSession implements ProviderSession {
    * (or never answers the interrupt at all), the turn is closed as interrupted anyway.
    */
   async interrupt(): Promise<void> {
+    this.markedHookAsks.clear();
     const turnId = this.mapper.turnId;
     if (!turnId) return;
     this.mapper.requestInterrupt();
@@ -271,8 +273,10 @@ export class ClaudeSession implements ProviderSession {
       },
       this.config.interruptTimeoutMs ?? 10_000,
       () => {
-        if (this.mapper.turnId === turnId)
+        if (this.mapper.turnId === turnId) {
+          this.markedHookAsks.clear();
           this.mapper.endTurn({ type: "interrupted", reason: "user" });
+        }
       },
     );
   }
@@ -440,11 +444,12 @@ export class ClaudeSession implements ProviderSession {
       }
     } catch (error) {
       failure = error;
-    }
-    if (this.q === q) {
-      this.markedHookAsks.clear();
-      this.q = undefined;
-      this.prompts = undefined;
+    } finally {
+      if (this.q === q) {
+        this.markedHookAsks.clear();
+        this.q = undefined;
+        this.prompts = undefined;
+      }
     }
     if (this.closed) return;
     this.broker.cancelAll();
@@ -475,7 +480,7 @@ export class ClaudeSession implements ProviderSession {
     const prefix = "PreToolUse:";
     const name = str(message, "hook_name");
     if (!name?.startsWith(prefix) || name.length === prefix.length) return;
-    const output = str(message, "stdout") || str(message, "output");
+    const output = (str(message, "stdout") || str(message, "output"))?.trim();
     if (!output?.startsWith("{")) return;
     let hookOutput: unknown;
     try {
@@ -487,33 +492,30 @@ export class ClaudeSession implements ProviderSession {
       str(hookOutput, "permissionDecision") === "ask" &&
       isMarkedHookAsk(str(hookOutput, "permissionDecisionReason"))
     ) {
-      const toolName = name.slice(prefix.length);
-      this.markedHookAsks.set(toolName, Math.min(20, (this.markedHookAsks.get(toolName) ?? 0) + 1));
+      this.markedHookAsks.add(name.slice(prefix.length));
     }
   }
 
   private readonly canUseTool: CanUseTool = async (toolName, input, options) => {
+    const dir = this.shell.dir;
     if (toolName === QUESTION_TOOL) {
       const deps = { broker: this.broker, mapper: this.mapper };
       return askQuestion(deps, input, options.toolUseID, options.signal);
     }
     if (toolName === PLAN_TOOL) return this.reviewPlan(input, options);
-    const denied = this.policy.denial(toolName, input, this.shell.dir);
+    const denied = this.policy.denial(toolName, input, dir);
     if (denied) return { behavior: "deny", message: denied };
     const q = this.q;
     // Let the pump consume a hook_response read in the same chunk.
     await new Promise((resolve) => setImmediate(resolve));
     if (this.closed || this.q !== q) {
-      return this.toPermissionResult(toolName, input, { kind: "cancel" });
+      return this.toPermissionResult(toolName, input, dir, { kind: "cancel" });
     }
-    const count = this.markedHookAsks.get(toolName) ?? 0;
-    if (count === 1) this.markedHookAsks.delete(toolName);
-    if (count > 1) this.markedHookAsks.set(toolName, count - 1);
 
     const decisionReason = options.decisionReason;
     const markedReason = isMarkedHookAsk(decisionReason);
-    if (markedReason || count > 0) {
-      const gate = this.policy.gate(toolName, input, this.shell.dir);
+    if (markedReason || this.markedHookAsks.has(toolName)) {
+      const gate = this.policy.gate(toolName, input, dir);
       const hookReason =
         (markedReason && decisionReason?.slice(HOOK_ASK_MARKER.length).trimStart()) ||
         "A hook asked for approval";
@@ -526,10 +528,10 @@ export class ClaudeSession implements ProviderSession {
       });
       const ctx = this.mapper.ctxForTool(options.toolUseID);
       const response = await this.broker.request(ctx, item, options.signal, markedHookReview);
-      return this.toPermissionResult(toolName, input, response, false);
+      return this.toPermissionResult(toolName, input, dir, response, false);
     }
 
-    const gate = this.policy.needsUser(toolName, input, this.shell.dir);
+    const gate = this.policy.needsUser(toolName, input, dir);
     if (!gate.ask) return { behavior: "allow", updatedInput: input };
     const ctx = this.mapper.ctxForTool(options.toolUseID);
     const item = this.approvalItem(toolName, input, options, {
@@ -541,7 +543,7 @@ export class ClaudeSession implements ProviderSession {
       options: ["allow_once", "allow_session", "deny"],
     });
     const response = await this.broker.request(ctx, item, options.signal);
-    return this.toPermissionResult(toolName, input, response);
+    return this.toPermissionResult(toolName, input, dir, response);
   };
 
   private approvalItem(
@@ -568,6 +570,7 @@ export class ClaudeSession implements ProviderSession {
   private toPermissionResult(
     toolName: string,
     input: Record<string, unknown>,
+    dir: string | undefined,
     response: RuntimeResponse,
     allowSession = true,
   ): PermissionResult {
@@ -575,7 +578,7 @@ export class ClaudeSession implements ProviderSession {
       return { behavior: "allow", updatedInput: input };
     }
     if (response.kind === "approval" && response.decision === "allow_session" && allowSession) {
-      this.policy.allowForSession(toolName, input, this.shell.dir);
+      this.policy.allowForSession(toolName, input, dir);
       return { behavior: "allow", updatedInput: input };
     }
     if (response.kind === "approval" && response.decision === "deny") {
