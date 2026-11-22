@@ -114,7 +114,8 @@ export class RoleSessions {
       autonomy: "auto",
     });
     const result = await this.deps.sessions.start(request, { replacesRoleId: previous?.id });
-    if (result.status !== "started") {
+    // Queued for a free slot is a started conversation too: it runs once one opens.
+    if (result.status !== "started" && result.status !== "queued") {
       throw new ServiceError(409, "role_session_conflict", `Could not start the ${role} session`);
     }
     return this.deps.sessions.detail(result.sessionId).session;
