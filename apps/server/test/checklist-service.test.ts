@@ -47,9 +47,9 @@ describe("checklist service", () => {
     expect(after.items[0]?.updatedAt).toBe(after.updatedAt);
     expect(after.items[1]).toEqual(before.items[1]);
     expect(after.changes).toEqual([
-      { itemId: "tests", text: "Run tests", from: "todo", to: "done" },
-      { itemId: "ship", text: "Ship", from: null, to: "todo" },
-      { itemId: "docs", text: "Docs", from: "todo", to: null },
+      { itemId: "tests", text: "Run tests", from: "todo", to: "done", at: after.updatedAt },
+      { itemId: "ship", text: "Ship", from: null, to: "todo", at: after.updatedAt },
+      { itemId: "docs", text: "Docs", from: "todo", to: null, at: after.updatedAt },
     ]);
     expect(service.list()).toEqual([after]);
     const head = store.headSeq();

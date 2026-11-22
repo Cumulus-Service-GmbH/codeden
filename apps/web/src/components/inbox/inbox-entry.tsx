@@ -11,6 +11,7 @@ import { platform } from "@/lib/platform";
 import { useProject, useTranscript } from "@/lib/queries";
 import type { TranscriptState } from "@/lib/transcript/reducer";
 import { cn } from "@/lib/utils";
+import { ChecklistInboxCard } from "./checklist-inbox-card";
 import { FactoryInboxCard, factoryInboxKind } from "./factory-inbox";
 import { InboxActions, PrReviewStatus } from "./inbox-actions";
 import { TriageCard } from "./triage-card";
@@ -127,6 +128,8 @@ export function InboxEntry({ item, focused = false }: { item: InboxItem; focused
       </div>
       {mirrors && !resolved ? (
         <MirroredRequest item={item} />
+      ) : item.kind === "checklist_approval" ? (
+        <ChecklistInboxCard item={item} />
       ) : item.kind === "triage" ? (
         <TriageCard item={item} />
       ) : factoryInboxKind(item) ? (

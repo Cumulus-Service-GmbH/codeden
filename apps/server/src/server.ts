@@ -23,10 +23,11 @@ import { HttpListener } from "./network/listener";
 import { RemoteAccessStore } from "./network/store";
 import { ensureHome, type HomePaths } from "./paths";
 import { BROWSER_LOOPBACK_ONLY_PATHS, mountBrowserSockets } from "./realtime/browser-routes";
-import { WsHub } from "./realtime/hub";
+import { WsCapabilitiesQuery, WsHub } from "./realtime/hub";
 import { TerminalBridge } from "./realtime/terminals";
 import { createApi } from "./routes/api";
 import { findWebDir, mountWeb } from "./routes/static";
+import { queryOf } from "./routes/validate";
 import type { RunnerClient } from "./runner/client";
 import { RunnerHub } from "./runner/hub";
 import {
@@ -353,7 +354,8 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
   app.all("/mcp", (c) => mcp(c.req.raw));
   app.get(
     "/ws",
-    upgradeWebSocket(() => hub.handlers()),
+    queryOf(WsCapabilitiesQuery),
+    upgradeWebSocket((c) => hub.handlers(c.req.query("capabilities")?.split(",") ?? [])),
   );
   const terminals = new TerminalBridge({
     runner: services.runner,
@@ -435,6 +437,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
     closing ??= (async () => {
       services.lifecycle.stop();
       services.orchestration.stop();
+      services.checklistListener.stop();
       services.github.stop();
       // Its git checks run in project folders: waited for below, before the database closes.
       const redetectorStopped = services.redetector.stop();

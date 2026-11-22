@@ -1,6 +1,7 @@
 import {
   AdmissionStatus,
   ArchivedSessionsPage,
+  CLIENT_CAPABILITIES,
   ClaudeSdkStatus,
   CompactSessionResponse,
   CreateProjectResponse,
@@ -16,6 +17,7 @@ import {
   HandoffSessionResponse,
   HideProviderHistoryResponse,
   InboxItem,
+  InboxItemKind,
   LoginCommandResponse,
   Project,
   ProjectChecksResponse,
@@ -36,6 +38,7 @@ import {
   SessionFileList,
   SessionSnapshot,
   SessionTranscriptExport,
+  SetChecklistEnforceResponse,
   Settings,
   SetupStatus,
   SlashCommandList,
@@ -66,6 +69,31 @@ import { openTerminalSocket } from "./terminal-channel";
 import type { MentionCandidate } from "./types";
 import { httpUpdatesApi } from "./updates-api";
 
+const warnedInboxKinds = new Set<string>();
+
+/**
+ * Parses `GET /api/snapshot`, skipping inbox items of a kind this client doesn't know (a kind
+ * newer than the client) instead of failing the whole load. An item of a known kind that fails
+ * validation still fails the snapshot. Warns once per unknown kind.
+ */
+export function parseSnapshot(value: unknown): Snapshot {
+  if (value && typeof value === "object" && Array.isArray((value as { inbox?: unknown }).inbox)) {
+    const raw = value as { inbox: unknown[] };
+    const known = new Set<string>(InboxItemKind.options);
+    const inbox = raw.inbox.filter((item) => {
+      const kind = (item as { kind?: unknown } | null)?.kind;
+      if (typeof kind !== "string" || known.has(kind)) return true;
+      if (!warnedInboxKinds.has(kind)) {
+        warnedInboxKinds.add(kind);
+        console.warn(`Skipping inbox items of kind "${kind}" this client can't read.`);
+      }
+      return false;
+    });
+    return Snapshot.parse({ ...raw, inbox });
+  }
+  return Snapshot.parse(value);
+}
+
 const whenBusy: Record<SendMode, SendMessageRequestInit["whenBusy"]> = {
   send: "queue",
   queue: "queue",
@@ -88,7 +116,7 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
   const http = createFetcher(origin, opts.onUnauthorized ?? (() => {}));
   const { get, post, call } = http;
   const wsBase = origin.replace(/^http/, "ws");
-  const socket = new RealtimeSocket(`${wsBase}/ws`);
+  const socket = new RealtimeSocket(`${wsBase}/ws?capabilities=${CLIENT_CAPABILITIES.join(",")}`);
   const enc = encodeURIComponent;
   // File lists for `@` mentions, by URL, reused for 30 seconds while the user types.
   const fileCache = new Map<string, { at: number; list: SessionFileList }>();
@@ -104,7 +132,8 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
 
   return {
     kind: "http",
-    getSnapshot: () => get("/snapshot", (v) => Snapshot.parse(v)),
+    getSnapshot: () =>
+      get(`/snapshot?capabilities=${enc(CLIENT_CAPABILITIES.join(","))}`, parseSnapshot),
     getSessionSnapshot: (id, query = {}) => {
       const params = new URLSearchParams();
       if (query.turns !== undefined) params.set("turns", String(query.turns));
@@ -183,6 +212,10 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
     createProject: (input) => post("/projects", input, (v) => CreateProjectResponse.parse(v)),
     updateProject: (id, patch) =>
       call("PATCH", `/projects/${enc(id)}`, patch, (v) => Project.parse(v)),
+    setChecklistEnforce: (id, enforce) =>
+      call("PUT", `/checklists/${enc(id)}/enforce`, { enforce }, (v) =>
+        SetChecklistEnforceResponse.parse(v),
+      ),
     executionBackends: ({ projectId, refresh } = {}) => {
       const params = new URLSearchParams();
       if (projectId) params.set("projectId", projectId);

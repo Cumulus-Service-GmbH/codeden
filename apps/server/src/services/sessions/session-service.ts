@@ -28,6 +28,8 @@ import type { SandboxService } from "../../execution/sandboxes";
 import type { McpTokenStore } from "../../mcp/tokens";
 import type { SettingsStore } from "../../settings-store";
 import type { ArtifactService } from "../artifacts";
+import type { ChecklistService } from "../checklist/checklist-service";
+import { checklistStartItem } from "../checklist/start";
 import { badRequest, conflict, ServiceError } from "../errors";
 import { isFactorySession } from "../factory/starter";
 import type { InboxService } from "../inbox-service";
@@ -45,7 +47,7 @@ import type { UtilityService } from "../utility";
 import type { SessionAdmission } from "./admission";
 import { freezeChecks, roundAfter, withRound } from "./checks";
 import { compactingRefusal, compactionRunning, compactRefusal, startCompaction } from "./compact";
-import { derivePurpose, deriveWorkKey, findConflicts } from "./conflicts";
+import { derivePurpose, deriveWorkKey, findConflicts, firstPurposeLine } from "./conflicts";
 import { planFork } from "./fork";
 import { planHandoff } from "./handoff";
 import type { InputDecorator } from "./input-decorator";
@@ -70,6 +72,7 @@ export interface SessionServiceDeps extends RunnerDeps {
   repo: SessionRepo;
   admission?: SessionAdmission;
   projects: ProjectService;
+  checklist?: Pick<ChecklistService, "get">;
   inbox: InboxService;
   artifacts: ArtifactService;
   settings: SettingsStore;
@@ -251,6 +254,7 @@ export class SessionService {
     options: {
       confirmChrome?: () => Promise<boolean>;
       chromeApproved?: true;
+      checklistItemId?: string;
       /** A role conversation this one replaces ("Start fresh"): archived as this one starts. */
       replacesRoleId?: string;
       /**
@@ -267,6 +271,17 @@ export class SessionService {
     if (project?.archivedAt) throw badRequest("The project is archived", "project_archived");
     if (!project && req.role !== "orchestrator") {
       throw badRequest("projectId is required for this role", "project_required");
+    }
+    if (project && req.role === "agent") {
+      const checklist = this.deps.checklist?.get(project.id);
+      if (checklist?.plan) {
+        checklistStartItem(
+          checklist,
+          req.purpose ?? firstPurposeLine(req.input?.text),
+          options.checklistItemId,
+          true,
+        );
+      }
     }
     const previous = options.replacesRoleId
       ? this.roleToArchive(options.replacesRoleId)
@@ -286,9 +301,8 @@ export class SessionService {
       return this.start(
         { ...req, provider: "claude" },
         {
+          ...options,
           chromeApproved: true,
-          replacesRoleId: options.replacesRoleId,
-          ...(options.ownTeamPins ? { ownTeamPins: true } : {}),
         },
       );
     }

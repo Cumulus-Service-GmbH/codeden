@@ -1,3 +1,4 @@
+import { ChecklistItem } from "@codeden/contracts";
 import { z } from "zod";
 import { defineTool } from "../define";
 
@@ -10,11 +11,20 @@ export const reportProgress = defineTool({
   scope: "session",
   alwaysLoad: true,
   input: z.object({
+    checklistItemId: ChecklistItem.shape.id
+      .optional()
+      .describe("An item already linked to this session or its parent"),
     text: z.string().min(1).max(500).describe("One line describing the current progress"),
   }),
-  handler: async ({ text }, { services, sessionId }) => {
+  handler: async ({ text, checklistItemId }, { services, sessionId }) => {
     const at = new Date().toISOString();
-    services.sessionRepo.update(sessionId, (s) => ({ ...s, progress: { text, at } }));
+    const session = services.sessionRepo.update(sessionId, (s) => ({
+      ...s,
+      progress: { text, at },
+    }));
+    if (checklistItemId && !services.checklist.markWork(session, "doing", checklistItemId)) {
+      return "Progress recorded. Checklist item ignored because it is not linked to your session or its parent.";
+    }
     return "Progress recorded.";
   },
 });

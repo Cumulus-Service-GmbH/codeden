@@ -508,8 +508,11 @@ export type ToolOutputResponse = z.infer<typeof ToolOutputResponse>;
 
 // ---------------------------------------------------------------- inbox
 
+/** `GET /api/snapshot` query with comma-separated client capabilities. */
+export const SnapshotQuery = z.object({ capabilities: z.string().max(512).optional() });
+
 /** `GET /api/inbox` query. Defaults to open items. */
-export const ListInboxQuery = z.object({
+export const ListInboxQuery = SnapshotQuery.extend({
   status: InboxItemStatus.optional(),
   projectId: Id.optional(),
   sessionId: Id.optional(),

@@ -30,6 +30,7 @@ import type {
   LoginToolId,
   Project,
   ProjectCheck,
+  ProjectChecklist,
   ProviderHistoryResponse,
   RefreshModelsResponse,
   RefreshProjectResponse,
@@ -233,6 +234,8 @@ export interface CodeDenClient {
   createProject(input: CreateProjectRequest): Promise<CreateProjectResponse>;
   /** Rename, change defaults, or pin and unpin a project (§13). */
   updateProject(projectId: string, patch: UpdateProjectRequest): Promise<Project>;
+  /** Turn enforcing an approved checklist's plan on PM starts on or off. */
+  setChecklistEnforce(projectId: string, enforce: boolean): Promise<ProjectChecklist>;
   /**
    * Where agent sessions can run (`docs/remote-runners.md` §5), each backend with the reason it
    * can't be used; with `projectId`, also whether that project may use it.

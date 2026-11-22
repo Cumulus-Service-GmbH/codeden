@@ -1,5 +1,12 @@
 import { describe, expect, it } from "vitest";
-import { defaultSettings, EventEnvelope, ProjectChecklist, Snapshot } from "../src";
+import {
+  ChecklistItem,
+  ChecklistProposal,
+  defaultSettings,
+  EventEnvelope,
+  ProjectChecklist,
+  Snapshot,
+} from "../src";
 import { sampleProject, ts } from "./fixtures";
 
 const checklist = {
@@ -22,7 +29,7 @@ describe("project checklists", () => {
     expect(EventEnvelope.parse(JSON.parse(JSON.stringify(event)))).toEqual(event);
   });
 
-  it("round-trips a snapshot and defaults legacy snapshots to an empty checklist array", () => {
+  it("round-trips a snapshot and keeps checklists optional in legacy snapshots", () => {
     const snapshot = {
       seq: 1,
       serverVersion: "0.0.0",
@@ -34,9 +41,32 @@ describe("project checklists", () => {
       automations: [],
       runner: { state: "disabled", runnerId: null, version: null, providers: [], lastError: null },
     };
-    expect(Snapshot.parse(snapshot).checklists).toEqual([]);
+    expect(Snapshot.parse(snapshot)).not.toHaveProperty("checklists");
     const parsed = Snapshot.parse({ ...snapshot, checklists: [checklist] });
     expect(parsed.checklists).toEqual([checklist]);
     expect(Snapshot.parse(JSON.parse(JSON.stringify(parsed)))).toEqual(parsed);
   });
+});
+
+it.each(["\r", "\n", "\r\n"])("rejects a checklist ID containing %j", (line) => {
+  expect(ChecklistItem.safeParse({ ...checklist.items[0], id: `task${line}next` }).success).toBe(
+    false,
+  );
+});
+
+it("requires every proposal order entry to be a checklist item ID", () => {
+  const order = ChecklistProposal.shape.order;
+  expect(order.parse(["a".repeat(64)])).toEqual(["a".repeat(64)]);
+  for (const invalid of ["", "a\nb", "a".repeat(65)]) {
+    expect(order.safeParse([invalid]).success).toBe(false);
+  }
+});
+
+it("strips automatic ownership from proposal addition metadata", () => {
+  const needsOwner = { reason: "Review the addition", sessionId: "agent" };
+  expect(
+    ChecklistProposal.shape.additionMetadata.parse([
+      { id: "new", needsOwner: { ...needsOwner, source: "work" } },
+    ]),
+  ).toEqual([{ id: "new", needsOwner }]);
 });

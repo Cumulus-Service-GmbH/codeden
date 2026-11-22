@@ -12,6 +12,7 @@ const GROUPS: { id: InboxItemKind; title: string; filter: Exclude<InboxFilter, "
   { id: "approval", title: "Approvals", filter: "asks" },
   { id: "question", title: "Questions", filter: "asks" },
   { id: "spec_approval", title: "Specs to approve", filter: "asks" },
+  { id: "checklist_approval", title: "Checklist changes", filter: "asks" },
   { id: "setup_change", title: "Setup changes", filter: "asks" },
   { id: "pr_review", title: "Pull requests ready", filter: "reviews" },
   { id: "spot_check", title: "Spot-checks", filter: "reviews" },
