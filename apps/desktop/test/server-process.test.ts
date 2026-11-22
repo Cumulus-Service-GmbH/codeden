@@ -8,11 +8,12 @@ import { serverLog } from "../src/server/log";
 const STUCK = resolve(__dirname, "support/stuck-server.mjs");
 const dirs: string[] = [];
 
-function stuckServer(log: string[]): ServerProcess {
+function stuckServer(log: string[], startupTimeoutMs?: number): ServerProcess {
   const home = mkdtempSync(join(tmpdir(), "codeden-server-process-"));
   dirs.push(home);
   return new ServerProcess({
     entry: STUCK,
+    startupTimeoutMs,
     home,
     port: 1,
     fake: true,
@@ -26,6 +27,16 @@ function stuckServer(log: string[]): ServerProcess {
 afterEach(() => {
   delete process.env.STUCK_SERVER_MODE;
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+it("rejects startup and stops a child that never reports readiness", async () => {
+  process.env.STUCK_SERVER_MODE = "no-ready";
+  const server = stuckServer([], 100);
+  try {
+    await expect(server.start()).rejects.toThrow("startup deadline");
+  } finally {
+    await server.stop({ stopRunner: false, timeoutMs: 100 });
+  }
 });
 
 describe("ServerProcess.stop", () => {

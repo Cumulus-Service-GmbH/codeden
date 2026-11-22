@@ -70,7 +70,7 @@ export interface StartRunnerOptions {
   /** Replace the browser engine (tests); by default one `BrowserManager` per runner. */
   browser?: BrowserManager;
   /** Called after `runner.shutdown` or a drain-and-exit closed everything (the CLI exits). */
-  onShutdown?: () => void;
+  onShutdown?: (exitCode: number) => void;
   /** How streamed deltas are batched before they are journaled (tests lengthen the window). */
   deltaBatching?: DeltaBatcherOptions;
   log?: (message: string) => void;
@@ -185,7 +185,15 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   const browserManager = opts.browser ?? new BrowserManager({ stream, log });
   const browser = createBrowserCommandHandlers({ manager: browserManager });
   const files = new WorkspaceFsHost(opts.home);
-  const finish = () => void close().then(() => opts.onShutdown?.());
+  const finish = async (exitCode = 0) => {
+    try {
+      await close();
+    } catch (error) {
+      log(`runner shutdown failed: ${String(error)}`);
+      exitCode = 1;
+    }
+    opts.onShutdown?.(exitCode);
+  };
 
   const core: RunnerCore = {
     home: opts.home,
@@ -210,7 +218,13 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
         emit({ kind: "runner.draining", reason });
       }
       if (exitWhenDrained && !drainExit) {
-        drainExit = host.drain(timeoutMs ?? DEFAULT_DRAIN_TIMEOUT).then(finish);
+        drainExit = host.drain(timeoutMs ?? DEFAULT_DRAIN_TIMEOUT).then(
+          () => finish(),
+          (error: unknown) => {
+            log(`runner drain failed: ${String(error)}`);
+            return finish(1);
+          },
+        );
       }
     },
     configureMcp: ({ url, link }) => {
@@ -219,7 +233,7 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
     },
     mcpResponse: (from, frame) => mcpLink.receive(from, frame),
     shutdown: () => {
-      setTimeout(finish, 50);
+      setTimeout(() => void finish(), 50);
     },
   };
 

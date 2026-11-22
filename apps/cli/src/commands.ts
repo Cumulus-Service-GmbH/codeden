@@ -77,7 +77,7 @@ export async function runCommand(args: string[], parsed: ParsedCli): Promise<num
       dataDir: home,
       token,
       enableFakeProvider: process.env.CODEDEN_FAKE_PROVIDER === "1",
-      onShutdownRequest: () => process.exit(0),
+      onShutdownRequest: (exitCode) => process.exit(exitCode),
       selfUpdate: {
         source: launch.source,
         restartCommand: launch.restartCommand,
