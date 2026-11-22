@@ -64,6 +64,7 @@ export const projects: Project[] = [
       path: "C:\\Code\\storefront",
       sortOrder: 0,
       autonomyMode: "dark_factory",
+      allowUnenforcedProviders: true,
       factoryLimits: {
         ...limits,
         maxConcurrentSessions: 3,
@@ -275,6 +276,9 @@ export const providers: ProviderInfo[] = [
     displayName: "Claude Code",
     capabilities: {
       ...caps,
+      // As the real adapters declare them (`enforcesSecurityRules`).
+      enforcesSecurityRules: true,
+      securityRulesWorktreesOnly: true,
       liveAutonomy: true,
       mcpStatus: true,
       hookRuns: true,
@@ -312,6 +316,7 @@ export const providers: ProviderInfo[] = [
     displayName: "Codex",
     capabilities: {
       ...caps,
+      enforcesSecurityRules: true,
       systemPrompt: true,
       mcpStatus: true,
       subagents: false,
