@@ -96,4 +96,10 @@ describe("token saver settings patches", () => {
     expect(next.tokenSaver.projects).toEqual({});
     expect(next.tokenSaver.roles.pm).toBeNull();
   });
+
+  it("clears an override that doesn't exist without failing validation", () => {
+    const base = Settings.parse({});
+    const next = Settings.parse(deepMerge(base, { tokenSaver: { projects: { p9: null } } }));
+    expect(next.tokenSaver.projects).toEqual({});
+  });
 });
