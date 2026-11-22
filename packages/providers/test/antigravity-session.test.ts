@@ -200,17 +200,16 @@ describe("Antigravity CLI session over ACP", () => {
     expect(logged("session/new")).toHaveLength(1);
   });
 
-  it("reports the setup a model switch brought, so the adapter's list follows it", async () => {
-    // The switch's reply lists a model fewer: the adapter's picker must drop it too.
+  it("keeps the picker on the session/new snapshot through a model switch", async () => {
+    // The switch's reply lists a model fewer; the picker follows the next session/new, not it.
     const { session, adapter, turn } = await open({
       env: { FAKE_AGY_SWITCH_DROP_MODEL: "claude-opus-5-5" },
     });
     expect(adapter.models().map((m) => m.id)).toContain("claude-opus-5-5");
     await session.configure?.({ model: "gemini-4-argon" });
     await turn("go");
-    const ids = adapter.models().map((m) => m.id);
-    expect(ids).toContain("gemini-4-argon");
-    expect(ids).not.toContain("claude-opus-5-5");
+    expect(configSets()).toContain("model=gemini-4-argon");
+    expect(adapter.models().map((m) => m.id)).toContain("claude-opus-5-5");
   });
 
   it("opens when the adapter's async reports reject later, with no unhandled rejection", async () => {

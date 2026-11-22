@@ -89,8 +89,6 @@ export class AntigravityAdapter implements ProviderAdapter {
   /** Whether the last session listed a `plan` mode; unknown until one has. */
   private planListed: boolean | undefined;
   private detecting: Promise<ProviderStatus> | undefined;
-  /** The newest setup whose models are on show (merged from the reports that built it). */
-  private taken: AcpSessionSetup = {};
   private found: { command: ResolvedCommand; version: string | null } | undefined;
 
   constructor(private readonly options: AntigravityAdapterOptions = {}) {}
@@ -203,23 +201,21 @@ export class AntigravityAdapter implements ProviderAdapter {
   }
 
   /**
-   * The newest complete list wins: a setup replaces the models and modes shown when it has
-   * models. Probes and sessions report the moment their reply arrives, so the last one to
-   * arrive is the newest. A report may carry only what changed (a reply's options): the fields
-   * it has replace those of the newest report taken. An empty or malformed one changes nothing.
+   * The newest complete snapshot wins: a setup replaces the models and modes shown, taken whole
+   * with nothing merged, when it lists models. Probes and sessions report the moment their
+   * reply arrives, so the last one to arrive is the newest. An empty or malformed one changes
+   * nothing.
    */
   private applySetup(setup: AcpSessionSetup): void {
     try {
-      const merged = { ...this.taken, ...setup };
-      const models = antigravityModelInfos(merged);
+      const models = antigravityModelInfos(setup);
       if (!models) return;
-      // A setup that says which modes it has (even none) decides plan mode; one that doesn't
-      // leaves it as it was.
-      if (merged.modes !== undefined || findOption(merged.configOptions, "mode")) {
-        this.planListed = modeIds(merged).includes(ANTIGRAVITY_AGENT.modes.plan ?? "plan");
+      // A snapshot that says which modes it has (even none) decides plan mode; one that
+      // doesn't leaves it as it was.
+      if (setup.modes !== undefined || findOption(setup.configOptions, "mode")) {
+        this.planListed = modeIds(setup).includes(ANTIGRAVITY_AGENT.modes.plan ?? "plan");
       }
       this.catalog.set(models);
-      this.taken = merged;
     } catch {
       // A malformed reply: Default (or the last good list) stands.
     }

@@ -137,19 +137,21 @@ describe("the Antigravity CLI's model list and flags", () => {
     expect(pending).toHaveLength(1);
   });
 
-  it("merge a report of options only with the newest setup taken, and clear plan mode on an empty mode list", async () => {
+  it("take each snapshot whole, and clear plan mode only when one says it has no modes", async () => {
     const adapter = new AntigravityAdapter({ executable: fakeAgy });
     const s = session(adapter);
     s.setup({
-      ...listing("gemini-4-neon"),
+      ...listing("gemini-4-neon", "gemini-4-argon"),
       modes: { availableModes: [{ id: "plan", name: "Plan" }] },
     });
     expect(adapter.capabilities().planMode).toBe(true);
-    // A reply's options only: the models change, plan mode stays as the last report said.
+    // A newer snapshot replaces the list whole: nothing of the older one is merged in.
     s.setup({ configOptions: listing("gemini-4-argon").configOptions });
     expect(ids(adapter)).toContain("gemini-4-argon");
+    expect(ids(adapter)).not.toContain("gemini-4-neon");
+    // It said nothing about modes, so plan mode stays as it was.
     expect(adapter.capabilities().planMode).toBe(true);
-    // A setup that says it has no modes at all clears plan mode.
+    // A snapshot that says it has no modes at all clears plan mode.
     s.setup({ ...listing("gemini-4-argon"), modes: { availableModes: [] } });
     expect(adapter.capabilities().planMode).toBe(false);
   });

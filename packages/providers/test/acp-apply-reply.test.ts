@@ -49,7 +49,7 @@ describe("what an ACP change's reply does to the session's setup", () => {
   };
   const live: AcpSessionSetup = { ...before, configOptions: list("newer") };
 
-  it("takes an option list the agent answered with, and reports only that list", () => {
+  it("takes an option list the agent answered with into its own setup, and reports nothing", () => {
     const liveModes: AcpSessionSetup = { ...live, modes: { currentModeId: "plan" } };
     const { inner, onSetup } = session(liveModes);
     const reply = list("reply");
@@ -57,8 +57,7 @@ describe("what an ACP change's reply does to the session's setup", () => {
     inner.applyReply(before, { ...before, configOptions: reply });
     expect(inner.setup.configOptions).toBe(reply);
     expect(inner.setup.modes?.currentModeId).toBe("plan");
-    expect(onSetup).toHaveBeenCalledTimes(1);
-    expect(onSetup.mock.calls[0]?.[0]).toEqual({ configOptions: reply });
+    expect(onSetup).not.toHaveBeenCalled();
   });
 
   it("keeps the live options after session/set_mode's acknowledgement, taking only its mode", () => {
