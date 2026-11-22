@@ -202,7 +202,8 @@ describe("the Antigravity CLI after the provider review", () => {
 
   it("keeps the picker on fresh snapshots: a resumed session's saved setup isn't one", async () => {
     const adapter = new AntigravityAdapter({ executable: fakeAgy });
-    const resumed = await adapter.openSession(options({ resumeToken: "saved-session" }));
+    const savedId = "saved-session";
+    const resumed = await adapter.openSession(options({ resumeToken: savedId }));
     sessions.push(resumed);
     // session/load succeeded: its saved setup leaves the picker on Default.
     expect(adapter.models().map((m) => m.id)).toEqual(["default"]);
