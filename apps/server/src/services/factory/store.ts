@@ -111,7 +111,7 @@ export class FactoryStore {
       enabledAt: null,
       seenFailedShas: [],
       fastMergeHold: null,
-      tuning: FactoryTuning.parse({}),
+      tuning: FactoryTuning.parse(this.rememberedSetup() ?? {}),
       drain: null,
       failedSessionsSweptAt: null,
       lastTickAt: null,
@@ -127,10 +127,7 @@ export class FactoryStore {
    */
   saveLoop(changed: FactoryLoop, tuning?: Partial<FactoryTuning>): FactoryLoop {
     const current = this.loop(changed.projectId);
-    const setup = current ? undefined : this.settings().teamSetup;
-    const remembered = setup?.remembered
-      ? { team: setup.team, resultSummaryBytes: setup.resultSummaryBytes }
-      : undefined;
+    const remembered = current ? undefined : this.rememberedSetup();
     const loop = {
       ...changed,
       scout: current ? keepScoutReports(changed.scout, current.scout) : changed.scout,
@@ -142,6 +139,11 @@ export class FactoryStore {
       { type: "factory.loop.updated", sessionId: null, payload: { loop: next } },
     ]);
     return next;
+  }
+
+  private rememberedSetup(): Pick<FactoryTuning, "team" | "resultSummaryBytes"> | undefined {
+    const { remembered, team, resultSummaryBytes } = this.settings().teamSetup;
+    return remembered ? { team, resultSummaryBytes } : undefined;
   }
 
   /**

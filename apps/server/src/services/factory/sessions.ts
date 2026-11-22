@@ -34,15 +34,6 @@ function brief(text: string): UserInput {
   return { text, attachments: [], from: "factory" };
 }
 
-/** A start request's provider and model: a model only when one is chosen. */
-function on(agent: AgentChoice): Pick<StartSessionRequestInit, "provider" | "model" | "effort"> {
-  return {
-    provider: agent.provider,
-    ...(agent.model ? { model: agent.model } : {}),
-    ...(agent.effort ? { effort: agent.effort } : {}),
-  };
-}
-
 /** Statuses that hold a session slot (`maxConcurrentSessions`). */
 const SLOT_STATUSES = new Set(["created", "queued", "starting", "running", "waiting"]);
 /** Statuses of sessions the kill switch stops. */
@@ -160,6 +151,17 @@ export class FactorySessions {
     );
   }
 
+  /** Include model and effort pins the chosen provider can use. */
+  private on(agent: AgentChoice): Pick<StartSessionRequestInit, "provider" | "model" | "effort"> {
+    return {
+      provider: agent.provider,
+      ...(agent.model ? { model: agent.model } : {}),
+      ...(agent.effort && this.supportsReasoningEffort(agent.provider)
+        ? { effort: agent.effort }
+        : {}),
+    };
+  }
+
   /** The models a provider lists (aliases with the full ids they run), from the runner. */
   models(provider: string): ModelInfo[] {
     return this.deps.runner.providers().find((p) => p.id === provider)?.models ?? [];
@@ -219,7 +221,7 @@ export class FactorySessions {
   startScout(projectId: string, text: string, agent: AgentChoice): Promise<StartSessionResponse> {
     return this.start({
       projectId,
-      ...on(agent),
+      ...this.on(agent),
       purpose: "Factory scout: review the app against the vision and file the work",
       workKey: SCOUT_WORK_KEY,
       scope: { area: "factory-scout" },
@@ -238,7 +240,7 @@ export class FactorySessions {
     const name = area.replace("_", " ");
     return this.start({
       projectId,
-      ...on(agent),
+      ...this.on(agent),
       purpose: `Factory area reviewer: review ${name}`,
       workKey: `${LENS_WORK_KEY_PREFIX}${area}`,
       scope: { area: `factory-lens-${area}` },
@@ -259,7 +261,7 @@ export class FactorySessions {
     const step = item.type ? ` (${item.type})` : "";
     return this.start({
       projectId: item.projectId,
-      ...on({ provider, model, effort }),
+      ...this.on({ provider, model, effort }),
       purpose: `Factory${step}: ${item.title}`.slice(0, 300),
       workKey: item.workKey,
       title: stripLeadingTags(item.title).slice(0, 200) || "Factory item",
@@ -308,7 +310,7 @@ export class FactorySessions {
     }
     return this.start({
       projectId: item.projectId,
-      ...on(reviewer),
+      ...this.on(reviewer),
       purpose: `Factory review: ${item.title}`.slice(0, 300),
       workKey: `${REVIEW_WORK_KEY_PREFIX}${item.pr?.number ?? item.id}`,
       title: `Review: ${item.title}`.slice(0, 200),
@@ -332,7 +334,7 @@ export class FactorySessions {
   ): Promise<StartSessionResponse> {
     return this.start({
       projectId: item.projectId,
-      ...on(agent),
+      ...this.on(agent),
       purpose: `Factory integration: resolve the conflicts of #${pr.number}`,
       workKey: `factory:integrate:${pr.number}`,
       title: `Integrate #${pr.number}: ${item.title}`.slice(0, 200),
@@ -358,7 +360,7 @@ export class FactorySessions {
   ): Promise<StartSessionResponse> {
     return this.start({
       projectId,
-      ...on(agent),
+      ...this.on(agent),
       purpose: `Factory: revert #${merge.prNumber} after a CI regression`,
       workKey: `factory:revert:${merge.sha.slice(0, 7)}`,
       title: `Revert #${merge.prNumber}`,

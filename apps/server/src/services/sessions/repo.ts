@@ -291,10 +291,12 @@ export class SessionRepo {
       })
       .from(sessions)
       .where(
-        and(
-          isNull(sessions.archivedAt),
-          or(
-            inArray(sessions.status, ["starting", "running", "waiting"]),
+        or(
+          inArray(sessions.status, ["starting", "running", "waiting"]),
+          and(
+            isNull(sessions.archivedAt),
+            inArray(sessions.status, ["queued", "idle", "interrupted", "failed"]),
+            // The JSON predicate is unindexed, so only check rows that can wait for a slot.
             sql`json_extract(${sessions.startMeta}, '$.admission.seq') is not null`,
           ),
         ),

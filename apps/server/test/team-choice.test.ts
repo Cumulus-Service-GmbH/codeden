@@ -104,7 +104,7 @@ it("seeds only new loops when setup is remembered", () => {
   expect(existing.tuning).toMatchObject({ team: [], resultSummaryBytes: null });
   env.settings.update({ teamSetup: { remembered: true } });
   const draft = data.loopOrNew("new-project");
-  expect(draft.tuning).toMatchObject({ team: [], resultSummaryBytes: null });
+  expect(draft.tuning).toMatchObject({ team, resultSummaryBytes: 256 });
   expect(data.loop("new-project")).toBeUndefined();
   expect(data.saveLoop(draft).tuning).toMatchObject({ team, resultSummaryBytes: 256 });
   expect(data.loop("new-project")?.tuning).toMatchObject({ team, resultSummaryBytes: 256 });

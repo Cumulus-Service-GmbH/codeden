@@ -64,7 +64,7 @@ export function GeneralSettings() {
       >
         <SettingRow
           label="Agent sessions across projects"
-          help="How many agent sessions can work at once, across all projects. More wait in a queue and start in order as slots free. Project checks count. Project managers and the orchestrator are exempt (one per project plus one)."
+          help="How many agent sessions can work at once, across all projects. More wait in a queue and start in order as slots free. Project checks count. Project checks and factory starts can briefly go one or two over. Project managers and the orchestrator are exempt (one per project plus one)."
         >
           <NumberField
             min={1}

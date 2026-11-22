@@ -587,7 +587,7 @@ export class SessionService {
         reserved = true;
       }
       try {
-        if (admissionHead || session.archivedAt) admission?.dequeue(id);
+        if (session.archivedAt) admission?.dequeue(id);
         outbox.remove(next, "sent");
         await this.sendNow(session, next.input, next.from);
       } catch (error) {
@@ -599,10 +599,13 @@ export class SessionService {
         const transient = isTransientRunnerError(error);
         this.holds.hold(id, transient);
         outbox.restore(next);
+        if (admissionHead && !transient) admission?.dequeue(id);
         if (!transient && session.status !== "failed") {
           this.deps.launcher.fail(id, `send-${Date.now()}`, error);
         }
+        return;
       }
+      if (admissionHead) admission?.dequeue(id);
     } finally {
       if (reserved) admission?.release(id);
     }
