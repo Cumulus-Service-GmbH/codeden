@@ -9,6 +9,8 @@
 // FAKE_AGY_AUTH=missing: `session/new` fails as signed out. FAKE_AGY_LOG: every message the
 // client sends, one JSON line each. FAKE_AGY_NEW_HANG=1: `session/new` never answers.
 // FAKE_AGY_SWITCH_DROP_MODEL: switching the model drops that one from the list.
+// FAKE_AGY_PUSH_DROP_MODEL: each prompt first sends a `config_option_update` of the model option
+// alone, without that model.
 // FAKE_AGY_NEW_DELAY_MS: `session/new` answers after that delay. FAKE_AGY_DROP_MODEL: that
 // model is left out of the list. FAKE_AGY_REJECT_FILE: while that file exists,
 // `session/set_config_option` fails. FAKE_AGY_REPLY: the text each `session/prompt` streams.
@@ -73,6 +75,18 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       return send({ id: msg.id, result: { configOptions: setup.configOptions } });
     }
     case "session/prompt":
+      if (env.FAKE_AGY_PUSH_DROP_MODEL) {
+        const model = setup.configOptions.find((o) => o.id === "model");
+        if (model) model.options = model.options.filter((o) => o.value !== env.FAKE_AGY_PUSH_DROP_MODEL);
+        // Only the options that changed: the model option, without the mode option.
+        send({
+          method: "session/update",
+          params: {
+            sessionId: session,
+            update: { sessionUpdate: "config_option_update", configOptions: [model] },
+          },
+        });
+      }
       send({
         method: "session/update",
         params: {

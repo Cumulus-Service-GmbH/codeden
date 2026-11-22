@@ -441,11 +441,16 @@ export class AcpSession implements ProviderSession {
     if (next.modes !== before.modes) this.setup = { ...this.setup, modes: next.modes };
   }
 
+  /**
+   * The agent's options changed (`config_option_update`). Only the options it sent are
+   * reported: the rest of the session's setup (`modes`, `models`) is as old as its
+   * `session/new`, and must not replace what a newer session reported since.
+   */
   private onConfigOptions(options: AcpConfigOption[]): void {
     this.setup = { ...this.setup, configOptions: options };
     const mode = currentMode({ configOptions: options });
     if (mode && mode !== this.mode) this.onAgentMode(mode);
-    notify(() => this.config.onSetup?.(this.setup, this.info));
+    notify(() => this.config.onSetup?.({ configOptions: options }, this.info));
   }
 
   /** The host for an extension call from the ACP session `acpSessionId` (the root or a child). */
