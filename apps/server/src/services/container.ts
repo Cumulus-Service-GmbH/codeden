@@ -267,7 +267,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     projectTeam: (projectId) => factory.data.loop(projectId)?.tuning.team ?? [],
     project: (projectId) => projects.get(projectId),
     session: (sessionId) => sessionRepo.find(sessionId)?.session,
-    liveSessions: (projectId) => sessionRepo.list({ projectId, status: [...TEAM_FILE_STATUSES] }),
+    liveSessions: (projectId) => sessionRepo.listInStatus(TEAM_FILE_STATUSES, projectId),
     log: opts.log,
   };
   const launcher = new SessionLauncher({
