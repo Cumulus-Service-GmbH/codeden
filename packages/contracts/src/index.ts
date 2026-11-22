@@ -67,6 +67,7 @@ export * from "./session-files";
 export * from "./settings";
 export * from "./slash-commands";
 export * from "./team";
+export * from "./tech-debt";
 export * from "./token-saver";
 export * from "./tool-output";
 export * from "./tools";
