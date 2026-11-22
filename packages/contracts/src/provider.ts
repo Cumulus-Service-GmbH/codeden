@@ -76,6 +76,12 @@ export const ProviderCapabilities = z.object({
    * of sight.
    */
   hookRuns: z.boolean().optional(),
+  /**
+   * `SessionOptions.systemPrompt` reaches the model when the session starts and again on every
+   * resume, and stays in force after compaction, so notes such as the token saver (#602) hold for
+   * the whole conversation. False or absent: it may apply only to the first start.
+   */
+  systemPrompt: z.boolean().optional(),
 });
 export type ProviderCapabilities = z.infer<typeof ProviderCapabilities>;
 
