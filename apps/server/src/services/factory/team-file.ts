@@ -37,10 +37,14 @@ export function teamRoots(project: Pick<Project, "path" | "slug">, worktreesDir:
 // Only a regular file (opened without following a link or blocking on a special file) whose stored text, as written,
 // has a valid time stamp and the same Team counts; anything else is replaced atomically.
 function sameTeamFile(path: string, body: TeamFile): boolean {
+  // Without O_NOFOLLOW (Windows) a link can't be told from a file here: never reuse, always replace.
+  if (!constants.O_NOFOLLOW) return false;
   let fd: number | undefined;
   try {
     fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-    if (!fstatSync(fd).isFile()) return false;
+    const stat = fstatSync(fd);
+    // Owner-only, as written: a file anyone else may read or write is replaced.
+    if (!stat.isFile() || (stat.mode & 0o077) !== 0) return false;
     const { updatedAt, ...current } = JSON.parse(readFileSync(fd, "utf8")) as Record<
       string,
       unknown
@@ -179,6 +183,25 @@ export function createTeamFileRefresher(deps: TeamFileDeps) {
       if (projectId === null || project === projectId) invalidate(id, why);
     }
   };
+  const removeLeftovers = (keep: ReadonlySet<string>) => {
+    const dir = join(deps.home, "teams");
+    let names: string[] = [];
+    try {
+      names = readdirSync(dir).filter((name) => /^[A-Za-z0-9_-]+\.json$/.test(name));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+        deps.log?.(`Team files in ${dir} not listed: ${message(error)}`);
+    }
+    for (const name of names) {
+      const id = name.slice(0, -".json".length);
+      if (keep.has(id)) continue;
+      try {
+        rmSync(join(dir, name), { force: true });
+      } catch (error) {
+        deps.log?.(`session ${id}: leftover Team file not removed: ${message(error)}`);
+      }
+    }
+  };
   // At start nothing is published yet: when the live sessions can't be listed, every file a previous run left is
   // invalidated (and retried), since none of them can be checked.
   const invalidateLeftovers = (why: string) => {
@@ -258,6 +281,8 @@ export function createTeamFileRefresher(deps: TeamFileDeps) {
         pendingAll = false;
         pendingProjects.clear();
         for (const session of list) targets.set(session.id, session);
+        // At start, a file left for a session that is no longer live (an interrupted cleanup) is removed.
+        if (initial) removeLeftovers(new Set(list.map((session) => session.id)));
       }
     }
     for (const projectId of [...pendingProjects]) {
