@@ -303,6 +303,30 @@ describe("read-only sessions (orchestrator and PMs, §11.2)", () => {
     expect(agentOpts.disallowedTools).toBeUndefined();
   });
 
+  it("lets a read-only role call CodeDen's own MCP tools only, at every level", () => {
+    for (const level of ["auto", "full", "supervised"] as const) {
+      const pm = new ClaudePolicy(level, { cwd: "/repo", extraRoots: [] }, true, ["codeden"]);
+      expect(pm.denial("mcp__azure__storage_account_create", {})).toMatch(/CodeDen's own tools/);
+      expect(pm.denial("mcp__github__create_issue", {})).toMatch(/CodeDen's own tools/);
+      expect(pm.denial("mcp__codeden__start_session", {})).toBeUndefined();
+    }
+    // An agent session is unchanged: its MCP tools follow the usual approvals.
+    const agent = new ClaudePolicy("auto", { cwd: "/repo", extraRoots: [] }, false, ["codeden"]);
+    expect(agent.denial("mcp__azure__storage_account_create", {})).toBeUndefined();
+  });
+
+  it("starts a read-only role with CodeDen's MCP servers only (strict MCP config)", () => {
+    const input = {
+      executable: { kind: "native", path: "/bin/claude" } as never,
+      canUseTool: async () => ({ behavior: "allow" as const, updatedInput: {} }),
+      hooks: {},
+      abortController: new AbortController(),
+    };
+    expect(buildQueryOptions({ ...input, session: base }).strictMcpConfig).toBe(true);
+    const agent = { ...base, role: "agent" as const, readOnly: undefined };
+    expect(buildQueryOptions({ ...input, session: agent }).strictMcpConfig).toBeUndefined();
+  });
+
   it("uses Codex's read-only sandbox", () => {
     expect(codexPolicy("full", true)).toEqual({
       approvalPolicy: "never",

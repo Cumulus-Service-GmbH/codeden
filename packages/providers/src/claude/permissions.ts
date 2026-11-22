@@ -57,6 +57,8 @@ export class ClaudePolicy {
     private readonly ctx: RiskContext,
     /** Read-only sessions (orchestrator, PMs): edits and writing commands are denied. */
     private readonly readOnly = false,
+    /** CodeDen's own MCP servers (trusted): the only ones a read-only session may call. */
+    private readonly codedenMcpServers: readonly string[] = [],
   ) {}
 
   get level(): AutonomyLevel {
@@ -89,6 +91,13 @@ export class ClaudePolicy {
    * shell's current directory, as for `gate`.
    */
   denial(toolName: string, input: Record<string, unknown>, dir?: string): string | undefined {
+    // Read-only roles call no MCP tool but CodeDen's own, whatever server offers it.
+    if (this.readOnly && toolName.startsWith("mcp__")) {
+      const server = toolName.slice("mcp__".length).split("__")[0] ?? "";
+      if (!this.codedenMcpServers.includes(server)) {
+        return "This session is read-only: it can use CodeDen's own tools only, not other MCP servers' tools.";
+      }
+    }
     if (this.isReadOnly && touchesCodeden(this.assess(toolName, input, dir))) {
       return this.readOnly
         ? "This session is read-only: CodeDen's own home and credential files are off limits. Act through CodeDen tools instead."

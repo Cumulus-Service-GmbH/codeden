@@ -84,6 +84,7 @@ const fakeProvider: ProviderInfo = {
     mcp: false,
     skills: false,
     enforcesSecurityRules: true,
+    readOnly: true,
     compact: true,
   },
 };

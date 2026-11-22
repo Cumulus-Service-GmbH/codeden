@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { Project, UpdateProjectRequest } from "../src";
+import { Project, securityRulesCover, UpdateProjectRequest } from "../src";
 import { sampleProject } from "./fixtures";
 
 function roundTrip<T>(schema: { parse: (v: unknown) => T }, value: unknown): T {
@@ -30,5 +30,22 @@ describe("allowing providers without enforced security rules, per project", () =
     expect(roundTrip(UpdateProjectRequest, { allowUnenforcedProviders: true })).toEqual({
       allowUnenforcedProviders: true,
     });
+  });
+});
+
+describe("whether the machine's security rules cover a session", () => {
+  const worktreesOnly = { enforcesSecurityRules: true, securityRulesWorktreesOnly: true };
+  it("covers a worktree session, and a read-only role anywhere, on a worktrees-only provider", () => {
+    expect(securityRulesCover(worktreesOnly, { role: "agent", inCodedenWorktree: true })).toBe(
+      true,
+    );
+    expect(securityRulesCover(worktreesOnly, { role: "pm" })).toBe(true);
+    expect(securityRulesCover(worktreesOnly, { role: "orchestrator" })).toBe(true);
+  });
+
+  it("doesn't cover an agent session outside a worktree, or any provider that declares nothing", () => {
+    expect(securityRulesCover(worktreesOnly, { role: "agent" })).toBe(false);
+    expect(securityRulesCover({}, { role: "agent", inCodedenWorktree: true })).toBe(false);
+    expect(securityRulesCover({ enforcesSecurityRules: true }, { role: "agent" })).toBe(true);
   });
 });

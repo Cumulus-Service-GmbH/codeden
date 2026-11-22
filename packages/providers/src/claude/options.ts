@@ -135,8 +135,9 @@ export function buildQueryOptions(input: QueryOptionsInput): Options {
     includeHookEvents: true,
     forwardSubagentText: true,
     ...(input.resume ? { resume: input.resume } : {}),
-    // Read-only sessions (orchestrator, PMs) never get the edit tools (§11.2).
-    ...(session.readOnly ? { disallowedTools: [...EDIT_TOOLS] } : {}),
+    // Read-only sessions (orchestrator, PMs) never get the edit tools (§11.2), nor any MCP server
+    // but the ones CodeDen passes: the user's own (an Azure MCP, say) aren't even loaded.
+    ...(session.readOnly ? { disallowedTools: [...EDIT_TOOLS], strictMcpConfig: true } : {}),
     extraArgs,
     ...trustedMcpTools(session.mcpServers),
     systemPrompt: {

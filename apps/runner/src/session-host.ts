@@ -1,9 +1,10 @@
 import { existsSync } from "node:fs";
-import type {
-  AgentEvent,
-  RunnerCommandOf,
-  RunnerEvent,
-  RunnerSessionInfo,
+import {
+  type AgentEvent,
+  type RunnerCommandOf,
+  type RunnerEvent,
+  type RunnerSessionInfo,
+  securityRulesCover,
 } from "@codeden/contracts";
 import {
   type ProviderRegistry,
@@ -102,13 +103,24 @@ export class SessionHost {
     }
     // Fail closed: a provider the machine's security rules don't cover (it doesn't declare
     // `enforcesSecurityRules`) runs only where the session's project allowed such providers.
-    if (
-      adapter.capabilities().enforcesSecurityRules !== true &&
-      !cmd.options.allowUnenforcedProviders
-    ) {
+    // The orchestrator never takes a project's exception.
+    const caps = adapter.capabilities();
+    const { role } = cmd.options;
+    const covered = securityRulesCover(caps, {
+      role,
+      inCodedenWorktree: cmd.options.inCodedenWorktree,
+    });
+    if (!covered && (!cmd.options.allowUnenforcedProviders || role === "orchestrator")) {
       throw new CommandError(
         "security_rules_unenforced",
-        `${adapter.displayName} isn't covered by this machine's security rules, and this session's project doesn't allow such providers`,
+        `${adapter.displayName} isn't covered by this machine's security rules, and this session isn't allowed to use such providers`,
+      );
+    }
+    // PMs and the orchestrator are read-only at every level: only on a provider that enforces it.
+    if (role !== "agent" && caps.readOnly !== true) {
+      throw new CommandError(
+        "read_only_unsupported",
+        `${adapter.displayName} can't enforce read-only, so it can't run a ${role === "pm" ? "PM" : "orchestrator"}`,
       );
     }
     // A folder that isn't there (a host path sent to a sandbox, a removed worktree) is named as

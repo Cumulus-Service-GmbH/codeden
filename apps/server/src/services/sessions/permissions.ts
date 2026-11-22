@@ -1,4 +1,9 @@
-import type { AutonomyLevel, ProviderInfo, Role } from "@codeden/contracts";
+import {
+  type AutonomyLevel,
+  type ProviderInfo,
+  type Role,
+  securityRulesCover,
+} from "@codeden/contracts";
 
 /**
  * Why a session cannot use a permission level on a provider, or null when it can. The
@@ -15,7 +20,8 @@ export function readOnlyUnsupported(
 ): string | null {
   if (!provider) return null;
   if (role !== "agent") {
-    if (provider.capabilities.readOnly !== false) return null;
+    // Absent counts as not enforced, as for the level itself.
+    if (provider.capabilities.readOnly === true) return null;
     return `${provider.displayName} can't run a ${role === "pm" ? "PM" : "orchestrator"}: those are read-only, and it can't enforce read-only`;
   }
   if (level !== "read_only") return null;
@@ -61,8 +67,11 @@ export function securityRulesUnenforced(
   provider: ProviderInfo | undefined,
   project: { allowUnenforcedProviders: boolean } | null | undefined,
   role: Role,
+  inCodedenWorktree = false,
 ): string | null {
-  if (!provider || provider.capabilities.enforcesSecurityRules === true) return null;
+  if (!provider || securityRulesCover(provider.capabilities, { role, inCodedenWorktree })) {
+    return null;
+  }
   // The orchestrator never takes a project's exception, even when one is named.
   if (role !== "orchestrator" && project?.allowUnenforcedProviders) return null;
   return `${provider.displayName} isn't covered by this machine's security rules, so this project doesn't allow it. Turn on "Allow providers without enforced security rules" in the project's settings to use it.`;

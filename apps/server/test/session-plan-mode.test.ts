@@ -42,6 +42,7 @@ const caps: ProviderInfo["capabilities"] = {
   mcp: true,
   skills: false,
   enforcesSecurityRules: true,
+  readOnly: true,
 };
 
 describe("plan mode through a real runner (Fake provider)", () => {

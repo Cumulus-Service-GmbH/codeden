@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import {
   CHILD_RUNS_FILE_ENV,
   type McpServerConfig,
@@ -413,6 +413,10 @@ export class SessionLauncher {
       // The orchestrator and PMs never write project code (§11.2). Agent sessions at the
       // `read_only` level carry it in `autonomy`, so it can change live.
       readOnly: session.role !== "agent",
+      // Where the machine's security rules cover worktrees only (the guard): is this one?
+      ...(this.deps.worktreesDir && session.cwd && isInside(session.cwd, this.deps.worktreesDir)
+        ? { inCodedenWorktree: true }
+        : {}),
       codedenHome: this.deps.home,
       artifactsDir: this.deps.artifacts?.sessionDir(session.id),
       mcpServers,
@@ -615,4 +619,10 @@ function plain(cwd: string): PreparedWorkspace {
 
 function defaultMeta(workspace: WorkspaceRequest) {
   return { workspaceMode: workspace.mode, workspaceFallback: null, forced: null, queuedBehind: [] };
+}
+
+/** Whether `path` is `dir` or inside it, after resolving both. */
+function isInside(path: string, dir: string): boolean {
+  const rel = relative(resolve(dir), resolve(path));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }

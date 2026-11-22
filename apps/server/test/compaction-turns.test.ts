@@ -216,6 +216,7 @@ describe("steering during a compaction", () => {
     mcp: true,
     skills: false,
     enforcesSecurityRules: true,
+    readOnly: true,
     compact: true,
   } satisfies ProviderInfo["capabilities"];
 

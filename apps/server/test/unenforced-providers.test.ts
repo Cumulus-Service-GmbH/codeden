@@ -55,6 +55,17 @@ const PROVIDERS: ProviderInfo[] = [
     }),
     models: [],
   },
+  // Covered only in a CodeDen worktree (as the guard covers Claude Code).
+  {
+    id: "guarded",
+    displayName: "Guarded CLI",
+    capabilities: capabilities({
+      readOnly: true,
+      enforcesSecurityRules: true,
+      securityRulesWorktreesOnly: true,
+    }),
+    models: [],
+  },
   // Declares nothing about the security rules: absent counts as not enforced.
   {
     id: "silent",
@@ -238,5 +249,27 @@ describe("who can allow providers without enforced security rules", () => {
       allowUnenforcedProviders: true,
     });
     expect(parsed).not.toHaveProperty("allowUnenforcedProviders");
+  });
+});
+
+describe("a provider whose security rules cover worktrees only", () => {
+  it("is enforced for an agent session in a worktree", async () => {
+    const started = await services().start(
+      request({ provider: "guarded", workspace: { mode: "worktree" } }),
+    );
+    expect(started.status).toBe("started");
+  });
+
+  it("refuses an agent session in the project folder without the project's opt-in", async () => {
+    expect(await code(() => services().start(request({ provider: "guarded" })))).toBe(
+      "security_rules_unenforced",
+    );
+    allowed = true;
+    expect((await services().start(request({ provider: "guarded" }))).status).toBe("started");
+  });
+
+  it("allows a read-only PM in the project folder, held by CodeDen's read-only policy", async () => {
+    const started = await services().start(request({ provider: "guarded", role: "pm" }));
+    expect(started.status).toBe("started");
   });
 });

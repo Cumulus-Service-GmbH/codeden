@@ -45,6 +45,7 @@ const fake = {
     mcp: true,
     skills: false,
     enforcesSecurityRules: true,
+    readOnly: true,
   },
 } as unknown as ProviderInfo;
 

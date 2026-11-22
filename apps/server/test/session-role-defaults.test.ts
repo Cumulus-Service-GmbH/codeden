@@ -30,6 +30,7 @@ const caps: ProviderInfo["capabilities"] = {
   mcp: true,
   skills: false,
   enforcesSecurityRules: true,
+  readOnly: true,
 };
 
 const info = (id: string, reasoningEffort = true): ProviderInfo => ({

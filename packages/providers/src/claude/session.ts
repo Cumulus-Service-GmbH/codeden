@@ -171,6 +171,8 @@ export class ClaudeSession implements ProviderSession {
           config.notesRoots ?? claudeNotesDirs({ cwd: opts.cwd, ...claudeHomes(opts.env) }),
       },
       opts.readOnly,
+      // CodeDen's own servers are the trusted ones it passes (`trusted`).
+      opts.mcpServers.flatMap((s) => (s.transport === "http" && s.trusted ? [s.name] : [])),
     );
     this.planMode = opts.planMode;
     this.policy.setPlanning(opts.planMode);

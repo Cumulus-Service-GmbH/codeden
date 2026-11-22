@@ -197,9 +197,14 @@ export class SessionService {
    * aren't enforced for it and the project hasn't allowed such providers), for every role, or
    * that would run `supervised` on a provider that can't enforce it.
    */
-  private assertProviderAllowed(session: Session, archived?: Session): void {
+  private assertProviderAllowed(
+    session: Session,
+    workspace: WorkspaceRequest,
+    archived?: Session,
+  ): void {
     const project = session.projectId ? this.deps.projects.get(session.projectId) : null;
-    const provider = this.provider(session.provider);
+    // On the runner that hosts the role's conversations (the old one's), not only the home one.
+    const provider = this.provider(session.provider, archived?.id);
     // Start fresh retires the old conversation with this one's creation: never on a provider
     // that can't be checked yet (the runner not connected).
     if (archived && !provider) {
@@ -209,7 +214,9 @@ export class SessionService {
         "The runner isn't connected, so the new conversation's provider can't be checked yet. Try again in a moment.",
       );
     }
-    const unenforced = securityRulesUnenforced(provider, project, session.role);
+    // A worktree session runs in a CodeDen worktree (the runner checks the real folder too).
+    const inWorktree = workspace.mode === "worktree";
+    const unenforced = securityRulesUnenforced(provider, project, session.role, inWorktree);
     if (unenforced) throw badRequest(unenforced, "security_rules_unenforced");
     this.assertSupervisedSupported(session.provider, session.autonomy);
     this.assertReadOnlySupported(session.role, session.provider, session.autonomy);
@@ -390,7 +397,7 @@ export class SessionService {
   ): boolean {
     const { admission, repo } = this.deps;
     // Every new session (a start, a fork, a handoff to another provider) passes here.
-    this.assertProviderAllowed(session, archived);
+    this.assertProviderAllowed(session, workspace, archived);
     const waitingForConflict = session.status === "queued";
     const waitingForSlot = !waitingForConflict && !this.reserve(session);
     try {

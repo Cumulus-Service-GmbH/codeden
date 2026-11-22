@@ -24,6 +24,7 @@
   "readOnly": true,
   "vendorHistory": true,
   "compact": true,
+  "enforcesSecurityRules": true,
   "mcpStatus": true,
   "hookRuns": true,
   "systemPrompt": true

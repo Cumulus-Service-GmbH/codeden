@@ -26,6 +26,7 @@ const caps: ProviderInfo["capabilities"] = {
   mcp: true,
   skills: false,
   enforcesSecurityRules: true,
+  readOnly: true,
 };
 const provider = (id: string, compact: boolean): ProviderInfo => ({
   id,

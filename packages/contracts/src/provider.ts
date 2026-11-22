@@ -59,6 +59,12 @@ export const ProviderCapabilities = z.object({
    */
   enforcesSecurityRules: z.boolean().optional(),
   /**
+   * With `enforcesSecurityRules`: the rules cover only sessions that run in a CodeDen worktree
+   * (the guard's scope), so an agent session elsewhere (the project folder itself) counts as
+   * not enforced. Read-only roles are held by CodeDen's own read-only policy instead.
+   */
+  securityRulesWorktreesOnly: z.boolean().optional(),
+  /**
    * The `read_only` permission level is enforced natively: no file edits, no writing shell
    * commands, no commits or pushes (§11.2). When false (or absent), sessions on this provider
    * cannot use `read_only`.
@@ -104,6 +110,22 @@ export const ProviderCapabilities = z.object({
   systemPrompt: z.boolean().optional(),
 });
 export type ProviderCapabilities = z.infer<typeof ProviderCapabilities>;
+
+/**
+ * Whether the machine's security rules cover a session on a provider: the provider declares them
+ * (`enforcesSecurityRules` true; absent counts as not) and, when they cover worktrees only
+ * (`securityRulesWorktreesOnly`), the session runs in a CodeDen worktree or is a read-only role
+ * (PM, orchestrator), which CodeDen's own read-only policy holds. Shared by the server and the
+ * runner, so both decide alike.
+ */
+export function securityRulesCover(
+  caps: Pick<ProviderCapabilities, "enforcesSecurityRules" | "securityRulesWorktreesOnly">,
+  session: { role: Role; inCodedenWorktree?: boolean },
+): boolean {
+  if (caps.enforcesSecurityRules !== true) return false;
+  if (!caps.securityRulesWorktreesOnly) return true;
+  return session.role !== "agent" || session.inCodedenWorktree === true;
+}
 
 /** A model a provider offers. */
 export const ModelInfo = z.object({
@@ -287,6 +309,12 @@ export const SessionOptions = z.object({
    * refuses to start the session (fail closed).
    */
   allowUnenforcedProviders: z.boolean().optional(),
+  /**
+   * True: the session runs in a CodeDen worktree (its folder is under the home's worktrees
+   * folder), where a provider whose rules cover worktrees only (`securityRulesWorktreesOnly`)
+   * is enforced. Absent means it doesn't.
+   */
+  inCodedenWorktree: z.boolean().optional(),
   /** Extra directories the agent may read/write. */
   additionalDirectories: z.array(z.string()).default([]),
   /**

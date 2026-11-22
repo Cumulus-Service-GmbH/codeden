@@ -23,6 +23,8 @@
   "liveAutonomy": true,
   "readOnly": true,
   "compact": true,
+  "enforcesSecurityRules": true,
+  "securityRulesWorktreesOnly": true,
   "mcpStatus": true,
   "hookRuns": true,
   "systemPrompt": true

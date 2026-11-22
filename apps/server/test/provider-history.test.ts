@@ -33,6 +33,7 @@ const CAPS: ProviderCapabilities = {
   mcp: true,
   skills: true,
   enforcesSecurityRules: true,
+  readOnly: true,
   vendorHistory: true,
 };
 

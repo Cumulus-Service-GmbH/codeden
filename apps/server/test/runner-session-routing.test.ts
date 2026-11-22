@@ -32,6 +32,7 @@ const capabilities: ProviderInfo["capabilities"] = {
   mcp: true,
   skills: true,
   enforcesSecurityRules: true,
+  readOnly: true,
 };
 const CLAUDE: ProviderInfo = { id: "claude", displayName: "Claude Code", capabilities, models: [] };
 const PROXY_A = "http://127.0.0.1:41001/mcp";
