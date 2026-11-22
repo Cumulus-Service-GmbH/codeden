@@ -18,6 +18,7 @@ import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
 import {
   clonesWorkspaces,
+  isRemoteRunner,
   type RunnerDeps,
   type RunnerPort,
   runnerErrorCode,
@@ -61,6 +62,18 @@ export interface LauncherDeps extends RunnerDeps {
   git?: GitBroker;
   /** Sandboxes for projects whose sessions run in containers (`docs/remote-runners.md` §8). */
   sandboxes?: Pick<SandboxService, "wants" | "place" | "release">;
+}
+
+export const BROWSER_OPERATOR_TAG = "[Browser Operator]";
+
+/** Whether this session starts Claude in Chrome on the home runner. */
+export function startsWithChrome(session: Session, runner: RunnerPort): boolean {
+  return (
+    session.provider === "claude" &&
+    session.role === "agent" &&
+    (session.title ?? "").startsWith(BROWSER_OPERATOR_TAG) &&
+    !isRemoteRunner(runner)
+  );
 }
 
 /**
@@ -354,7 +367,8 @@ export class SessionLauncher {
    */
   sessionOptions(session: Session, mcpToken: string | null = null): SessionOptions {
     const project = this.projectOf(session);
-    const proxyUrl = runnerForSession(this.deps, session.id).mcpProxyUrl();
+    const runner = runnerForSession(this.deps, session.id);
+    const proxyUrl = runner.mcpProxyUrl();
     const mcpServers: McpServerConfig[] = [];
     if (proxyUrl && mcpToken) {
       mcpServers.push({
@@ -384,6 +398,7 @@ export class SessionLauncher {
       mcpServers,
       ...(ownBranch(session) ? { ownBranch: ownBranch(session) } : {}),
       ...(project?.agentCiEnv === false ? { ciEnv: false } : {}),
+      ...(startsWithChrome(session, runner) ? { chrome: true } : {}),
     });
   }
 
