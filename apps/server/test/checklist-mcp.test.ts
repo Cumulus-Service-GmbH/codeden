@@ -222,6 +222,86 @@ it("includes the checklist in the snapshot and streams committed tool updates", 
   }
 });
 
+it.each(["linked session", "child of a linked session"])(
+  "streams a live checklist update when a %s changes status",
+  async (source) => {
+    const home = mkdtempSync(join(tmpdir(), "codeden-checklist-"));
+    let server: RunningServer | undefined;
+    try {
+      server = await startServer({
+        port: 0,
+        dataDir: home,
+        userHome: home,
+        token,
+        runner: false,
+        secrets: "memory",
+        checkSetupOnStart: false,
+      });
+      seedProjects(server.store);
+      const { checklist, sessionRepo } = server.services;
+      const parent = {
+        ...sampleSession,
+        projectId,
+        status: "idle" as const,
+        parentSessionId: null,
+      };
+      const session =
+        source === "linked session"
+          ? parent
+          : { ...parent, id: "child", parentSessionId: parent.id };
+      server.store.append(
+        (session === parent ? [parent] : [parent, session]).map((entry) => ({
+          type: "session.created",
+          sessionId: entry.id,
+          payload: { session: entry },
+        })),
+      );
+      checklist.update(projectId, { items: [{ id: "linked", text: "Work" }] });
+      checklist.link(projectId, "linked", parent);
+      const response = await fetch(`${server.url}/api/snapshot`, { headers });
+      expect(response.status).toBe(200);
+      const snapshot = Snapshot.parse(await response.json());
+      expect(snapshot.checklists).toMatchObject([
+        { projectId, items: [{ id: "linked", status: "todo", sessionIds: [parent.id] }] },
+      ]);
+
+      const ws = new WebSocket(`${server.url.replace("http", "ws")}/ws`, { headers });
+      try {
+        await receive(ws, (message) => (message.type === "hello" ? message : undefined));
+        const pong = receive(ws, (message) => (message.type === "pong" ? message : undefined));
+        ws.send(JSON.stringify({ type: "subscribe", fromSeq: snapshot.seq }));
+        ws.send(JSON.stringify({ type: "ping", id: "checklist-session" }));
+        await pong;
+
+        const update = receive(ws, (message) =>
+          message.type === "events"
+            ? message.events.find(({ type }) => type === "checklist.updated")
+            : undefined,
+        );
+        sessionRepo.update(session.id, (entry) => ({ ...entry, status: "running" }));
+
+        const event = EventEnvelope.parse(await update);
+        expect(event.seq).toBeGreaterThan(snapshot.seq);
+        expect(event).toMatchObject({
+          type: "checklist.updated",
+          payload: {
+            checklist: {
+              projectId,
+              items: [{ id: "linked", status: "doing", sessionIds: [parent.id] }],
+            },
+          },
+        });
+        expect(checklist.get(projectId)?.items[0]?.status).toBe("doing");
+      } finally {
+        ws.close();
+      }
+    } finally {
+      await server?.close();
+      await removeTree(home);
+    }
+  },
+);
+
 it("strips automatic ownership from orchestrator additions before approval", async () => {
   const database = openDatabase(":memory:");
   try {
