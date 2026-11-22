@@ -149,7 +149,7 @@ describe("PM Chrome confirmation cards", () => {
     ["timeout", "", "skipped"],
     ["abort", "", "skipped"],
     ["already aborted", "", "skipped"],
-  ] as const)("handles %s answering %s", async (answerer, answer, status) => {
+  ] as const)("handles Chrome consent for %s answering %s", async (answerer, answer, status) => {
     const database = openDatabase(":memory:");
     const controller = new AbortController();
     try {
@@ -228,7 +228,14 @@ describe("PM Chrome confirmation cards", () => {
           questions.respond(sampleSession.id, card.requestId, response, "pm"),
         ).rejects.toMatchObject({ code: "user_confirmation_required" });
         expect(sessionRepo.item(sampleSession.id, card.id)?.item.status).toBe("in_progress");
-        await questions.respond(sampleSession.id, card.requestId, response, "user");
+        await expect(
+          questions.respond(sampleSession.id, card.requestId, response, "user"),
+        ).resolves.toBe(true);
+        expect(sessionRepo.item(sampleSession.id, card.id)?.item).toMatchObject({
+          status: "completed",
+          answers: response.answers,
+          decidedBy: "user",
+        });
       } else if (answerer === "user") {
         await questions.respond(sampleSession.id, card.requestId, response, "user");
       } else if (answerer === "abort") {

@@ -8,7 +8,7 @@ import type { SessionService } from "../src/services/sessions/session-service";
 import { sampleSession } from "./helpers";
 
 describe("Start fresh at the session limit", () => {
-  it("returns the replacement that waits for a free slot instead of failing", async () => {
+  it("shares one queued replacement across concurrent Start fresh requests", async () => {
     const database = openDatabase(":memory:");
     try {
       const store = new EventStore(database.db);
