@@ -29,14 +29,15 @@ export interface SegmentQueue<T> {
 const SPACELESS =
   "\\p{scx=Han}\\p{scx=Hiragana}\\p{scx=Katakana}\\p{scx=Thai}\\p{scx=Lao}\\p{scx=Khmer}\\p{scx=Myanmar}\\u3000-\\u303f\\uff01-\\uff60";
 const STARTS_SPACELESS = new RegExp(`^[${SPACELESS}]`, "u");
+const MARK = /^\p{M}$/u;
 
 /**
  * What goes between two pieces of dictated text: nothing where both sides are in a script
  * written without spaces (a pause there is not a word break), a single space otherwise.
  */
 export function separator(before: string, after: string): string {
-  // Test the last code point with ^ because a $-anchored u-flag class misses trailing astral characters on V8 14.6 (Node 26).
-  const last = Array.from(before.slice(-2)).at(-1) ?? "";
+  // Skip trailing marks and test the last remaining code point with ^ because a $-anchored u-flag class misses trailing astral characters on V8 14.6 (Node 26).
+  const last = Array.from(before).findLast((ch) => !MARK.test(ch)) ?? "";
   return STARTS_SPACELESS.test(last) && STARTS_SPACELESS.test(after) ? "" : " ";
 }
 
