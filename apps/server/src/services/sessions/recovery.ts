@@ -83,6 +83,13 @@ export class SessionRecovery {
     };
     let hosted = await this.hostedSessions(runner);
     if (!hosted) return;
+    // Clear stale active statuses before any continuation asks admission for a slot.
+    for (const id of candidates) {
+      if (hosted.has(id) || !stillCutOff(id)) continue;
+      const session = repo.find(id)?.session;
+      if (!session || lastCompaction(repo, session)) continue;
+      repo.update(id, (s) => (isCutOff(s.status) ? { ...s, status: "interrupted" } : s));
+    }
     for (const id of candidates) {
       if (!stillCutOff(id)) continue;
       // Resuming the candidates before this one took a while, and the session may have come

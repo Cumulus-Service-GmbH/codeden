@@ -1,11 +1,22 @@
-import type { Session } from "@codeden/contracts";
-import { describe, expect, it, vi } from "vitest";
+import { join } from "node:path";
+import type { RunnerCommandName, RunnerCommandOf, Session } from "@codeden/contracts";
+import { FakeProvider } from "@codeden/providers";
+import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { ensureHome } from "../src/paths";
+import { createServices } from "../src/services/container";
 import type { RunnerPort, RunnerRouter } from "../src/services/runner-port";
+import { MemorySecretStore } from "../src/services/secrets";
 import type { SessionLauncher } from "../src/services/sessions/launcher";
-import { type RecoveryDeps, SessionRecovery } from "../src/services/sessions/recovery";
+import {
+  RESTART_CONTINUE_MESSAGE,
+  type RecoveryDeps,
+  SessionRecovery,
+} from "../src/services/sessions/recovery";
 import type { SessionRepo } from "../src/services/sessions/repo";
 import type { SessionService } from "../src/services/sessions/session-service";
+import { SettingsStore } from "../src/settings-store";
 import { sampleSession } from "./helpers";
+import { createGithubEnv } from "./support/github-env";
 
 /**
  * Recovery after a runner connects, with a session started on that runner while its
@@ -27,6 +38,10 @@ describe("session recovery", () => {
       find: (id: string) => {
         const session = sessions.get(id);
         return session ? { session } : undefined;
+      },
+      update: (id: string, change: (session: Session) => Session) => {
+        const session = sessions.get(id);
+        if (session) sessions.set(id, change(session));
       },
       closeOrphanedTurns: vi.fn(() => 0),
       // Their cut-off turns are work turns (a cut-off compaction: compaction-restart.test.ts).
@@ -272,5 +287,94 @@ describe("session recovery", () => {
     finishSweep();
     await vi.waitFor(() => expect(sweep).toHaveBeenCalledTimes(2));
     finishSweep();
+  });
+});
+
+describe("admission during restart recovery", () => {
+  it.each([false, true])("resumes in candidate order (hosted session: %s)", async (keepHosted) => {
+    const env = createGithubEnv();
+    onTestFinished(() => env.close());
+    const candidates = Array.from({ length: 6 }, (_, index) =>
+      env.addSession({
+        status: "running",
+        resumeToken: `resume-${index}`,
+        createdAt: `2026-11-07T10:00:0${index}.000Z`,
+      }),
+    ).reverse();
+    const live = keepHosted
+      ? env.addSession({ status: "waiting", resumeToken: "live" })
+      : undefined;
+    const liveBefore = live && env.repo.get(live.id);
+    const hosted = new Set(live ? [live.id] : []);
+    const starts: RunnerCommandOf<"session.start">[] = [];
+    const runner: RunnerPort = {
+      isConnected: () => true,
+      runnerId: () => "r1",
+      providers: () => [
+        {
+          id: "fake",
+          displayName: "Fake",
+          capabilities: new FakeProvider().capabilities(),
+          models: [],
+        },
+      ],
+      mcpProxyUrl: () => null,
+      waitForConnection: async () => true,
+      request: (async (command: RunnerCommandOf<RunnerCommandName>) => {
+        switch (command.name) {
+          case "runner.status":
+            return { sessions: [...hosted].map((sessionId) => ({ sessionId })) };
+          case "session.send":
+            throw Object.assign(new Error("Unknown session"), { code: "unknown_session" });
+          case "session.start":
+            starts.push(command);
+            hosted.add(command.sessionId);
+            return { resumeToken: command.options.resumeToken };
+          default:
+            throw new Error(`Unexpected runner command: ${command.name}`);
+        }
+      }) as RunnerPort["request"],
+    };
+    const paths = ensureHome(join(env.dir, "home"));
+    const settings = new SettingsStore(paths.settings);
+    settings.update({ limits: { maxActiveSessions: 4 } });
+    const { admission, lifecycle, recovery } = createServices({
+      db: env.db.db,
+      store: env.store,
+      paths,
+      settings,
+      runner,
+      secrets: new MemorySecretStore(),
+      userHome: env.dir,
+    });
+    const reserve = vi.spyOn(admission, "tryReserve");
+    const delivered = () => starts.map(({ sessionId, input }) => [sessionId, input?.text]);
+    const continuation = ({ id }: Session) => [id, RESTART_CONTINUE_MESSAGE];
+    const immediate = live ? 3 : 4;
+
+    await recovery.onRunnerReady();
+
+    expect(delivered()).toEqual(candidates.slice(0, immediate).map(continuation));
+    expect(admission.status()).toMatchObject({
+      active: 4,
+      waiting: candidates.slice(immediate).map(({ id }, index) => ({
+        sessionId: id,
+        kind: "turn",
+        place: index + 1,
+      })),
+    });
+    if (live) {
+      expect(env.repo.get(live.id)).toEqual(liveBefore);
+      expect(reserve.mock.calls.map(([id]) => id)).not.toContain(live.id);
+      return;
+    }
+
+    for (const [index, { id }] of candidates.slice(0, 2).entries()) {
+      env.repo.update(id, (s) => ({ ...s, status: "idle" }));
+      lifecycle.drainQueue();
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(delivered()).toEqual(candidates.slice(0, immediate + index + 1).map(continuation));
+    }
+    expect(admission.status().waiting).toEqual([]);
   });
 });
