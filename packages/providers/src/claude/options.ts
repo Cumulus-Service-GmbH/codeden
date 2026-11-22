@@ -104,15 +104,15 @@ export interface QueryOptionsInput {
  * which it passes inline (`--mcp-config <json>`), bearer tokens included, on the command line any
  * local process can read (§15).
  */
-function mcpConfigArgs(input: QueryOptionsInput): Pick<Options, "extraArgs"> {
+function mcpConfigArgs(input: QueryOptionsInput): Record<string, string | null> {
   if (input.session.mcpServers.length === 0) return {};
   if (!input.mcpConfigFile) {
     throw new Error("A Claude session's MCP servers must be passed as a private config file");
   }
-  return { extraArgs: { "mcp-config": input.mcpConfigFile } };
+  return { "mcp-config": input.mcpConfigFile };
 }
 
-/** Build the `query()` options for a session (§7.2). */
+/** Build the `query()` options for a session (§7.2). `chrome: null` serializes to `--chrome`. */
 export function buildQueryOptions(input: QueryOptionsInput): Options {
   const { session } = input;
   const permissionMode = permissionModeFor(session.autonomy, session.planMode);
@@ -120,6 +120,7 @@ export function buildQueryOptions(input: QueryOptionsInput): Options {
   // plan is approved, which the CLI only accepts when it was launched allowing it.
   const bypass = permissionModeFor(session.autonomy, false) === "bypassPermissions";
   const effort = claudeEffort(session.effort);
+  const extraArgs = { ...mcpConfigArgs(input), ...(session.chrome ? { chrome: null } : {}) };
   return {
     ...executableOptions(input.executable),
     cwd: session.cwd,
@@ -135,7 +136,7 @@ export function buildQueryOptions(input: QueryOptionsInput): Options {
     ...(input.resume ? { resume: input.resume } : {}),
     // Read-only sessions (orchestrator, PMs) never get the edit tools (§11.2).
     ...(session.readOnly ? { disallowedTools: [...EDIT_TOOLS] } : {}),
-    ...mcpConfigArgs(input),
+    ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
     ...trustedMcpTools(session.mcpServers),
     systemPrompt: {
       type: "preset",

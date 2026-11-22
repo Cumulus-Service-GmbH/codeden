@@ -8,6 +8,7 @@ import {
   speechExcerpt,
 } from "@codeden/contracts";
 import type { RunnerPort } from "./runner-port";
+import { stripLeadingTags } from "./sessions/role-tag";
 
 /** Context handed to utility jobs about a finished turn. */
 export interface TurnContext {
@@ -164,9 +165,9 @@ export class ProviderUtilityService implements UtilityService {
       "Write a title of 3 to 6 words for a coding session that starts with the request below. Reply with the title only: no quotes, no trailing punctuation.",
       `Request:\n${clip(source, 4_000)}`,
     );
-    const title = out
-      ?.split("\n")[0]
-      ?.replace(/^["'#\s]+|["'.\s]+$/g, "")
+    const firstLine = out?.split("\n")[0]?.replace(/^["'#\s]+|["'.\s]+$/g, "");
+    const title = stripLeadingTags(firstLine ?? "")
+      .trim()
       .slice(0, 80);
     return title ? title : null;
   }
