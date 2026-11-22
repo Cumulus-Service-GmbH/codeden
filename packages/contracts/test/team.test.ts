@@ -1,5 +1,13 @@
 import { expect, it } from "vitest";
-import { FactoryTuning, FactoryTuningPatch, Settings, Team, teamRoleOfTitle } from "../src";
+import {
+  FactoryTuning,
+  FactoryTuningPatch,
+  Settings,
+  TEAM_FILE_ENV,
+  Team,
+  TeamFile,
+  teamRoleOfTitle,
+} from "../src";
 
 it("fills Team defaults in old records while keeping tuning patches sparse", () => {
   expect(FactoryTuning.parse({})).toMatchObject({ team: [], resultSummaryBytes: null });
@@ -35,4 +43,16 @@ it.each([
 ])("reads only the first leading tag [%s]", (tag, role) => {
   expect(teamRoleOfTitle(`[${tag}] [Writer] Work`)).toBe(role);
   expect(teamRoleOfTitle(`Work [${tag}]`)).toBeNull();
+});
+
+it("round-trips a Team file", () => {
+  const file = TeamFile.parse({
+    version: 1,
+    projectId: "p1",
+    team: [{ role: "reviewer", provider: "claude", model: "claude-opus-5-5", effort: "high" }],
+    updatedAt: "2026-11-22T19:00:00.000Z",
+  });
+  expect(TeamFile.parse(JSON.parse(JSON.stringify(file)))).toEqual(file);
+  expect(TeamFile.safeParse({ ...file, version: 2 }).success).toBe(false);
+  expect(TEAM_FILE_ENV).toBe("TEAM_FILE");
 });
