@@ -3,7 +3,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentEvent, SessionOptions } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import type { AcpSessionSetup } from "../src/acp/protocol";
 import { AcpSession } from "../src/acp/session";
 import type { ProviderSession } from "../src/adapter";
 import { ANTIGRAVITY_AGENT, AntigravityAdapter } from "../src/antigravity/adapter";
@@ -178,25 +177,16 @@ describe("Antigravity CLI session over ACP", () => {
   });
 
   it("reports the setup a model switch brought, so the adapter's list follows it", async () => {
-    const reported: AcpSessionSetup[] = [];
-    const session = new AcpSession(options(), {
-      executable: fakeAgy,
-      spec: ANTIGRAVITY_AGENT,
-      onSetup: (setup) => reported.push(setup),
+    // The switch's reply lists a model fewer: the adapter's picker must drop it too.
+    const { session, adapter, turn } = await open({
+      env: { FAKE_AGY_SWITCH_DROP_MODEL: "claude-opus-5-5" },
     });
-    sessions.push(session);
-    await session.start();
-    const at = reported.length;
-    await session.configure({ model: "gemini-4-argon" });
-    const it = session.events[Symbol.asyncIterator]();
-    await session.send({ text: "go", attachments: [] });
-    for (;;) {
-      const next = await it.next();
-      if (next.done || isTurnEnd(next.value)) break;
-    }
-    const model = (s?: AcpSessionSetup) => s?.configOptions?.find((o) => o.id === "model");
-    expect(reported.length).toBeGreaterThan(at);
-    expect(model(reported.at(-1))?.currentValue).toBe("gemini-4-argon");
+    expect(adapter.models().map((m) => m.id)).toContain("claude-opus-5-5");
+    await session.configure?.({ model: "gemini-4-argon" });
+    await turn("go");
+    const ids = adapter.models().map((m) => m.id);
+    expect(ids).toContain("gemini-4-argon");
+    expect(ids).not.toContain("claude-opus-5-5");
   });
 
   it("opens when the adapter's async reports reject later, with no unhandled rejection", async () => {

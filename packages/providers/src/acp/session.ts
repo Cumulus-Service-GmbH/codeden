@@ -324,7 +324,8 @@ export class AcpSession implements ProviderSession {
     await this.applyMode();
     if (this.model) {
       const setup = this.setup;
-      this.setup = await setModel(rpc, opened.sessionId, setup, this.model).catch(() => setup);
+      // A failure keeps the live setup: options reported while the request ran stay.
+      this.setup = await setModel(rpc, opened.sessionId, setup, this.model).catch(() => this.setup);
       this.reportSetup(setup);
     }
     await this.applyEffort(rpc, opened.sessionId, this.effort);
@@ -410,7 +411,7 @@ export class AcpSession implements ProviderSession {
       effort ? spec.value(effort, listed) : own && listed.includes(own) ? own : undefined;
     const setup = this.setup;
     const applied = setConfigValue(rpc, sessionId, setup, spec.category, pick);
-    this.setup = strict ? await applied : await applied.catch(() => setup);
+    this.setup = strict ? await applied : await applied.catch(() => this.setup);
     this.reportSetup(setup);
     if (!effort) this.agentEffort = undefined;
   }

@@ -61,7 +61,7 @@ export async function listSetup(
     .request<AcpSessionSetup>("session/new", { cwd, mcpServers: [] })
     .then((setup) => {
       if (!setup || late || performance.now() > due) return undefined;
-      onSetup?.(setup);
+      notify(() => onSetup?.(setup));
       return setup;
     })
     .catch(() => undefined);
@@ -108,9 +108,7 @@ export async function probeAntigravity(
     try {
       notify(() => opts.onInfo?.(started.info));
       const timeout = opts.setupTimeoutMs ?? SETUP_TIMEOUT_MS;
-      const setup = await listSetup(started.rpc, cwd, timeout, (s) =>
-        notify(() => opts.onSetup?.(s)),
-      );
+      const setup = await listSetup(started.rpc, cwd, timeout, opts.onSetup);
       return { acp: true, info: started.info, ...(setup ? { setup } : {}) };
     } finally {
       await started.rpc.close();

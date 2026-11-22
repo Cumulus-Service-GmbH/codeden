@@ -8,6 +8,7 @@
 // `mode`); `session/set_config_option` answers with every option.
 // FAKE_AGY_AUTH=missing: `session/new` fails as signed out. FAKE_AGY_LOG: every message the
 // client sends, one JSON line each. FAKE_AGY_NEW_HANG=1: `session/new` never answers.
+// FAKE_AGY_SWITCH_DROP_MODEL: switching the model drops that one from the list.
 // FAKE_AGY_NEW_DELAY_MS: `session/new` answers after that delay. FAKE_AGY_DROP_MODEL: that
 // model is left out of the list. FAKE_AGY_REJECT_FILE: while that file exists,
 // `session/set_config_option` fails. FAKE_AGY_REPLY: the text each `session/prompt` streams.
@@ -66,6 +67,9 @@ createInterface({ input: process.stdin }).on("line", (line) => {
         return send({ id: msg.id, error: { code: -32602, message: "invalid config value" } });
       }
       option.currentValue = msg.params.value;
+      if (option.id === "model" && env.FAKE_AGY_SWITCH_DROP_MODEL) {
+        option.options = option.options.filter((o) => o.value !== env.FAKE_AGY_SWITCH_DROP_MODEL);
+      }
       return send({ id: msg.id, result: { configOptions: setup.configOptions } });
     }
     case "session/prompt":
