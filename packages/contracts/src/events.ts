@@ -165,6 +165,11 @@ export const EventEnvelope = z.discriminatedUnion("type", [
   globalEvent("decision.raised", DecisionCard),
   globalEvent("decision.confirmed", DecisionConfirmation),
   globalEvent("decision.step_consumed", z.object({ id: Id, step: PlanApprovalStep })),
+  /** The outcome of a handler after its approved step was consumed. */
+  globalEvent(
+    "decision.step_result",
+    z.object({ id: Id, step: PlanApprovalStep, ok: z.boolean(), error: z.string().optional() }),
+  ),
   globalEvent("decision.github_claimed", z.object({ id: Id })),
   globalEvent("decision.github_stale", z.object({ id: Id })),
   globalEvent("decision.github_posted", z.object({ id: Id })),

@@ -6,9 +6,10 @@ import {
   decisionTiers,
   type GitHubApprovalTarget,
   type PlanApprovalStep,
+  redactSecrets,
 } from "@codeden/contracts";
 import type { EventStore } from "../events/store";
-import { ServiceError } from "./errors";
+import { errorMessage, ServiceError } from "./errors";
 import { checkPlanStep } from "./plan-approval";
 
 interface Actor {
@@ -166,6 +167,26 @@ export class DecisionApprovals {
       }
       throw error;
     }
+  }
+
+  recordStepResult(
+    id: string,
+    sessionId: string | null,
+    step: PlanApprovalStep,
+    result: { ok: true } | { ok: false; error: unknown },
+  ): void {
+    this.store.append([
+      {
+        type: "decision.step_result",
+        sessionId,
+        payload: {
+          id,
+          step,
+          ok: result.ok,
+          ...(result.ok ? {} : { error: redactSecrets(errorMessage(result.error)) }),
+        },
+      },
+    ]);
   }
 
   authorize(actor: Actor, projectId: string, step: PlanApprovalStep, cardId?: string): void {

@@ -292,6 +292,9 @@ export class FakeGithub {
     if (m && method === "POST") {
       const issue = this.issues.get(Number(m[1]));
       if (!issue?.pr) return notFound;
+      if (b.event === "APPROVE" && issue.author === login) {
+        return { status: 422, data: { message: "Cannot approve your own pull request" } };
+      }
       return ok({ id: this.nextId++, commit_id: b.commit_id, state: "APPROVED" });
     }
     m = rest.match(/^\/pulls\/(\d+)\/files$/);

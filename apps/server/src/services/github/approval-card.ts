@@ -37,6 +37,11 @@ export function githubApprovalPort(client: GithubClient) {
       const decision = `Approved by the owner in CodeDen. Decision ${cardId}.`;
       await client.run(async (octokit) => {
         if (target.kind === "merge_verify") {
+          await octokit.rest.issues.createComment({
+            ...repo,
+            issue_number: target.pullNumber,
+            body: `${decision} Merge-verify head: ${target.headSha}.`,
+          });
           await octokit.rest.pulls.createReview({
             ...repo,
             pull_number: target.pullNumber,

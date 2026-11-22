@@ -155,6 +155,7 @@ export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
     case "decision.raised":
     case "decision.confirmed":
     case "decision.step_consumed":
+    case "decision.step_result":
     case "decision.github_claimed":
     case "decision.github_stale":
     case "decision.github_posted":

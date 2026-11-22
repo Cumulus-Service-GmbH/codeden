@@ -83,6 +83,7 @@ export class ToolRegistry {
       return { text: `${name} needs a project`, isError: true };
     }
     try {
+      let approvedStep: PlanApprovalStep | undefined;
       const tier = tierFor(name);
       if (tier !== undefined || plan) {
         const step = PlanApprovalStep.parse({ action: name, args: args ?? {} });
@@ -91,15 +92,32 @@ export class ToolRegistry {
           throw new ToolError("The step must target the card's project");
         }
         this.services.decisions.authorize(caller, target, step, plan?.cardId);
+        if (plan) approvedStep = step;
       }
-      const output = await tool.handler(parsed.data, {
-        role: caller.role,
-        caller: caller.caller,
-        signal: caller.signal,
-        sessionId: caller.sessionId,
-        projectId,
-        services: this.services,
-      } as never);
+      let output: unknown;
+      try {
+        output = await tool.handler(parsed.data, {
+          role: caller.role,
+          caller: caller.caller,
+          signal: caller.signal,
+          sessionId: caller.sessionId,
+          projectId,
+          services: this.services,
+        } as never);
+      } catch (error) {
+        if (plan && approvedStep) {
+          this.services.decisions.recordStepResult(plan.cardId, caller.sessionId, approvedStep, {
+            ok: false,
+            error,
+          });
+        }
+        throw error;
+      }
+      if (plan && approvedStep) {
+        this.services.decisions.recordStepResult(plan.cardId, caller.sessionId, approvedStep, {
+          ok: true,
+        });
+      }
       if (output instanceof ToolOutput) {
         return { text: output.text, isError: false, images: output.images };
       }

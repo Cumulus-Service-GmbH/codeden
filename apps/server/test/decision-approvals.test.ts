@@ -96,26 +96,27 @@ describe("decision approvals", () => {
 });
 
 describe("GitHub approval client", () => {
-  it("checks the live head and sends an approving review tied to the recorded SHA", async () => {
+  it("checks the live head and posts both approval artifacts for the recorded SHA", async () => {
     const env = createGithubEnv();
     try {
-      const pr = env.gh.addPr("approval-card", {}, { headSha: target.headSha });
+      const pr = env.gh.addPr(
+        "approval-card",
+        { author: "contributor" },
+        { headSha: target.headSha },
+      );
       const githubTarget = { ...target, repository: "acme/widgets", pullNumber: pr.number };
       const service = new DecisionApprovals(env.store, githubApprovalPort(env.service.client));
       const card = service.raise(pm, "project", { kind: "github", target: githubTarget });
-      const reviews = () =>
-        env.gh.requests.filter(
-          ({ method, path }) => method === "POST" && path.endsWith(`/pulls/${pr.number}/reviews`),
-        );
+      const writes = () => env.gh.requests.filter(({ method }) => method === "POST");
       await expect(service.postGithub(card.id, pm)).rejects.toThrow();
-      expect(reviews()).toEqual([]);
+      expect(writes()).toEqual([]);
       await service.confirm(card.id, owner);
-      expect(reviews()).toEqual([]);
+      expect(writes()).toEqual([]);
       env.gh.touch(pr.number, (issue) => {
         if (issue.pr) issue.pr.headSha = "b".repeat(40);
       });
       await expect(service.postGithub(card.id, pm)).rejects.toThrow("head moved");
-      expect(reviews()).toEqual([]);
+      expect(writes()).toEqual([]);
       env.gh.touch(pr.number, (issue) => {
         if (issue.pr) issue.pr.headSha = target.headSha;
       });
@@ -125,9 +126,41 @@ describe("GitHub approval client", () => {
       await service.postGithub(next.id, pm);
       const reopened = new DecisionApprovals(env.store, githubApprovalPort(env.service.client));
       await expect(reopened.postGithub(next.id, pm)).rejects.toThrow();
-      expect(reviews()).toMatchObject([
-        { status: 200, body: { event: "APPROVE", commit_id: target.headSha } },
+      expect(writes()).toMatchObject([
+        {
+          path: `/repos/acme/widgets/issues/${pr.number}/comments`,
+          status: 201,
+          body: {
+            body: `Approved by the owner in CodeDen. Decision ${next.id}. Merge-verify head: ${target.headSha}.`,
+          },
+        },
+        {
+          path: `/repos/acme/widgets/pulls/${pr.number}/reviews`,
+          status: 200,
+          body: { event: "APPROVE", commit_id: target.headSha },
+        },
       ]);
+    } finally {
+      await env.close();
+    }
+  });
+  it("leaves the comment and reports a rejected self-review without replaying either post", async () => {
+    const env = createGithubEnv();
+    try {
+      const pr = env.gh.addPr("self-review", {}, { headSha: target.headSha });
+      const service = new DecisionApprovals(env.store, githubApprovalPort(env.service.client));
+      const card = service.raise(pm, "project", {
+        kind: "github",
+        target: { ...target, repository: "acme/widgets", pullNumber: pr.number },
+      });
+      await service.confirm(card.id, owner);
+      await expect(service.postGithub(card.id, pm)).rejects.toThrow("own pull request");
+      await expect(service.postGithub(card.id, pm)).rejects.toThrow("unused owner approval");
+      expect(env.gh.requests.filter(({ method }) => method === "POST")).toMatchObject([
+        { path: `/repos/acme/widgets/issues/${pr.number}/comments`, status: 201 },
+        { path: `/repos/acme/widgets/pulls/${pr.number}/reviews`, status: 422 },
+      ]);
+      expect(env.store.listTypes(["decision.github_posted"])).toEqual([]);
     } finally {
       await env.close();
     }
@@ -196,4 +229,40 @@ it("checks the card before the tool handler can run, including on the direct too
   expect((await registry.call(step.action, step.args, caller, plan)).isError).toBe(false);
   expect((await registry.call(step.action, step.args, caller, plan)).isError).toBe(true);
   expect(handler).toHaveBeenCalledTimes(1);
+});
+
+it.each([true, false])("records the consumed step's result when ok is %s", async (ok) => {
+  const { service, store } = setup();
+  const decisions = service();
+  const step = { action: "merge_pull_request", args: { pullNumber: 10, headSha: target.headSha } };
+  const handler = vi.fn(async () => {
+    expect(store.listAfter(0).at(-1)?.type).toBe("decision.step_consumed");
+    if (!ok) throw new ServiceError(409, "merge_verify_pending", "PR must pass merge verification");
+    return "merged";
+  });
+  const tool = defineTool({
+    name: "merge_pull_request",
+    description: "Merge a pull request",
+    scope: "project",
+    roles: ["orchestrator"],
+    input: z.strictObject({ pullNumber: z.number(), headSha: z.string() }),
+    handler,
+  });
+  const registry = new ToolRegistry([tool], { decisions } as AppServices);
+  const caller = { ...orchestrator, caller: "mcp" as const, signal: new AbortController().signal };
+  const card = decisions.raise(orchestrator, "project", { kind: "plan", steps: [step] });
+  await decisions.confirm(card.id, pm);
+  const plan = { cardId: card.id, projectId: "project" };
+  const result = await registry.call(step.action, step.args, caller, plan);
+  expect(result.isError).toBe(!ok);
+  expect((await registry.call(step.action, step.args, caller, plan)).isError).toBe(true);
+  expect(handler).toHaveBeenCalledTimes(1);
+  expect(store.listAfter(0).slice(2)).toMatchObject([
+    { type: "decision.step_consumed", payload: { id: card.id, step } },
+    {
+      type: "decision.step_result",
+      sessionId: caller.sessionId,
+      payload: { id: card.id, step, ok, ...(ok ? {} : { error: result.text }) },
+    },
+  ]);
 });
