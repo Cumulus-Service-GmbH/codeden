@@ -130,8 +130,13 @@ it("refuses a start whose calling session can't be read for its Team", async () 
   ).rejects.toThrow(/TEAM_UNRESOLVED/);
 });
 
-it("opens card-gated work supervised", async () => {
-  const { started } = await start({ purpose: "Production migration" }, {});
+it.each([
+  "PRD deployment",
+  "Provisioning",
+  "Database migration",
+  "Install requiring an owner card",
+])("opens card-gated work supervised for %s", async (purpose) => {
+  const { started } = await start({ purpose }, {});
   expect(started[0]?.autonomy).toBe("supervised");
 });
 
@@ -156,6 +161,18 @@ it("resolves the PM and Team policies for the role and purpose", async () => {
     },
   );
   expect(started[0]?.autonomy).toBe("auto");
+});
+
+it("keeps each role's configured autonomy for work without owner cards", async () => {
+  const opts = {
+    project: [writer, { ...writer, role: "planReviewer" as const }],
+    teamPolicy: { writer: { "*": "full" }, planReviewer: { "*": "read_only" } } as const,
+  };
+  const input = { purpose: "Documentation" };
+  const writerRun = await start({ ...input, title: "[Writer] Work" }, opts);
+  const reviewerRun = await start({ ...input, title: "[Plan Reviewer] Work" }, opts);
+  expect(writerRun.started[0]?.autonomy).toBe("full");
+  expect(reviewerRun.started[0]?.autonomy).toBe("read_only");
 });
 
 it("uses the strictest matching purpose rule in a free-text purpose", async () => {
@@ -302,9 +319,17 @@ it("raises a running agent to supervised, audits the reason, and refuses a later
 it.each(Object.entries(TEAM_ROLE_TAGS))("checks every Team role %s", async (tag, role) => {
   const title = `${tag} Work`;
   await expect(start({ title }, {})).rejects.toThrow("TEAM_ROLE_UNSET");
-  await expect(
-    start({ title, provider: "codex" }, { project: [{ ...writer, role }] }),
-  ).rejects.toThrow("TEAM_MISMATCH");
+  const defaults: Team = [{ ...writer, role, model: "global-model" }];
+  const project: Team = [{ ...writer, role }];
+  for (const [opts, provider, model] of [
+    [{ defaults }, "claude", "global-model"],
+    [{ defaults, project }, "claude", "project-model"],
+    [{ defaults, project, callerTitle: `${tag} Lead`, architect: true }, "codex", "caller-model"],
+  ] as const) {
+    const { started } = await start({ title, provider, model }, opts);
+    expect(started[0]).toMatchObject({ provider, model });
+    await expect(start({ title, model: "wrong-model" }, opts)).rejects.toThrow("TEAM_MISMATCH");
+  }
 });
 
 it("allows only the PM's delegated Architect to open child sessions", async () => {

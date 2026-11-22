@@ -270,6 +270,37 @@ describe("factory loop state machine (§10.1)", () => {
     expect(item(verifying.id).reviewerSessionId).not.toBe(formerReviewer);
   });
 
+  it("routes Claude-written work to Codex when the Team primary is Opus", async () => {
+    env = createFactoryEnv({
+      providers: ["claude", "alternate", "codex"],
+      modelVendors: { alternate: "anthropic" },
+    });
+    enable();
+    env.factory.setMode(env.project.id, {
+      mode: "software_factory",
+      tuning: {
+        team: [{ role: "reviewer", provider: "claude", model: "claude-opus-5-5", effort: "high" }],
+      },
+    });
+    const verifying = await toVerifying(backlogItem());
+    expect(verifying).toMatchObject({ builderProvider: "claude", reviewerProvider: "codex" });
+    const reviewer = verifying.reviewerSessionId as string;
+    env.repo.update(reviewer, (session) => ({ ...session, provider: "alternate" }));
+    expect(() => review(verifying)).toThrow("distinct model vendor");
+  });
+
+  it("waits for a known author vendor even when a reviewer is available", async () => {
+    env = createFactoryEnv({ modelVendors: { claude: undefined } });
+    enable();
+    const verifying = await toVerifying(backlogItem());
+    expect(verifying).toMatchObject({
+      builderProvider: "claude",
+      reviewerProvider: null,
+      reviewerSessionId: null,
+      note: "Waiting: the author's model vendor is unknown.",
+    });
+  });
+
   it("keeps a busy reviewer while the runner reports no providers", async () => {
     env = createFactoryEnv();
     enable();
