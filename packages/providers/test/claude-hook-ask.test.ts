@@ -53,13 +53,17 @@ const forcePushReason = "Force-pushes, which can overwrite remote history";
 const once = ["allow_once", "deny"];
 const ordinary = ["allow_once", "allow_session", "deny"];
 
-function open(autonomy: SessionOptions["autonomy"]) {
+function hookOutput(permissionDecision = "ask", permissionDecisionReason = marked) {
+  return JSON.stringify({ hookSpecificOutput: { permissionDecision, permissionDecisionReason } });
+}
+
+function open(autonomy: SessionOptions["autonomy"], interruptTimeoutMs = 10_000) {
   const sdk = stubSdk();
   const events: AgentEvent[] = [];
   const approvals: ItemOf<"approval_request">[] = [];
   const session = new ClaudeSession(
     { ...base, autonomy },
-    { executable: { kind: "native", path: "/bin/claude" }, query: sdk.query },
+    { executable: { kind: "native", path: "/bin/claude" }, query: sdk.query, interruptTimeoutMs },
   );
   sessions.push(session);
   void (async () => {
@@ -114,9 +118,7 @@ function open(autonomy: SessionOptions["autonomy"]) {
       hook_name: `PreToolUse:${tool}`,
       hook_event: "PreToolUse",
       outcome: "success",
-      stdout: `${padding}${JSON.stringify({
-        hookSpecificOutput: { permissionDecision: "ask", permissionDecisionReason: marked },
-      })}${padding}`,
+      stdout: `${padding}${hookOutput()}${padding}`,
     });
   return {
     session,
@@ -234,6 +236,32 @@ describe("Claude settings hooks that require approval", () => {
     },
   );
 
+  it.each([
+    ["empty stdout with marked output", { stdout: "", output: hookOutput() }, once],
+    ["error outcome", { outcome: "error" }, ordinary],
+    ["deny decision", { stdout: hookOutput("deny") }, ordinary],
+    ["unmarked reason", { stdout: hookOutput("ask", "Review this call") }, ordinary],
+    ["another tool", { hook_name: "PreToolUse:Write" }, ordinary],
+    ["missing tool name", { hook_name: "PreToolUse:" }, ordinary],
+    ["PostToolUse event", { hook_event: "PostToolUse" }, ordinary],
+  ] as const)("uses the expected card options for %s", async (_label, fields, options) => {
+    const run = open("auto");
+    run.messages.push({
+      type: "system",
+      subtype: "hook_response",
+      hook_name: "PreToolUse:Bash",
+      hook_event: "PreToolUse",
+      outcome: "success",
+      stdout: hookOutput(),
+      ...fields,
+    });
+    const call = run.permission("Bash", forcePush, forcePushReason);
+    const card = await run.card();
+    expect(card.options).toEqual(options);
+    await run.answer(card, "deny");
+    await expect(call).resolves.toMatchObject({ behavior: "deny" });
+  });
+
   it("clears leftover asks at the end of a turn", async () => {
     const run = open("full");
     await run.session.send({ text: "go", attachments: [] });
@@ -246,12 +274,20 @@ describe("Claude settings hooks that require approval", () => {
     expect(run.approvals).toHaveLength(0);
   });
 
-  it("keeps marked asks after interrupt until the result", async () => {
-    const run = open("auto");
+  it("keeps marked asks after the interrupt deadline until the result", async () => {
+    const interruptTimeoutMs = 100;
+    const run = open("auto", interruptTimeoutMs);
     await run.session.send({ text: "go", attachments: [] });
     run.pushAsk();
     await new Promise((resolve) => setImmediate(resolve));
-    await run.session.interrupt();
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      await run.session.interrupt();
+      await vi.advanceTimersByTimeAsync(interruptTimeoutMs);
+    } finally {
+      vi.useRealTimers();
+    }
+    expect(run.events.some((event) => event.type === "turn.interrupted")).toBe(true);
     const call = run.permission("Bash", forcePush, forcePushReason);
     const card = await run.card();
     expect(card.options).toEqual(once);

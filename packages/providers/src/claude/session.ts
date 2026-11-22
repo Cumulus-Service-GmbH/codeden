@@ -276,7 +276,6 @@ export class ClaudeSession implements ProviderSession {
       this.config.interruptTimeoutMs ?? 10_000,
       () => {
         if (this.mapper.turnId === turnId) {
-          this.markedHookAsks.clear();
           this.mapper.endTurn({ type: "interrupted", reason: "user" });
         }
       },
