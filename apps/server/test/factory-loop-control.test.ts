@@ -15,7 +15,9 @@ import {
 } from "../src/services/factory/revert-blocked";
 import { renderProjectDigest } from "../src/services/orchestration/digest";
 import { deriveNotices } from "../src/services/orchestration/notices";
+import { sampleSession } from "./helpers";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
+import { factorySteps } from "./support/factory-steps";
 
 let env: FactoryEnv;
 let tools: ToolRegistry;
@@ -739,6 +741,34 @@ it("ignores resolved inbox history when deriving agent notices", async () => {
   );
 });
 
+it("raises a new notice when a run fails again after its failure was dismissed", () => {
+  const session = { ...sampleSession, projectId: env.project.id };
+  const lookup = { session: () => session, finalMessage: () => null };
+  const failure = env.inbox.raiseRunFailed(session, "turn:failed", "First failure");
+  expect(deriveNotices(events(), lookup)).toMatchObject([
+    { notice: { id: `session.failed:${failure.id}`, type: "session.failed" } },
+  ]);
+
+  const beforeDismissal = events().length;
+  env.inbox.close(failure, "dismissed", null);
+  expect(env.inbox.get(failure.id).status).toBe("dismissed");
+  expect(deriveNotices(events().slice(beforeDismissal), lookup)).toEqual([]);
+
+  const beforeRetry = events().length;
+  env.inbox.raiseRunFailed(session, "turn:failed", "Second failure");
+  expect(env.inbox.get(failure.id)).toMatchObject({ status: "open", attempts: 2 });
+  expect(deriveNotices(events().slice(beforeRetry), lookup)).toMatchObject([
+    {
+      notice: {
+        id: `session.failed:${failure.id}:2`,
+        type: "session.failed",
+        sessionId: session.id,
+        data: { error: "Second failure" },
+      },
+    },
+  ]);
+});
+
 it("keeps the daily rollover when Stop now interrupts a tick", async () => {
   queueWork();
   const day = loop().day;
@@ -763,6 +793,55 @@ it("keeps the daily rollover when Stop now interrupts a tick", async () => {
   });
   await env.factory.tick(env.project.id);
   expect(events().filter((event) => event.type === "factory.digest.created")).toHaveLength(1);
+});
+
+it("keeps the new day's merge count when Stop now interrupts a merge in a tick", async () => {
+  const steps = factorySteps(() => env);
+  await steps.enable();
+  const { id, pr } = await steps.verifying();
+  await steps.review(id);
+  env.factory.data.saveLoop({ ...loop(), mergesToday: 2 });
+  vi.setSystemTime(new Date(2026, 10, 23, 0, 5));
+  const merge = env.gh.merge.bind(env.gh);
+  vi.spyOn(env.gh, "merge").mockImplementationOnce(async (...args) => {
+    const merged = await merge(...args);
+    await result("factory_stop", input());
+    return merged;
+  });
+
+  await steps.tick();
+
+  expect(steps.item(id).pr).toMatchObject({ number: pr.ref.number, state: "merged" });
+  expect(loop()).toMatchObject({
+    day: "2026-11-23",
+    mergesToday: 1,
+    state: "stopped",
+    lastControl: { action: "stop" },
+  });
+});
+
+it("keeps a regression pause set by the tick when Stop now interrupts its CI check", async () => {
+  const steps = factorySteps(() => env);
+  await steps.enable();
+  const { id, pr } = await steps.verifying();
+  await steps.review(id);
+  await steps.tick();
+  expect(steps.item(id).stage).toBe("watching");
+  expect(loop().pausedReason).toBeNull();
+  env.gh.main.checks = "failure";
+  vi.spyOn(env.gh, "commitChecks").mockImplementationOnce(async () => {
+    await result("factory_stop", input());
+    return "failure";
+  });
+
+  await steps.tick();
+
+  expect(loop()).toMatchObject({
+    state: "paused",
+    pausedReason: expect.stringContaining(`${regressionPausePrefix("main")}${pr.ref.number};`),
+    lastControl: { action: "stop" },
+  });
+  expect(await call("factory_resume", input())).toMatchObject({ isError: true });
 });
 
 it.each(["project", "global"] as const)(
