@@ -7,7 +7,7 @@ describe("admission contracts", () => {
       limit: 4,
       active: 4,
       control: 2,
-      waiting: ["start", "turn", "checks"].map((kind, index) => ({
+      waiting: ["start", "turn"].map((kind, index) => ({
         sessionId: `session-${index}`,
         kind,
         since: "2026-11-22T10:00:00.000Z",
