@@ -114,7 +114,15 @@ const artifacts = await build({
     electronVersion,
     // The installed Electron for host builds; electron-builder downloads other architectures.
     // (The electron package downloads its binary on first `require`.)
-    ...(hostOnly ? { electronDist: resolve(require("electron"), "..") } : {}),
+    // On macOS, electron-builder needs the directory containing Electron.app.
+    ...(hostOnly
+      ? {
+          electronDist: resolve(
+            require("electron"),
+            process.platform === "darwin" ? "../../../.." : "..",
+          ),
+        }
+      : {}),
   },
 });
 for (const file of artifacts) console.log(`built ${file}`);
