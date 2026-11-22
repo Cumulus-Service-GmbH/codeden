@@ -417,14 +417,11 @@ export class SessionLauncher {
    * so a start or resume always sees the current Team; the container rewrites it on every change.
    */
   private teamEnv(session: Session): { env: Record<string, string> } | null {
-    const team = session.projectId ? this.deps.team?.(session.projectId) : null;
-    if (!session.projectId || !team?.length) return null;
-    try {
-      return { env: { [TEAM_FILE_ENV]: writeTeamFile(this.deps.home, session.projectId, team) } };
-    } catch (error) {
-      this.deps.log?.(`session ${session.id}: Team file not written: ${errorMessage(error)}`);
-      return null;
-    }
+    if (!session.projectId || !this.deps.team) return null;
+    // Every project session gets the path, even with no Team yet (an empty Team), so a Team set
+    // later reaches it. A failed write fails the start: never run on a stale or missing Team.
+    const team = this.deps.team(session.projectId) ?? [];
+    return { env: { [TEAM_FILE_ENV]: writeTeamFile(this.deps.home, session.projectId, team) } };
   }
 
   /**

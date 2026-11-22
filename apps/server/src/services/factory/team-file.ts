@@ -1,4 +1,5 @@
-import { mkdirSync, renameSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { type RawEventEnvelope, type Team, TeamFile } from "@codeden/contracts";
 
@@ -13,9 +14,15 @@ export function writeTeamFile(home: string, projectId: string, team: Team, now =
   const path = teamFilePath(home, projectId);
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const body = TeamFile.parse({ version: 1, projectId, team, updatedAt: now.toISOString() });
-  const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(body, null, 2)}\n`, { mode: 0o600 });
-  renameSync(tmp, path);
+  // A fresh name opened exclusively: never an existing file or a planted symlink.
+  const tmp = `${path}.${randomUUID()}.tmp`;
+  try {
+    writeFileSync(tmp, `${JSON.stringify(body, null, 2)}\n`, { mode: 0o600, flag: "wx" });
+    renameSync(tmp, path);
+  } catch (error) {
+    rmSync(tmp, { force: true });
+    throw error;
+  }
   return path;
 }
 

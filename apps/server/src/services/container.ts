@@ -1,4 +1,4 @@
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { messageFrom, type Session } from "@codeden/contracts";
@@ -461,8 +461,11 @@ export function createServices(opts: ServicesOptions): AppServices {
           writeTeamFile(opts.paths.home, projectId, team);
         }
       } catch (error) {
+        // Fail closed: without the file, the session's review and role scripts refuse to run
+        // instead of using a Team that was changed.
+        rmSync(teamFilePath(opts.paths.home, projectId), { force: true });
         opts.log?.(
-          `project ${projectId}: Team file not written: ${error instanceof Error ? error.message : String(error)}`,
+          `project ${projectId}: Team file not written, removed: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
     }
