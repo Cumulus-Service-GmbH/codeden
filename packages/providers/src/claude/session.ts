@@ -6,16 +6,18 @@ import type {
   Query,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import type {
-  AgentEvent,
-  AutonomyLevel,
-  ItemOf,
-  RuntimeResponse,
-  SessionOptions,
-  UserInput,
+import {
+  type AgentEvent,
+  type AutonomyLevel,
+  HOOK_ASK_MARKER,
+  type ItemOf,
+  isMarkedHookAsk,
+  type RuntimeResponse,
+  type SessionOptions,
+  type UserInput,
 } from "@codeden/contracts";
 import { type ProviderSession, ProviderSessionError, type SessionConfigChange } from "../adapter";
-import { ApprovalBroker } from "../approvals";
+import { type AnswerReview, ApprovalBroker } from "../approvals";
 import { AsyncQueue } from "../async-queue";
 import type { ResolvedCommand } from "../util/exec";
 import { interruptWithDeadline } from "../util/interrupt";
@@ -32,7 +34,7 @@ import { carriesToolResult, planApprovalItem, planDecision, planText } from "./p
 import { PlanUsageReader } from "./plan-usage";
 import { askQuestion } from "./questions";
 import type { ClaudeSdkModule } from "./sdk";
-import { approvalTitle, PLAN_TOOL, QUESTION_TOOL } from "./tools";
+import { approvalTitle, defaultApprovalAction, PLAN_TOOL, QUESTION_TOOL } from "./tools";
 
 /**
  * `Query.interrupt` as the SDK implements it: `cancelQueued` also cancels user messages still
@@ -47,6 +49,18 @@ type InterruptibleQuery = {
 
 /** Claude Code's built-in command that compacts the conversation. */
 const COMPACT_COMMAND = "/compact";
+
+const markedHookReview: AnswerReview = {
+  problem: (response) => {
+    if (
+      response.kind === "approval" &&
+      response.decision !== "allow_once" &&
+      response.decision !== "deny"
+    ) {
+      return "This approval can only be allowed once or denied.";
+    }
+  },
+};
 
 export interface ClaudeSessionConfig {
   executable: ResolvedCommand;
@@ -86,6 +100,8 @@ export class ClaudeSession implements ProviderSession {
   private abort: AbortController | undefined;
   private stderrTail = "";
   private closed = false;
+  // hook_response has no tool_use_id, so a counted ask is matched by tool name.
+  private readonly markedHookAsks = new Map<string, number>();
   /** The shell's current directory from the latest PreToolUse hook, for relative paths. */
   private readonly shell: ShellState = {};
   /** Current autonomy: a query restarted after the CLI exits starts with it. */
@@ -268,6 +284,7 @@ export class ClaudeSession implements ProviderSession {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    this.markedHookAsks.clear();
     this.mcpStatus.stop();
     this.broker.cancelAll();
     this.mapper.closeAll();
@@ -411,7 +428,11 @@ export class ClaudeSession implements ProviderSession {
         this.afterMessage(message);
         const type = str(message, "type");
         if (type === "rate_limit_event") this.planUsage.noteEvent(message);
-        if (type === "result") this.reportPlanUsage(q);
+        if (type === "system" && !this.closed) this.noteMarkedHookAsk(message);
+        if (type === "result") {
+          this.markedHookAsks.clear();
+          this.reportPlanUsage(q);
+        }
         // Init lists the servers without errors, often while some still connect.
         if (type === "result" || (type === "system" && str(message, "subtype") === "init")) {
           this.mcpStatus.refresh();
@@ -421,6 +442,7 @@ export class ClaudeSession implements ProviderSession {
       failure = error;
     }
     if (this.q === q) {
+      this.markedHookAsks.clear();
       this.q = undefined;
       this.prompts = undefined;
     }
@@ -443,6 +465,33 @@ export class ClaudeSession implements ProviderSession {
     }
   }
 
+  private noteMarkedHookAsk(message: unknown): void {
+    if (
+      str(message, "subtype") !== "hook_response" ||
+      str(message, "hook_event") !== "PreToolUse" ||
+      str(message, "outcome") !== "success"
+    )
+      return;
+    const prefix = "PreToolUse:";
+    const name = str(message, "hook_name");
+    if (!name?.startsWith(prefix) || name.length === prefix.length) return;
+    const output = str(message, "stdout") || str(message, "output");
+    if (!output?.startsWith("{")) return;
+    let hookOutput: unknown;
+    try {
+      hookOutput = JSON.parse(output)?.hookSpecificOutput;
+    } catch {
+      return;
+    }
+    if (
+      str(hookOutput, "permissionDecision") === "ask" &&
+      isMarkedHookAsk(str(hookOutput, "permissionDecisionReason"))
+    ) {
+      const toolName = name.slice(prefix.length);
+      this.markedHookAsks.set(toolName, Math.min(20, (this.markedHookAsks.get(toolName) ?? 0) + 1));
+    }
+  }
+
   private readonly canUseTool: CanUseTool = async (toolName, input, options) => {
     if (toolName === QUESTION_TOOL) {
       const deps = { broker: this.broker, mapper: this.mapper };
@@ -451,43 +500,85 @@ export class ClaudeSession implements ProviderSession {
     if (toolName === PLAN_TOOL) return this.reviewPlan(input, options);
     const denied = this.policy.denial(toolName, input, this.shell.dir);
     if (denied) return { behavior: "deny", message: denied };
+    const q = this.q;
+    // Let the pump consume a hook_response read in the same chunk.
+    await new Promise((resolve) => setImmediate(resolve));
+    if (this.closed || this.q !== q) {
+      return this.toPermissionResult(toolName, input, { kind: "cancel" });
+    }
+    const count = this.markedHookAsks.get(toolName) ?? 0;
+    if (count === 1) this.markedHookAsks.delete(toolName);
+    if (count > 1) this.markedHookAsks.set(toolName, count - 1);
+
+    const decisionReason = options.decisionReason;
+    const markedReason = isMarkedHookAsk(decisionReason);
+    if (markedReason || count > 0) {
+      const gate = this.policy.gate(toolName, input, this.shell.dir);
+      const hookReason =
+        (markedReason && decisionReason?.slice(HOOK_ASK_MARKER.length).trimStart()) ||
+        "A hook asked for approval";
+      const reason =
+        gate.ask && gate.reason !== hookReason ? `${gate.reason}. ${hookReason}` : hookReason;
+      const item = this.approvalItem(toolName, input, options, {
+        action: gate.ask ? gate.action : defaultApprovalAction(toolName),
+        reason,
+        options: ["allow_once", "deny"],
+      });
+      const ctx = this.mapper.ctxForTool(options.toolUseID);
+      const response = await this.broker.request(ctx, item, options.signal, markedHookReview);
+      return this.toPermissionResult(toolName, input, response, false);
+    }
+
     const gate = this.policy.needsUser(toolName, input, this.shell.dir);
     if (!gate.ask) return { behavior: "allow", updatedInput: input };
     const ctx = this.mapper.ctxForTool(options.toolUseID);
-    const item: ItemOf<"approval_request"> = {
+    const item = this.approvalItem(toolName, input, options, {
+      action: gate.action,
+      reason:
+        decisionReason && decisionReason !== gate.reason
+          ? `${gate.reason}. ${decisionReason}`
+          : gate.reason,
+      options: ["allow_once", "allow_session", "deny"],
+    });
+    const response = await this.broker.request(ctx, item, options.signal);
+    return this.toPermissionResult(toolName, input, response);
+  };
+
+  private approvalItem(
+    toolName: string,
+    input: Record<string, unknown>,
+    options: Parameters<CanUseTool>[2],
+    approval: Pick<ItemOf<"approval_request">, "action" | "reason" | "options">,
+  ): ItemOf<"approval_request"> {
+    return {
       id: `approval-${options.requestId ?? options.toolUseID}`,
       kind: "approval_request",
       status: "in_progress",
       requestId: options.requestId ?? options.toolUseID,
-      action: gate.action,
+      ...approval,
       title: approvalTitle(toolName, input),
-      reason:
-        options.decisionReason && options.decisionReason !== gate.reason
-          ? `${gate.reason}. ${options.decisionReason}`
-          : gate.reason,
       toolName,
       toolInput: toJson(input),
       toolCallItemId: options.toolUseID,
-      options: ["allow_once", "allow_session", "deny"],
       ...(str(input, "command") ? { command: str(input, "command"), cwd: this.opts.cwd } : {}),
       ...(str(input, "file_path") ? { paths: [str(input, "file_path") as string] } : {}),
     };
-    const response = await this.broker.request(ctx, item, options.signal);
-    return this.toPermissionResult(toolName, input, response);
-  };
+  }
 
   private toPermissionResult(
     toolName: string,
     input: Record<string, unknown>,
     response: RuntimeResponse,
+    allowSession = true,
   ): PermissionResult {
-    if (response.kind === "approval" && response.decision !== "deny") {
-      if (response.decision === "allow_session") {
-        this.policy.allowForSession(toolName, input, this.shell.dir);
-      }
+    if (response.kind === "approval" && response.decision === "allow_once") {
       return { behavior: "allow", updatedInput: input };
     }
-    if (response.kind === "approval") {
+    if (response.kind === "approval" && response.decision === "allow_session" && allowSession) {
+      this.policy.allowForSession(toolName, input, this.shell.dir);
+      return { behavior: "allow", updatedInput: input };
+    }
+    if (response.kind === "approval" && response.decision === "deny") {
       return { behavior: "deny", message: response.message ?? "The user denied this action." };
     }
     return { behavior: "deny", message: "The request was cancelled.", interrupt: true };
