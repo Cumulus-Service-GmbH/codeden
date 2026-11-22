@@ -459,6 +459,7 @@ export class SessionService {
         !delivering &&
         (req.whenBusy === "steer" ||
           (req.whenBusy === "queue" &&
+            session.status === "running" &&
             (from === "pm" || from === "orchestrator") &&
             this.provider(session.provider, id)?.capabilities.steer))
       ) {

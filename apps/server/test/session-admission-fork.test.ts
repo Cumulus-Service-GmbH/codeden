@@ -378,6 +378,15 @@ describe("priority session messages at capacity", () => {
     },
   );
 
+  it("queues a PM message while the session is waiting on the user", async () => {
+    const { sessions } = atCapacity();
+    const { id } = env.addSession({ provider: "claude", status: "waiting" });
+
+    expect(await sessions.send(id, request, "pm")).toEqual({ status: "queued" });
+    expect(sessions.hasOutbox(id)).toBe(true);
+    expect(calls).toEqual([]);
+  });
+
   it("flushes a queued PM message on settle when the running provider cannot steer", async ({
     onTestFinished,
   }) => {
