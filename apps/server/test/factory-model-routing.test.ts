@@ -68,6 +68,14 @@ describe("factory model routing: docs builds (#384)", () => {
     }
   });
 
+  it("strips leading role tags from issue titles used for builder sessions", async () => {
+    env = createFactoryEnv({ providers: ["claude"] });
+    await enable("software_factory", { tuning: BUILDERS });
+    const issue = queued("bug", "[Browser Operator] Do X", 5);
+    await tick();
+    expect(env.starts.find((req) => req.workKey === issue.workKey)?.title).toBe("Do X");
+  });
+
   it("builds docs like everything else until a docs builder is chosen", async () => {
     env = createFactoryEnv({ providers: ["claude", "codex"] });
     await enable("software_factory", { tuning: BUILDERS });

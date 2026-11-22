@@ -11,6 +11,7 @@ import {
 import { errorMessage, ServiceError } from "../errors";
 import type { RunnerPort } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
+import { stripLeadingTags } from "../sessions/role-tag";
 import type { SessionService } from "../sessions/session-service";
 import type { AgentChoice } from "./agent-choice";
 import type {
@@ -250,7 +251,7 @@ export class FactorySessions {
       ...(model ? { model } : {}),
       purpose: `Factory${step}: ${item.title}`.slice(0, 300),
       workKey: item.workKey,
-      title: item.title.slice(0, 200),
+      title: stripLeadingTags(item.title).slice(0, 200) || "Factory item",
       issue: item.issue ?? undefined,
       input: brief(builderPrompt(item, vision, lessons)),
     });

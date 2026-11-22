@@ -31,6 +31,7 @@ import type { ForkStart } from "./fork";
 import { withHandoffBrief } from "./handoff";
 import { ownBranch } from "./own-branch";
 import type { SessionRepo } from "./repo";
+import { BROWSER_OPERATOR_TAG } from "./role-tag";
 import { withSetupNote } from "./setup-failure";
 import { seenSetups, settleSetup } from "./setup-gate";
 import { setUnanswered, unansweredCode } from "./unanswered-start";
@@ -63,8 +64,6 @@ export interface LauncherDeps extends RunnerDeps {
   /** Sandboxes for projects whose sessions run in containers (`docs/remote-runners.md` §8). */
   sandboxes?: Pick<SandboxService, "wants" | "place" | "release">;
 }
-
-export const BROWSER_OPERATOR_TAG = "[Browser Operator]";
 
 /** Whether this session starts Claude in Chrome on the home runner. */
 export function startsWithChrome(session: Session, runner: RunnerPort): boolean {
