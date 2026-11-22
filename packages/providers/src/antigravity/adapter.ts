@@ -11,11 +11,12 @@ import type { AcpInitializeResult, AcpSessionSetup } from "../acp/protocol";
 import { AcpSession } from "../acp/session";
 import { type ProviderAdapter, type ProviderSession, ProviderSessionError } from "../adapter";
 import { ModelCatalog } from "../models";
+import { brokenInstallMessage, lookupForDetect } from "../util/detect-exe";
 import type { ResolvedCommand } from "../util/exec";
 import { findExecutable, type LocateOptions } from "../util/locate";
 import {
   ANTIGRAVITY_LOGIN_COMMAND,
-  ANTIGRAVITY_UPGRADE_COMMAND,
+  antigravityInstallCommand,
   antigravityTooOldMessage,
   detectAntigravity,
   isSupportedAntigravityVersion,
@@ -91,8 +92,18 @@ export class AntigravityAdapter implements ProviderAdapter {
 
   /** The CLI to run: a given copy, the one detection found, else one looked up now. */
   private async executable(): Promise<{ command: ResolvedCommand; version: string | null }> {
-    if (this.options.executable) return { command: this.options.executable, version: null };
     if (this.found) return this.found;
+    const given = this.options.executable;
+    if (given) {
+      // A given copy is version-checked like a found one before a session runs it.
+      const lookup = await lookupForDetect("agy", {
+        executable: given,
+        ...(this.options.probeTimeoutMs ? { timeoutMs: this.options.probeTimeoutMs } : {}),
+      });
+      if (!lookup.command) throw new Error(brokenInstallMessage("Antigravity CLI", lookup.broken));
+      this.found = { command: given, version: lookup.version };
+      return this.found;
+    }
     const lookup = await findExecutable("agy", {
       ...(this.options.probeTimeoutMs ? { timeoutMs: this.options.probeTimeoutMs } : {}),
       ...this.options.locate,
@@ -145,10 +156,10 @@ export class AntigravityAdapter implements ProviderAdapter {
 
   async openSession(opts: SessionOptions): Promise<ProviderSession> {
     const { command, version } = await this.executable();
-    if (version && !isSupportedAntigravityVersion(version)) {
+    if (!isSupportedAntigravityVersion(version)) {
       throw new ProviderSessionError(
         "version_unsupported",
-        `${antigravityTooOldMessage(version)}. Update it with \`${ANTIGRAVITY_UPGRADE_COMMAND}\`.`,
+        `${antigravityTooOldMessage(version)}. Update it with \`${antigravityInstallCommand()}\`.`,
         "setup",
       );
     }

@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentEvent, SessionOptions } from "@codeden/contracts";
@@ -111,6 +111,39 @@ describe("Antigravity CLI session over ACP", () => {
     await turn("again");
     // A new model: the effort is checked again after it, and set only when the level changed.
     expect(configSets().at(-1)).toBe("model=claude-opus-5-5");
+  });
+
+  it("puts the agent's own thinking level back when the effort is cleared", async () => {
+    const { session, turn } = await open({ effort: "low" });
+    expect(configSets()).toEqual(["thought_level=low"]);
+    await session.configure?.({ effort: null });
+    await turn("go");
+    expect(configSets()).toEqual(["thought_level=low", "thought_level=high"]);
+  });
+
+  it("fails a turn whose asked-for effort the agent refuses, and retries it next turn", async () => {
+    const reject = join(dir, "reject");
+    const { session, turn } = await open({ env: { FAKE_AGY_REJECT_FILE: reject } });
+    await session.configure?.({ effort: "medium" });
+    writeFileSync(reject, "");
+    await expect(session.send({ text: "go", attachments: [] })).rejects.toThrow(/invalid/);
+    expect(logged("session/prompt")).toEqual([]);
+    rmSync(reject);
+    await turn("again");
+    expect(configSets().at(-1)).toBe("thought_level=medium");
+  });
+
+  it("refuses to open a given CLI that is too old", async () => {
+    const adapter = new AntigravityAdapter({ executable: fakeAgy });
+    process.env.FAKE_AGY_VERSION = "1.5.11";
+    try {
+      await expect(adapter.openSession(options())).rejects.toMatchObject({
+        code: "version_unsupported",
+      });
+    } finally {
+      delete process.env.FAKE_AGY_VERSION;
+    }
+    expect(logged("initialize")).toEqual([]);
   });
 
   it("plans in its `plan` mode, and stays in `default` read-only", async () => {

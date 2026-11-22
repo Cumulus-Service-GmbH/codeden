@@ -1,6 +1,6 @@
 import type { SetupCheck, SetupCommand, SetupToolId } from "@codeden/contracts";
 import {
-  ANTIGRAVITY_INSTALL_COMMAND,
+  antigravityInstallCommand,
   cursorInstallCommand,
   GEMINI_INSTALL_COMMAND,
 } from "@codeden/providers";
@@ -47,7 +47,7 @@ export function installFix(id: SetupToolId, platform: NodeJS.Platform): SetupCom
     case "antigravity":
       return {
         kind: "install",
-        command: ANTIGRAVITY_INSTALL_COMMAND,
+        command: antigravityInstallCommand(platform),
         url: "https://antigravity.google/docs/cli",
       };
     case "gh":

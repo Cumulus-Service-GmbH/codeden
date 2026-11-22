@@ -1,5 +1,5 @@
 import {
-  ANTIGRAVITY_UPGRADE_COMMAND,
+  antigravityInstallCommand,
   antigravityTooOldMessage,
   isSupportedAntigravityVersion,
 } from "@codeden/providers";
@@ -36,7 +36,7 @@ export async function checkAntigravity({
       ...installed,
       state: "missing",
       message: antigravityTooOldMessage(tool.version),
-      fix: { kind: "upgrade", command: ANTIGRAVITY_UPGRADE_COMMAND },
+      fix: { kind: "upgrade", command: antigravityInstallCommand(platform) },
     };
   }
   return {

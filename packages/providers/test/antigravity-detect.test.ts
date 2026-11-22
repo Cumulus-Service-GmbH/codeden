@@ -6,6 +6,7 @@ import { AntigravityAdapter } from "../src/antigravity/adapter";
 import {
   ANTIGRAVITY_INSTALL_COMMAND,
   ANTIGRAVITY_UPGRADE_COMMAND,
+  antigravityInstallCommand,
   detectAntigravity,
   isSupportedAntigravityVersion,
 } from "../src/antigravity/detect";
@@ -138,6 +139,17 @@ describe("detectAntigravity", () => {
     const status = await detectAntigravity({ executable: fakeAgy, probe });
     expect(status.supported).toBe(false);
     expect(status.issues).toEqual([expect.objectContaining({ code: "version_unsupported" })]);
+  });
+
+  it("runs the real handshake when no probe is given", async () => {
+    process.env.FAKE_AGY_NO_ACP = "1";
+    const status = await detectAntigravity({ executable: fakeAgy, timeoutMs: 10_000 });
+    expect(status.supported).toBe(false);
+  });
+
+  it("opens the install instructions on native Windows, whose shell has no Bash", () => {
+    expect(antigravityInstallCommand("win32")).toBe("start https://antigravity.google/docs/cli");
+    expect(antigravityInstallCommand("darwin")).toBe(ANTIGRAVITY_INSTALL_COMMAND);
   });
 
   it("reports the installer when nothing is installed", async () => {

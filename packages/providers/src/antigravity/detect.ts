@@ -2,7 +2,12 @@ import type { ProviderIssue, ProviderStatus } from "@codeden/contracts";
 import { brokenInstallMessage, type DetectExeOptions, lookupForDetect } from "../util/detect-exe";
 import type { ResolvedCommand } from "../util/exec";
 import { compareVersions } from "../util/version";
-import type { AntigravityProbe } from "./probe";
+import { type AntigravityProbe, probeAntigravity } from "./probe";
+
+/** The real handshake, when detection isn't given a probe. */
+function defaultProbe(timeoutMs: number | undefined) {
+  return (exe: ResolvedCommand) => probeAntigravity(exe, timeoutMs ? { timeoutMs } : {});
+}
 
 /**
  * Oldest Antigravity CLI CodeDen supports: 1.5.12, the release whose ACP server takes
@@ -14,6 +19,15 @@ export const ANTIGRAVITY_INSTALL_COMMAND =
   "curl -fsSL https://antigravity.google/cli/install.sh | bash";
 /** Its installer also updates an existing copy. */
 export const ANTIGRAVITY_UPGRADE_COMMAND = ANTIGRAVITY_INSTALL_COMMAND;
+/**
+ * The install (and update) command for `platform`. The installer is a Bash script, so native
+ * Windows opens the vendor's install instructions instead.
+ */
+export function antigravityInstallCommand(platform: NodeJS.Platform = process.platform): string {
+  return platform === "win32"
+    ? "start https://antigravity.google/docs/cli"
+    : ANTIGRAVITY_INSTALL_COMMAND;
+}
 /** The CLI has no login command: started on its own, it asks how to sign in. */
 export const ANTIGRAVITY_LOGIN_COMMAND = "agy";
 
@@ -56,8 +70,8 @@ export async function detectAntigravity(
     checkedAt: new Date().toISOString(),
   };
   const issues: ProviderIssue[] = [];
-  const install = { kind: "install" as const, command: ANTIGRAVITY_INSTALL_COMMAND };
-  const upgrade = { kind: "upgrade" as const, command: ANTIGRAVITY_UPGRADE_COMMAND };
+  const install = { kind: "install" as const, command: antigravityInstallCommand() };
+  const upgrade = { kind: "upgrade" as const, command: antigravityInstallCommand() };
   const lookup = await lookupForDetect("agy", { ...opts, timeoutMs: opts.timeoutMs ?? 15_000 });
   const broken = lookup.broken.length > 0 ? { broken: lookup.broken } : {};
   const exe = lookup.command;
@@ -96,8 +110,8 @@ export async function detectAntigravity(
     return { ...found, issues };
   }
   let supported = true;
-  const probe = await opts.probe?.(exe, lookup.version);
-  if (probe && !probe.acp) {
+  const probe = await (opts.probe ?? defaultProbe(opts.timeoutMs))(exe, lookup.version);
+  if (!probe.acp) {
     supported = false;
     issues.push({
       code: "version_unsupported",

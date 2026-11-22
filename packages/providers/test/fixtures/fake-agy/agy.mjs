@@ -7,8 +7,9 @@
 // Like agy: sessions report `modes`, `models` and config options (`model`, `thought_level`,
 // `mode`); `session/set_config_option` answers with every option.
 // FAKE_AGY_AUTH=missing: `session/new` fails as signed out. FAKE_AGY_LOG: every message the
-// client sends, one JSON line each. FAKE_AGY_REPLY: the text each `session/prompt` streams.
-import { appendFileSync, readFileSync } from "node:fs";
+// client sends, one JSON line each. FAKE_AGY_REJECT_FILE: while that file exists,
+// `session/set_config_option` fails. FAKE_AGY_REPLY: the text each `session/prompt` streams.
+import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
 const args = process.argv.slice(2);
@@ -50,7 +51,8 @@ createInterface({ input: process.stdin }).on("line", (line) => {
       return send({ id: msg.id, result: { ...setup, sessionId: undefined } });
     case "session/set_config_option": {
       const option = setup.configOptions.find((o) => o.id === msg.params.configId);
-      if (!option || !option.options.some((o) => o.value === msg.params.value)) {
+      const refused = env.FAKE_AGY_REJECT_FILE && existsSync(env.FAKE_AGY_REJECT_FILE);
+      if (refused || !option || !option.options.some((o) => o.value === msg.params.value)) {
         return send({ id: msg.id, error: { code: -32602, message: "invalid config value" } });
       }
       option.currentValue = msg.params.value;

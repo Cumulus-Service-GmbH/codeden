@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { startAgent } from "../acp/process";
@@ -23,17 +23,6 @@ export interface AntigravityProbe {
   error?: string;
 }
 
-/** A folder of CodeDen's own to run the probe in, so it never touches a project. */
-function scratchDir(): string {
-  const dir = path.join(tmpdir(), "codeden-antigravity-probe");
-  try {
-    mkdirSync(dir, { recursive: true });
-  } catch {
-    // The probe still runs, in the runner's own folder.
-  }
-  return dir;
-}
-
 /**
  * Start `agy acp` once and check it answers `initialize` with ACP version 1. Only the handshake
  * runs: no `authenticate`, no session (that would save a conversation and start the user's MCP
@@ -44,7 +33,10 @@ export async function probeAntigravity(
   opts: { timeoutMs?: number } = {},
 ): Promise<AntigravityProbe> {
   let stderr = "";
+  let cwd: string | undefined;
   try {
+    // A fresh owner-only folder of its own, so the probe never touches a project.
+    cwd = mkdtempSync(path.join(tmpdir(), "codeden-antigravity-probe-"));
     const started = await startAgent(
       exe,
       {
@@ -59,7 +51,7 @@ export async function probeAntigravity(
       {
         args: ANTIGRAVITY_ACP_ARGS,
         label: "Antigravity CLI",
-        cwd: scratchDir(),
+        cwd,
         timeoutMs: opts.timeoutMs ?? 20_000,
       },
     );
@@ -74,5 +66,7 @@ export async function probeAntigravity(
         .join(": ")
         .slice(0, 400),
     };
+  } finally {
+    if (cwd) rmSync(cwd, { recursive: true, force: true });
   }
 }

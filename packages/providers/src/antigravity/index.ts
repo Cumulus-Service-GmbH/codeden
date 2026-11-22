@@ -13,6 +13,7 @@ export {
   ANTIGRAVITY_LOGIN_COMMAND,
   ANTIGRAVITY_MIN_VERSION,
   ANTIGRAVITY_UPGRADE_COMMAND,
+  antigravityInstallCommand,
   antigravityTooOldMessage,
   detectAntigravity,
   isSupportedAntigravityVersion,

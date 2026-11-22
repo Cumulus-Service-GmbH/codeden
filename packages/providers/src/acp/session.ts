@@ -13,7 +13,7 @@ import { ApprovalBroker } from "../approvals";
 import { AsyncQueue } from "../async-queue";
 import { explicitModel } from "../util/model";
 import { answerPermission } from "./approvals";
-import { acpMcpServers, agentCan, modelsOf, skippedNotice } from "./config";
+import { acpMcpServers, agentCan, findOption, modelsOf, skippedNotice } from "./config";
 import { exitedOutcome, failedPrompt, stopNotice, stopOutcome } from "./errors";
 import { type AcpExtensionHost, type AcpSessionConfig, extensionHost } from "./extensions";
 import { promptBlocks, withInstructions } from "./items";
@@ -64,6 +64,8 @@ export class AcpSession implements ProviderSession {
   /** The reasoning effort to set (`spec.effort`); undefined leaves the agent's own. */
   private effort: ReasoningEffort | undefined;
   private nextEffort: ReasoningEffort | null | undefined;
+  /** The agent's own level for the current model, kept while CodeDen's effort overrides it. */
+  private agentEffort: string | undefined;
   private instructions: string | undefined;
   private mode: string | undefined;
   private planning: boolean;
@@ -354,28 +356,49 @@ export class AcpSession implements ProviderSession {
     if ((next === undefined && nextEffort === undefined) || !this.acpSession) return;
     this.nextModel = undefined;
     this.nextEffort = undefined;
-    if (nextEffort !== undefined) this.effort = nextEffort ?? undefined;
     const model = next === undefined ? undefined : explicitModel(next);
     if (model && model !== this.model) {
       this.setup = await setModel(rpc, this.acpSession, this.setup, model);
       this.model = model;
+      // A new model brings its own level, so the effort is set again after it.
+      this.agentEffort = undefined;
       this.events.push({ type: "session.updated", model });
     } else if (nextEffort === undefined) {
       return;
     }
-    // A new model may bring its own level, so the effort is set again after it.
-    await this.applyEffort(rpc, this.acpSession);
+    const previous = this.effort;
+    if (nextEffort !== undefined) this.effort = nextEffort ?? undefined;
+    try {
+      await this.applyEffort(rpc, this.acpSession, nextEffort !== undefined);
+    } catch (error) {
+      // The prompt doesn't run at the old effort unannounced: the change is retried next turn.
+      this.effort = previous;
+      this.nextEffort ??= nextEffort;
+      throw error;
+    }
   }
 
-  /** Set the session's reasoning effort through the agent's option for it (`spec.effort`). */
-  private async applyEffort(rpc: AcpRpc, sessionId: string): Promise<void> {
+  /**
+   * Set the session's reasoning effort through the agent's option for it (`spec.effort`); with
+   * none, put back the agent's own level if CodeDen changed it. A failed request only throws
+   * when `strict` (a change the user asked for); the first setup carries on without it.
+   */
+  private async applyEffort(rpc: AcpRpc, sessionId: string, strict = false): Promise<void> {
     const spec = this.config.spec.effort;
+    if (!spec) return;
     const effort = this.effort;
-    if (!spec || !effort) return;
+    const own = this.agentEffort;
+    if (!effort && own === undefined) return;
+    if (effort && own === undefined) {
+      const current = findOption(this.setup.configOptions, spec.category)?.currentValue;
+      if (typeof current === "string") this.agentEffort = current;
+    }
+    const pick = (listed: readonly string[]) =>
+      effort ? spec.value(effort, listed) : own && listed.includes(own) ? own : undefined;
     const setup = this.setup;
-    this.setup = await setConfigValue(rpc, sessionId, setup, spec.category, (listed) =>
-      spec.value(effort, listed),
-    ).catch(() => setup);
+    const applied = setConfigValue(rpc, sessionId, setup, spec.category, pick);
+    this.setup = strict ? await applied : await applied.catch(() => setup);
+    if (!effort) this.agentEffort = undefined;
   }
 
   private onAgentMode(mode: string): void {
