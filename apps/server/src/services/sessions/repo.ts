@@ -1,4 +1,5 @@
 import {
+  type AutonomyLevel,
   agentEventToNewEvent,
   type Item,
   type ItemOf,
@@ -6,11 +7,13 @@ import {
   type ListSessionsQuery,
   type NewEvent,
   type Session,
+  type SessionAutonomyChanged,
   SessionStartMeta,
   type ThreadItemsPage,
   type ThreadItemsQuery,
   type ToolCallItem,
   type Turn,
+  teamRoleOfTitle,
   type Usage,
   type UserInput,
   type WorkSummary,
@@ -40,7 +43,6 @@ import { notFound } from "../errors";
 import { ACTIVE_RUN_STATUSES, ACTIVE_SESSION_STATUSES } from "./conflicts";
 import type { ForkStart } from "./fork";
 import type { LaunchFork } from "./launcher";
-import { BROWSER_OPERATOR_TAG } from "./role-tag";
 import type { UnansweredStart } from "./unanswered-start";
 
 /** Session ids per query of `modelsOf`, so no query has too many parameters. */
@@ -68,6 +70,9 @@ export type StoredStartMeta = SessionStartMeta & {
   chromeRequested?: boolean;
   /** Its provider or model was the caller's own choice, not filled from the Team (`ownTeamPins`). */
   ownTeamPins?: true;
+  autonomyFloor?: AutonomyLevel;
+  /** The PM delegated session starts to this Team Architect. */
+  teamArchitect?: true;
   pending?: PendingStart | null;
   admission?: { seq: number; since: string } | null;
   prFeedback?: Record<string, { rounds: number; keys: string[] }>;
@@ -151,7 +156,7 @@ export class SessionRepo {
     const chromeOptIn =
       session.role === "agent" &&
       session.provider === "claude" &&
-      session.title?.startsWith(BROWSER_OPERATOR_TAG) &&
+      teamRoleOfTitle(session.title ?? undefined) === "browserOperator" &&
       (session.startedBy.kind === "user" || startMeta.chromeOptIn)
         ? true
         : undefined;
@@ -197,12 +202,24 @@ export class SessionRepo {
    * Apply `change` to the current row and append `session.updated` when it changed. Synchronous
    * end to end, so there is no read-modify-write race with event ingestion.
    */
-  update(id: string, change: (s: Session) => Session): Session {
+  update(
+    id: string,
+    change: (s: Session) => Session,
+    audit?: Pick<SessionAutonomyChanged, "changedBy" | "reason">,
+  ): Session {
     const current = this.get(id);
     const next = change(current);
     if (next === current) return current;
     const session = { ...next, updatedAt: new Date().toISOString() };
-    this.store.append([{ type: "session.updated", sessionId: id, payload: { session } }]);
+    const events: NewEvent[] = [{ type: "session.updated", sessionId: id, payload: { session } }];
+    if (audit && session.autonomy !== current.autonomy) {
+      events.push({
+        type: "session.autonomy_changed",
+        sessionId: id,
+        payload: { ...audit, previous: current.autonomy, autonomy: session.autonomy },
+      });
+    }
+    this.store.append(events);
     return session;
   }
 

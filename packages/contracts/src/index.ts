@@ -48,6 +48,7 @@ export * from "./mcp-status";
 export * from "./network";
 export * from "./orchestration";
 export * from "./orchestration-api";
+export * from "./pm-session-tools";
 export * from "./project-config";
 export * from "./projects-api";
 export * from "./provider";

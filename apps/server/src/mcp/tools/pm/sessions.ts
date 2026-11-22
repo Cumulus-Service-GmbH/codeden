@@ -1,23 +1,26 @@
 import {
-  ChecklistItem,
-  ConflictDecision,
   defaultTeam,
   messageFrom,
-  ProviderId,
-  ReasoningEffort,
+  PmStartSessionInput,
   resolveTeam,
   SessionStatus,
+  SetSessionAutonomyInput,
   StartedBy,
   StartSessionRequest,
   sessionTeamMember,
   teamMember,
   teamRoleOfTitle,
-  WorkKey,
 } from "@codeden/contracts";
 import { z } from "zod";
 import { checklistStartItem } from "../../../services/checklist/start";
+import type { AppServices } from "../../../services/container";
 import { applyTeamRole } from "../../../services/factory/team-role";
-import { defineTool, ToolError } from "../../define";
+import {
+  assertAutonomy,
+  resolveAutonomy,
+  stricter,
+} from "../../../services/sessions/autonomy-policy";
+import { defineTool, type ToolAvailabilityContext, ToolError } from "../../define";
 import { currentTurn } from "../../transcript";
 import { agentSessionOf, compactSession, compactWork, projectFor } from "../shared/helpers";
 import { assertMayStartOnIssues, issuesNamed } from "./issue-trust";
@@ -53,44 +56,26 @@ export const listSessions = defineTool({
   },
 });
 
+function canStartSessions(services: AppServices, caller?: ToolAvailabilityContext): boolean {
+  if (!caller?.sessionId) return false;
+  const row = services.sessionRepo.find(caller.sessionId);
+  return row?.session.projectId === caller.projectId && row.startMeta?.teamArchitect === true;
+}
+
 /** `start_session` (§8.2, §8.4): start an agent session, with the conflict check built in. */
 export const startSession = defineTool({
   name: "start_session",
   description:
-    "Start an agent session in its own worktree to do one piece of work. Always pass a workKey (issue:<n>, pr:<n>, automation:<name> or request:<slug>) and a one-line purpose; add scope (paths or area) when known. For an issue whose author isn't trusted (not a trusted author, not CodeDen's GitHub account, no write access), it starts only in a turn the user's own message started; otherwise it is refused and you put the issue in the user's inbox with report_triage (decision 'ready'). If matching work is already running or queued, nothing starts and the result is 'conflict' with the existing work: choose the resolution yourself and call again with conflict = {resolution: 'wait'} (queue behind it), {resolution: 'skip'} (it is the same work), {resolution: 'join', sessionId} (send the prompt to the existing session) or {resolution: 'force', reason}.",
-  roles: ["pm"],
+    "Start an agent session in its own worktree to do one piece of work. Specify autonomy to request more supervision. The policy opens card-gated purposes as supervised by default. Always pass a workKey (issue:<n>, pr:<n>, automation:<name> or request:<slug>) and a one-line purpose; add scope (paths or area) when known. For an issue whose author isn't trusted (not a trusted author, not CodeDen's GitHub account, no write access), it starts only in a turn the user's own message started; otherwise it is refused and you put the issue in the user's inbox with report_triage (decision 'ready'). If matching work is already running or queued, nothing starts and the result is 'conflict' with the existing work: choose the resolution yourself and call again with conflict = {resolution: 'wait'} (queue behind it), {resolution: 'skip'} (it is the same work), {resolution: 'join', sessionId} (send the prompt to the existing session) or {resolution: 'force', reason}.",
+  roles: ["pm", "agent"],
+  isAvailable: (services, caller, role) => role === "pm" || canStartSessions(services, caller),
   scope: "project",
   alwaysLoad: true,
-  input: z.object({
-    prompt: z
-      .string()
-      .min(1)
-      .max(50_000)
-      .describe(
-        "The brief for the agent: goal, context, acceptance criteria, and the decisions you already made (defaults, scope, whether to open a pull request), so the agent doesn't have to ask",
-      ),
-    purpose: z.string().trim().min(1).max(300),
-    checklistItemId: ChecklistItem.shape.id
-      .optional()
-      .describe("The approved checklist item for this work, when applicable"),
-    workKey: WorkKey.optional(),
-    scope: z
-      .object({ paths: z.array(z.string()).optional(), area: z.string().optional() })
-      .optional(),
-    title: z.string().trim().min(1).max(200).optional(),
-    issueNumber: z.int().positive().optional(),
-    provider: ProviderId.optional(),
-    model: z.string().min(1).optional(),
-    effort: ReasoningEffort.optional(),
-    conflict: ConflictDecision.optional(),
-    reportTo: z
-      .enum(["orchestrator"])
-      .optional()
-      .describe(
-        "'orchestrator' when the orchestrator passed this work on: its finish or failure also reaches the orchestrator, so it can tell the user",
-      ),
-  }),
-  handler: async (input, { services, projectId, sessionId, caller, signal }) => {
+  input: PmStartSessionInput,
+  handler: async (input, { services, projectId, sessionId, caller, role: callerRole, signal }) => {
+    if (callerRole !== "pm" && !canStartSessions(services, { projectId, sessionId })) {
+      throw new ToolError("Only the PM or its delegated Team Architect can start a session.");
+    }
     const project = projectFor(services, projectId);
     await assertMayStartOnIssues(services, { caller, sessionId }, project, issuesNamed(input));
     const issue =
@@ -111,9 +96,11 @@ export const startSession = defineTool({
         `TEAM_UNRESOLVED: the calling session ${sessionId} could not be read for its Team`,
       );
     }
+    const settings = services.settings.get();
+    const tuning = services.factory.data.loop(projectId)?.tuning;
     const { team } = resolveTeam({
-      defaults: defaultTeam(services.settings.get()),
-      project: services.factory.data.loop(projectId)?.tuning.team ?? [],
+      defaults: defaultTeam(settings),
+      project: tuning?.team ?? [],
       session:
         callerSession && callerRow?.startMeta?.ownTeamPins
           ? sessionTeamMember(callerSession)
@@ -121,6 +108,13 @@ export const startSession = defineTool({
     });
     const role = teamRoleOfTitle(input.title);
     const member = teamMember(team, role);
+    const autonomyFloor = resolveAutonomy(
+      role,
+      input.purpose,
+      settings.autonomy.pmPolicy,
+      tuning?.autonomyPolicy,
+    );
+    assertAutonomy(input.autonomy, autonomyFloor);
     // A tagged role the resolved Team does not set has no pin to start on: refused, as the guard refuses it.
     // [Arbiter] is a Team role tag CodeDen does not resolve yet: refused like an unset role.
     const reserved = /^\[Arbiter\]/.test(input.title ?? "");
@@ -140,6 +134,7 @@ export const startSession = defineTool({
       ...(provider !== undefined ? { provider } : {}),
       ...(model !== undefined ? { model } : {}),
       ...(effort !== undefined ? { effort } : {}),
+      autonomy: input.autonomy ?? autonomyFloor,
       purpose: input.purpose,
       workKey: input.workKey ?? (input.issueNumber ? `issue:${input.issueNumber}` : undefined),
       scope: input.scope,
@@ -174,6 +169,9 @@ export const startSession = defineTool({
     }
     try {
       const result = await services.sessions.start(req, {
+        autonomyFloor,
+        // A PM grants the Architect delegation when choosing that role. A later title edit grants nothing.
+        teamArchitect: callerRole === "pm" && role === "architect",
         ...(itemId ? { checklistItemId: itemId } : {}),
         // Pins the PM gave are this session's own; ones CodeDen filled from the Team are not.
         ...((input.provider && input.provider !== "auto") || input.model
@@ -251,6 +249,41 @@ export const startSession = defineTool({
     } finally {
       releaseLink?.();
     }
+  },
+});
+
+/** Change a project agent's autonomy and record why the PM changed it. */
+export const setSessionAutonomy = defineTool({
+  name: "set_session_autonomy",
+  description:
+    "Change a project agent session's autonomy. Give a reason. The session's policy can require a more supervised level.",
+  roles: ["pm"],
+  scope: "project",
+  alwaysLoad: true,
+  input: SetSessionAutonomyInput,
+  handler: async ({ sessionId, autonomy, reason }, ctx) => {
+    const session = agentSessionOf(ctx.services, sessionId, ctx.projectId);
+    if (!ctx.sessionId) throw new ToolError("An active PM session is required");
+    if (ENDED.has(session.status) || session.archivedAt) {
+      throw new ToolError("The agent session has ended.");
+    }
+    const { settings, factory, sessionRepo } = ctx.services;
+    const currentFloor = resolveAutonomy(
+      teamRoleOfTitle(session.title ?? undefined),
+      session.purpose,
+      settings.get().autonomy.pmPolicy,
+      factory.data.loop(ctx.projectId)?.tuning.autonomyPolicy,
+    );
+    assertAutonomy(
+      autonomy,
+      stricter(currentFloor, sessionRepo.find(session.id)?.startMeta?.autonomyFloor),
+    );
+    const updated = await ctx.services.sessions.update(
+      session.id,
+      { autonomy },
+      { changedBy: ctx.sessionId, reason },
+    );
+    return { sessionId, autonomy: updated.autonomy };
   },
 });
 

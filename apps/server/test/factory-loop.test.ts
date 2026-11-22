@@ -258,12 +258,88 @@ describe("factory loop state machine (§10.1)", () => {
     expect(item(it1.id)).toMatchObject({ stage: "merged", note: "Merged on GitHub" });
   });
 
-  it("falls back to the author's provider for the review when it is the only one", async () => {
+  it("refuses a verdict from an existing reviewer that shares the writer's vendor", async () => {
+    env = createFactoryEnv();
+    enable();
+    const verifying = await toVerifying(backlogItem());
+    const formerReviewer = verifying.reviewerSessionId as string;
+    env.repo.update(formerReviewer, (session) => ({ ...session, provider: "claude" }));
+    expect(() => review(verifying)).toThrow("distinct model vendor");
+    await tick();
+    expect(item(verifying.id).reviewerProvider).toBe("codex");
+    expect(item(verifying.id).reviewerSessionId).not.toBe(formerReviewer);
+  });
+
+  it("routes Claude-written work to Codex when the Team primary is Opus", async () => {
+    env = createFactoryEnv({
+      providers: ["claude", "alternate", "codex"],
+      modelVendors: { alternate: "anthropic" },
+    });
+    enable();
+    env.factory.setMode(env.project.id, {
+      mode: "software_factory",
+      tuning: {
+        team: [{ role: "reviewer", provider: "claude", model: "claude-opus-5-5", effort: "high" }],
+      },
+    });
+    const verifying = await toVerifying(backlogItem());
+    expect(verifying).toMatchObject({ builderProvider: "claude", reviewerProvider: "codex" });
+    const reviewer = verifying.reviewerSessionId as string;
+    env.repo.update(reviewer, (session) => ({ ...session, provider: "alternate" }));
+    expect(() => review(verifying)).toThrow("distinct model vendor");
+  });
+
+  it("waits for a known author vendor even when a reviewer is available", async () => {
+    env = createFactoryEnv({ modelVendors: { claude: undefined } });
+    enable();
+    const verifying = await toVerifying(backlogItem());
+    expect(verifying).toMatchObject({
+      builderProvider: "claude",
+      reviewerProvider: null,
+      reviewerSessionId: null,
+      note: "Waiting: the author's model vendor is unknown.",
+    });
+  });
+
+  it("keeps a busy reviewer while the runner reports no providers", async () => {
+    env = createFactoryEnv();
+    enable();
+    const verifying = await toVerifying(backlogItem());
+    const reviewer = verifying.reviewerSessionId as string;
+    await env.setStatus(reviewer, "running");
+    const providers = env.providers;
+    env.providers = [];
+    await tick();
+    expect(env.stopped).not.toContain(reviewer);
+    expect(item(verifying.id)).toMatchObject({ reviewerSessionId: reviewer, review: null });
+    expect(() => review(verifying)).toThrow("Try again");
+    expect(item(verifying.id).review).toBeNull();
+
+    env.providers = providers;
+    await expect(review(verifying)).resolves.toMatchObject({ recorded: true });
+  });
+
+  it("waits when only the author's vendor is available", async () => {
     env = createFactoryEnv({ providers: ["claude"] });
     enable();
     const verifying = await toVerifying(backlogItem());
-    expect(verifying.reviewerProvider).toBe("claude");
-    expect(verifying.reviewerNote).toMatch(/same provider/);
+    expect(verifying.reviewerProvider).toBeNull();
+    expect(verifying.note).toMatch(/verified distinct model vendor/);
+  });
+
+  it("refuses a different reviewer provider with the author's model vendor", async () => {
+    env = createFactoryEnv({
+      providers: ["claude", "alternate"],
+      modelVendors: { alternate: "anthropic" },
+    });
+    enable();
+    const verifying = await toVerifying(backlogItem());
+    expect(verifying).toMatchObject({
+      builderProvider: "claude",
+      reviewerProvider: null,
+      reviewerSessionId: null,
+      note: expect.stringMatching(/verified distinct model vendor/),
+    });
   });
 
   it("stops the loop and every factory session with the project and global kill switches", async () => {
@@ -317,8 +393,9 @@ describe("factory loop state machine (§10.1)", () => {
     const loop = env.factory.data.loopOrNew(env.project.id);
     expect(loop.state).toBe("paused");
     expect(env.inbox.find(`inbox:factory-regression:${it1.id}`)?.priority).toBe("high");
-    // The revert may merge while the loop is paused.
+    expect(revert.builderProvider).toBe(merged.builderProvider);
     await tick();
+    expect(item(revert.id).reviewerProvider).toBe("codex");
     // No builder worktree: the reviewer gets one on the revert PR's head, fetched by CodeDen,
     // so the review itself is offline.
     const reviewStart = env.starts.find((s) => s.workKey === `factory:review:${revert.pr?.number}`);

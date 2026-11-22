@@ -33,6 +33,7 @@ export const CODEX_PROVIDER_ID = "codex";
  * exists in the protocol but is not wired up. Fork is `thread/fork` (`forkConversation`).
  */
 const capabilities: ProviderCapabilities = {
+  modelVendor: "openai",
   resume: true,
   steer: true,
   interrupt: true,

@@ -18,6 +18,7 @@ import {
   startRevertAgent,
 } from "./revert-start";
 import { awaitRevertCi, revertStillRed } from "./revert-watch";
+import { reviewAuthorProvider } from "./reviewer-choice";
 import { advanceSpec } from "./spec-approval";
 import { builderOpenPr, holdEarlyPr } from "./spec-early-pr";
 import { REVERTED_AT, revertedAt } from "./stats";
@@ -275,7 +276,13 @@ async function regression(
   /** The revert item when no agent could start to write it, and why: it is started again. */
   let unstarted: { revert: FactoryItem; why: string } | null = null;
   if (revertPr) {
-    ctx.store.createItem({ ...base, stage: "verifying", pr: revertPr, nudges: { verifying: at } });
+    ctx.store.createItem({
+      ...base,
+      stage: "verifying",
+      pr: revertPr,
+      builderProvider: reviewAuthorProvider(ctx, item),
+      nudges: { verifying: at },
+    });
     revertNote = `revert PR #${revertPr.number} is open`;
   } else {
     // On the builder's provider for a bug, or another available one (`revert-start.ts`). With
