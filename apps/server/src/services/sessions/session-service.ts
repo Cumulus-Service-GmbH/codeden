@@ -8,6 +8,7 @@ import type {
   HandoffSessionResponse,
   JsonValue,
   ProviderInfo,
+  QueuedMessage,
   QueueSender,
   RespondRequest,
   ReviewSessionRequest,
@@ -526,7 +527,7 @@ export class SessionService {
             this.provider(session.provider, id)?.capabilities.steer))
       ) {
         try {
-          await this.steer(id, req.input);
+          if ((await this.steer(id, req.input, from)) === "queued") return { status: "queued" };
         } catch (error) {
           if (runnerErrorCode(error) === "priority_cancelled") throw error;
           if (
@@ -585,7 +586,11 @@ export class SessionService {
     return { status: "sent" };
   }
 
-  async steer(id: string, raw: UserInput): Promise<void> {
+  async steer(
+    id: string,
+    raw: UserInput,
+    source: QueueSender | QueuedMessage = "user",
+  ): Promise<"steered" | "queued"> {
     const session = this.deps.repo.get(id);
     if (!BUSY.has(session.status)) throw conflict("No turn is running", "no_turn");
     const capabilities = this.provider(session.provider, id)?.capabilities;
@@ -593,33 +598,59 @@ export class SessionService {
       throw conflict("This provider cannot steer a running turn", "unsupported");
     }
     if (compactionRunning(this.deps.repo, session)) throw compactingRefusal();
-    const input = this.forRunner(session, raw);
+    const { outbox } = this.deps;
+    const stored = typeof source === "string" ? this.externalize(session, raw) : source.input;
+    const input = this.deps.artifacts.resolveAttachments(stored);
     const delay = capabilities.interruptToolCall
       ? this.deps.settings.get().priorityInterruptMinutes * 60_000
       : undefined;
+    let pending: QueuedMessage | undefined;
     const wait = this.priorityWaits.get(id) ?? { controller: new AbortController(), pending: 0 };
     wait.pending++;
     this.priorityWaits.set(id, wait);
     try {
       await deliverPriority(
-        (attempt) =>
-          this.runnerOf(id).request({
+        async (attempt) => {
+          const result = await this.runnerOf(id).request({
             name: "session.steer",
             sessionId: id,
             input,
             waitForShell: true,
             ...attempt,
-          }),
+          });
+          if (
+            result?.waitingFor &&
+            !pending &&
+            typeof source === "string" &&
+            !wait.controller.signal.aborted
+          ) {
+            pending = outbox.push(id, stored, source);
+            outbox.steering.add(pending.id);
+          }
+          return result;
+        },
         (wake) => this.deps.repo.onPriorityBoundary(id, wake),
         delay,
         wait.controller.signal,
       );
+      if (pending && outbox.get(id, pending.id)) outbox.remove(pending, "sent");
+      return "steered";
     } catch (error) {
+      if (
+        runnerErrorCode(error) === "priority_suspended" &&
+        (pending || typeof source !== "string")
+      ) {
+        return "queued";
+      }
+      if (pending && outbox.get(id, pending.id)) outbox.remove(pending, "dropped");
       throw toServiceError(error);
     } finally {
+      if (pending) outbox.steering.delete(pending.id);
       // Keep Stop wired to all concurrent priority requests for this session.
-      if (--wait.pending === 0 && this.priorityWaits.get(id) === wait)
+      if (--wait.pending === 0 && this.priorityWaits.get(id) === wait) {
         this.priorityWaits.delete(id);
+        this.flushIfSettled(id);
+      }
     }
   }
 
@@ -728,6 +759,7 @@ export class SessionService {
     return (
       !this.holds.isHeld(session.id) &&
       !this.delivering.has(session.id) &&
+      !this.priorityWaits.has(session.id) &&
       FLUSHABLE.has(session.status)
     );
   }
@@ -752,7 +784,7 @@ export class SessionService {
       if (!found || !this.canFlushOutbox(found.session)) return;
       const { session, startMeta } = found;
       const next = outbox.peek(id);
-      if (!next) return;
+      if (!next || outbox.steering.has(next.id)) return;
       const priority = PRIORITY_SENDERS.has(next.from);
       if (!admissionHead) {
         if (!priority && startMeta?.admission && !session.archivedAt) return;
@@ -835,12 +867,21 @@ export class SessionService {
    * Returns how many were dropped.
    */
   dropQueued(id: string, from: QueueSender): number {
-    const mine = this.deps.outbox.list(id).filter((m) => m.from === from);
+    const mine = this.deps.outbox
+      .list(id)
+      .filter((m) => m.from === from && !this.deps.outbox.steering.has(m.id));
     for (const m of mine) this.deps.outbox.remove(m, "dropped");
     if (!this.hasOutbox(id) && this.deps.repo.find(id)?.session.status !== "queued") {
       this.deps.admission?.dequeue(id);
     }
     return mine.length;
+  }
+
+  /** Shutdown releases the waiters while leaving their messages in the outbox. */
+  suspendPriorityDelivery(): void {
+    const reason = conflict("Priority delivery paused for shutdown", "priority_suspended");
+    for (const wait of this.priorityWaits.values()) wait.controller.abort(reason);
+    this.priorityWaits.clear();
   }
 
   private cancelPriorityWaits(id: string): void {

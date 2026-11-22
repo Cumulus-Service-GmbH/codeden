@@ -2,6 +2,7 @@ import type { QueuedMessage, Session } from "@codeden/contracts";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { toast } from "sonner";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { SessionComposer } from "@/components/composer/composer";
 import { QueuedMessages } from "@/components/thread/queued-messages";
 import type { CodeDenClient } from "@/lib/api/client";
 import { ApiRequestError } from "@/lib/api/http";
@@ -30,6 +31,37 @@ const session = (over: Partial<Session> = {}) =>
   ({ id: "s-q", provider: "claude", role: "agent", ...over }) as Session;
 
 afterEach(() => vi.restoreAllMocks());
+
+it("preserves a newer composer draft when Stop cancels a priority send", async () => {
+  const client = createMockClient();
+  const sending = Promise.withResolvers<void>();
+  const sendMessage = vi.spyOn(client, "sendMessage").mockReturnValue(sending.promise);
+  const interrupt = vi.spyOn(client, "interrupt").mockImplementation(async () => {
+    sending.reject(new ApiRequestError(409, "priority_cancelled", "Priority delivery stopped"));
+  });
+  const errorToast = vi.spyOn(toast, "error");
+  const current = session({ id: "priority-draft", autonomy: "auto" });
+  const { queryClient } = renderWithClient(<SessionComposer session={current} running />, client, {
+    withRouter: true,
+  });
+  const composer = await screen.findByRole("combobox");
+  fireEvent.change(composer, { target: { value: "priority A" } });
+  fireEvent.click(await screen.findByRole("button", { name: /^steer$/i }));
+  fireEvent.click(screen.getByRole("button", { name: "steer message" }));
+  await waitFor(() =>
+    expect(sendMessage).toHaveBeenCalledWith(
+      current.id,
+      { text: "priority A", attachments: [] },
+      "steer",
+    ),
+  );
+  fireEvent.change(composer, { target: { value: "draft B" } });
+  fireEvent.keyDown(composer, { key: ".", ctrlKey: true, metaKey: true });
+  await waitFor(() => expect(interrupt).toHaveBeenCalledWith(current.id));
+  await waitFor(() => expect(queryClient.isMutating()).toBe(0));
+  expect(getDraft(useComposerStore.getState(), current.id).text).toBe("draft B");
+  expect(errorToast).not.toHaveBeenCalled();
+});
 
 describe("queue labels", () => {
   it("numbers positions and names senders", () => {

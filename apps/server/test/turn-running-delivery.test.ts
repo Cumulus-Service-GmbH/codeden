@@ -53,7 +53,7 @@ const settle = () => new Promise((resolve) => setImmediate(resolve));
  * session: one turn at a time, and `session.send` during a turn fails the way runners before
  * the `turn_running` code reported it (`command_failed`, "A turn is already running").
  */
-function providerLike(opts: { turnRunning?: boolean } = {}) {
+function providerLike(opts: { turnRunning?: boolean; steer?: boolean } = {}) {
   repo.update("s1", (s) => ({ ...s, status: "idle" }));
   const state = { turn: opts.turnRunning ?? false };
   const sent: string[] = [];
@@ -64,7 +64,11 @@ function providerLike(opts: { turnRunning?: boolean } = {}) {
     sent.push(command.input?.text ?? "");
     return {};
   });
-  const runner = { isConnected: () => true, providers: () => [], request } as unknown as RunnerPort;
+  const runner = {
+    isConnected: () => true,
+    providers: () => (opts.steer ? [{ id: "fake", capabilities: { steer: true } }] : []),
+    request,
+  } as unknown as RunnerPort;
   // Like the real launcher: a failure marks the session failed.
   const launcher = {
     fail: vi.fn((id: string) => repo.update(id, (s) => ({ ...s, status: "failed" }))),
@@ -89,6 +93,43 @@ function providerLike(opts: { turnRunning?: boolean } = {}) {
   };
   return { sessions, launcher, sent, state, request, endTurn };
 }
+
+it("persists a composer priority message while waiting, until Stop drops it", async () => {
+  const { sessions, request } = providerLike({ steer: true });
+  repo.update("s1", (s) => ({ ...s, status: "running" }));
+  request.mockResolvedValueOnce({
+    waitingFor: { itemId: "sleep", turnId: "turn", threadId: "thread", rootTurnId: "turn" },
+  });
+  const result = sessions
+    .send("s1", { input: input("priority"), whenBusy: "steer" })
+    .catch((error: unknown) => error);
+  await settle();
+  const reopened = openDatabase(join(dir, "codeden.db"));
+  try {
+    expect(new Outbox(reopened.db, new EventStore(reopened.db)).peek("s1")?.input.text).toBe(
+      "priority",
+    );
+  } finally {
+    reopened.close();
+    await sessions.interrupt("s1");
+    expect(await result).toMatchObject({ code: "priority_cancelled" });
+  }
+  expect(texts()).toEqual([]);
+});
+
+it("keeps waiting priority messages when the server shuts down", async () => {
+  const { sessions, request } = providerLike({ steer: true });
+  repo.update("s1", (s) => ({ ...s, status: "running" }));
+  request.mockResolvedValueOnce({
+    waitingFor: { itemId: "sleep", turnId: "turn", threadId: "thread", rootTurnId: "turn" },
+  });
+  const sending = sessions.send("s1", { input: input("priority"), whenBusy: "steer" });
+  await settle();
+  sessions.suspendPriorityDelivery();
+  await expect(sending).resolves.toEqual({ status: "queued" });
+  expect(texts()).toEqual(["priority"]);
+  expect(request).toHaveBeenCalledTimes(1);
+});
 
 describe("deliveries racing a running turn (#96)", () => {
   it("queues the second of two deliveries racing an idle session, and delivers both in order", async () => {

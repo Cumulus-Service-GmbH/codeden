@@ -153,21 +153,39 @@ describe("QueueService", () => {
     expect(outbox.list("s1")).toEqual([]);
   });
 
-  it("send-now steers the running turn and takes the message out first", async () => {
+  it("send-now steers the running turn and removes the message after delivery", async () => {
     const { queue, sessions } = queueWith({ status: "running" });
     const a = outbox.push("s1", { text: "a", attachments: [] });
     outbox.push("s1", { text: "b", attachments: [] });
     await expect(queue.sendNow("s1", a.id)).resolves.toEqual({ status: "steered" });
-    expect(sessions.steer).toHaveBeenCalledWith("s1", a.input);
+    expect(sessions.steer).toHaveBeenCalledWith("s1", a.input, a);
     expect(text(outbox)).toEqual(["b"]);
     expect(outbox.dequeuedReason("s1", a.id)).toBe("sent");
   });
 
-  it("send-now puts the message back in its place when steering fails", async () => {
+  it("keeps a Send now message on disk while the runner waits", async () => {
+    const waiting = Promise.withResolvers<void>();
+    const { queue } = queueWith({ status: "running", steer: () => waiting.promise });
+    const message = outbox.push("s1", { text: "priority", attachments: [] });
+    const sending = queue.sendNow("s1", message.id);
+    const reopened = openStore("codeden.db");
+    try {
+      expect(new Outbox(reopened.db.db, reopened.store).get("s1", message.id)).toEqual(message);
+      expectError(() => queue.delete("s1", message.id), 409, "already_sent");
+      await expect(queue.sendNow("s1", message.id)).rejects.toMatchObject({ code: "already_sent" });
+    } finally {
+      reopened.db.close();
+      waiting.resolve();
+      await sending;
+    }
+    expect(text(outbox)).toEqual([]);
+  });
+
+  it("send-now keeps the message in its place when steering fails", async () => {
     const { queue } = queueWith({
       status: "running",
       steer: async () => {
-        // While the steer is in flight, the message is gone: a racing edit gets 409.
+        // While the steer is in flight, a racing edit gets 409.
         expectError(() => queue.edit("s1", a.id, "x"), 409, "already_sent");
         throw new Error("runner gone");
       },

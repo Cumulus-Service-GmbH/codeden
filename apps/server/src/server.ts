@@ -429,6 +429,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
   async function close(closeOpts: { stopRunner?: boolean } = {}): Promise<void> {
     closing ??= (async () => {
       services.lifecycle.stop();
+      services.sessions.suspendPriorityDelivery();
       services.orchestration.stop();
       services.github.stop();
       // Its git checks run in project folders: waited for below, before the database closes.
