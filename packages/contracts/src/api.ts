@@ -18,6 +18,8 @@ import { ProjectExecutionBackend } from "./execution";
 import { UserInput } from "./input";
 import { FollowupsItem } from "./items";
 import { BrokenExecutable, ProviderInfo, RuntimeResponse } from "./provider";
+import { TeamRole } from "./team";
+import { TokenSaverLevel } from "./token-saver";
 import { ConflictDecision, StartedBy, StartWorkResult, WorkKey } from "./work";
 import { SetupStep } from "./workbench";
 import { ClientSubscribe, ClientToServerMessage, ServerToClientMessage } from "./ws";
@@ -201,6 +203,13 @@ export const StartSessionRequest = z.object({
     .optional(),
   startedBy: StartedBy.prefault({ kind: "user" }),
   title: z.string().trim().min(1).max(200).optional(),
+  /**
+   * A Team role for the session: its title starts with the role's tag, and an unset provider,
+   * model or effort comes from the resolved Team (the project's Team, then the default Team).
+   */
+  teamRole: TeamRole.optional(),
+  /** This session's token saver level, over the project and role defaults. */
+  tokenSaver: TokenSaverLevel.optional(),
   parentSessionId: Id.optional(),
   issue: GitHubIssueRef.optional(),
   /** First message; the session starts idle when omitted. */
@@ -336,6 +345,8 @@ export const SessionStartMeta = z.object({
   queuedBehind: z.array(Id),
   /** Worktree setup commands (`.codeden/project.json`) and their output, in order. */
   setup: z.array(SetupStep).optional(),
+  /** The token saver level chosen for this session at its start; absent uses the defaults. */
+  tokenSaver: TokenSaverLevel.optional(),
 });
 export type SessionStartMeta = z.infer<typeof SessionStartMeta>;
 

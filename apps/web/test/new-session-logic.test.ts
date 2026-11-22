@@ -260,6 +260,33 @@ describe("buildStartRequest", () => {
     expect(buildStartRequest("p1", input, resolved, "   ")).not.toHaveProperty("workKey");
   });
 
+  it("sends the Team role and Saver, and leaves the pins to the Team unless a provider was picked", () => {
+    const team = resolveDraftChoice(
+      choice({ teamRole: "browserTester", tokenSaver: "ultra" }),
+      defaults(),
+    );
+    expect(buildStartRequest("p1", input, team, "")).toEqual({
+      projectId: "p1",
+      input,
+      autonomy: "auto",
+      teamRole: "browserTester",
+      tokenSaver: "ultra",
+    });
+    const picked = resolveDraftChoice(
+      pickModel(choice({ teamRole: "browserTester" }), {
+        provider: "planner",
+        model: "big",
+        effort: null,
+      }),
+      defaults(),
+    );
+    expect(buildStartRequest("p1", input, picked, "")).toMatchObject({
+      teamRole: "browserTester",
+      provider: "planner",
+      model: "big",
+    });
+  });
+
   it("runs in the project folder when it isn't a git repository (#408)", () => {
     const notGit = projectWith({ isGitRepo: false });
     const resolved = resolveDraftChoice(choice(), defaults({ project: notGit }));

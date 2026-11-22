@@ -315,6 +315,7 @@ export class SessionService {
         forced,
         queuedBehind,
         chromeOptIn: options.chromeApproved,
+        ...(req.tokenSaver ? { tokenSaver: req.tokenSaver } : {}),
       },
       workspace,
       req.input,

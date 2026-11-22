@@ -6,6 +6,8 @@ import {
   type ReasoningEffort,
   type StartSessionRequestInit,
   type StartWorkResult,
+  type TeamRole,
+  type TokenSaverLevel,
   type UserInputInit,
 } from "@codeden/contracts";
 
@@ -35,6 +37,10 @@ export interface DraftChoice {
   untilChecksPass?: boolean;
   /** Automatic rounds for `untilChecksPass`; absent: the default. */
   checkRounds?: number;
+  /** A Team role: its tag on the title, and the Team's pins unless a provider is picked. */
+  teamRole?: TeamRole | null;
+  /** This session's token saver level; absent or null: the defaults. */
+  tokenSaver?: TokenSaverLevel | null;
 }
 
 export const emptyChoice: DraftChoice = {
@@ -89,6 +95,10 @@ export interface ResolvedDraft {
    * isn't a git repository (no worktree can be made there).
    */
   workspace: "worktree" | "repo_root";
+  teamRole: TeamRole | null;
+  tokenSaver: TokenSaverLevel | null;
+  /** A Team role with no provider picked: the server takes provider, model and effort from the Team. */
+  pinsFromTeam: boolean;
 }
 
 /** Why a project whose folder isn't a git repository gets no worktree (as the server says). */
@@ -142,6 +152,9 @@ export function resolveDraftChoice(choice: DraftChoice, defaults: DraftDefaults)
     untilChecksPass: (choice.untilChecksPass ?? false) && autonomy !== "read_only",
     checkRounds: choice.checkRounds ?? DEFAULT_CHECK_ROUNDS,
     workspace: project?.isGitRepo === false ? "repo_root" : "worktree",
+    teamRole: choice.teamRole ?? null,
+    tokenSaver: choice.tokenSaver ?? null,
+    pinsFromTeam: Boolean(choice.teamRole) && choice.provider === null,
   };
 }
 
@@ -174,9 +187,12 @@ export function buildStartRequest(
     ...(resolved.untilChecksPass
       ? { untilChecksPass: true, checkRounds: resolved.checkRounds }
       : {}),
-    ...(resolved.provider ? { provider: resolved.provider.id } : {}),
-    ...(resolved.model ? { model: resolved.model } : {}),
-    ...(resolved.effort ? { effort: resolved.effort } : {}),
+    ...(resolved.teamRole ? { teamRole: resolved.teamRole } : {}),
+    ...(resolved.tokenSaver ? { tokenSaver: resolved.tokenSaver } : {}),
+    // With a Team role and no provider picked, the Team decides provider, model and effort.
+    ...(!resolved.pinsFromTeam && resolved.provider ? { provider: resolved.provider.id } : {}),
+    ...(!resolved.pinsFromTeam && resolved.model ? { model: resolved.model } : {}),
+    ...(!resolved.pinsFromTeam && resolved.effort ? { effort: resolved.effort } : {}),
     ...(key ? { workKey: key } : {}),
     // A git project leaves it to the server (a new worktree); a folder that isn't one says so.
     ...(resolved.workspace === "repo_root" ? { workspace: { mode: "repo_root" as const } } : {}),
