@@ -3,7 +3,7 @@ import type { ItemEntry, TranscriptState, TurnState } from "./reducer";
 import { threadItems } from "./reducer";
 
 /** One work entry inside a work group: a tool call or a reasoning block. */
-export type WorkEntry = ToolCallItem | ItemOf<"reasoning">;
+export type WorkEntry = (ToolCallItem | ItemOf<"reasoning">) & { startedAt?: string };
 
 /** A hook from the user's settings that ran (§12.4). */
 export type HookRun = ItemOf<"hook_run">;
@@ -122,10 +122,14 @@ export function buildTimeline(state: TranscriptState, threadId: string): Timelin
       continue;
     }
     if (isWork(item)) {
-      if (group && group.turnId === turnId) group.entries.push(item);
+      const step =
+        item.kind === "tool_call" && item.toolKind === "command" && entry.createdAt
+          ? { ...item, startedAt: entry.createdAt }
+          : item;
+      if (group && group.turnId === turnId) group.entries.push(step);
       else {
         flush();
-        group = { turnId, entries: [item], firstId: item.id };
+        group = { turnId, entries: [step], firstId: item.id };
       }
       continue;
     }

@@ -37,6 +37,7 @@ export class FakeSession implements ProviderSession {
   private readonly token: string;
   private counter = 0;
   private turn: TurnState | undefined;
+  private shell?: { threadId: string; turnId: string; itemId: string; cancel: () => void };
   private readonly pending = new Map<string, (response: RuntimeResponse) => void>();
 
   constructor(
@@ -108,6 +109,21 @@ export class FakeSession implements ProviderSession {
       input,
     };
     this.emit({ type: "item.completed", threadId: turn.threadId, turnId: turn.turnId, item });
+  }
+
+  async interruptToolCall(call: {
+    threadId: string;
+    turnId: string;
+    itemId: string;
+  }): Promise<void> {
+    const shell = this.shell;
+    if (
+      shell?.itemId === call.itemId &&
+      shell.turnId === call.turnId &&
+      shell.threadId === call.threadId
+    ) {
+      shell.cancel();
+    }
   }
 
   async interrupt(): Promise<void> {
@@ -391,12 +407,33 @@ export class FakeSession implements ProviderSession {
       kind: "tool_call" as const,
       toolKind: "command" as const,
       toolName: "shell",
-      title: "Run echo hello",
-      command: "echo hello",
+      title: this.fake.holdShell ? "Wait" : "Run echo hello",
+      command: this.fake.holdShell ? "sleep 600" : "echo hello",
       cwd: this.opts.cwd,
     };
     await this.step(turn);
     this.emit({ type: "item.started", threadId, turnId, item: { ...base, status: "in_progress" } });
+    if (this.fake.holdShell) {
+      const hold = this.fake.holdShell;
+      const { signal } = turn.abort;
+      const result = Promise.withResolvers<boolean>();
+      const cancel = () => result.resolve(true);
+      this.shell = { threadId, turnId, itemId: id, cancel };
+      signal.addEventListener("abort", cancel, { once: true });
+      void hold.then(() => result.resolve(false));
+      const cancelled = await result.promise;
+      signal.removeEventListener("abort", cancel);
+      this.shell = undefined;
+      if (signal.aborted) throw new Interrupted();
+      this.emit({
+        type: "item.completed",
+        threadId,
+        turnId,
+        item: { ...base, status: cancelled ? "cancelled" : "completed" },
+      });
+      await this.step(turn);
+      return;
+    }
     await this.step(turn);
     this.emit({
       type: "item.delta",

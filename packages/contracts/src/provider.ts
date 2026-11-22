@@ -12,6 +12,8 @@ export const ProviderCapabilities = z.object({
   /** Input can be injected into a running turn. */
   steer: z.boolean(),
   interrupt: z.boolean(),
+  /** Can cancel a specific running shell call while keeping its turn alive. Absence means false. */
+  interruptToolCall: z.boolean().optional(),
   /** Tool approvals can be routed to CodeDen. */
   approvals: z.boolean(),
   /** The agent can ask structured questions. */

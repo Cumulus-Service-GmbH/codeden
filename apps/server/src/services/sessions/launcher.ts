@@ -461,7 +461,10 @@ export class SessionLauncher {
    * the first prompt).
    */
   private systemPrompt(session: Session, project: Project | null): string {
-    const base = codedenSystemPrompt(session, project);
+    const base = [
+      codedenSystemPrompt(session, project),
+      "Run long waits in the background and check their progress between short steps to keep the turn responsive to new messages.",
+    ].join("\n\n");
     const settings = this.deps.tokenSaver?.();
     if (!settings) return base;
     // A level chosen for this session at its start wins over the project and role defaults.

@@ -436,6 +436,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
   async function close(closeOpts: { stopRunner?: boolean } = {}): Promise<void> {
     closing ??= (async () => {
       services.lifecycle.stop();
+      services.sessions.suspendPriorityDelivery();
       services.orchestration.stop();
       services.checklistListener.stop();
       services.github.stop();

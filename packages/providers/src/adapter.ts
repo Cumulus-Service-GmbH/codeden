@@ -97,6 +97,8 @@ export interface ProviderSession {
   send(input: UserInput): Promise<void>;
   /** Inject input into the running turn. Present only when `capabilities().steer`. */
   steer?(input: UserInput): Promise<void>;
+  /** Cancel only the exact running shell call, if it is still active. */
+  interruptToolCall?(call: { threadId: string; turnId: string; itemId: string }): Promise<void>;
   /** Stop the running turn; emits `turn.interrupted`. No-op when idle. */
   interrupt(): Promise<void>;
   /**

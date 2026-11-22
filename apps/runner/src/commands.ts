@@ -179,8 +179,7 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
       await host.send(command);
       return {};
     case "session.steer":
-      await host.steer(command);
-      return {};
+      return host.steer(command);
     case "session.interrupt":
       await host.interrupt(command.sessionId);
       return {};

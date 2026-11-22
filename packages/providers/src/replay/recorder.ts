@@ -17,6 +17,7 @@ export class RecordingSession implements ProviderSession {
   readonly events = new AsyncQueue<AgentEvent>();
   private readonly preamble: AgentEvent[] = [];
   private readonly turns: ReplayTurn[] = [];
+  readonly interruptToolCall?: ProviderSession["interruptToolCall"];
   readonly steer?: (input: UserInput) => Promise<void>;
 
   constructor(
@@ -28,6 +29,7 @@ export class RecordingSession implements ProviderSession {
       options: SessionOptions;
     },
   ) {
+    this.interruptToolCall = inner.interruptToolCall?.bind(inner);
     if (inner.steer) this.steer = (input) => inner.steer?.(input) ?? Promise.resolve();
     void this.pump();
   }
