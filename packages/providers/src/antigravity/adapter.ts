@@ -88,10 +88,8 @@ export class AntigravityAdapter implements ProviderAdapter {
   private info: AcpInitializeResult | undefined;
   /** Whether the last session listed a `plan` mode; unknown until one has. */
   private planListed: boolean | undefined;
-  /** Bumped by every probe and every session setup, so a slower probe never replaces newer facts. */
-  private generation = 0;
-  /** The generation whose model list is shown (0: Default). */
-  private listed = 0;
+  /** When the shown model list was listed (0: Default); only a newer complete list replaces it. */
+  private listedAt = 0;
   private found: { command: ResolvedCommand; version: string | null } | undefined;
 
   constructor(private readonly options: AntigravityAdapterOptions = {}) {}
@@ -124,13 +122,11 @@ export class AntigravityAdapter implements ProviderAdapter {
   async detect(): Promise<ProviderStatus> {
     // A reinstall or an uninstall since the last detection: look again.
     this.found = undefined;
-    // Taken before the lookup, so detections that overtake each other keep their order.
-    const generation = ++this.generation;
     return detectAntigravity({
       ...(this.options.executable ? { executable: this.options.executable } : {}),
       ...(this.options.locate ? { locate: this.options.locate } : {}),
       ...(this.options.probeTimeoutMs ? { timeoutMs: this.options.probeTimeoutMs } : {}),
-      probe: (exe, version) => this.probe(exe, version, generation),
+      probe: (exe, version) => this.probe(exe, version),
     });
   }
 
@@ -193,43 +189,37 @@ export class AntigravityAdapter implements ProviderAdapter {
   /** A session reported its models and modes: they are the account's current ones. */
   private onSetup(setup: AcpSessionSetup, info: AcpInitializeResult): void {
     this.info = info;
-    this.applySetup(setup, ++this.generation);
+    this.applySetup(setup, Date.now());
   }
 
   /**
-   * Take a reported setup's modes and models unless a newer one was already taken (a probe that
-   * lists nothing doesn't count); a list it can't read leaves the current one.
+   * The newest complete list wins: a setup listed at `listedAt` replaces the models and modes
+   * shown when it has models and is not older than them. An empty or malformed one changes
+   * nothing.
    */
-  private applySetup(setup: AcpSessionSetup, generation: number): void {
-    if (generation < this.listed) return;
+  private applySetup(setup: AcpSessionSetup, listedAt: number): void {
+    if (listedAt < this.listedAt) return;
     try {
-      const modes = modeIds(setup);
-      if (modes.length) this.planListed = modes.includes(ANTIGRAVITY_AGENT.modes.plan ?? "plan");
       const models = antigravityModelInfos(setup);
       if (!models) return;
+      const modes = modeIds(setup);
+      if (modes.length) this.planListed = modes.includes(ANTIGRAVITY_AGENT.modes.plan ?? "plan");
       this.catalog.set(models);
-      this.listed = generation;
+      this.listedAt = listedAt;
     } catch {
       // A malformed reply: Default (or the last good list) stands.
     }
   }
 
   /** Detection found a supported copy: sessions run it, after the handshake shows its flags. */
-  private async probe(
-    exe: ResolvedCommand,
-    version: string | null,
-    generation: number,
-  ): Promise<AntigravityProbe> {
+  private async probe(exe: ResolvedCommand, version: string | null): Promise<AntigravityProbe> {
+    this.found = { command: exe, version };
     const result = await probeAntigravity(exe, {
       ...(this.options.probeTimeoutMs ? { timeoutMs: this.options.probeTimeoutMs } : {}),
       ...(this.options.listTimeoutMs ? { setupTimeoutMs: this.options.listTimeoutMs } : {}),
     });
-    // The newest detection names the CLI and its flags; a later one or a real session wins.
-    if (this.generation === generation) {
-      this.found = { command: exe, version };
-      if (result.info) this.info = result.info;
-    }
-    if (result.setup) this.applySetup(result.setup, generation);
+    if (result.info) this.info = result.info;
+    if (result.setup && result.listedAt) this.applySetup(result.setup, result.listedAt);
     return result;
   }
 }

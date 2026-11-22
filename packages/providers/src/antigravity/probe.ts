@@ -21,6 +21,8 @@ export interface AntigravityProbe {
   info?: AcpInitializeResult;
   /** What a throwaway session listed (models, thinking levels), when it opened in time. */
   setup?: AcpSessionSetup;
+  /** When the throwaway session answered (`Date.now()`), so a newer list can win over it. */
+  listedAt?: number;
   /** Why the ACP server didn't start, when it didn't. */
   error?: string;
 }
@@ -86,8 +88,9 @@ export async function probeAntigravity(
       },
     );
     const setup = await listSetup(started.rpc, cwd, opts.setupTimeoutMs ?? SETUP_TIMEOUT_MS);
+    const listedAt = Date.now();
     await started.rpc.close();
-    return { acp: true, info: started.info, ...(setup ? { setup } : {}) };
+    return { acp: true, info: started.info, ...(setup ? { setup, listedAt } : {}) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return {
