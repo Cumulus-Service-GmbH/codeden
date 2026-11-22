@@ -36,6 +36,8 @@ let projects: ProjectService;
 let defaults: Team;
 let projectTeams: Map<string, Team>;
 let sessions: Map<string, Session>;
+// Sessions whose pins came from the Team (not their starter's own choice).
+const inherited = new Set<string>();
 const opus = {
   role: "reviewer",
   provider: "claude",
@@ -81,6 +83,7 @@ const deps = (): TeamFileDeps => ({
   projectTeam: (id) => projectTeams.get(id) ?? [],
   project: (id) => projects.get(id),
   session: (id) => sessions.get(id),
+  ownTeamPins: (id) => !inherited.has(id),
   liveSessions: (projectId) =>
     [...sessions.values()].filter(
       (s) => (!projectId || s.projectId === projectId) && s.status !== "completed",
@@ -320,4 +323,25 @@ it("removes leftover files of sessions that are not live at start, and replaces 
     },
   ]);
   expect(statSync(path).mode & 0o077).toBe(0);
+});
+
+it("a session whose pins came from the Team has no layer of its own: a Team change reaches it", async () => {
+  const id = await addProject();
+  const session: Session = {
+    ...sampleSession,
+    id: "filled",
+    projectId: id,
+    status: "running",
+    title: "[Writer] x",
+    provider: "claude",
+    model: "old",
+  };
+  sessions.set(session.id, session);
+  inherited.add(session.id);
+  projectTeams.set(id, [{ role: "writer", provider: "codex", model: "new", effort: null }]);
+  createTeamFileRefresher(deps());
+  const file = read(teamFilePath(join(dir, "home"), session.id));
+  expect(file.team).toEqual([{ role: "writer", provider: "codex", model: "new", effort: null }]);
+  expect(file.sources).toEqual({ writer: "project" });
+  inherited.delete(session.id);
 });

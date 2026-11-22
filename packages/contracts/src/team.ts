@@ -31,6 +31,9 @@ export const Team = z
   .max(TeamRole.options.length)
   .refine((team) => new Set(team.map((member) => member.role)).size === team.length, {
     message: "Team roles must be unique",
+  })
+  .refine((team) => !team.some((m) => m.role === "planReviewer" && m.effort === "minimal"), {
+    message: "The Plan Reviewer runs at low effort or higher, never minimal",
   });
 export type Team = z.infer<typeof Team>;
 

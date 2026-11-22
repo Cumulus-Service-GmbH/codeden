@@ -45,6 +45,9 @@ function sameTeamFile(path: string, body: TeamFile): boolean {
     const stat = fstatSync(fd);
     // Owner-only, as written: a file anyone else may read or write is replaced.
     if (!stat.isFile() || (stat.mode & 0o077) !== 0) return false;
+    // The same Team written again has exactly this size (the time stamp keeps its length): anything else is
+    // replaced without reading it, so a damaged or huge file is never parsed.
+    if (stat.size !== Buffer.byteLength(`${JSON.stringify(body, null, 2)}\n`)) return false;
     const { updatedAt, ...current } = JSON.parse(readFileSync(fd, "utf8")) as Record<
       string,
       unknown
@@ -79,6 +82,8 @@ export interface TeamFileDeps {
   projectTeam: (projectId: string) => Team;
   project: (projectId: string) => Pick<Project, "path" | "slug">;
   session: (sessionId: string) => Session | undefined;
+  /** Whether the session's provider or model was its starter's own choice (its own Team layer). */
+  ownTeamPins?: (sessionId: string) => boolean;
   /** Sessions that are live (not ended), all or one project's. */
   liveSessions: (projectId?: string) => Session[];
   log?: (message: string) => void;
@@ -94,7 +99,8 @@ export function writeTeamFile(deps: TeamFileDeps, session: Session, now = new Da
   const { team, sources } = resolveTeam({
     defaults: deps.defaults(),
     project: deps.projectTeam(session.projectId),
-    session: sessionTeamMember(session),
+    // Only pins the starter chose are the session's own; ones filled from the Team follow the Team.
+    session: deps.ownTeamPins?.(session.id) ? sessionTeamMember(session) : null,
   });
   const body = TeamFile.parse({
     version: 1,
@@ -195,19 +201,16 @@ export function createTeamFileRefresher(deps: TeamFileDeps) {
     for (const name of names) {
       const id = name.slice(0, -".json".length);
       if (keep.has(id)) continue;
-      // Only a known session that is no longer live loses its file; a name that is no session is left alone.
-      let known = false;
+      // Only a known session that is no longer live loses its file; a name that is no session is left alone. A
+      // lookup that fails is retried (`pendingLeftovers`), and a file that can't be removed is retried as failed.
+      let known: boolean;
       try {
         known = deps.session(id) !== undefined;
       } catch {
-        known = false;
+        pendingLeftovers.set(id, "session not read at start");
+        continue;
       }
-      if (!known) continue;
-      try {
-        rmSync(join(dir, name), { force: true });
-      } catch (error) {
-        deps.log?.(`session ${id}: leftover Team file not removed: ${message(error)}`);
-      }
+      if (known) invalidate(id, "session is not live");
     }
   };
   // At start nothing is published yet: when the live sessions can't be listed, every file a previous run left is

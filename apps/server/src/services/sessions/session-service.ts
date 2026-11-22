@@ -246,6 +246,11 @@ export class SessionService {
       chromeApproved?: true;
       /** A role conversation this one replaces ("Start fresh"): archived as this one starts. */
       replacesRoleId?: string;
+      /**
+       * The caller chose this session's provider or model itself (not filled from the Team): only
+       * then is it the session's own layer of its Team (`sessionTeamMember`).
+       */
+      ownTeamPins?: boolean;
     } = {},
   ): Promise<StartSessionResponse> {
     const { repo, projects } = this.deps;
@@ -273,7 +278,11 @@ export class SessionService {
       // Recheck the project and conflicts after waiting for the user, with the provider fixed.
       return this.start(
         { ...req, provider: "claude" },
-        { chromeApproved: true, replacesRoleId: options.replacesRoleId },
+        {
+          chromeApproved: true,
+          replacesRoleId: options.replacesRoleId,
+          ...(options.ownTeamPins ? { ownTeamPins: true } : {}),
+        },
       );
     }
     const purpose = derivePurpose(req.purpose, req.input?.text);
@@ -326,6 +335,7 @@ export class SessionService {
         forced,
         queuedBehind,
         chromeOptIn: options.chromeApproved,
+        ...(options.ownTeamPins ? { ownTeamPins: true as const } : {}),
         ...(req.tokenSaver ? { tokenSaver: req.tokenSaver } : {}),
       },
       workspace,

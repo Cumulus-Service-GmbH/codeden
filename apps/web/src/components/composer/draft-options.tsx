@@ -80,6 +80,11 @@ export function DraftOptions({
         value={resolved.teamRole}
         onChange={(teamRole) => onChange({ ...choice, teamRole })}
       />
+      {resolved.teamProviderMissing && (
+        <span className="px-2 text-2xs text-destructive">
+          The Team runs this role on {resolved.teamProviderMissing}, which isn't available here
+        </span>
+      )}
       <SaverPicker
         value={resolved.tokenSaver}
         onChange={(tokenSaver) => onChange({ ...choice, tokenSaver })}

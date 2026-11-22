@@ -33,7 +33,9 @@ export function NewSessionPage({ projectId }: { projectId: string }) {
   const fallbackTeam = useSnapshotData((s) => defaultTeam(s.settings), []);
   const projectTeam = useFactoryStatus(projectId, Boolean(draft.choice.teamRole)).data?.tuning.team;
   const team = useMemo(
-    () => resolveTeam({ defaults: fallbackTeam, project: projectTeam ?? [] }).team,
+    // Unknown until the project's Team has loaded: the start then leaves the pins to the server.
+    () =>
+      projectTeam ? resolveTeam({ defaults: fallbackTeam, project: projectTeam }).team : undefined,
     [fallbackTeam, projectTeam],
   );
   const { setChoice, setWorkKey } = useNewSessionStore.getState();

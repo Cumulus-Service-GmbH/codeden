@@ -100,6 +100,13 @@ export interface ResolvedDraft {
   workspace: "worktree" | "repo_root";
   teamRole: TeamRole | null;
   tokenSaver: TokenSaverLevel | null;
+  /**
+   * A Team role with no provider picked: the server fills provider, model and effort from the
+   * Team, so the start sends none of them (the pickers show the Team member's, when known).
+   */
+  pinsFromTeam: boolean;
+  /** The chosen role's Team member runs on a provider that isn't available here. */
+  teamProviderMissing: string | null;
 }
 
 /** Why a project whose folder isn't a git repository gets no worktree (as the server says). */
@@ -121,11 +128,13 @@ export function resolveDraftChoice(choice: DraftChoice, defaults: DraftDefaults)
   const { providers, project } = defaults;
   const known = (id: string | null | undefined) =>
     id && providers.some((p) => p.id === id) ? id : null;
-  // A Team role with no provider picked runs as the Team's member for it: show and check that one.
+  // A Team role runs as the Team's member for it unless another provider is picked: show and check
+  // that member (its unset fields too when its own provider is picked).
+  const found = choice.teamRole
+    ? defaults.team?.find((m) => m.role === choice.teamRole)
+    : undefined;
   const member =
-    choice.teamRole && choice.provider === null
-      ? defaults.team?.find((m) => m.role === choice.teamRole)
-      : undefined;
+    found && (choice.provider === null || choice.provider === found.provider) ? found : undefined;
   const providerId =
     known(choice.provider) ??
     known(member?.provider) ??
@@ -163,6 +172,8 @@ export function resolveDraftChoice(choice: DraftChoice, defaults: DraftDefaults)
     checkRounds: choice.checkRounds ?? DEFAULT_CHECK_ROUNDS,
     workspace: project?.isGitRepo === false ? "repo_root" : "worktree",
     teamRole: choice.teamRole ?? null,
+    pinsFromTeam: Boolean(choice.teamRole) && choice.provider === null,
+    teamProviderMissing: found && !known(found.provider) ? found.provider : null,
     tokenSaver: choice.tokenSaver ?? null,
   };
 }
@@ -198,9 +209,10 @@ export function buildStartRequest(
       : {}),
     ...(resolved.teamRole ? { teamRole: resolved.teamRole } : {}),
     ...(resolved.tokenSaver ? { tokenSaver: resolved.tokenSaver } : {}),
-    ...(resolved.provider ? { provider: resolved.provider.id } : {}),
-    ...(resolved.model ? { model: resolved.model } : {}),
-    ...(resolved.effort ? { effort: resolved.effort } : {}),
+    // With a Team role and no provider picked, the server takes all three from the Team.
+    ...(!resolved.pinsFromTeam && resolved.provider ? { provider: resolved.provider.id } : {}),
+    ...(!resolved.pinsFromTeam && resolved.model ? { model: resolved.model } : {}),
+    ...(!resolved.pinsFromTeam && resolved.effort ? { effort: resolved.effort } : {}),
     ...(key ? { workKey: key } : {}),
     // A git project leaves it to the server (a new worktree); a folder that isn't one says so.
     ...(resolved.workspace === "repo_root" ? { workspace: { mode: "repo_root" as const } } : {}),

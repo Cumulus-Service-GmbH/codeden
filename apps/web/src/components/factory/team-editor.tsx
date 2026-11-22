@@ -187,7 +187,8 @@ export function TeamEditor({
             checked={useForNewProjects}
             onCheckedChange={setRemembered}
           />
-          Use for new projects
+          Default Team: new projects start from it, and every project uses it for the roles it
+          doesn't set
         </label>
         {isSuccess && (
           <span role="status" className="text-muted-foreground">

@@ -152,7 +152,7 @@ it("saves Team pins with factory tuning and replaces remembered roles in Save se
   expect(builder.selectedOptions[0]?.textContent).toBe("Set by Team");
 
   const team = [{ role: "writer", provider: "codex", model: null, effort: "high" }];
-  fireEvent.click(screen.getByRole("switch", { name: "Use for new projects" }));
+  fireEvent.click(screen.getByRole("switch", { name: /Default Team: new projects start from it/ }));
   fireEvent.click(screen.getByRole("button", { name: "Save setup" }));
   await screen.findByText("Saved");
   expect((await client.getSnapshot()).settings.teamSetup).toEqual({
