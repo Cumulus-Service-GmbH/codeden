@@ -2,10 +2,13 @@ import { expect, it } from "vitest";
 import {
   FactoryTuning,
   FactoryTuningPatch,
+  resolveTeam,
   Settings,
+  sessionTeamMember,
   TEAM_FILE_ENV,
   Team,
   TeamFile,
+  TeamRole,
   teamRoleOfTitle,
 } from "../src";
 
@@ -48,12 +51,43 @@ it.each([
 it("round-trips a Team file", () => {
   const file = TeamFile.parse({
     version: 1,
+    sessionId: "s1",
     projectId: "p1",
     roots: ["/work/app", "/home/.codeden/wt/app"],
     team: [{ role: "reviewer", provider: "claude", model: "claude-opus-5-5", effort: "high" }],
+    sources: { reviewer: "project" },
     updatedAt: "2026-11-22T19:00:00.000Z",
   });
   expect(TeamFile.parse(JSON.parse(JSON.stringify(file)))).toEqual(file);
   expect(TeamFile.safeParse({ ...file, version: 2 }).success).toBe(false);
   expect(TEAM_FILE_ENV).toBe("TEAM_FILE");
+});
+
+it("resolves a session's Team: session over project over defaults, nothing else", () => {
+  const member = (role: string, provider: string, model: string | null) => ({
+    role: role as never,
+    provider: provider as never,
+    model,
+    effort: null,
+  });
+  const session = sessionTeamMember({
+    title: "[Writer] Fix it",
+    provider: "claude",
+    model: "m-session",
+  });
+  expect(session).toEqual(member("writer", "claude", "m-session"));
+  expect(sessionTeamMember({ title: "Fix it", provider: "claude" })).toBeNull();
+  const { team, sources } = resolveTeam({
+    defaults: [member("writer", "codex", "m-default"), member("reviewer", "codex", "m-default")],
+    project: [member("reviewer", "claude", "m-project")],
+    session,
+  });
+  expect(team).toEqual([
+    member("writer", "claude", "m-session"),
+    member("reviewer", "claude", "m-project"),
+  ]);
+  expect(sources).toEqual({ writer: "session", reviewer: "project" });
+  expect(Team.safeParse(TeamRole.options.map((role) => member(role, "codex", null))).success).toBe(
+    true,
+  );
 });

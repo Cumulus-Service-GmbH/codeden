@@ -19,7 +19,7 @@ import { ChecklistService } from "./checklist/checklist-service";
 import { type Exec, runTool } from "./exec";
 import { type FactoryOptions, FactoryService } from "./factory/factory-service";
 import { type FactoryGithub, GithubFactoryPort } from "./factory/github-port";
-import { loopProjects, refreshTeamFile } from "./factory/team-file";
+import { refreshTeamFiles, type TeamFileDeps } from "./factory/team-file";
 import { FILE_RESET_NOTICES, reportFileReset } from "./file-reset-notice";
 import { ConfigFiles } from "./files/config-files";
 import { createGitBroker, type GitBroker } from "./git-broker";
@@ -255,6 +255,16 @@ export function createServices(opts: ServicesOptions): AppServices {
   const gitBroker =
     opts.gitBroker ??
     createGitBroker({ exec, token: async () => (await github.auth.token())?.value ?? null });
+  // `factory` is created below; sessions start only after the container is built.
+  const teamFiles: TeamFileDeps = {
+    home: opts.paths.home,
+    worktreesDir: opts.paths.worktrees,
+    defaults: () => opts.settings.get().teamSetup.team,
+    projectTeam: (projectId) => factory.data.loop(projectId)?.tuning.team ?? [],
+    project: (projectId) => projects.get(projectId),
+    session: (sessionId) => sessionRepo.find(sessionId)?.session,
+    log: opts.log,
+  };
   const launcher = new SessionLauncher({
     repo: sessionRepo,
     projects,
@@ -269,8 +279,8 @@ export function createServices(opts: ServicesOptions): AppServices {
     git: gitBroker,
     sandboxes,
     tokenSaver: () => opts.settings.get().tokenSaver,
-    // `factory` is created below; sessions start only after the container is built.
-    team: (projectId) => factory.data.loop(projectId)?.tuning.team ?? null,
+
+    teamFiles,
     log: opts.log,
   });
   // Before the session service: a start in a project the start-up check hasn't reached checks it.
@@ -453,19 +463,8 @@ export function createServices(opts: ServicesOptions): AppServices {
     options: opts.factory,
     log: opts.log,
   });
-  // Keep every project's Team file current, so running sessions' tools see a Team change at once.
-  opts.store.subscribe((events) => {
-    for (const projectId of loopProjects(events)) {
-      refreshTeamFile({
-        home: opts.paths.home,
-        worktreesDir: opts.paths.worktrees,
-        projectId,
-        team: () => factory.data.loop(projectId)?.tuning.team ?? [],
-        project: () => projects.get(projectId),
-        log: opts.log,
-      });
-    }
-  });
+  // Keep every session's Team file current, so its tools see a Team or model change at once.
+  opts.store.subscribe((events) => refreshTeamFiles(teamFiles, events));
   const unwatchedApprovals = new UnwatchedApprovals({
     store: opts.store,
     repo: sessionRepo,

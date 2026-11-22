@@ -1,12 +1,20 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { type Project, type RawEventEnvelope, type Team, TeamFile } from "@codeden/contracts";
+import {
+  type Project,
+  type RawEventEnvelope,
+  resolveTeam,
+  type Session,
+  sessionTeamMember,
+  type Team,
+  TeamFile,
+} from "@codeden/contracts";
 
-/** Where a project's Team file lives under CodeDen's home (`TEAM_FILE` points here). */
-export function teamFilePath(home: string, projectId: string): string {
-  if (!/^[A-Za-z0-9_-]+$/.test(projectId)) throw new Error(`unsafe project id ${projectId}`);
-  return join(home, "teams", `${projectId}.json`);
+/** Where a session's Team file lives under CodeDen's home (`TEAM_FILE` points here). */
+export function teamFilePath(home: string, sessionId: string): string {
+  if (!/^[A-Za-z0-9_-]+$/.test(sessionId)) throw new Error(`unsafe session id ${sessionId}`);
+  return join(home, "teams", `${sessionId}.json`);
 }
 
 /** The folders whose code the project's Team governs: its own folder and its worktrees. */
@@ -14,17 +22,41 @@ export function teamRoots(project: Pick<Project, "path" | "slug">, worktreesDir:
   return [project.path, join(worktreesDir, project.slug)];
 }
 
-/** Write a project's Team file atomically, readable only by the user, and return its path. */
-export function writeTeamFile(
-  home: string,
-  projectId: string,
-  team: Team,
-  roots: string[],
-  now = new Date(),
-) {
-  const path = teamFilePath(home, projectId);
+/** What a session's Team is resolved from; every model comes from one of these UI choices. */
+export interface TeamFileDeps {
+  home: string;
+  worktreesDir: string;
+  /** The default Team (Settings, Factory > Team setup). */
+  defaults: () => Team;
+  /** The project's Team (its factory settings). */
+  projectTeam: (projectId: string) => Team;
+  project: (projectId: string) => Pick<Project, "path" | "slug">;
+  session: (sessionId: string) => Session | undefined;
+  log?: (message: string) => void;
+}
+
+/**
+ * Write a session's effective Team (`resolveTeam`: its own choice for its role, the project's
+ * Team, the default Team) atomically, readable only by the user, and return the path.
+ */
+export function writeTeamFile(deps: TeamFileDeps, session: Session, now = new Date()): string {
+  if (!session.projectId) throw new Error(`session ${session.id} has no project`);
+  const path = teamFilePath(deps.home, session.id);
+  const { team, sources } = resolveTeam({
+    defaults: deps.defaults(),
+    project: deps.projectTeam(session.projectId),
+    session: sessionTeamMember(session),
+  });
+  const body = TeamFile.parse({
+    version: 1,
+    sessionId: session.id,
+    projectId: session.projectId,
+    roots: teamRoots(deps.project(session.projectId), deps.worktreesDir),
+    team,
+    sources,
+    updatedAt: now.toISOString(),
+  });
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-  const body = TeamFile.parse({ version: 1, projectId, roots, team, updatedAt: now.toISOString() });
   // A fresh name opened exclusively: never an existing file or a planted symlink.
   const tmp = `${path}.${randomUUID()}.tmp`;
   try {
@@ -38,43 +70,61 @@ export function writeTeamFile(
 }
 
 /**
- * Rewrite a project's Team file after its factory loop changed (only once it has a file or a
- * Team). On failure the old file is removed, so tools fail closed instead of using a changed
- * Team; every error stays within this project.
+ * The sessions whose Team files a batch of events can change: one session (its row changed), a
+ * project's sessions (its Team changed) or all of them (the default Team may have changed).
  */
-export function refreshTeamFile(opts: {
-  home: string;
-  worktreesDir: string;
-  projectId: string;
-  team: () => Team;
-  project: () => Pick<Project, "path" | "slug">;
-  log?: (message: string) => void;
-}) {
-  const { home, projectId } = opts;
-  try {
-    const team = opts.team();
-    if (!team.length && !existsSync(teamFilePath(home, projectId))) return;
-    writeTeamFile(home, projectId, team, teamRoots(opts.project(), opts.worktreesDir));
-  } catch (error) {
-    let removed = "removed";
-    try {
-      rmSync(teamFilePath(home, projectId), { force: true });
-    } catch (rmError) {
-      removed = `NOT removed (${rmError instanceof Error ? rmError.message : String(rmError)})`;
+export function teamFileChanges(events: readonly RawEventEnvelope[]) {
+  const sessions = new Set<string>();
+  const projects = new Set<string>();
+  let all = false;
+  for (const event of events) {
+    const payload = event.payload as {
+      loop?: { projectId?: unknown };
+      session?: { id?: unknown };
+    } | null;
+    if (event.type === "settings.updated") all = true;
+    const projectId = payload?.loop?.projectId;
+    if (event.type === "factory.loop.updated" && typeof projectId === "string") {
+      projects.add(projectId);
     }
-    opts.log?.(
-      `project ${projectId}: Team file not written, old file ${removed}: ${error instanceof Error ? error.message : String(error)}`,
-    );
+    const sessionId = payload?.session?.id;
+    if (event.type === "session.updated" && typeof sessionId === "string") sessions.add(sessionId);
   }
+  return { all, projects, sessions };
 }
 
-/** Projects whose factory loop (and so possibly its Team) changed in a batch of events. */
-export function loopProjects(events: readonly RawEventEnvelope[]): string[] {
-  const ids = new Set<string>();
-  for (const event of events) {
-    if (event.type !== "factory.loop.updated") continue;
-    const id = (event.payload as { loop?: { projectId?: unknown } } | null)?.loop?.projectId;
-    if (typeof id === "string") ids.add(id);
+/**
+ * Rewrite the existing Team files the events affect. A file whose session is gone is removed;
+ * when a rewrite fails the old file is removed too, so tools fail closed instead of using a
+ * changed Team. Every error stays within its session.
+ */
+export function refreshTeamFiles(deps: TeamFileDeps, events: readonly RawEventEnvelope[]) {
+  const { all, projects, sessions } = teamFileChanges(events);
+  if (!all && projects.size === 0 && sessions.size === 0) return;
+  const dir = join(deps.home, "teams");
+  if (!existsSync(dir)) return;
+  for (const name of readdirSync(dir)) {
+    if (!name.endsWith(".json")) continue;
+    const sessionId = name.slice(0, -".json".length);
+    try {
+      const session = deps.session(sessionId);
+      if (!session?.projectId) {
+        rmSync(join(dir, name), { force: true });
+        continue;
+      }
+      if (all || projects.has(session.projectId) || sessions.has(sessionId)) {
+        writeTeamFile(deps, session);
+      }
+    } catch (error) {
+      let removed = "removed";
+      try {
+        rmSync(join(dir, name), { force: true });
+      } catch (rmError) {
+        removed = `NOT removed (${rmError instanceof Error ? rmError.message : String(rmError)})`;
+      }
+      deps.log?.(
+        `session ${sessionId}: Team file not written, old file ${removed}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
-  return [...ids];
 }

@@ -25,6 +25,7 @@ const ROLE_LABEL: Record<TeamRole, string> = {
   agentsMdWriter: "AGENTS.md writer",
   planReviewer: "Plan reviewer",
   reviewer: "Code reviewer",
+  reviewerFallback: "Code reviewer fallback",
   investigator: "Investigator",
   browserTester: "Browser tester",
   browserOperator: "Browser operator",
