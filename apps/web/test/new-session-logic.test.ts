@@ -268,7 +268,7 @@ describe("buildStartRequest", () => {
       choice({ teamRole: "browserTester", tokenSaver: "ultra" }),
       defaults({ team }),
     );
-    // The composer shows and checks the member's provider, and the start carries its pins.
+    // The composer shows and checks the member's provider; the start leaves the pins to the Team.
     expect(asTeam.provider?.id).toBe("plain");
     expect(buildStartRequest("p1", input, asTeam, "")).toEqual({
       projectId: "p1",
@@ -276,8 +276,6 @@ describe("buildStartRequest", () => {
       autonomy: "auto",
       teamRole: "browserTester",
       tokenSaver: "ultra",
-      provider: "plain",
-      model: "only",
     });
     const picked = resolveDraftChoice(
       pickModel(choice({ teamRole: "browserTester" }), {

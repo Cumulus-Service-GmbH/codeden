@@ -265,6 +265,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     projectTeam: (projectId) => factory.data.loop(projectId)?.tuning.team ?? [],
     project: (projectId) => projects.get(projectId),
     session: (sessionId) => sessionRepo.find(sessionId)?.session,
+    ownTeamPins: (sessionId) => sessionRepo.find(sessionId)?.startMeta?.ownTeamPins === true,
     liveSessions: (projectId) => sessionRepo.listInStatus(TEAM_FILE_STATUSES, projectId),
     log: opts.log,
   };

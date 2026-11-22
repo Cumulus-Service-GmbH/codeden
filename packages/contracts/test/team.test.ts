@@ -91,3 +91,9 @@ it("resolves a session's Team: session over project over defaults, nothing else"
     true,
   );
 });
+
+it("refuses a Plan Reviewer at minimal effort, wherever the Team is used", () => {
+  const plan = { role: "planReviewer", provider: "codex", model: null, effort: "minimal" };
+  expect(Team.safeParse([plan]).success).toBe(false);
+  expect(Team.safeParse([{ ...plan, effort: "low" }]).success).toBe(true);
+});

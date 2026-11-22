@@ -48,7 +48,8 @@ export function sessionRoutes(s: AppServices, installToken: string) {
           defaults: defaultTeam(s.settings.get()),
           project: asked.projectId ? (s.factory.data.loop(asked.projectId)?.tuning.team ?? []) : [],
         });
-        const result = await s.sessions.start(req);
+        const own = (asked.provider && asked.provider !== "auto") || Boolean(asked.model);
+        const result = await s.sessions.start(req, own ? { ownTeamPins: true } : {});
         if (result.status !== "conflict") {
           // A new version of a request that had an open conflict: that conflict is done.
           s.orchestration.conflicts.closeReplaced(req, result);

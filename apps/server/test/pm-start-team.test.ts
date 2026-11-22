@@ -19,6 +19,15 @@ async function start(
     store.append(sampleSessionEvent());
     const sessionRepo = new SessionRepo(database.db, store);
     if (opts.callerTitle) {
+      sessionRepo.setStartMeta(sampleSession.id, (m) => ({
+        ...(m ?? {
+          workspaceMode: "worktree",
+          workspaceFallback: null,
+          forced: null,
+          queuedBehind: [],
+        }),
+        ownTeamPins: true,
+      }));
       sessionRepo.update(sampleSession.id, (s) => ({
         ...s,
         title: opts.callerTitle ?? null,

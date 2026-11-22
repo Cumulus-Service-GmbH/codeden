@@ -97,7 +97,8 @@ export const startSession = defineTool({
         : undefined;
     // The same Team the caller's Team file holds (and the guard checks): the caller's own role
     // choice over the project's Team over the default Team.
-    const callerSession = sessionId ? services.sessionRepo.find(sessionId)?.session : undefined;
+    const callerRow = sessionId ? services.sessionRepo.find(sessionId) : undefined;
+    const callerSession = callerRow?.session;
     // The guard judged this start by the caller's Team file, which holds its own role layer: without
     // the caller's row that layer is unknown, so the start is refused rather than judged by another Team.
     if (sessionId && !callerSession) {
@@ -108,12 +109,17 @@ export const startSession = defineTool({
     const { team } = resolveTeam({
       defaults: defaultTeam(services.settings.get()),
       project: services.factory.data.loop(projectId)?.tuning.team ?? [],
-      session: callerSession ? sessionTeamMember(callerSession) : null,
+      session:
+        callerSession && callerRow?.startMeta?.ownTeamPins
+          ? sessionTeamMember(callerSession)
+          : null,
     });
     const role = teamRoleOfTitle(input.title);
     const member = teamMember(team, role);
     // A tagged role the resolved Team does not set has no pin to start on: refused, as the guard refuses it.
-    if (role && !member) {
+    // [Arbiter] is a Team role tag CodeDen does not resolve yet: refused like an unset role.
+    const reserved = /^\[Arbiter\]/.test(input.title ?? "");
+    if ((role && !member) || reserved) {
       throw new ToolError(
         `TEAM_ROLE_UNSET: this project's Team (with the default Team) sets no ${input.title?.match(/^\[[^\]]+\]/)?.[0]}; set that role in CodeDen`,
       );
@@ -142,6 +148,10 @@ export const startSession = defineTool({
       conflict: input.conflict,
     });
     const result = await services.sessions.start(req, {
+      // Pins the PM gave are this session's own; ones CodeDen filled from the Team are not.
+      ...((input.provider && input.provider !== "auto") || input.model
+        ? { ownTeamPins: true }
+        : {}),
       confirmChrome: async () => {
         if (!sessionId || services.factory.isUnattended(sessionId)) return false;
         const approve = "Allow Chrome";

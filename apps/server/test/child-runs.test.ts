@@ -1,4 +1,11 @@
-import { appendFileSync, mkdirSync, mkdtempSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  constants,
+  mkdirSync,
+  mkdtempSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CHILD_RUNS_FILE_ENV } from "@codeden/contracts";
@@ -19,7 +26,10 @@ afterEach(async () => {
 const line = (status: string, at: string) =>
   `${JSON.stringify({ id: "w1", role: "planReviewer", provider: "codex", model: "m", effort: "high", status, at, detail: null })}\n`;
 
-it("passes CHILD_RUNS_FILE and lists what the session's tools logged", () => {
+// Reading needs no-follow opening; where the platform lacks it only the unavailable case below applies.
+const noFollow = it.runIf(Boolean(constants.O_NOFOLLOW));
+
+noFollow("passes CHILD_RUNS_FILE and lists what the session's tools logged", () => {
   const runs = join(dir, "child-runs");
   const launcher = new SessionLauncher({
     runner: { mcpProxyUrl: () => null },
@@ -39,7 +49,7 @@ it("passes CHILD_RUNS_FILE and lists what the session's tools logged", () => {
   ]);
 });
 
-it("reads only a regular file and refuses unsafe session ids", () => {
+noFollow("reads only a regular file and refuses unsafe session ids", () => {
   const runs = join(dir, "child-runs");
   mkdirSync(runs, { recursive: true });
   writeFileSync(join(dir, "elsewhere.jsonl"), line("running", "2026-11-22T21:00:00.000Z"));
@@ -48,7 +58,7 @@ it("reads only a regular file and refuses unsafe session ids", () => {
   expect(() => childRunsFile(runs, "../x")).toThrow(/unsafe/);
 });
 
-it("drops only a partial first line when the log is longer than its 1 MB window", () => {
+noFollow("drops only a partial first line when the log is longer than its 1 MB window", () => {
   const runs = join(dir, "child-runs");
   mkdirSync(runs, { recursive: true });
   // 256-byte report lines with unique ids: 4096 of them fill the window exactly.
