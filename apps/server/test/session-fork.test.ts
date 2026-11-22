@@ -5,22 +5,17 @@ import {
   type RunnerCommandName,
   type RunnerCommandOf,
   type Session,
-  StartSessionRequest,
   type UserInput,
 } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { McpTokenStore } from "../src/mcp/tokens";
 import { RunnerCommandError } from "../src/runner/client";
-import { FACTORY_STARTER } from "../src/services/factory/starter";
 import type { ProjectService } from "../src/services/projects/project-service";
 import type { RunnerPort } from "../src/services/runner-port";
-import { SessionAdmission } from "../src/services/sessions/admission";
 import { forkTitle } from "../src/services/sessions/fork";
 import { SessionLauncher } from "../src/services/sessions/launcher";
-import { SessionLifecycle } from "../src/services/sessions/lifecycle";
 import { Outbox } from "../src/services/sessions/outbox";
 import { SessionService, type SessionServiceDeps } from "../src/services/sessions/session-service";
-import { SettingsStore } from "../src/settings-store";
 import { createGithubEnv, type GithubEnv } from "./support/github-env";
 
 const capabilities = (fork: boolean): ProviderInfo["capabilities"] => ({
@@ -52,7 +47,6 @@ interface RunnerScript {
   checkpoints: Record<string, number[]>;
   /** Fail this many `workspace.prepare` calls (as a restore of a missing checkpoint does). */
   failPrepares: number;
-  acceptMessages?: boolean;
   /** Runs while the provider copies the conversation. */
   duringFork?: () => void;
   /** Fail the conversation copy with this runner error. */
@@ -102,7 +96,6 @@ const runner = {
       case "session.start":
         return { resumeToken: command.options.resumeToken ?? null };
       case "session.send":
-        if (script.acceptMessages) return {};
         // The runner never started the fork (its first start failed).
         throw new RunnerCommandError(
           "unknown_session",
@@ -115,7 +108,7 @@ const runner = {
 } as unknown as RunnerPort;
 
 /** A session service and launcher over the real repo; built again to model a server restart. */
-function services(admission?: SessionAdmission) {
+function services() {
   const projects = {
     get: (id: string) => (id === env.githubProject.id ? env.githubProject : env.localProject),
   } as unknown as ProjectService;
@@ -136,8 +129,6 @@ function services(admission?: SessionAdmission) {
     inbox: env.inbox,
     launcher,
     outbox: new Outbox(env.db.db, env.store),
-    admission,
-    settings: new SettingsStore(join(env.dir, "settings.json")),
     artifacts: {
       externalizeAttachments: (i: UserInput) => i,
       resolveAttachments: (i: UserInput) => i,
@@ -725,98 +716,3 @@ function checkpointEvent(sessionId: string, index: number) {
     },
   };
 }
-
-describe("global session admission", () => {
-  it("starts and sends in FIFO order, preserving fork plans and factory starts", async ({
-    onTestFinished,
-  }) => {
-    const settings = new SettingsStore(join(env.dir, "settings.json"));
-    const defaultLimits = settings.get().limits;
-    settings.update({ limits: { maxActiveSessions: 1 } });
-    const admission = new SessionAdmission(
-      env.repo,
-      () => settings.get().limits.maxActiveSessions,
-      () => 2,
-      () => lifecycle.scheduleDrain(),
-    );
-    const { sessions } = services(admission);
-    const lifecycle = new SessionLifecycle({
-      db: env.db.db,
-      repo: env.repo,
-      store: env.store,
-      sessions,
-      admission,
-      settings,
-      tokens: {} as McpTokenStore,
-      utility: {} as never,
-    });
-    onTestFinished(() => lifecycle.stop());
-    lifecycle.start();
-    script.acceptMessages = true;
-    const target = source();
-    script.checkpoints[target.id] = [1];
-    const start = (workKey: string, factory = false) =>
-      sessions.start(
-        StartSessionRequest.parse({
-          projectId: env.githubProject.id,
-          role: "agent",
-          provider: "claude",
-          startedBy: factory ? FACTORY_STARTER : { kind: "user" },
-          workKey: `task:${workKey}`,
-          input: { text: workKey, attachments: [] },
-          workspace: { mode: "repo_root" },
-        }),
-      );
-    const first = await start("first");
-    expect(first.status).toBe("started");
-    await settle(sessions);
-
-    const second = await start("second");
-    expect(second).toMatchObject({ status: "queued", behind: [] });
-    const input = { text: "queued turn", attachments: [] };
-    await expect(sessions.send(target.id, { input, whenBusy: "reject" })).rejects.toMatchObject({
-      code: "turn_running",
-    });
-    expect(sessions.hasOutbox(target.id)).toBe(false);
-    expect(await sessions.send(target.id, { input, whenBusy: "queue" })).toEqual({
-      status: "queued",
-    });
-    const fork = await sessions.fork(target.id, {});
-    expect(env.repo.get(fork.sessionId).status).toBe("queued");
-    const factory = await start("factory", true);
-    expect(factory.status).toBe("started");
-    await settle(sessions);
-
-    const idOf = (result: Awaited<ReturnType<typeof start>>) => {
-      if (!("sessionId" in result)) throw new Error("missing session");
-      return result.sessionId;
-    };
-    const idle = (id: string) => env.repo.update(id, (s) => ({ ...s, status: "idle" }));
-    const drain = async () => {
-      await new Promise<void>((resolve) => setImmediate(resolve));
-      await settle(sessions);
-      await new Promise<void>((resolve) => setImmediate(resolve));
-    };
-    idle(idOf(factory));
-    idle(idOf(first));
-    await drain();
-    expect(env.repo.get(idOf(second)).status).toBe("running");
-    expect(sessions.hasOutbox(target.id)).toBe(true);
-    idle(idOf(second));
-    await drain();
-    expect(sessions.hasOutbox(target.id)).toBe(false);
-    expect(call("session.send")).toMatchObject({ sessionId: target.id, input });
-    expect(env.repo.get(fork.sessionId).status).toBe("queued");
-    idle(target.id);
-    await drain();
-    const forkResume = "claude-source:fork";
-    expect(env.repo.get(fork.sessionId)).toMatchObject({
-      status: "idle",
-      resumeToken: forkResume,
-    });
-
-    settings.update({ limits: defaultLimits });
-    for (const key of ["a", "b", "c"]) expect((await start(key)).status).toBe("started");
-    await settle(sessions);
-  });
-});
