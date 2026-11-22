@@ -1,5 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { dirname, join } from "node:path";
 import {
   type Project,
@@ -23,13 +34,24 @@ export function teamRoots(project: Pick<Project, "path" | "slug">, worktreesDir:
 }
 
 /** Whether the file already holds this Team (all but its time stamp): then it is not rewritten. */
+// Only a regular file (opened without following a link or blocking on a special file) whose stored text, as written,
+// has a valid time stamp and the same Team counts; anything else is replaced atomically.
 function sameTeamFile(path: string, body: TeamFile): boolean {
+  let fd: number | undefined;
   try {
-    const { updatedAt: _old, ...current } = TeamFile.parse(JSON.parse(readFileSync(path, "utf8")));
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    if (!fstatSync(fd).isFile()) return false;
+    const { updatedAt, ...current } = JSON.parse(readFileSync(fd, "utf8")) as Record<
+      string,
+      unknown
+    >;
+    if (typeof updatedAt !== "string" || Number.isNaN(Date.parse(updatedAt))) return false;
     const { updatedAt: _new, ...wanted } = body;
     return JSON.stringify(current) === JSON.stringify(wanted);
   } catch {
     return false;
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 
@@ -112,7 +134,10 @@ export function teamFileChanges(events: readonly RawEventEnvelope[]) {
       projects.add(projectId);
     }
     const sessionId = payload?.session?.id ?? event.sessionId;
-    if ((event.type === "session.updated" || event.type === "session.created") && typeof sessionId === "string") {
+    if (
+      (event.type === "session.updated" || event.type === "session.created") &&
+      typeof sessionId === "string"
+    ) {
       sessions.add(sessionId);
     }
   }
@@ -134,25 +159,53 @@ export function createTeamFileRefresher(deps: TeamFileDeps) {
   let pendingAll = false;
   const seenProjects = new Map<string, string>();
   let seenDefaults: string | null = null;
+  // The files this refresher wrote, by session, with their project: what a failed lookup must invalidate.
+  const published = new Map<string, string>();
   const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
+  // Fail closed: remove the file now and retry the session on every later batch.
+  const invalidate = (sessionId: string, why: string) => {
+    failed.add(sessionId);
+    published.delete(sessionId);
+    let removed = "removed";
+    try {
+      rmSync(teamFilePath(deps.home, sessionId), { force: true });
+    } catch (rmError) {
+      removed = `NOT removed (${message(rmError)})`;
+    }
+    deps.log?.(`session ${sessionId}: Team file not current, old file ${removed}: ${why}`);
+  };
+  const invalidateWhere = (projectId: string | null, why: string) => {
+    for (const [id, project] of [...published]) {
+      if (projectId === null || project === projectId) invalidate(id, why);
+    }
+  };
+  // At start nothing is published yet: when the live sessions can't be listed, every file a previous run left is
+  // invalidated (and retried), since none of them can be checked.
+  const invalidateLeftovers = (why: string) => {
+    const dir = join(deps.home, "teams");
+    let names: string[] = [];
+    try {
+      names = readdirSync(dir).filter((name) => /^[A-Za-z0-9_-]+\.json$/.test(name));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+        deps.log?.(`Team files in ${dir} not listed: ${message(error)}`);
+    }
+    for (const name of names) invalidate(name.slice(0, -".json".length), why);
+  };
   const refresh = (session: Session | undefined, sessionId: string) => {
     try {
       const keeps =
         session?.projectId && (TEAM_FILE_STATUSES as readonly string[]).includes(session.status);
-      if (session && keeps) writeTeamFile(deps, session);
-      else rmSync(teamFilePath(deps.home, sessionId), { force: true });
+      if (session?.projectId && keeps) {
+        writeTeamFile(deps, session);
+        published.set(sessionId, session.projectId);
+      } else {
+        rmSync(teamFilePath(deps.home, sessionId), { force: true });
+        published.delete(sessionId);
+      }
       failed.delete(sessionId);
     } catch (error) {
-      failed.add(sessionId);
-      let removed = "removed";
-      try {
-        rmSync(teamFilePath(deps.home, sessionId), { force: true });
-      } catch (rmError) {
-        removed = `NOT removed (${message(rmError)})`;
-      }
-      deps.log?.(
-        `session ${sessionId}: Team file not written, old file ${removed}: ${message(error)}`,
-      );
+      invalidate(sessionId, `not written: ${message(error)}`);
     }
   };
   const live = (projectId?: string): Session[] | null => {
@@ -172,8 +225,7 @@ export function createTeamFileRefresher(deps: TeamFileDeps) {
       try {
         targets.set(id, deps.session(id));
       } catch (error) {
-        failed.add(id);
-        deps.log?.(`session ${id}: not read for its Team file: ${message(error)}`);
+        invalidate(id, `session not read: ${message(error)}`);
       }
     }
     if (all || initial) {
@@ -183,7 +235,7 @@ export function createTeamFileRefresher(deps: TeamFileDeps) {
         seenDefaults = key;
       } catch (error) {
         pendingAll = true;
-        deps.log?.(`default Team not read: ${message(error)}`);
+        invalidateWhere(null, `default Team not read: ${message(error)}`);
       }
     }
     for (const projectId of projects) {
@@ -193,11 +245,15 @@ export function createTeamFileRefresher(deps: TeamFileDeps) {
         seenProjects.set(projectId, key);
       } catch (error) {
         pendingProjects.add(projectId);
-        deps.log?.(`project ${projectId}: Team not read: ${message(error)}`);
+        invalidateWhere(projectId, `project Team not read: ${message(error)}`);
       }
     }
     if (pendingAll) {
       const list = live();
+      if (!list) {
+        if (initial) invalidateLeftovers("live sessions not listed at start");
+        else invalidateWhere(null, "live sessions not listed");
+      }
       if (list) {
         pendingAll = false;
         pendingProjects.clear();
@@ -206,7 +262,10 @@ export function createTeamFileRefresher(deps: TeamFileDeps) {
     }
     for (const projectId of [...pendingProjects]) {
       const list = live(projectId);
-      if (!list) continue;
+      if (!list) {
+        invalidateWhere(projectId, "live sessions not listed");
+        continue;
+      }
       pendingProjects.delete(projectId);
       for (const session of list) targets.set(session.id, session);
     }

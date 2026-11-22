@@ -125,6 +125,7 @@ it("uses the legacy docs builder before the Team writer, then falls back to that
 it("uses the Team's Code Reviewer Fallback when the reviewer's provider is unavailable", () => {
   const tuning = FactoryTuning.parse({
     ...legacy,
+    reviewerFallback: "any",
     team: [
       { role: "reviewer", provider: "claude", model: "r-model", effort: "high" },
       { role: "reviewerFallback", provider: "gemini", model: "f-model", effort: "medium" },
@@ -140,6 +141,7 @@ it("uses the Team's Code Reviewer Fallback when the reviewer's provider is unava
   // Never the author's own provider.
   const sameAsAuthor = FactoryTuning.parse({
     ...legacy,
+    reviewerFallback: "any",
     team: [
       { role: "reviewer", provider: "claude", model: "r", effort: null },
       { role: "reviewerFallback", provider: "codex", model: "f", effort: null },
@@ -161,5 +163,12 @@ it("keeps a project's wait policy and never claims a cross-provider review for a
     unavailable: [],
     author: { provider: null, model: null },
   });
-  expect(unknownAuthor).not.toMatchObject({ model: "f", crossProvider: true });
+  expect(unknownAuthor).toMatchObject({ wait: false, crossProvider: false });
+  expect(unknownAuthor).not.toMatchObject({ model: "f" });
+  // A project that falls back to the builder keeps that over the Team's fallback.
+  const builder = FactoryTuning.parse({ ...legacy, reviewerFallback: "builder", team });
+  expect(reviewer(builder, ["codex", "gemini"])).toMatchObject({
+    provider: "codex",
+    crossProvider: false,
+  });
 });

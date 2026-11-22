@@ -65,7 +65,7 @@ export function pickReviewer(input: ReviewerInput): ReviewerChoice | ReviewerWai
         provider: wanted,
         model: member ? member.model : tuning.reviewerModel,
         ...(member?.effort ? { effort: member.effort } : {}),
-        crossProvider: wanted !== author.provider,
+        crossProvider: author.provider != null && wanted !== author.provider,
         note: null,
       };
     }
@@ -77,7 +77,7 @@ export function pickReviewer(input: ReviewerInput): ReviewerChoice | ReviewerWai
         wait: false,
         provider: preferred,
         model: null,
-        crossProvider: true,
+        crossProvider: author.provider != null,
         note: null,
       };
     }
@@ -111,6 +111,15 @@ function fallback(
   const { author, available } = input;
   const mode = input.tuning.reviewerFallback;
   if (mode === "wait") return { wait: true, note: `Waiting: ${reason}` };
+  if (mode === "builder" && author.provider && available.includes(author.provider)) {
+    return {
+      wait: false,
+      provider: author.provider,
+      model: author.model,
+      crossProvider: false,
+      note: `${reason}; the review ran on the builder's provider (${name(author.provider)}) in a fresh session.`,
+    };
+  }
   // Then the Team's Code Reviewer Fallback, when its provider is available and is known to differ from the author's.
   const member = teamMember(input.tuning.team, "reviewerFallback");
   if (
@@ -128,15 +137,6 @@ function fallback(
       note: `${reason}; the review ran on the Team's Code Reviewer Fallback (${name(member.provider)}).`,
     };
   }
-  if (mode === "builder" && author.provider && available.includes(author.provider)) {
-    return {
-      wait: false,
-      provider: author.provider,
-      model: author.model,
-      crossProvider: false,
-      note: `${reason}; the review ran on the builder's provider (${name(author.provider)}) in a fresh session.`,
-    };
-  }
   // `any`, or the builder's provider is unavailable too.
   const other =
     [...REVIEW_ORDER, ...available].find((p) => available.includes(p) && p !== author.provider) ??
@@ -145,7 +145,7 @@ function fallback(
     wait: false,
     provider: other,
     model: other === author.provider ? author.model : null,
-    crossProvider: other !== author.provider,
+    crossProvider: author.provider != null && other !== author.provider,
     note: `${reason}; the review ran on ${name(other)}.`,
   };
 }

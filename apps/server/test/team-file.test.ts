@@ -1,4 +1,13 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import {
+  existsSync,
+  lstatSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type Session, Settings, TEAM_FILE_ENV, type Team, TeamFile } from "@codeden/contracts";
@@ -158,7 +167,7 @@ it("keeps live sessions' files current, retries failures and repairs files at st
   down = false;
   flaky([event("inbox.updated", {})]);
   expect(read(path).team).toHaveLength(3);
-  // A listing failure keeps the change pending until a later batch can list.
+  // A listing failure at start removes the files it cannot check; each is rewritten, current, as soon as it can be.
   let listing = false;
   const unlisted = createTeamFileRefresher({
     ...deps(),
@@ -167,9 +176,10 @@ it("keeps live sessions' files current, retries failures and repairs files at st
       return deps().liveSessions(projectId);
     },
   });
+  expect(existsSync(path)).toBe(false);
   projectTeams.set(id, []);
   unlisted([event("factory.loop.updated", { loop: { projectId: id } })]);
-  expect(read(path).team).toHaveLength(3);
+  expect(read(path).sources).toEqual({ writer: "session", planReviewer: "default" });
   listing = true;
   unlisted([event("inbox.updated", {})]);
   expect(read(path).sources).toEqual({ writer: "session", planReviewer: "default" });
@@ -199,7 +209,7 @@ it("follows the events CodeDen's own write paths emit", async () => {
   const refresher = createTeamFileRefresher({
     ...deps(),
     session: (sessionId) => repo.find(sessionId)?.session,
-    liveSessions: (projectId) => repo.list({ projectId, status: ["running"] }),
+    liveSessions: (projectId) => repo.listInStatus(["running"], projectId),
   });
   store.subscribe(refresher);
   const path = teamFilePath(join(dir, "home"), "s7");
@@ -211,4 +221,70 @@ it("follows the events CodeDen's own write paths emit", async () => {
     { type: "settings.updated", sessionId: null, payload: { settings: Settings.parse({}) } },
   ]);
   expect(read(path).sources).toEqual({ writer: "session", planReviewer: "default" });
+});
+
+it("invalidates a file whose session can't be read, and replaces a linked or stale-stamped file", async () => {
+  const id = await addProject();
+  const session: Session = { ...sampleSession, projectId: id, status: "running" };
+  sessions.set(session.id, session);
+  const path = teamFilePath(join(dir, "home"), session.id);
+  const event = {
+    seq: 1,
+    sessionId: null,
+    type: "session.updated",
+    payload: { session: { id: session.id } },
+    ts: "2026-11-22T19:00:00.000Z",
+  };
+  let readable = true;
+  const refresh = createTeamFileRefresher({
+    ...deps(),
+    session: (sessionId) => {
+      if (!readable) throw new Error("db closed");
+      return sessions.get(sessionId);
+    },
+  });
+  expect(existsSync(path)).toBe(true);
+  readable = false;
+  refresh([event]);
+  expect(existsSync(path)).toBe(false);
+  readable = true;
+  refresh([]);
+  expect(existsSync(path)).toBe(true);
+  // A link in place of the file, or a stored time stamp that is not a date, is replaced, never kept.
+  const elsewhere = join(dir, "elsewhere.json");
+  writeFileSync(elsewhere, readFileSync(path, "utf8"));
+  rmSync(path);
+  symlinkSync(elsewhere, path);
+  refresh([event]);
+  expect(lstatSync(path).isSymbolicLink()).toBe(false);
+  writeFileSync(
+    path,
+    readFileSync(path, "utf8").replace(/"updatedAt": "[^"]*"/, '"updatedAt": "soon"'),
+  );
+  refresh([event]);
+  expect(Number.isNaN(Date.parse(read(path).updatedAt))).toBe(false);
+});
+
+it("lists every live session for the Team files, past the session list's page limit", async () => {
+  const id = await addProject();
+  const repo = new SessionRepo(database.db, new EventStore(database.db));
+  const meta = {
+    workspaceMode: "worktree" as const,
+    workspaceFallback: null,
+    forced: null,
+    queuedBehind: [],
+  };
+  for (let i = 0; i < 1005; i++) {
+    repo.create(
+      {
+        ...sampleSession,
+        id: `live-${i}`,
+        projectId: id,
+        status: i === 0 ? "completed" : "running",
+      },
+      meta,
+    );
+  }
+  expect(repo.listInStatus(["running"], id)).toHaveLength(1004);
+  expect(repo.listInStatus(["running"])).toHaveLength(1004);
 });

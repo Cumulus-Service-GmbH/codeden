@@ -207,6 +207,21 @@ export class SessionRepo {
     this.db.update(sessions).set({ startMeta: meta }).where(eq(sessions.id, id)).run();
   }
 
+  /** Every session in one of these statuses (all, or one project's), with no page limit. */
+  listInStatus(statuses: readonly Session["status"][], projectId?: string): Session[] {
+    return this.db
+      .select()
+      .from(sessions)
+      .where(
+        and(
+          inArray(sessions.status, [...statuses]),
+          projectId ? eq(sessions.projectId, projectId) : undefined,
+        ),
+      )
+      .all()
+      .map(rowToSession);
+  }
+
   /** Public view of the start metadata. */
   publicStartMeta(meta: StoredStartMeta | null): SessionStartMeta | null {
     return meta ? SessionStartMeta.parse(meta) : null;
