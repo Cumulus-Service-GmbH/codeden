@@ -1,11 +1,18 @@
 import { createHash } from "node:crypto";
+import { Automation, type UserInput } from "@codeden/contracts";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { sampleSession } from "../../../packages/contracts/test/fixtures";
 import { startSession } from "../src/mcp/tools/pm/sessions";
 import { checklistRoutes } from "../src/routes/checklists";
 import { inboxRoutes } from "../src/routes/inbox";
+import { sessionRoutes } from "../src/routes/sessions";
+import { errorResponse } from "../src/routes/validate";
+import { AutomationExecutor, type ExecutorDeps } from "../src/services/automations/executor";
+import { RunStore } from "../src/services/automations/runs";
 import { ChecklistService } from "../src/services/checklist/checklist-service";
 import type { AppServices } from "../src/services/container";
+import { FactorySessions, type FactorySessionsDeps } from "../src/services/factory/sessions";
+import { SessionService, type SessionServiceDeps } from "../src/services/sessions/session-service";
 import { createFactoryEnv } from "./support/factory-env";
 
 let env: ReturnType<typeof createFactoryEnv>;
@@ -270,14 +277,123 @@ it("starts without reserving a link when enforcement is off and all links are ac
 });
 
 it("refuses PM starts until the reviewed plan is approved and then requires its task", async () => {
-  const tasks = [{ id: "a", text: "Add a counter" }];
-  const sha = createHash("sha256").update(JSON.stringify(tasks)).digest("hex");
-  const { pending } = checklist.proposePlan(env.project.id, { tasks, sha, reviewRef: "review-1" });
-  if (!pending) throw new Error("Expected plan approval");
+  services.sessions = sessionService();
+  expect(await start(undefined, "Unplanned work")).toMatchObject({ status: "started" });
+  const pending = proposePlan();
   await expect(start("a")).rejects.toThrow(/awaiting owner approval/i);
   expect((await decide(pending.inboxItemId, "resolved")).status).toBe(200);
   await expect(start()).rejects.toThrow(/requires a reviewed revision/i);
   await expect(start("a", "Change other work")).rejects.toThrow(/purpose/i);
-  expect(env.starts).toHaveLength(0);
+  expect(env.repo.list({ projectId: env.project.id })).toHaveLength(1);
   expect(await start("a")).toMatchObject({ status: "started" });
+});
+
+function proposePlan(text = "Add a counter") {
+  const tasks = [{ id: "a", text }];
+  const sha = createHash("sha256").update(JSON.stringify(tasks)).digest("hex");
+  const { pending } = checklist.proposePlan(env.project.id, { tasks, sha, reviewRef: "review-1" });
+  if (!pending) throw new Error("Expected plan approval");
+  return pending;
+}
+
+function sessionService() {
+  return new SessionService({
+    checklist,
+    repo: env.repo,
+    projects: services.projects,
+    runner: { providers: () => [], isConnected: () => false },
+    settings: env.settings,
+    launcher: { launch: async () => undefined },
+    artifacts: {
+      externalizeAttachments: (input: UserInput) => input,
+      resolveAttachments: (input: UserInput) => input,
+    },
+  } as unknown as SessionServiceDeps);
+}
+
+function pinPlan(text?: string) {
+  checklist.decide(proposePlan(text).inboxItemId, "resolved");
+}
+
+it("refuses a factory start outside the pinned plan", async () => {
+  const factory = new FactorySessions({
+    sessions: sessionService(),
+    repo: env.repo,
+  } as FactorySessionsDeps);
+  const launch = () =>
+    factory.startScout(env.project.id, "Find work", { provider: "auto", model: null });
+  const first = await launch();
+  if (first.status !== "started") throw new Error("Expected an unpinned start");
+  env.repo.update(first.sessionId, (session) => ({ ...session, status: "completed" }));
+  pinPlan();
+  await expect(launch()).rejects.toThrow(/requires a reviewed revision/i);
+  expect(factory.list(env.project.id)).toHaveLength(1);
+});
+
+it("refuses an automation start outside the pinned plan", async () => {
+  const executor = new AutomationExecutor({
+    sessions: sessionService(),
+    repo: env.repo,
+    runs: new RunStore(env.db.db, env.store),
+    lastTurnStatus: () => null,
+    now: () => new Date(),
+  } as unknown as ExecutorDeps);
+  const fire = (name: string) =>
+    executor.fire({
+      automation: Automation.parse({
+        id: name,
+        name,
+        enabled: true,
+        description: null,
+        templateId: null,
+        source: "database",
+        trigger: { type: "manual" },
+        action: { type: "start_session", prompt: "Do the work" },
+        target: { type: "project", projectId: env.project.id },
+        guards: {},
+        createdAt: env.project.createdAt,
+        updatedAt: env.project.updatedAt,
+      }),
+      project: env.project,
+      triggeredBy: "manual",
+      timezone: "UTC",
+      vars: {},
+      autonomy: undefined,
+    });
+  expect(await fire("Before pinning")).toMatchObject({ sessionId: expect.any(String) });
+  pinPlan();
+  expect(await fire("Outside the plan")).toMatchObject({
+    sessionId: null,
+    run: {
+      status: "failed",
+      error: { message: expect.stringMatching(/requires a reviewed revision/i) },
+    },
+  });
+  expect(await fire("Add a counter")).toMatchObject({ sessionId: expect.any(String) });
+});
+
+it("refuses an HTTP start outside the pinned plan", async () => {
+  const app = sessionRoutes(
+    {
+      ...services,
+      sessions: sessionService(),
+      orchestration: { conflicts: { closeReplaced: () => undefined } },
+    } as unknown as AppServices,
+    "test-token",
+  ).onError(errorResponse);
+  const post = (text: string) =>
+    app.request("/", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ projectId: env.project.id, input: { text } }),
+    });
+  expect((await post("Before pinning")).status).toBe(200);
+  const task = "Add a counter with precise behavior and acceptance criteria. ".repeat(3).trim();
+  pinPlan(task);
+  const refused = await post("Outside the plan");
+  expect(refused.status).toBe(400);
+  expect(await refused.json()).toMatchObject({
+    error: { message: expect.stringMatching(/requires a reviewed revision/i) },
+  });
+  expect((await post(`${task}\n\nImplementation details`)).status).toBe(200);
 });

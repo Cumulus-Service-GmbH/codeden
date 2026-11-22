@@ -15,7 +15,7 @@ import {
   WorkKey,
 } from "@codeden/contracts";
 import { z } from "zod";
-import { sameChecklistPurpose } from "../../../services/checklist/checklist-service";
+import { checklistStartItem } from "../../../services/checklist/start";
 import { applyTeamRole } from "../../../services/factory/team-role";
 import { defineTool, ToolError } from "../../define";
 import { currentTurn } from "../../transcript";
@@ -153,17 +153,10 @@ export const startSession = defineTool({
       conflict: input.conflict,
     });
     const checklist = services.checklist?.get(projectId);
-    if (checklist?.pending?.plan && !checklist.plan) {
-      throw new ToolError("The reviewed plan is awaiting owner approval.");
-    }
     const enforcing = checklist?.state === "approved" && checklist.enforce;
     const itemId = input.checklistItemId;
-    const item = checklist?.items.find((entry) => entry.id === itemId);
-    const known = item !== undefined;
-    if (enforcing && !known) {
-      if (itemId) throw new ToolError(`Unknown approved checklistItemId: ${itemId}.`);
-      if (checklist.plan)
-        throw new ToolError("Work outside the pinned plan requires a reviewed revision.");
+    const item = checklistStartItem(checklist, input.purpose, itemId);
+    if (enforcing && !item) {
       const expansionId = services.checklist.expansionForStart(
         projectId,
         project.name,
@@ -174,20 +167,6 @@ export const startSession = defineTool({
         message: `Not in the approved plan: an expansion card is waiting for the owner. Once approved, start again with checklistItemId ${expansionId}.`,
       };
     }
-    if (enforcing && item?.status === "done") {
-      throw new ToolError(
-        `Checklist item ${item.id} is done; ask the orchestrator for an expansion card.`,
-      );
-    }
-    if (
-      enforcing &&
-      item?.startPurpose !== undefined &&
-      !sameChecklistPurpose(item.startPurpose, input.purpose)
-    ) {
-      throw new ToolError(
-        `Checklist item ${item.id} was approved for "${item.startPurpose}". Use the same purpose to start this item.`,
-      );
-    }
     const releaseLink =
       enforcing && item ? services.checklist.reserveLink(projectId, item) : undefined;
     if (enforcing && item && !releaseLink) {
@@ -195,6 +174,7 @@ export const startSession = defineTool({
     }
     try {
       const result = await services.sessions.start(req, {
+        ...(itemId ? { checklistItemId: itemId } : {}),
         // Pins the PM gave are this session's own; ones CodeDen filled from the Team are not.
         ...((input.provider && input.provider !== "auto") || input.model
           ? { ownTeamPins: true }
@@ -224,7 +204,7 @@ export const startSession = defineTool({
           );
         },
       });
-      let note = itemId && !known ? { note: `Unknown checklistItemId ${itemId} was ignored.` } : {};
+      let note = itemId && !item ? { note: `Unknown checklistItemId ${itemId} was ignored.` } : {};
       if (item && (result.status === "started" || result.status === "queued")) {
         try {
           const session = services.sessionRepo.find(result.sessionId)?.session;

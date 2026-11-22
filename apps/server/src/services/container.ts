@@ -307,8 +307,14 @@ export function createServices(opts: ServicesOptions): AppServices {
     () => lifecycle.scheduleDrain(),
     () => checksLoop.runningIds(),
   );
+  const checklist = new ChecklistService(opts.db, opts.store, inbox, (projectId, message) => {
+    void orchestration
+      .messagePm(projectId, message, { caller: "ui", sessionId: null })
+      .catch((error: unknown) => opts.log?.(`Checklist decision message failed: ${String(error)}`));
+  });
   sessions = new SessionService({
     admission,
+    checklist,
     repo: sessionRepo,
     projects,
     runner: opts.runner,
@@ -482,11 +488,6 @@ export function createServices(opts: ServicesOptions): AppServices {
     respond: (id, req) => (sessions as SessionService).respond(id, req),
     ...opts.unwatchedApprovals,
     log: opts.log,
-  });
-  const checklist = new ChecklistService(opts.db, opts.store, inbox, (projectId, message) => {
-    void orchestration
-      .messagePm(projectId, message, { caller: "ui", sessionId: null })
-      .catch((error: unknown) => opts.log?.(`Checklist decision message failed: ${String(error)}`));
   });
   const services: AppServices = {
     db: opts.db,
