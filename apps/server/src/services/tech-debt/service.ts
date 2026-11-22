@@ -5,11 +5,12 @@ import {
   type TechDebtList,
   type TechDebtView,
 } from "@codeden/contracts";
-import { eq } from "drizzle-orm";
+import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "../../db/client";
-import { projectTechDebt } from "../../db/schema";
+import { projectTechDebt, sessions } from "../../db/schema";
 import type { EventStore } from "../../events/store";
 import { badRequest, errorMessage, notFound } from "../errors";
+import { ACTIVE_SESSION_STATUSES } from "../sessions/conflicts";
 import { debtId, issueFindings, syncDebtTick, type TechDebtIssuePort } from "./issue";
 
 type StartFix = (project: Project, findings: TechDebtFinding[]) => Promise<string>;
@@ -66,8 +67,8 @@ export class TechDebtService {
         }
         case "fix": {
           const selected = action.ids.map((id) => this.find(view, id));
-          if (selected.some((finding) => finding.status !== "open")) {
-            throw badRequest("Select open findings to start a fix");
+          if (selected.some((finding) => !this.canStartFix(finding))) {
+            throw badRequest("Select open findings or wait for their current fix sessions to end");
           }
           const sessionId = await this.startFix(project, selected);
           const ids = new Set(action.ids);
@@ -102,6 +103,23 @@ export class TechDebtService {
         }
       }
     });
+  }
+
+  private canStartFix(finding: TechDebtFinding): boolean {
+    if (finding.status === "open") return true;
+    if (finding.status !== "in_progress") return false;
+    if (!finding.sessionId) return true;
+    const activeSession = this.db
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.id, finding.sessionId),
+          inArray(sessions.status, [...ACTIVE_SESSION_STATUSES]),
+        ),
+      )
+      .get();
+    return !activeSession;
   }
 
   private get(projectId: string): TechDebtView {

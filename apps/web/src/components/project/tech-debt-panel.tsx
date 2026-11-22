@@ -132,6 +132,16 @@ export function TechDebtPanel({ projectId }: { projectId: string }) {
                 {finding.reason && <p className="break-words">{finding.reason}</p>}
                 {(finding.status === "open" || finding.status === "in_progress") && (
                   <div className="flex flex-wrap gap-2">
+                    {finding.status === "in_progress" && (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        disabled={update.isPending}
+                        onClick={() => submit({ action: "fix", ids: [finding.id] })}
+                      >
+                        Retry fix
+                      </Button>
+                    )}
                     <Button
                       size="sm"
                       variant="outline"

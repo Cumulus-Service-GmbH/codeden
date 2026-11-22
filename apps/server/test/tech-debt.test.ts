@@ -96,6 +96,39 @@ describe("project tech debt", () => {
     expect(write).not.toHaveBeenCalled();
   });
 
+  it.each(["failed", "stopped", "idle"] as const)(
+    "retries a finding after its fix session goes %s without ticking the issue",
+    async (status) => {
+      const { env, service, project, start, write } = setup();
+      await service.act(project, { action: "configure", issue });
+      const { findings } = await service.list(project);
+      const id = findings[0]?.id ?? "";
+      const fix = { action: "fix" as const, ids: [id] };
+      const session = env.addSession({
+        id: "fix-session",
+        projectId: project.id,
+        status: "running",
+      });
+      await service.act(project, fix);
+      await expect(service.act(project, fix)).rejects.toThrow();
+      expect(start).toHaveBeenCalledTimes(1);
+
+      env.store.append([
+        {
+          type: "session.updated",
+          sessionId: session.id,
+          payload: { session: { ...session, status } },
+        },
+      ]);
+      start.mockResolvedValueOnce("retry-session");
+      expect((await service.act(project, fix)).findings[0]).toMatchObject({
+        status: "in_progress",
+        sessionId: "retry-session",
+      });
+      expect(write).not.toHaveBeenCalled();
+    },
+  );
+
   it("syncs a closed local finding to a configured issue without duplicating it on reimport", async () => {
     const { service, project, write } = setup();
     await service.act(project, { action: "configure", issue });
