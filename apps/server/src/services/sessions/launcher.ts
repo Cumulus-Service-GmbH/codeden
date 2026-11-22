@@ -451,7 +451,11 @@ export class SessionLauncher {
     const base = codedenSystemPrompt(session, project);
     const settings = this.deps.tokenSaver?.();
     if (!settings) return base;
-    const note = tokenSaverNote(tokenSaverLevel(settings, session.role, session.projectId));
+    // A level chosen for this session at its start wins over the project and role defaults.
+    const chosen = this.deps.repo?.find(session.id)?.startMeta?.tokenSaver;
+    const note = tokenSaverNote(
+      chosen ?? tokenSaverLevel(settings, session.role, session.projectId),
+    );
     return note ? `${base}\n\n${note}` : base;
   }
 

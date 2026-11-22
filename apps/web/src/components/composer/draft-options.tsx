@@ -4,6 +4,7 @@ import { type DraftChoice, pickModel, type ResolvedDraft } from "@/lib/new-sessi
 import { ChecksToggle } from "./checks-toggle";
 import { ModelPicker } from "./model-picker/model-picker";
 import { AutonomyPicker, PlanToggle } from "./pickers";
+import { SaverPicker, TeamRolePicker } from "./team-saver-pickers";
 import { WorkspacePicker } from "./workspace-picker";
 
 /**
@@ -67,6 +68,14 @@ export function DraftOptions({
             : { provider: provider.displayName, wasOn: choice.planMode, canSwitch: true }
         }
         onChange={(planMode) => onChange({ ...choice, planMode })}
+      />
+      <TeamRolePicker
+        value={resolved.teamRole}
+        onChange={(teamRole) => onChange({ ...choice, teamRole })}
+      />
+      <SaverPicker
+        value={resolved.tokenSaver}
+        onChange={(tokenSaver) => onChange({ ...choice, tokenSaver })}
       />
       {checks.length > 0 && resolved.autonomy !== "read_only" && (
         <ChecksToggle
