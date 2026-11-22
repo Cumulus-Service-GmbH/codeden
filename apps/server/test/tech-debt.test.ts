@@ -129,6 +129,39 @@ describe("project tech debt", () => {
     },
   );
 
+  it("lets Fix selected start again after a failed fix run and refuses while either run is active", async () => {
+    const { env, service, project, start } = setup();
+    await service.act(project, { action: "configure", issue });
+    const { findings } = await service.list(project);
+    const fix = { action: "fix" as const, ids: [findings[0]?.id ?? ""] };
+    const first = env.addSession({ id: "fix-session", projectId: project.id, status: "running" });
+
+    expect((await service.act(project, fix)).findings[0]).toMatchObject({
+      status: "in_progress",
+      sessionId: first.id,
+    });
+    await expect(service.act(project, fix)).rejects.toThrow("Select open findings");
+    expect(start).toHaveBeenCalledTimes(1);
+
+    env.store.append([
+      {
+        type: "session.updated",
+        sessionId: first.id,
+        payload: { session: { ...first, status: "failed" } },
+      },
+    ]);
+    start.mockImplementationOnce(
+      async () =>
+        env.addSession({ id: "retry-session", projectId: project.id, status: "running" }).id,
+    );
+    expect((await service.act(project, fix)).findings[0]).toMatchObject({
+      status: "in_progress",
+      sessionId: "retry-session",
+    });
+    await expect(service.act(project, fix)).rejects.toThrow("Select open findings");
+    expect(start).toHaveBeenCalledTimes(2);
+  });
+
   it("syncs a closed local finding to a configured issue without duplicating it on reimport", async () => {
     const { service, project, write } = setup();
     await service.act(project, { action: "configure", issue });
