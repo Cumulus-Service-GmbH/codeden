@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import {
   CODEDEN_VERSION,
   RUNNER_PROTOCOL_VERSION,
@@ -115,7 +116,16 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   await assertSingleInstance(lockFile);
 
   const token = randomBytes(32).toString("hex");
-  const journal = new Journal(dir);
+  let attached: ServerConnection | undefined;
+  let stopped = false;
+  const journal = new Journal(dir, {
+    onAppend: (message) => attached?.deliver(message),
+    onAppendError: (error) => {
+      stopped = true;
+      log(`journal: append failed, stopping runner for recovery: ${error.message}`);
+      setImmediate(finish);
+    },
+  });
   // Claude Code support is installed on demand into `<home>/deps` in the published package.
   configureClaudeSdk({
     depsDir: join(opts.home, "deps"),
@@ -140,7 +150,6 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   });
 
   const connections = new Set<ServerConnection>();
-  let attached: ServerConnection | undefined;
   let draining = false;
   let drainExit: Promise<void> | undefined;
   let closing: Promise<void> | undefined;
@@ -151,11 +160,10 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   const mcpLink = new LinkMcpUpstream({ channel: () => attached });
   let port = 0;
 
-  let stopped = false;
   const journalEvent = (event: RunnerEvent) => {
     if (stopped) return; // late callbacks after close (killed processes)
-    const msg = journal.append(event);
-    attached?.deliver(msg);
+    if (event.kind === "agent" && event.event.type === "item.delta") journal.queueDelta(event);
+    else journal.append(event);
   };
   // Every durable event goes through the batcher: streamed deltas wait briefly to be merged,
   // and any other event journals the batches it follows first, so order is kept.
@@ -283,6 +291,25 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   writeFileSync(tmp, `${JSON.stringify(lock, null, 2)}\n`, { mode: 0o600 });
   renameSync(tmp, lockFile);
   log(`runner ${journal.runnerId} listening on 127.0.0.1:${port}`);
+  const loopDelay = monitorEventLoopDelay({ resolution: 20 });
+  loopDelay.enable();
+  const diagnostics = setInterval(() => {
+    const eventLoopMaxMs = Math.round(loopDelay.max / 1e6);
+    loopDelay.reset();
+    const { appendCount, appendMaxMs, journalQueuedBytes } = journal.takeAppendDiagnostics();
+    const { replayMaxMs = 0, socketQueuedBytes = 0 } = attached?.takeDiagnostics() ?? {};
+    if (
+      appendCount ||
+      replayMaxMs ||
+      journalQueuedBytes ||
+      socketQueuedBytes ||
+      eventLoopMaxMs >= 100
+    ) {
+      log(
+        `runner diagnostics: eventLoopMaxMs=${eventLoopMaxMs} appendCount=${appendCount} appendMaxMs=${appendMaxMs.toFixed(1)} replayMaxMs=${replayMaxMs.toFixed(1)} journalQueuedBytes=${journalQueuedBytes} socketQueuedBytes=${socketQueuedBytes}`,
+      );
+    }
+  }, 60_000).unref();
   // Ask providers for their models now, so pickers are right before the first session.
   // Spawns provider CLIs, so it runs in the background; it never throws.
   void registry.refreshModels();
@@ -296,6 +323,8 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
     closing ??= (async () => {
       // Stop advertising first so a new server spawns a fresh runner instead of reconnecting.
       removeLock();
+      clearInterval(diagnostics);
+      loopDelay.disable();
       stopProviderUpdates();
       await host.closeAll();
       await terminals.closeAll();
@@ -309,11 +338,12 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
         if ("closeAllConnections" in server) server.closeAllConnections();
       });
       process.off("exit", removeLock);
-      deltas.flush();
-      stopped = true;
       try {
+        deltas.flush();
+        stopped = true;
         journal.close();
       } catch (error) {
+        stopped = true;
         log(`journal: ${String(error)}`);
       }
       log("runner stopped");
