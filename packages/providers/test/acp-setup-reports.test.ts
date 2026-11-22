@@ -59,6 +59,25 @@ describe("what an ACP session reports to its adapter after a config_option_updat
     expect(seen.at(-1)).toEqual({ configOptions: pushed });
   });
 
+  it("Cursor: its adapter takes the update's models from that report", async () => {
+    const pushed: AcpConfigOption[] = [
+      {
+        id: "model",
+        name: "Model",
+        category: "model",
+        type: "select",
+        currentValue: "gpt-6",
+        options: [{ value: "gpt-6", name: "GPT-6" }],
+      },
+    ];
+    const { session, adapter } = await acp.open([
+      { update: { sessionUpdate: "config_option_update", configOptions: pushed } },
+      chunk("Done."),
+    ]);
+    await oneTurn(session as unknown as AcpSession);
+    expect(adapter.models().map((m) => m.id)).toContain("gpt-6");
+  });
+
   it("Antigravity: the update replaces the models, and plan mode stays as session/new said", async () => {
     const dir = mkdtempSync(join(tmpdir(), "codeden-agy-reports-"));
     const adapter = new AntigravityAdapter({ executable: fakeAgy });

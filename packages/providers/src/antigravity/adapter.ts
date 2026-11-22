@@ -29,9 +29,9 @@ export const ANTIGRAVITY_PROVIDER_ID = "antigravity";
 /**
  * How CodeDen drives `agy acp --process-per-session`. No `authMethod`: the ACP server reuses
  * the login of an interactive `agy`, so CodeDen never authenticates. Agent sessions run in its
- * `default` mode, which asks before edits and commands; there is no read-only mode, so
- * read-only sessions stay in `default` and CodeDen's policy refuses edits and commands. Plan
- * mode is its `plan` mode. CodeDen's reasoning effort is its `thought_level` option
+ * `default` mode, which asks before edits and commands "per your permission settings"; there is
+ * no read-only mode, so CodeDen can't guarantee read-only and doesn't offer it. Plan mode is
+ * its `plan` mode. CodeDen's reasoning effort is its `thought_level` option
  * (`thoughtLevel`: `minimal` runs at `low`, a level a model lacks at the nearest one it has).
  */
 export const ANTIGRAVITY_AGENT: AcpAgentSpec = {
@@ -42,8 +42,9 @@ export const ANTIGRAVITY_AGENT: AcpAgentSpec = {
 };
 
 /**
- * Honest flags (Principle 5). Approvals and the read-only level go through the CLI's permission
- * requests, decided by CodeDen's policy for every call (so autonomy changes apply live). Plan
+ * Honest flags (Principle 5). Approvals go through the CLI's permission requests, decided by
+ * CodeDen's policy for every call (so autonomy changes apply live). Read-only is off: the CLI
+ * asks only per its own permission settings, so not every edit or command is sure to reach it. Plan
  * mode is its `plan` mode; resume is `session/load`; reasoning effort is its thinking level.
  * Skills: the CLI loads its own, from `~/.gemini/config/skills/<name>/`, in every session.
  * Not wired up: questions, steering (ACP can't add input to a running prompt), subagents,
@@ -66,7 +67,7 @@ const BASE_CAPABILITIES: ProviderCapabilities = {
   mcp: true,
   skills: true,
   liveAutonomy: true,
-  readOnly: true,
+  readOnly: false,
   modelListAtStart: true,
 };
 
@@ -210,8 +211,23 @@ export class AntigravityAdapter implements ProviderAdapter {
    */
   private applySetup(setup: AcpSessionSetup): void {
     try {
-      const models = antigravityModelInfos(setup);
-      if (!models) return;
+      const listed = antigravityModelInfos(setup);
+      if (!listed) return;
+      // Each model's efforts come from `models.availableModels`. A `config_option_update`
+      // carries only the options, so a model it names keeps the efforts already known for it.
+      const known = new Map(this.catalog.list().map((m) => [m.id, m]));
+      const models = setup.models
+        ? listed
+        : listed.map((m) => {
+            const was = known.get(m.id);
+            if (!was || m.efforts?.length) return m;
+            const { defaultEffort: _drop, ...rest } = m;
+            return {
+              ...rest,
+              efforts: was.efforts ?? [],
+              ...(was.defaultEffort ? { defaultEffort: was.defaultEffort } : {}),
+            };
+          });
       // A snapshot that says which modes it has (even none) decides plan mode; one that
       // doesn't leaves it as it was.
       if (setup.modes !== undefined || findOption(setup.configOptions, "mode")) {

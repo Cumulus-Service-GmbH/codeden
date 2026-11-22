@@ -119,5 +119,14 @@ export async function detectAntigravity(
       fix: upgrade,
     });
   }
+  // The throwaway session was refused because the CLI isn't signed in: say so, with the fix.
+  if (probe.signedIn === false) {
+    issues.push({
+      code: "not_logged_in",
+      message: "The Antigravity CLI is not signed in. Run `agy` once and sign in.",
+      fix: { kind: "login", command: ANTIGRAVITY_LOGIN_COMMAND },
+    });
+    return { ...found, supported, loggedIn: false, issues };
+  }
   return { ...found, supported, issues };
 }

@@ -67,6 +67,8 @@ export class AcpSession implements ProviderSession {
   private nextEffort: ReasoningEffort | null | undefined;
   /** The agent's own level for the current model, kept while CodeDen's effort overrides it. */
   private agentEffort: string | undefined;
+  /** The model the agent reported at `session/new`: what Default goes back to. */
+  private openedModel: string | undefined;
   private instructions: string | undefined;
   private mode: string | undefined;
   private planning: boolean;
@@ -322,14 +324,20 @@ export class AcpSession implements ProviderSession {
     this.mode = currentMode(opened.setup);
     notify(() => this.config.onSetup?.(opened.setup, this.info));
     await this.applyMode();
+    // The agent's own model, put back when the session is switched to Default.
+    this.openedModel = modelsOf(opened.setup)?.current;
     if (this.model) {
+      // The session must run on the model it was given: a refusal fails the start rather than
+      // leaving it on another model while it reports this one.
       const before = this.setup;
-      // A failure changes nothing: the live setup stays.
-      const next = await setModel(rpc, opened.sessionId, before, this.model).catch(() => undefined);
-      if (next) this.applyReply(before, next);
+      this.applyReply(before, await setModel(rpc, opened.sessionId, before, this.model));
     }
-    await this.applyEffort(rpc, opened.sessionId, this.effort);
-    const model = this.model ?? modelsOf(opened.setup)?.current;
+    // An effort the agent refuses or doesn't list yet stays pending: the first turn applies it
+    // (and fails if it is refused again) before its prompt runs.
+    if (!(await this.applyEffort(rpc, opened.sessionId, this.effort)) && this.effort) {
+      this.nextEffort ??= this.effort;
+    }
+    const model = this.model ?? this.openedModel;
     this.events.push({
       type: "session.updated",
       resumeToken: opened.sessionId,
@@ -364,23 +372,31 @@ export class AcpSession implements ProviderSession {
     const sessionId = this.acpSession;
     if ((next === undefined && nextEffort === undefined) || !sessionId) return;
     const model = next === undefined ? undefined : explicitModel(next);
-    const switching = !!model && model !== this.model;
-    if (model && switching) {
+    // Back to Default from a model CodeDen chose: the agent's own model from the start returns.
+    const target = next !== undefined && !model && this.model ? this.openedModel : model;
+    const switching = !!target && (target !== this.model || !model);
+    if (target && switching) {
       const before = this.setup;
-      this.applyReply(before, await setModel(rpc, sessionId, before, model));
+      this.applyReply(before, await setModel(rpc, sessionId, before, target));
       this.model = model;
       // A new model brings its own level, so the effort is set again after it.
       this.agentEffort = undefined;
-      this.events.push({ type: "session.updated", model });
+      this.events.push({ type: "session.updated", model: target });
     }
     if (this.nextModel === next) this.nextModel = undefined;
     const effort = nextEffort === undefined ? this.effort : (nextEffort ?? undefined);
     if (nextEffort === undefined && !(switching && effort)) return;
+    let applied: boolean;
     try {
-      await this.applyEffort(rpc, sessionId, effort, true);
+      applied = await this.applyEffort(rpc, sessionId, effort, true);
     } catch (error) {
       if (this.nextEffort === undefined) this.nextEffort = effort ?? null;
       throw error;
+    }
+    // An effort the agent doesn't list (yet) stays pending for a later turn, not dropped.
+    if (!applied) {
+      if (this.nextEffort === undefined) this.nextEffort = effort ?? null;
+      return;
     }
     this.effort = effort;
     if (this.nextEffort === nextEffort) this.nextEffort = undefined;
@@ -388,31 +404,45 @@ export class AcpSession implements ProviderSession {
 
   /**
    * Set the session's reasoning effort through the agent's option for it (`spec.effort`); with
-   * none, put back the agent's own level if CodeDen changed it. A failed request only throws
-   * when `strict` (a change during the session); the first setup carries on without it.
+   * none, put back the agent's own level if CodeDen changed it. True once the agent runs at it
+   * (set now, or already its level); false when the agent doesn't list the option or a level
+   * for it, or (not `strict`) refused it. A refusal only throws when `strict` (a change during
+   * the session).
    */
   private async applyEffort(
     rpc: AcpRpc,
     sessionId: string,
     effort: ReasoningEffort | undefined,
     strict = false,
-  ): Promise<void> {
+  ): Promise<boolean> {
     const spec = this.config.spec.effort;
-    if (!spec) return;
+    if (!spec) return true;
     const own = this.agentEffort;
-    if (!effort && own === undefined) return;
+    if (!effort && own === undefined) return true;
+    const option = findOption(this.setup.configOptions, spec.category);
+    if (!option) return false;
     if (effort && own === undefined) {
-      const current = findOption(this.setup.configOptions, spec.category)?.currentValue;
+      const current = option.currentValue;
       if (typeof current === "string") this.agentEffort = current;
     }
-    const pick = (listed: readonly string[]) =>
-      effort ? spec.value(effort, listed) : own && listed.includes(own) ? own : undefined;
+    let pickable = true;
+    const pick = (listed: readonly string[]) => {
+      const value = effort
+        ? spec.value(effort, listed)
+        : own && listed.includes(own)
+          ? own
+          : undefined;
+      pickable = value !== undefined;
+      return value;
+    };
     const before = this.setup;
     const applied = setConfigValue(rpc, sessionId, before, spec.category, pick);
     // Strict: a refusal fails the turn. Otherwise a failure changes nothing.
     const next = strict ? await applied : await applied.catch(() => undefined);
-    if (next) this.applyReply(before, next);
+    if (!next) return false;
+    this.applyReply(before, next);
     if (!effort) this.agentEffort = undefined;
+    return pickable;
   }
 
   private onAgentMode(mode: string): void {

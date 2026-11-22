@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { classifyAcpError } from "../acp/errors";
 import { notify } from "../acp/notify";
 import { startAgent } from "../acp/process";
 import type { AcpInitializeResult, AcpSessionSetup } from "../acp/protocol";
@@ -22,6 +23,8 @@ export interface AntigravityProbe {
   info?: AcpInitializeResult;
   /** What a throwaway session listed (models, thinking levels), when it opened in time. */
   setup?: AcpSessionSetup;
+  /** False when the throwaway session was refused because the CLI isn't signed in. */
+  signedIn?: false;
   /** Why the ACP server didn't start, when it didn't. */
   error?: string;
 }
@@ -38,13 +41,15 @@ const SETUP_TIMEOUT_MS = 8_000;
 /**
  * Open one throwaway session (no MCP servers, no prompt) to read the account's models and
  * thinking levels, reported through `onSetup` as it arrives. Undefined when it fails or is
- * slow (a signed-out CLI, an old one, a hang); a reply after the deadline is dropped.
+ * slow (a signed-out CLI, reported through `onSignedOut`, an old one, a hang); a reply after the
+ * deadline is dropped.
  */
 export async function listSetup(
   rpc: AcpRpc,
   cwd: string,
   timeoutMs: number,
   onSetup?: (setup: AcpSessionSetup) => void,
+  onSignedOut?: () => void,
 ): Promise<AcpSessionSetup | undefined> {
   let timer: NodeJS.Timeout | undefined;
   // Checked against a monotonic clock, so a reply past the deadline never counts even when
@@ -64,7 +69,11 @@ export async function listSetup(
       notify(() => onSetup?.(setup));
       return setup;
     })
-    .catch(() => undefined);
+    .catch((error) => {
+      // Refused for authentication: the CLI answers, but isn't signed in.
+      if (!late && classifyAcpError(error) === "auth") onSignedOut?.();
+      return undefined;
+    });
   try {
     return await Promise.race([opened, deadline]);
   } finally {
@@ -108,8 +117,16 @@ export async function probeAntigravity(
     try {
       notify(() => opts.onInfo?.(started.info));
       const timeout = opts.setupTimeoutMs ?? SETUP_TIMEOUT_MS;
-      const setup = await listSetup(started.rpc, cwd, timeout, opts.onSetup);
-      return { acp: true, info: started.info, ...(setup ? { setup } : {}) };
+      let signedOut = false;
+      const setup = await listSetup(started.rpc, cwd, timeout, opts.onSetup, () => {
+        signedOut = true;
+      });
+      return {
+        acp: true,
+        info: started.info,
+        ...(setup ? { setup } : {}),
+        ...(signedOut ? { signedIn: false as const } : {}),
+      };
     } finally {
       await started.rpc.close();
     }

@@ -183,7 +183,7 @@ describe("detectAntigravity", () => {
       mcp: true,
       planMode: true,
       approvals: true,
-      readOnly: true,
+      readOnly: false,
       liveAutonomy: true,
       reasoningEffort: true,
       skills: true,

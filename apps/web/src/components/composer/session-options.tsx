@@ -44,14 +44,14 @@ export function appliesFrom(
 /**
  * A model change on a provider whose model list is read when a session starts
  * (`capabilities.modelListAtStart`): the session uses the new model, but the picker's list
- * may only show what the switch changed (other models or levels) from the next session.
+ * is the one read when a session opens, so it may not show what the switch changed.
  */
 export function modelListNote(
   patch: UpdateSessionRequest,
   modelListAtStart: boolean,
 ): string | undefined {
   if (patch.model === undefined || !modelListAtStart) return undefined;
-  return "The model list updates at the next session.";
+  return "The model list is read when a session opens.";
 }
 
 /**
