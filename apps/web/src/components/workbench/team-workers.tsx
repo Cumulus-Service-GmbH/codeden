@@ -1,4 +1,4 @@
-import type { TeamRun } from "@codeden/contracts";
+import type { TeamRun, TeamWorker } from "@codeden/contracts";
 import { useSnapshot } from "@/lib/queries";
 
 function estimatedMinutes(run: TeamRun, startedAt: number | undefined): number | undefined {
@@ -11,6 +11,32 @@ function estimatedMinutes(run: TeamRun, startedAt: number | undefined): number |
   if (!samples.length) return undefined;
   const average = samples.reduce((sum, elapsed) => sum + elapsed, 0) / samples.length;
   return Math.max(1, Math.ceil((average - (Date.now() - startedAt)) / 60_000));
+}
+
+function JevStatus({ jev }: { jev: NonNullable<TeamWorker["jev"]> }) {
+  if (!jev.receipt) return <span> · Jev {jev.status}</span>;
+  return (
+    <details>
+      <summary>Jev {jev.status}</summary>
+      <dl className="break-all">
+        <dt>Candidate</dt>
+        <dd>{jev.receipt.head}</dd>
+        <dt>History</dt>
+        <dd>{jev.receipt.historyPath}</dd>
+        <dt>History SHA-256</dt>
+        <dd>{jev.receipt.historySha256}</dd>
+        {jev.receipt.inputSha256 && (
+          <>
+            <dt>Input digest</dt>
+            <dd>{jev.receipt.inputSha256}</dd>
+          </>
+        )}
+        {jev.receipt.reasons?.map((reason) => (
+          <dd key={reason}>{reason}</dd>
+        ))}
+      </dl>
+    </details>
+  );
 }
 
 export function TeamWorkers({ sessionId }: { sessionId: string }) {
@@ -32,6 +58,7 @@ export function TeamWorkers({ sessionId }: { sessionId: string }) {
               {run.items.find((item) => item.id === worker.itemId)?.text} · {worker.status}
               {worker.attempt > 0 && ` · Round ${worker.attempt}/${run.limits.maxRounds}`}
               {minutes !== undefined && ` · ETA ~${minutes} min`}
+              {worker.jev && <JevStatus jev={worker.jev} />}
             </li>
           );
         })}
@@ -52,6 +79,19 @@ export function TeamRunProgress({ run }: { run: TeamRun }) {
         {run.teamName} · {done}/{run.workers.length}
       </h3>
       {current && <p>{run.items.find((item) => item.id === current.itemId)?.text}</p>}
+      {run.workers.some((worker) => worker.jev) && (
+        <ul>
+          {run.workers.map(
+            (worker) =>
+              worker.jev && (
+                <li key={worker.itemId}>
+                  {run.items.find((item) => item.id === worker.itemId)?.text}
+                  <JevStatus jev={worker.jev} />
+                </li>
+              ),
+          )}
+        </ul>
+      )}
     </section>
   );
 }

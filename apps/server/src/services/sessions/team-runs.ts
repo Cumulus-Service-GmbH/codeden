@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import { appendFile } from "node:fs/promises";
 import {
   type ProjectTeams,
   type StartTeamRun,
@@ -7,9 +8,15 @@ import {
   type TeamRole,
   type TeamRun,
   type TeamWorker,
+  type TeamWorkerJev,
   teamMember,
 } from "@codeden/contracts";
+import type { TeamReviewEvidence } from "./team-run-jev";
 import { eligibleAssignments, resolveRunTeam } from "./team-run-scheduler";
+
+type TeamReviewResult =
+  | { head: string; evidence?: TeamReviewEvidence }
+  | { changes: string; history: string };
 
 export interface TeamRunPorts {
   configuration(projectId: string): { teams: ProjectTeams; defaults: readonly TeamMember[] };
@@ -27,8 +34,26 @@ export interface TeamRunPorts {
     item?: TeamRun["items"][number],
   ): Promise<{ sessionId: string; branch: string; worktree: string }>;
   coordinate(sessionId: string, message: TeamCoordinationMessage): Promise<void>;
-  review(run: TeamRun, worker: TeamWorker): Promise<{ head: string } | { changes: string }>;
-  merge(run: TeamRun, worker: TeamWorker, reviewedHead: string): Promise<{ conflict?: string }>;
+  head(run: TeamRun, worker: TeamWorker): Promise<string>;
+  review(
+    run: TeamRun,
+    worker: TeamWorker,
+    context: { historyPath?: string; refusal?: TeamWorkerJev["receipt"] },
+  ): Promise<TeamReviewResult>;
+  history?(run: TeamRun, worker: TeamWorker): Promise<string>;
+  gate(
+    run: TeamRun,
+    worker: TeamWorker,
+    review: Extract<TeamReviewResult, { head: string }>,
+    historyPath?: string,
+  ): Promise<TeamWorkerJev>;
+  ownerDecision(run: TeamRun, worker: TeamWorker): void;
+  /** Merge the immutable candidate, conditional on the worker ref still naming that commit. */
+  merge(
+    run: TeamRun,
+    worker: TeamWorker,
+    reviewedHead: string,
+  ): Promise<{ conflict?: string; headMoved?: boolean }>;
   verify(run: TeamRun): Promise<void>;
   save(run: TeamRun): void;
 }
@@ -65,7 +90,20 @@ export class TeamRuns {
     private readonly ports: TeamRunPorts,
     initial: TeamRun[] = [],
   ) {
-    for (const run of initial) this.runs.set(run.id, run);
+    for (const stored of initial) {
+      const run = structuredClone(stored);
+      this.runs.set(run.id, run);
+      for (const worker of run.workers) {
+        if (worker.jev?.status === "owner decision") this.ports.ownerDecision(run, worker);
+      }
+      const interrupted = run.workers.filter((worker) => worker.status === "running");
+      if (!interrupted.length && run.status !== "running") continue;
+      const reason = "Team run interrupted by server restart";
+      for (const worker of interrupted) this.checkpoint(worker, "waiting", reason);
+      run.status = "waiting";
+      run.notice = reason;
+      this.save(run);
+    }
   }
 
   async finishWorker(sessionId: string, failure: string | null): Promise<void> {
@@ -75,7 +113,7 @@ export class TeamRuns {
     else
       await this.serialize(async () => {
         for (const run of this.runs.values()) {
-          if (run.coordinatorId && run.status !== "ready") await this.dispatch(run);
+          if (run.coordinatorId && run.status === "running") await this.dispatch(run);
         }
       });
   }
@@ -121,10 +159,13 @@ export class TeamRuns {
       const writer = member(team, "writer");
       const reviewer = member(team, "reviewer");
       const tester = member(team, "browserTester");
-      if ([architect, writer, reviewer, tester].some((role) => !this.ports.vendor(role))) {
+      const vendors = [architect, writer, reviewer, tester].map((role) =>
+        this.ports.vendor(role)?.trim().toLowerCase(),
+      );
+      if (vendors.some((vendor) => !vendor || vendor === "unknown")) {
         throw new Error("Unknown Team vendor");
       }
-      if (this.ports.vendor(writer) === this.ports.vendor(reviewer)) {
+      if (vendors[1] === vendors[2]) {
         throw new Error("Writer and reviewer must use different vendors");
       }
       if (this.ports.freeAgentSlots() < 1) throw new Error("No free agent slots");
@@ -190,15 +231,7 @@ export class TeamRuns {
         if (failure !== null) {
           this.checkpoint(worker, "failed", failure);
         } else {
-          const review = await this.ports.review(run, worker);
-          await this.ports.coordinate(coordinatorId, { type: "review_done", ...identity });
-          if ("changes" in review) {
-            this.checkpoint(worker, "failed", "Review requested changes");
-            if (worker.checkpoint) worker.checkpoint.nextSteps = review.changes;
-          } else {
-            const { conflict } = await this.ports.merge(run, worker, review.head);
-            this.checkpoint(worker, conflict ? "waiting" : "completed", conflict ?? null);
-          }
+          await this.reviewAndMerge(run, worker, coordinatorId, identity);
         }
       } catch (error) {
         this.checkpoint(worker, "waiting", String(error));
@@ -229,6 +262,64 @@ export class TeamRuns {
     });
   }
 
+  private async reviewAndMerge(
+    run: TeamRun,
+    worker: TeamWorker,
+    coordinatorId: string,
+    identity: { itemId: string; attempt: number },
+  ) {
+    const historyPath = await this.ports.history?.(run, worker);
+
+    for (let round = 0; round < 2; round++) {
+      worker.jev = { status: "pending" };
+      this.save(run);
+      const review = await this.ports.review(run, worker, {
+        historyPath,
+        refusal: worker.jevRefusal,
+      });
+      await this.ports.coordinate(coordinatorId, { type: "review_done", ...identity });
+      if ("changes" in review) {
+        if (historyPath) await appendFile(historyPath, `${review.history}\n`);
+        this.checkpoint(worker, "failed", "Review requested changes");
+        if (worker.checkpoint) worker.checkpoint.nextSteps = review.changes;
+        return;
+      }
+      if (review.head !== (await this.ports.head(run, worker))) {
+        throw new Error("Worker head moved after review");
+      }
+      worker.jev = await this.ports.gate(run, worker, review, historyPath);
+      if (worker.jev.status === "pass") {
+        if (
+          worker.jev.receipt?.head !== review.head ||
+          review.head !== (await this.ports.head(run, worker))
+        ) {
+          worker.jev = { status: "pending" };
+          throw new Error("Jev receipt does not cover the current worker head");
+        }
+        this.save(run);
+        const { conflict, headMoved } = await this.ports.merge(run, worker, review.head);
+        if (headMoved) {
+          worker.jev = { status: "pending" };
+          throw new Error("Jev receipt does not cover the current worker head");
+        }
+        this.checkpoint(worker, conflict ? "waiting" : "completed", conflict ?? null);
+        return;
+      }
+      if (worker.jev.status !== "revise" || !worker.jev.receipt) {
+        throw new Error("Jev done gate is unavailable");
+      }
+      if (worker.jevRefusal) {
+        worker.jev = { status: "owner decision", receipt: worker.jev.receipt };
+        this.checkpoint(worker, "waiting", "Jev requires an owner decision");
+        this.save(run);
+        this.ports.ownerDecision(run, worker);
+        return;
+      }
+      worker.jevRefusal = worker.jev.receipt;
+      this.save(run);
+    }
+  }
+
   private checkpoint(worker: TeamWorker, status: TeamWorker["status"], blocker: string | null) {
     worker.status = status;
     worker.checkpoint = {
@@ -253,6 +344,7 @@ export class TeamRuns {
           ? (worker.branch ?? run.assembler)
           : run.assembler;
       worker.status = "running";
+      worker.jev = { status: "pending" };
       worker.attempt += 1;
       worker.startedAt = Date.now();
       worker.sessionId = null;

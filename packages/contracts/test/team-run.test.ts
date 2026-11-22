@@ -38,6 +38,10 @@ it("round-trips an assigned worker and its checkpoint", () => {
     status: "waiting",
     dependsOn: ["item-1"],
     attempt: 1,
+    jev: {
+      status: "pass",
+      receipt: { head: "a".repeat(40), historyPath: "/history", historySha256: "b".repeat(64) },
+    },
     checkpoint: {
       summary: "Implemented",
       nextSteps: "Resolve conflict",

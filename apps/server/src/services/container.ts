@@ -618,7 +618,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     workspaceFs: (session) =>
       workspaceFsFor({ runner: opts.runner, runners, home: opts.paths.home }, session),
   };
-  if (opts.teamRuns) services.teamRuns = wireTeamRuns(services, opts.teamRuns, opts.log);
+  services.teamRuns = wireTeamRuns(services, exec, opts.teamRuns, opts.log);
   services.tools = new ToolRegistry(allTools, services, opts.log);
   return services;
 }

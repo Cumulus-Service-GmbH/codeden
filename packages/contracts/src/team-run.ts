@@ -3,6 +3,7 @@ import { ReasoningEffort } from "./common";
 import { Team, TeamMember } from "./team";
 
 const id = z.string().min(1);
+const commitSha = z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/);
 
 /** Run budgets. Admission also bounds parallel workers by the current active-session cap. */
 export const TeamRunSettings = z.object({
@@ -38,7 +39,7 @@ export type ProjectTeams = z.infer<typeof ProjectTeams>;
 export const StartTeamRun = z.union([
   z.strictObject({
     teamId: id.optional(),
-    planSha: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/),
+    planSha: commitSha,
   }),
   z.strictObject({ teamId: id.optional(), checklistId: id }),
 ]);
@@ -52,6 +53,23 @@ export const TeamWorkerCheckpoint = z.object({
   updatedAt: z.int().nonnegative(),
 });
 export type TeamWorkerCheckpoint = z.infer<typeof TeamWorkerCheckpoint>;
+
+/** The result of checking the reviewed candidate, bound to its commit and item history. */
+export const TeamWorkerJev = z.object({
+  status: z.enum(["pending", "pass", "revise", "unavailable", "owner decision"]),
+  receipt: z
+    .object({
+      head: commitSha,
+      historyPath: id,
+      historySha256: z.string().regex(/^[0-9a-f]{64}$/),
+      /** The receipt covers this prefix of the append-only history. */
+      historyBytes: z.int().nonnegative().optional(),
+      inputSha256: z.string().optional(),
+      reasons: z.array(z.string()).optional(),
+    })
+    .optional(),
+});
+export type TeamWorkerJev = z.infer<typeof TeamWorkerJev>;
 
 /** One assignment in the run. Runner resources are absent until provisioned. */
 export const TeamWorker = z.object({
@@ -68,6 +86,9 @@ export const TeamWorker = z.object({
   /** When this attempt started, used to estimate remaining time. */
   startedAt: z.int().nonnegative().optional(),
   checkpoint: TeamWorkerCheckpoint.nullable(),
+  jev: TeamWorkerJev.optional(),
+  /** The first product refusal, retained across worker attempts for the single reviewer escalation. */
+  jevRefusal: TeamWorkerJev.shape.receipt,
 });
 export type TeamWorker = z.infer<typeof TeamWorker>;
 

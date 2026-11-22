@@ -104,6 +104,37 @@ export async function branches(
   };
 }
 
+export async function mergeTeamWorker({
+  cwd,
+  assembler,
+  workerBranch,
+  head,
+}: RunnerCommandOf<"git.mergeTeamWorker">): Promise<RunnerCommandResult<"git.mergeTeamWorker">> {
+  const state = await status(cwd);
+  if (
+    state.branch !== assembler ||
+    state.files.length ||
+    (await gitOk(cwd, ["rev-parse", "--verify", "MERGE_HEAD"]))
+  ) {
+    return { conflict: "Assembler must be on its run branch with a clean worktree" };
+  }
+  const ref = `refs/heads/${workerBranch}`;
+  if (
+    !(await gitOk(cwd, ["show-ref", "--verify", "--quiet", ref])) ||
+    (await gitText(cwd, ["rev-parse", "--verify", "--end-of-options", ref])) !== head
+  ) {
+    return { headMoved: true };
+  }
+  const result = await git(cwd, ["merge", "--no-ff", "--no-edit", "--no-autostash", head], {
+    okCodes: [0, 1, 128],
+  });
+  if (result.code === 0) return {};
+  if (await gitOk(cwd, ["rev-parse", "--verify", "MERGE_HEAD"])) {
+    await git(cwd, ["merge", "--abort"]);
+  }
+  return { conflict: `Could not merge worker ${workerBranch} into ${assembler}` };
+}
+
 /** Stage all changes (or `paths`) and commit. Returns null when nothing was staged. */
 export async function commit(
   cmd: RunnerCommandOf<"git.commit">,

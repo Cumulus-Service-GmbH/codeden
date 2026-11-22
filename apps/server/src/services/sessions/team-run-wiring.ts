@@ -1,11 +1,15 @@
+import { createHash } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { defaultTeam, EventEnvelope, StartSessionRequest } from "@codeden/contracts";
 import type { AppServices } from "../container";
+import type { Exec } from "../exec";
+import { runJevDone } from "./team-run-jev";
 import { listTeamRuns, saveTeamRun } from "./team-run-projection";
 import { type TeamRunPorts, TeamRuns } from "./team-runs";
 
-export type TeamRunIntegrations = Pick<
-  TeamRunPorts,
-  "approvedPlan" | "vendor" | "merge" | "review" | "verify"
+export type TeamRunIntegrations = Partial<
+  Pick<TeamRunPorts, "approvedPlan" | "vendor" | "head" | "merge" | "review" | "verify" | "gate">
 >;
 
 function waitForWorktree({ sessionRepo, store }: AppServices, sessionId: string) {
@@ -33,12 +37,111 @@ function waitForWorktree({ sessionRepo, store }: AppServices, sessionId: string)
 
 export function wireTeamRuns(
   services: AppServices,
-  integrations: TeamRunIntegrations,
+  exec: Exec,
+  integrations: TeamRunIntegrations = {},
   log?: (message: string) => void,
 ): TeamRuns {
   const { admission, db, sessionRepo, sessions, store } = services;
   const runs = new TeamRuns(
     {
+      approvedPlan: async () => {
+        throw new Error("Approved pinned-plan lookup is unavailable");
+      },
+      vendor: (member) =>
+        services.runner.providers().find((provider) => provider.id === member.provider)
+          ?.capabilities.modelVendor,
+      head: async (_run, worker) => {
+        if (!worker.sessionId || !worker.worktree) throw new Error("Worker worktree unavailable");
+        const runner = services.runners.forSession(worker.sessionId);
+        const { branches } = await runner.request({ name: "git.branches", cwd: worker.worktree });
+        const head = branches.find(
+          (branch) => !branch.remote && branch.name === worker.branch,
+        )?.commit;
+        if (!head) throw new Error("Worker branch head unavailable");
+        return head;
+      },
+      review: async () => {
+        throw new Error("Shared Team review is unavailable");
+      },
+      merge: async (run, worker, head) => {
+        if (!run.coordinatorId || !worker.sessionId || !worker.branch) {
+          throw new Error("Team assembler or worker worktree is unavailable");
+        }
+        const assembler = sessionRepo.get(run.coordinatorId);
+        if (!assembler.worktreePath || assembler.branch !== run.assembler) {
+          throw new Error("Team assembler worktree is unavailable");
+        }
+        const runner = services.runners.forSession(run.coordinatorId);
+        if (runner !== services.runners.forSession(worker.sessionId)) {
+          throw new Error("Team assembler and worker must share a runner");
+        }
+        return runner.request({
+          name: "git.mergeTeamWorker",
+          cwd: assembler.worktreePath,
+          assembler: run.assembler,
+          workerBranch: worker.branch,
+          head,
+        });
+      },
+      verify: async () => {
+        throw new Error("Team full-suite and browser verification are unavailable");
+      },
+      history: async (run, worker) => {
+        const dir = join(services.paths.home, "team-history");
+        await mkdir(dir, { recursive: true, mode: 0o700 });
+        const key = createHash("sha256")
+          .update(JSON.stringify([run.id, worker.itemId]))
+          .digest("hex");
+        const path = join(dir, `${key}.md`);
+        try {
+          await writeFile(
+            path,
+            `Approved plan ${run.revision}\n\n${JSON.stringify(run.items, null, 2)}\n\nAssignment ${worker.itemId}\n`,
+            {
+              flag: "wx",
+              mode: 0o600,
+            },
+          );
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+        }
+        return path;
+      },
+      gate: async (_run, _worker, review, historyPath) => {
+        if (!review.evidence || !historyPath) return { status: "unavailable" };
+        return runJevDone(
+          exec,
+          join(services.userHome, ".claude", "skills", "trioharness-codeden", "scripts", "jev.mjs"),
+          historyPath,
+          { ...review.evidence, head: review.head },
+        );
+      },
+      ownerDecision: (run, worker) => {
+        const id = `team-owner-decision:${run.id}:${worker.itemId}`;
+        if (services.inbox.find(id)) return;
+        const now = new Date().toISOString();
+        services.inbox.put({
+          id,
+          kind: "message",
+          status: "open",
+          priority: "high",
+          notify: "needs_you",
+          title: `${run.teamName} requires an owner decision`,
+          body: `Jev refused assignment ${worker.itemId} again. ${worker.jev?.receipt?.reasons?.join("; ") ?? ""}`,
+          projectId: run.projectId,
+          sessionId: run.coordinatorId,
+          threadId: null,
+          itemId: null,
+          requestId: null,
+          issue: null,
+          pr: null,
+          automationRunId: null,
+          createdAt: now,
+          updatedAt: now,
+          resolvedAt: null,
+          resolution: null,
+        });
+      },
       ...integrations,
       configuration: (projectId) => {
         const settings = services.settings.get();

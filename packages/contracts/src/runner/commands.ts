@@ -301,6 +301,14 @@ export const RunnerCommand = z.discriminatedUnion("name", [
     cwd: z.string(),
     includeRemote: z.boolean().optional(),
   }),
+  /** Merge only the approved worker commit into its run's checked-out assembler. */
+  z.object({
+    name: z.literal("git.mergeTeamWorker"),
+    cwd: z.string(),
+    assembler: z.string().min(1),
+    workerBranch: z.string().min(1),
+    head: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/),
+  }),
   /** Stage (all changes, or `paths`) and commit. */
   z.object({
     name: z.literal("git.commit"),
@@ -501,6 +509,10 @@ export const RunnerCommandResults = {
         upstream: z.string().nullable(),
       }),
     ),
+  }),
+  "git.mergeTeamWorker": z.object({
+    conflict: z.string().optional(),
+    headMoved: z.boolean().optional(),
   }),
   /** `commit` is null when there was nothing to commit. */
   "git.commit": z.object({ commit: z.string().nullable() }),

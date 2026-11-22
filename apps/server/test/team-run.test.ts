@@ -36,7 +36,7 @@ const teams: ProjectTeams = {
   })),
 };
 
-function setup(save: (run: TeamRun) => void = () => {}) {
+function setup(save: (run: TeamRun) => void = () => {}, initial: TeamRun[] = []) {
   const merge = vi.fn(
     async (): Promise<{ conflict?: string }> => ({ conflict: "Conflicting files" }),
   );
@@ -47,25 +47,42 @@ function setup(save: (run: TeamRun) => void = () => {}) {
   }));
   const coordinate = vi.fn(async () => {});
   const verify = vi.fn(async () => {});
-  const runs = new TeamRuns({
-    approvedPlan: async (_projectId, request) =>
-      "checklistId" in request && request.checklistId === "approved"
-        ? {
-            revision: "approved-v1",
-            items: ["a", "b"].map((id) => ({ id, text: id, dependsOn: [] })),
-          }
-        : undefined,
-    configuration: () => ({ teams, defaults: [] }),
-    vendor: (member) => (member.role === "reviewer" ? "review-vendor" : "writer-vendor"),
-    freeAgentSlots: () => 8,
-    launch,
-    coordinate,
-    review: async () => ({ head: "a".repeat(40) }),
-    merge,
-    verify,
-    save,
-  });
-  return { runs, launch, merge, coordinate, verify };
+  const head = vi.fn(async () => "a".repeat(40));
+  const review = vi.fn(
+    async (): Promise<{ head: string } | { changes: string; history: string }> => ({
+      head: "a".repeat(40),
+    }),
+  );
+  const gate = vi.fn(async () => ({
+    status: "pass" as "pass" | "revise" | "unavailable",
+    receipt: { head: "a".repeat(40), historyPath: "/history", historySha256: "b".repeat(64) },
+  }));
+  const ownerDecision = vi.fn();
+  const runs = new TeamRuns(
+    {
+      approvedPlan: async (_projectId, request) =>
+        "checklistId" in request && request.checklistId === "approved"
+          ? {
+              revision: "approved-v1",
+              items: ["a", "b"].map((id) => ({ id, text: id, dependsOn: [] })),
+            }
+          : undefined,
+      configuration: () => ({ teams, defaults: [] }),
+      vendor: (member) => (member.role === "reviewer" ? "review-vendor" : "writer-vendor"),
+      freeAgentSlots: () => 8,
+      launch,
+      coordinate,
+      head,
+      review,
+      gate,
+      ownerDecision,
+      merge,
+      verify,
+      save,
+    },
+    initial,
+  );
+  return { runs, launch, merge, coordinate, verify, gate, review, head, ownerDecision };
 }
 
 it("uses the selected Team's models and dispatch cap", async () => {
@@ -168,12 +185,18 @@ it("starts both named Teams through MCP and handles a runner completion conflict
     const paths = ensureHome(join(env.dir, "home"));
     const prepared: RunnerCommandOf<"workspace.prepare">[] = [];
     const opened: RunnerCommandOf<"session.start">[] = [];
+    const merged: RunnerCommandOf<"git.mergeTeamWorker">[] = [];
     const fake = new FakeProvider();
     const runner: RunnerPort = {
       isConnected: () => true,
       runnerId: () => "team-test",
       providers: () => [
-        { id: "fake", displayName: "Fake", capabilities: fake.capabilities(), models: [] },
+        {
+          id: "fake",
+          displayName: "Fake",
+          capabilities: { ...fake.capabilities(), modelVendor: "fake-vendor" },
+          models: [],
+        },
       ],
       mcpProxyUrl: () => "http://127.0.0.1:4318/mcp",
       waitForConnection: async () => true,
@@ -186,10 +209,23 @@ it("starts both named Teams through MCP and handles a runner completion conflict
           opened.push(command);
           return { resumeToken: null };
         }
+        if (command.name === "git.branches") {
+          return {
+            branches: prepared.map(({ branch }) => ({
+              name: branch,
+              remote: false,
+              commit: "a".repeat(40),
+            })),
+          };
+        }
+        if (command.name === "git.mergeTeamWorker") {
+          merged.push(command);
+          return { conflict: "Conflicting files" };
+        }
         return {};
       }) as RunnerPort["request"],
     };
-    const services = createServices({
+    const options: Parameters<typeof createServices>[0] = {
       db: env.db.db,
       store: env.store,
       paths,
@@ -206,13 +242,47 @@ it("starts both named Teams through MCP and handles a runner completion conflict
       }),
       imageEngines: new ImageEngineRegistry([]),
       userHome: env.dir,
+    };
+    const defaults = createServices(options);
+    expect(defaults.tools.list("pm").map(({ name }) => name)).toContain("start_team_run");
+    expect(
+      await defaults.tools.call(
+        "start_team_run",
+        { checklistId: "draft" },
+        {
+          role: "pm",
+          caller: "ui",
+          sessionId: "pm-test",
+          projectId: project.id,
+          signal: new AbortController().signal,
+        },
+      ),
+    ).toMatchObject({ isError: true, text: "Approved pinned-plan lookup is unavailable" });
+    const sameVendor = createServices({
+      ...options,
+      teamRuns: {
+        approvedPlan: async () => ({
+          revision: "approved-v1",
+          items: [{ id: "draft", text: "Draft", dependsOn: [] }],
+        }),
+      },
+    });
+    await expect(
+      sameVendor.teamRuns?.start(project.id, { checklistId: "approved" }),
+    ).rejects.toThrow("Writer and reviewer must use different vendors");
+    expect(prepared).toHaveLength(0);
+    const services = createServices({
+      ...options,
       teamRuns: {
         approvedPlan: async () => ({
           revision: "approved-v1",
           items: [{ id: "draft", text: "Draft", dependsOn: [] }],
         }),
         vendor: (member) => (member.role === "reviewer" ? "review-vendor" : "writer-vendor"),
-        merge: async () => ({ conflict: "Conflicting files" }),
+        gate: async () => ({
+          status: "pass",
+          receipt: { head: "a".repeat(40), historyPath: "/history", historySha256: "b".repeat(64) },
+        }),
         review: async () => ({ head: "a".repeat(40) }),
         verify: async () => {},
       },
@@ -287,7 +357,87 @@ it("starts both named Teams through MCP and handles a runner completion conflict
       notice: "Conflicting files",
       workers: [{ status: "waiting" }],
     });
+    expect(merged).toEqual([
+      {
+        name: "git.mergeTeamWorker",
+        cwd: prepared[0]?.path,
+        assembler: run.assembler,
+        workerBranch: run.workers[0]?.branch,
+        head: "a".repeat(40),
+      },
+    ]);
   } finally {
     await env.close();
   }
+});
+
+it("refuses merge when the gate is unavailable", async () => {
+  const { runs, gate, merge } = setup();
+  gate.mockImplementation(async () => ({
+    status: "unavailable",
+    receipt: { head: "a".repeat(40), historyPath: "/history", historySha256: "b".repeat(64) },
+  }));
+  const run = await runs.start("project", { checklistId: "approved" });
+  const result = await runs.finish(run.id, run.workers[0]?.sessionId ?? "", null);
+  expect(result.workers[0]).toMatchObject({ status: "waiting", jev: { status: "unavailable" } });
+  expect(merge).not.toHaveBeenCalled();
+});
+
+it("invalidates a pass when the worker head moves during the gate", async () => {
+  const { runs, head, merge } = setup();
+  head.mockResolvedValueOnce("a".repeat(40)).mockResolvedValueOnce("c".repeat(40));
+  const run = await runs.start("project", { checklistId: "approved" });
+  const result = await runs.finish(run.id, run.workers[0]?.sessionId ?? "", null);
+  expect(result.workers[0]).toMatchObject({ status: "waiting", jev: { status: "pending" } });
+  expect(merge).not.toHaveBeenCalled();
+});
+
+it("returns a product refusal to the reviewer once, then raises an owner decision", async () => {
+  const { runs, gate, review, merge, ownerDecision } = setup();
+  gate.mockImplementation(async () => ({
+    status: "revise",
+    receipt: { head: "a".repeat(40), historyPath: "/history", historySha256: "b".repeat(64) },
+  }));
+  const run = await runs.start("project", { checklistId: "approved" });
+  const result = await runs.finish(run.id, run.workers[0]?.sessionId ?? "", null);
+  expect(review).toHaveBeenCalledTimes(2);
+  expect(ownerDecision).toHaveBeenCalledOnce();
+  expect(result.workers[0]).toMatchObject({ status: "waiting", jev: { status: "owner decision" } });
+  expect(merge).not.toHaveBeenCalled();
+});
+
+it("records interrupted assignments as waiting on restart", async () => {
+  const { runs } = setup();
+  const run = await runs.start("project", { checklistId: "approved" });
+  const save = vi.fn();
+  const restored = setup(save, [run]);
+  await restored.runs.finishWorker(run.workers[0]?.sessionId ?? "", null);
+  expect(save).toHaveBeenCalledExactlyOnceWith(
+    expect.objectContaining({
+      status: "waiting",
+      workers: [
+        expect.objectContaining({ status: "waiting" }),
+        expect.objectContaining({ status: "queued" }),
+      ],
+    }),
+  );
+  expect(restored.launch).not.toHaveBeenCalled();
+});
+
+it("preserves the reviewer escalation limit across worker attempts", async () => {
+  const { runs, gate, review, ownerDecision } = setup();
+  gate.mockResolvedValue({
+    status: "revise",
+    receipt: { head: "a".repeat(40), historyPath: "/history", historySha256: "b".repeat(64) },
+  });
+  review
+    .mockResolvedValueOnce({ head: "a".repeat(40) })
+    .mockResolvedValueOnce({ changes: "Revise the item", history: "A revision was requested." });
+  const run = await runs.start("project", { checklistId: "approved" });
+  const retried = await runs.finish(run.id, run.workers[0]?.sessionId ?? "", null);
+  expect(retried.workers[0]).toMatchObject({ status: "running", attempt: 2 });
+  const result = await runs.finish(run.id, retried.workers[0]?.sessionId ?? "", null);
+  expect(review).toHaveBeenCalledTimes(3);
+  expect(ownerDecision).toHaveBeenCalledOnce();
+  expect(result.workers[0]).toMatchObject({ jev: { status: "owner decision" } });
 });
