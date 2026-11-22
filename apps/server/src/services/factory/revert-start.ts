@@ -4,6 +4,7 @@ import { type AgentChoice, type AgentWait, builderWanted, chooseAgent } from "./
 import { baseBranchOf, type FactoryContext } from "./context";
 import { revertBlocked, revertedName } from "./revert-blocked";
 import { claimSlot } from "./slots";
+import { teamTuning } from "./team-role";
 
 /**
  * Starting the agent that writes an automatic revert (§10.1, Merge), when the revert couldn't be
@@ -50,7 +51,12 @@ export function revertAgent(
   project: Project,
   loop: FactoryLoop,
 ): AgentChoice | AgentWait {
-  return chooseAgent(ctx, project, builderWanted({ type: "bug" }, loop.tuning), "revert");
+  return chooseAgent(
+    ctx,
+    project,
+    builderWanted({ type: "bug" }, teamTuning(ctx, loop.tuning)),
+    "revert",
+  );
 }
 
 /** A started revert agent: its session and the provider it runs on (null: not known). */

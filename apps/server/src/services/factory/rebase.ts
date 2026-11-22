@@ -12,6 +12,7 @@ import { revertBlocked } from "./revert-blocked";
 import { isBusy } from "./sessions";
 import { claimSlot } from "./slots";
 import { FINISHED_STAGES } from "./store";
+import { teamTuning } from "./team-role";
 
 /**
  * Merge conflicts and the CI clock (§10.1, Review and Merge). When another merge leaves a
@@ -216,7 +217,12 @@ export async function startIntegrator(
     task === "conflicts"
       ? `Merge conflicts with ${base}`
       : "CI never started on its head and its author's session is gone";
-  const agent = chooseAgent(ctx, project, builderWanted(item, loop.tuning), "integration");
+  const agent = chooseAgent(
+    ctx,
+    project,
+    builderWanted(item, teamTuning(ctx, loop.tuning)),
+    "integration",
+  );
   if ("waiting" in agent) {
     if (item.note !== agent.waiting) {
       ctx.store.updateItem(item.id, (i) => ({ ...i, note: agent.waiting }), { touch: false });

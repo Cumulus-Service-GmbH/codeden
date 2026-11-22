@@ -31,6 +31,7 @@ import { settleSpecInbox } from "./spec-approval";
 import { closeEarlyPrs } from "./spec-early-pr";
 import { settleSpotCheckInbox } from "./spot-checks";
 import { OWNED_STAGES } from "./store";
+import { teamTuning } from "./team-role";
 import { mayAutoMerge } from "./trust";
 import { recoverTurnRaceFailures } from "./turn-race";
 import { advanceVerifying } from "./verify";
@@ -319,7 +320,12 @@ async function startBuilder(
   vision: string,
   loop: FactoryLoop,
 ): Promise<boolean> {
-  const choice = chooseAgent(ctx, project, builderWanted(item, loop.tuning), "build");
+  const choice = chooseAgent(
+    ctx,
+    project,
+    builderWanted(item, teamTuning(ctx, loop.tuning)),
+    "build",
+  );
   if ("waiting" in choice) {
     ctx.store.updateItem(item.id, (i) => ({ ...i, note: choice.waiting }));
     return false;
