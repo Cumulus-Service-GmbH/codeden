@@ -327,6 +327,21 @@ describe("factory loop state machine (§10.1)", () => {
     expect(verifying.note).toMatch(/verified distinct model vendor/);
   });
 
+  it("refuses a different reviewer provider with the author's model vendor", async () => {
+    env = createFactoryEnv({
+      providers: ["claude", "alternate"],
+      modelVendors: { alternate: "anthropic" },
+    });
+    enable();
+    const verifying = await toVerifying(backlogItem());
+    expect(verifying).toMatchObject({
+      builderProvider: "claude",
+      reviewerProvider: null,
+      reviewerSessionId: null,
+      note: expect.stringMatching(/verified distinct model vendor/),
+    });
+  });
+
   it("stops the loop and every factory session with the project and global kill switches", async () => {
     env = createFactoryEnv();
     enable();

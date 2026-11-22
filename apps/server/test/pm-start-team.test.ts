@@ -328,6 +328,8 @@ it.each(Object.entries(TEAM_ROLE_TAGS))("checks every Team role %s", async (tag,
   ] as const) {
     const { started } = await start({ title, provider, model }, opts);
     expect(started[0]).toMatchObject({ provider, model });
+    const wrongProvider = provider === "claude" ? "codex" : "claude";
+    await expect(start({ title, provider: wrongProvider }, opts)).rejects.toThrow("TEAM_MISMATCH");
     await expect(start({ title, model: "wrong-model" }, opts)).rejects.toThrow("TEAM_MISMATCH");
   }
 });
