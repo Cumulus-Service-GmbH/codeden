@@ -19,4 +19,9 @@ export {
   isSupportedAntigravityVersion,
 } from "./detect";
 export { antigravityModelInfos, fallbackAntigravityModels, thoughtLevel } from "./models";
-export { ANTIGRAVITY_ACP_ARGS, type AntigravityProbe, probeAntigravity } from "./probe";
+export {
+  ANTIGRAVITY_ACP_ARGS,
+  type AntigravityProbe,
+  type AntigravityProbeReports,
+  probeAntigravity,
+} from "./probe";

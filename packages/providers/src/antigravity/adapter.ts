@@ -88,13 +88,15 @@ export class AntigravityAdapter implements ProviderAdapter {
   private info: AcpInitializeResult | undefined;
   /** Whether the last session listed a `plan` mode; unknown until one has. */
   private planListed: boolean | undefined;
-  /** When the shown model list was listed (0: Default); only a newer complete list replaces it. */
-  private listedAt = 0;
+  private detecting: Promise<ProviderStatus> | undefined;
   private found: { command: ResolvedCommand; version: string | null } | undefined;
 
   constructor(private readonly options: AntigravityAdapterOptions = {}) {}
 
-  /** The CLI to run: a given copy, the one detection found, else one looked up now. */
+  /**
+   * The CLI to run: the one detection found, else one looked up now for this session only (only
+   * detection fills the cache, so a session's lookup never replaces a newer detection's).
+   */
   private async executable(): Promise<{ command: ResolvedCommand; version: string | null }> {
     if (this.found) return this.found;
     const given = this.options.executable;
@@ -105,8 +107,7 @@ export class AntigravityAdapter implements ProviderAdapter {
         ...(this.options.probeTimeoutMs ? { timeoutMs: this.options.probeTimeoutMs } : {}),
       });
       if (!lookup.command) throw new Error(brokenInstallMessage("Antigravity CLI", lookup.broken));
-      this.found = { command: given, version: lookup.version };
-      return this.found;
+      return { command: given, version: lookup.version };
     }
     const lookup = await findExecutable("agy", {
       ...(this.options.probeTimeoutMs ? { timeoutMs: this.options.probeTimeoutMs } : {}),
@@ -115,11 +116,18 @@ export class AntigravityAdapter implements ProviderAdapter {
     if (!lookup.command) {
       throw new Error("The Antigravity CLI is not installed (no `agy` on PATH or in ~/.local/bin)");
     }
-    this.found = { command: lookup.command, version: lookup.version };
-    return this.found;
+    return { command: lookup.command, version: lookup.version };
   }
 
-  async detect(): Promise<ProviderStatus> {
+  /** One detection at a time: a call while one runs shares its result. */
+  detect(): Promise<ProviderStatus> {
+    this.detecting ??= this.runDetection().finally(() => {
+      this.detecting = undefined;
+    });
+    return this.detecting;
+  }
+
+  private runDetection(): Promise<ProviderStatus> {
     // A reinstall or an uninstall since the last detection: look again.
     this.found = undefined;
     return detectAntigravity({
@@ -189,38 +197,37 @@ export class AntigravityAdapter implements ProviderAdapter {
   /** A session reported its models and modes: they are the account's current ones. */
   private onSetup(setup: AcpSessionSetup, info: AcpInitializeResult): void {
     this.info = info;
-    this.applySetup(setup, Date.now());
+    this.applySetup(setup);
   }
 
   /**
-   * The newest complete list wins: a setup listed at `listedAt` replaces the models and modes
-   * shown when it has models and is not older than them. An empty or malformed one changes
-   * nothing.
+   * The newest complete list wins: a setup replaces the models and modes shown when it has
+   * models. Probes and sessions report the moment their reply arrives, so the last one to
+   * arrive is the newest. An empty or malformed one changes nothing.
    */
-  private applySetup(setup: AcpSessionSetup, listedAt: number): void {
-    if (listedAt < this.listedAt) return;
+  private applySetup(setup: AcpSessionSetup): void {
     try {
       const models = antigravityModelInfos(setup);
       if (!models) return;
       const modes = modeIds(setup);
       if (modes.length) this.planListed = modes.includes(ANTIGRAVITY_AGENT.modes.plan ?? "plan");
       this.catalog.set(models);
-      this.listedAt = listedAt;
     } catch {
       // A malformed reply: Default (or the last good list) stands.
     }
   }
 
   /** Detection found a supported copy: sessions run it, after the handshake shows its flags. */
-  private async probe(exe: ResolvedCommand, version: string | null): Promise<AntigravityProbe> {
+  private probe(exe: ResolvedCommand, version: string | null): Promise<AntigravityProbe> {
     this.found = { command: exe, version };
-    const result = await probeAntigravity(exe, {
+    return probeAntigravity(exe, {
       ...(this.options.probeTimeoutMs ? { timeoutMs: this.options.probeTimeoutMs } : {}),
       ...(this.options.listTimeoutMs ? { setupTimeoutMs: this.options.listTimeoutMs } : {}),
+      onInfo: (info) => {
+        this.info = info;
+      },
+      onSetup: (setup) => this.applySetup(setup),
     });
-    if (result.info) this.info = result.info;
-    if (result.setup && result.listedAt) this.applySetup(result.setup, result.listedAt);
-    return result;
   }
 }
 

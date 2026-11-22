@@ -21,10 +21,14 @@ export interface AntigravityProbe {
   info?: AcpInitializeResult;
   /** What a throwaway session listed (models, thinking levels), when it opened in time. */
   setup?: AcpSessionSetup;
-  /** When the throwaway session answered (`Date.now()`), so a newer list can win over it. */
-  listedAt?: number;
   /** Why the ACP server didn't start, when it didn't. */
   error?: string;
+}
+
+/** Called the moment each reply arrives, so the caller orders them with its sessions' reports. */
+export interface AntigravityProbeReports {
+  onInfo?: (info: AcpInitializeResult) => void;
+  onSetup?: (setup: AcpSessionSetup) => void;
 }
 
 /** How long the throwaway session may take to list the models; then Default stands in. */
@@ -32,23 +36,33 @@ const SETUP_TIMEOUT_MS = 8_000;
 
 /**
  * Open one throwaway session (no MCP servers, no prompt) to read the account's models and
- * thinking levels. Undefined when it fails or is slow: a signed-out CLI, an old one, a hang.
+ * thinking levels, reported through `onSetup` as it arrives. Undefined when it fails or is
+ * slow (a signed-out CLI, an old one, a hang); a reply after the deadline is dropped.
  */
 async function listSetup(
   rpc: AcpRpc,
   cwd: string,
   timeoutMs: number,
+  onSetup?: (setup: AcpSessionSetup) => void,
 ): Promise<AcpSessionSetup | undefined> {
   let timer: NodeJS.Timeout | undefined;
-  const late = new Promise<undefined>((resolve) => {
-    timer = setTimeout(() => resolve(undefined), timeoutMs);
+  let late = false;
+  const deadline = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => {
+      late = true;
+      resolve(undefined);
+    }, timeoutMs);
   });
   const opened = rpc
     .request<AcpSessionSetup>("session/new", { cwd, mcpServers: [] })
-    .then((setup) => setup ?? undefined)
+    .then((setup) => {
+      if (!setup || late) return undefined;
+      onSetup?.(setup);
+      return setup;
+    })
     .catch(() => undefined);
   try {
-    return await Promise.race([opened, late]);
+    return await Promise.race([opened, deadline]);
   } finally {
     clearTimeout(timer);
   }
@@ -62,7 +76,7 @@ async function listSetup(
  */
 export async function probeAntigravity(
   exe: ResolvedCommand,
-  opts: { timeoutMs?: number; setupTimeoutMs?: number } = {},
+  opts: { timeoutMs?: number; setupTimeoutMs?: number } & AntigravityProbeReports = {},
 ): Promise<AntigravityProbe> {
   let stderr = "";
   let cwd: string | undefined;
@@ -87,10 +101,11 @@ export async function probeAntigravity(
         timeoutMs: opts.timeoutMs ?? 20_000,
       },
     );
-    const setup = await listSetup(started.rpc, cwd, opts.setupTimeoutMs ?? SETUP_TIMEOUT_MS);
-    const listedAt = Date.now();
+    opts.onInfo?.(started.info);
+    const timeout = opts.setupTimeoutMs ?? SETUP_TIMEOUT_MS;
+    const setup = await listSetup(started.rpc, cwd, timeout, opts.onSetup);
     await started.rpc.close();
-    return { acp: true, info: started.info, ...(setup ? { setup, listedAt } : {}) };
+    return { acp: true, info: started.info, ...(setup ? { setup } : {}) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return {
