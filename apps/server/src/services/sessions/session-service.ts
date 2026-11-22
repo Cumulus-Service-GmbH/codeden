@@ -465,17 +465,21 @@ export class SessionService {
       ) {
         try {
           await this.steer(id, req.input);
-          return { status: "steered" };
         } catch (error) {
-          // A compaction can't be steered: the message goes once it ends.
-          if (runnerErrorCode(error) !== "compacting") throw error;
+          if (req.whenBusy === "steer" && runnerErrorCode(error) !== "compacting") throw error;
+          const queued = this.enqueue(id, req.input, from);
+          this.flushIfSettled(id);
+          return queued;
         }
+        if (PRIORITY_SENDERS.has(from) && !this.hasOutbox(id)) this.deps.admission?.dequeue(id);
+        return { status: "steered" };
       }
       return this.enqueue(id, req.input, from);
     }
     const { admission, repo } = this.deps;
-    if (
-      !PRIORITY_SENDERS.has(from) &&
+    const priority = PRIORITY_SENDERS.has(from);
+    if (priority) this.reserve(session);
+    else if (
       !isFactorySession(session) &&
       (repo.find(id)?.startMeta?.admission || !this.reserve(session))
     ) {
@@ -491,6 +495,7 @@ export class SessionService {
     const place = this.deps.outbox.reserve();
     try {
       await this.sendNow(session, req.input, from);
+      if (priority && !this.hasOutbox(id)) admission?.dequeue(id);
     } catch (error) {
       // The provider is still running a turn the server had not seen: the message waits for it.
       if (isTurnRunningError(error)) {
@@ -529,8 +534,9 @@ export class SessionService {
   }
 
   async interrupt(id: string): Promise<void> {
-    this.deps.repo.get(id);
+    const session = this.deps.repo.get(id);
     this.deps.outbox.clear(id);
+    if (session.status !== "queued") this.deps.admission?.dequeue(id);
     // Between turns, Stop ends the session's check run: no turn is running to interrupt.
     if (await this.checkRuns?.cancel(id, "stopped")) return;
     await this.runnerOf(id)
@@ -655,13 +661,14 @@ export class SessionService {
       const { session, startMeta } = found;
       const next = outbox.peek(id);
       if (!next) return;
-      if (!admissionHead && !PRIORITY_SENDERS.has(next.from)) {
-        if (startMeta?.admission && !session.archivedAt) return;
-        if (!this.reserve(session)) {
+      const priority = PRIORITY_SENDERS.has(next.from);
+      if (!admissionHead) {
+        if (!priority && startMeta?.admission && !session.archivedAt) return;
+        reserved = this.reserve(session);
+        if (!reserved && !priority) {
           if (!session.archivedAt) admission?.enqueue(id);
           return;
         }
-        reserved = true;
       }
       try {
         if (session.archivedAt) admission?.dequeue(id);
@@ -682,7 +689,7 @@ export class SessionService {
         }
         return;
       }
-      if (admissionHead) admission?.dequeue(id);
+      if (priority ? !this.hasOutbox(id) : admissionHead) admission?.dequeue(id);
     } finally {
       if (reserved) admission?.release(id);
     }
@@ -738,6 +745,9 @@ export class SessionService {
   dropQueued(id: string, from: QueueSender): number {
     const mine = this.deps.outbox.list(id).filter((m) => m.from === from);
     for (const m of mine) this.deps.outbox.remove(m, "dropped");
+    if (!this.hasOutbox(id) && this.deps.repo.find(id)?.session.status !== "queued") {
+      this.deps.admission?.dequeue(id);
+    }
     return mine.length;
   }
 

@@ -8,7 +8,7 @@ import {
   StartSessionRequest,
   type UserInput,
 } from "@codeden/contracts";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { McpTokenStore } from "../src/mcp/tokens";
 import { FACTORY_STARTER } from "../src/services/factory/starter";
 import type { ProjectService } from "../src/services/projects/project-service";
@@ -375,6 +375,97 @@ describe("priority session messages at capacity", () => {
       expect(await sessions.send(id, request, from)).toEqual({ status: "steered" });
       expect(call("session.steer")).toMatchObject({ sessionId: id, input });
       expect(sessions.hasOutbox(id)).toBe(false);
+    },
+  );
+
+  it.each(["queue", "steer"] as const)("handles a failed %s steer", async (whenBusy) => {
+    const { sessions } = atCapacity();
+    const { id } = env.addSession({ provider: "claude", status: "running" });
+    vi.spyOn(sessions, "steer").mockRejectedValueOnce(new Error("Runner refused steer"));
+
+    const send = sessions.send(id, { input, whenBusy }, "pm");
+    if (whenBusy === "steer") {
+      await expect(send).rejects.toThrow("Runner refused steer");
+      expect(sessions.hasOutbox(id)).toBe(false);
+    } else {
+      await expect(send).resolves.toEqual({ status: "queued" });
+      expect(sessions.hasOutbox(id)).toBe(true);
+    }
+  });
+
+  it.each(["send", "flush"] as const)("clears an empty waiter after priority %s", async (path) => {
+    const { admission, sessions } = atCapacity();
+    const { id } = env.addSession({ provider: "claude", status: "waiting" });
+    if (path === "flush") await sessions.send(id, request, "pm");
+    env.repo.update(id, (session) => ({ ...session, status: "idle" }));
+    admission.enqueue(id);
+
+    if (path === "flush") await sessions.flushOutbox(id);
+    else await sessions.send(id, request, "pm");
+
+    expect(call("session.send")).toMatchObject({ sessionId: id });
+    expect(admission.waiters()).toEqual([]);
+  });
+
+  it.each(["send", "flush"] as const)(
+    "keeps the waiter when priority %s leaves messages",
+    async (path) => {
+      const { admission, sessions } = atCapacity();
+      const { id } = env.addSession({ provider: "claude", status: "waiting" });
+      if (path === "flush") await sessions.send(id, request, "pm");
+      await sessions.send(id, request, "codeden");
+      env.repo.update(id, (session) => ({ ...session, status: "idle" }));
+      admission.enqueue(id);
+      const [waiter] = admission.waiters();
+
+      if (path === "flush") await sessions.flushOutbox(id);
+      else await sessions.send(id, request, "pm");
+
+      expect(call("session.send")).toMatchObject({ sessionId: id });
+      expect(sessions.hasOutbox(id)).toBe(true);
+      expect(admission.waiters()).toEqual([{ ...waiter, status: "running" }]);
+    },
+  );
+
+  it.each(["send", "flush"] as const)("reserves a free slot on priority %s", async (path) => {
+    const { admission, settings } = atCapacity();
+    const openAdmission = new SessionAdmission(
+      env.repo,
+      () => 2,
+      () => 2,
+    );
+    const sessions = createSessions(openAdmission, settings);
+    const { id } = env.addSession({ provider: "claude", status: "waiting" });
+    if (path === "flush") await sessions.send(id, request, "pm");
+    env.repo.update(id, (session) => ({ ...session, status: "idle" }));
+    expect(admission.free()).toBe(0);
+    expect(openAdmission.free()).toBe(1);
+
+    const delivery = path === "flush" ? sessions.flushOutbox(id) : sessions.send(id, request, "pm");
+    const freeDuringDelivery = openAdmission.free();
+    await delivery;
+
+    expect(freeDuringDelivery).toBe(0);
+    env.repo.update(id, (session) => ({ ...session, status: "idle" }));
+    expect(openAdmission.free()).toBe(1);
+  });
+
+  it.each(["interrupt", "drop"] as const)(
+    "clears a waiter on %s only if its outbox is empty",
+    async (action) => {
+      const { admission, sessions } = atCapacity();
+      const { id } = source();
+      await sessions.send(id, request, "codeden");
+      await sessions.send(id, request, "factory");
+      const [waiter] = admission.waiters();
+
+      sessions.dropQueued(id, "factory");
+      expect(admission.waiters()).toEqual([waiter]);
+      if (action === "interrupt") await sessions.interrupt(id);
+      else sessions.dropQueued(id, "codeden");
+
+      expect(sessions.hasOutbox(id)).toBe(false);
+      expect(admission.waiters()).toEqual([]);
     },
   );
 
