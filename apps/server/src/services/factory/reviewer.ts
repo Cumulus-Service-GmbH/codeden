@@ -8,6 +8,7 @@ import type { FactoryContext } from "./context";
 import { failReview } from "./failures";
 import type { FactoryPr } from "./github-port";
 import { stoppedSinceNudge } from "./idle";
+import { jevReviewBrief } from "./jev";
 import { awaitingStart, awaitingStartNote } from "./late-start";
 import { briefLessons } from "./lessons";
 import { failItem } from "./outcomes";
@@ -227,7 +228,10 @@ export async function ensureReviewer(
         { touch: false },
       );
     }
-    await ctx.sessions.message(item.reviewerSessionId, reReviewPrompt(item));
+    await ctx.sessions.message(
+      item.reviewerSessionId,
+      `${reReviewPrompt(item)}\n\n${jevReviewBrief(item)}`,
+    );
     return ctx.store.updateItem(item.id, (i) => {
       const { rereview_pending: _p, ...rest } = i.nudges;
       const at = ctx.now().toISOString();

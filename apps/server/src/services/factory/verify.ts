@@ -6,6 +6,7 @@ import {
   type ReviewVerdict,
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
+import { jevPasses } from "../review-jev";
 import { settleApproval, verdictHead } from "./approval";
 import { advanceArbiter, reviewEscalation } from "./arbiter";
 import { codeFiles, evaluateChecks, hasTestResults, sameChecks } from "./checks";
@@ -16,7 +17,8 @@ import type { FactoryPr, PrEvidence } from "./github-port";
 import { inheritedCi } from "./inherited-ci";
 import { stopBeforeAgentTurn } from "./item-budget";
 import { overReviewBudget } from "./item-cost";
-import { prDecidedOutside, readyForYou } from "./merge";
+import { advanceJev } from "./jev";
+import { prDecidedOutside, readyForYou, readyInboxId } from "./merge";
 import { escalate, failItem, markStuck, runAudit } from "./outcomes";
 import { changedPaths, isUiFile, withVisionFile } from "./policy";
 import { decidedPr } from "./pr-gone";
@@ -67,7 +69,11 @@ export async function advanceVerifying(
   if (stoppedOnPurpose(ctx, item) && !decidedPr(ctx, item)) return endStopped(ctx, loop, item);
   // Ready and waiting for a person: the synced PR says when they merge or close it; GitHub
   // itself is asked again only every few minutes (new commits, CI, conflicts).
-  if (item.nudges.ready && !mayAutoMerge(item, project.factoryLimits)) {
+  if (
+    item.nudges.ready &&
+    jevPasses(item.jev, trackedHead(item)) &&
+    !mayAutoMerge(item, project.factoryLimits)
+  ) {
     const ref = ctx.github.prRef(project.id, item.pr.number);
     if (ref && (ref.state === "merged" || ref.state === "closed")) {
       prDecidedOutside(ctx, item, ref);
@@ -137,6 +143,15 @@ export async function advanceVerifying(
     return settleApproval(n, tracked, pr, review, at);
   };
   const head = trackHead(item.nudges, pr, at);
+  if (item.nudges.ready && !jevPasses(item.jev, pr.headSha)) {
+    const ready = ctx.inbox.find(readyInboxId(item.id));
+    if (ready?.status === "open")
+      ctx.inbox.close(ready, "resolved", { note: "Waiting for Jev on the current head" });
+    item = ctx.store.updateItem(item.id, (i) => {
+      const { ready: _ready, ready_checked: _checked, ...nudges } = i.nudges;
+      return { ...i, nudges };
+    });
+  }
   const settled = { nudges: nudgesFor(item.nudges, item.review) };
   // Red CI that fails only what fails on the default branch waits for it (`inherited-ci.ts`).
   const ciInherited = await inheritedCi(ctx, project, item, pr);
@@ -171,7 +186,26 @@ export async function advanceVerifying(
   if (outcome === "escalate") return escalate(ctx, loop, current, checks);
   if (
     pr.headSha &&
-    (current.arbitration || reviewEscalation(current, loop.tuning.reviewPolicy ?? {}))
+    (!current.arbitration ||
+      (current.arbitration.head === pr.headSha && current.arbitration.state === "jev_pending")) &&
+    (current.arbitration?.state === "jev_pending" ||
+      current.jevReviewHead === pr.headSha ||
+      current.jev?.head === pr.headSha ||
+      outcome === "pass")
+  ) {
+    if (!(await advanceJev(ctx, project, current, pr.headSha))) {
+      leaveQueue(ctx, ctx.store.item(current.id) ?? current);
+      return loop;
+    }
+    current = ctx.store.item(current.id) ?? current;
+    if (current.arbitration?.state === "jev_pending" && outcome !== "pass") return loop;
+  }
+
+  if (
+    pr.headSha &&
+    (current.arbitration
+      ? current.arbitration.state !== "jev_pending" || current.arbitration.head !== pr.headSha
+      : reviewEscalation(current, loop.tuning.reviewPolicy ?? {}))
   ) {
     if (!current.arbitration) {
       const stopped = await beforeAgentTurn(current);
@@ -223,6 +257,7 @@ export async function advanceVerifying(
     return reviewerStalled(ctx, project, loop, current);
   }
 
+  if (!pr.headSha) return loop;
   // Every check passed: the merge queue merges it in its turn, or a person does.
   if (!mayAutoMerge(current, project.factoryLimits) || !isFactoryMode(project.autonomyMode)) {
     current = leaveQueue(ctx, current);

@@ -103,7 +103,10 @@ export function mergeQueue(ctx: FactoryContext, project: Project): FactoryItem[]
     .items(project.id, ["verifying"])
     .filter(
       (i) =>
-        !i.arbitration && i.pr && i.nudges[MERGE_QUEUED] && mayAutoMerge(i, project.factoryLimits),
+        (!i.arbitration || i.arbitration.state === "jev_pending") &&
+        i.pr &&
+        i.nudges[MERGE_QUEUED] &&
+        mayAutoMerge(i, project.factoryLimits),
     )
     .sort(compare);
 }

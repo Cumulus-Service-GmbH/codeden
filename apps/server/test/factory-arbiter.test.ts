@@ -33,7 +33,7 @@ it("keeps arbitrated work out of the merge pipeline", async () => {
   expect(pipelineStep(item)).toBe("arbiter");
 });
 
-it("records a confirmation and hands off the pinned head without approving a merge", async () => {
+it("records a confirmation and leaves the pinned head pending for Jev", async () => {
   const { confirmArbiter } = await import("../src/services/factory/arbiter");
   const { ReviewVerdict } = await import("@codeden/contracts");
   const item = {
@@ -53,6 +53,7 @@ it("records a confirmation and hands off the pinned head without approving a mer
     reviewerSessionId: "reviewer-1",
     arbitration: { head: "abc", state: "confirming", ruling: "Fix the regression." },
     review: null,
+    nudges: {},
     createdAt: "2026-11-23T00:00:00.000Z",
     updatedAt: "2026-11-23T00:00:00.000Z",
     finishedAt: null,
@@ -80,7 +81,8 @@ it("records a confirmation and hands off the pinned head without approving a mer
   expect(inbox).toEqual([]);
   expect(confirmArbiter(ctx, item, verdict)).toBe(true);
   expect(saved.stage).toBe("verifying");
-  expect(saved.review).toBeNull();
+  expect(saved.review).toEqual(verdict);
+  expect(saved.jev).toBeUndefined();
   expect(saved.arbitration).toMatchObject({ head: "abc", state: "jev_pending" });
-  expect(inbox).toMatchObject([{ kind: "owner_decision", body: expect.stringContaining("abc") }]);
+  expect(inbox).toEqual([]);
 });

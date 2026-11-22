@@ -131,6 +131,8 @@ export function resumeReview(
     stage: "verifying",
     pr,
     review: null,
+    jev: undefined,
+    jevReviewHead: undefined,
     ...(opts.retry ? { reviewRounds: undefined, arbitration: undefined } : {}),
     attempts: opts.retry ? 0 : i.attempts,
     // A retry is a person's (or the PM's) call to spend more: the per-item cap counts afresh.

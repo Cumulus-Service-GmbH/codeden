@@ -1,9 +1,11 @@
 import type { Project, ProjectChecklist } from "@codeden/contracts";
 import { ChevronRight } from "lucide-react";
 import { useRef } from "react";
+import { useFactoryStatus } from "@/lib/factory";
 import { cn } from "@/lib/utils";
 import { useLayoutStore } from "@/stores/layout";
 import { ProjectTile } from "../shell/sidebar/project-group";
+import { JevStatus } from "../workbench/jev-status";
 import { EnforceSwitch, PendingProposal, StateChip } from "./checklist-approval";
 import { ChangesSection } from "./checklist-changes";
 import { ItemRow } from "./checklist-item";
@@ -76,6 +78,10 @@ export function ChecklistSection({
     checklist.pending?.kind === "expand"
       ? sharedLabelIds(checklist.pending.diff, checklist.items)
       : new Map<string, string>();
+  const factory = useFactoryStatus(project.id, !closed).data;
+  const factoryItems = [...(factory?.inProgress ?? []), ...(factory?.recent ?? [])].filter(
+    (item) => item.jev,
+  );
   const bodyId = `checklist-${project.id}`;
 
   return (
@@ -129,6 +135,19 @@ export function ChecklistSection({
                 shortId={shortIds.get(item.id)}
               />
             ))}
+          </ul>
+        )}
+        {!closed && factoryItems.length > 0 && (
+          <ul className="mt-1.5 flex flex-col">
+            {factoryItems.map(
+              (item) =>
+                item.jev && (
+                  <li className="px-2 py-1 text-[13px]" key={item.id}>
+                    <p>{item.title}</p>
+                    <JevStatus receipt={item.jev} />
+                  </li>
+                ),
+            )}
           </ul>
         )}
       </div>

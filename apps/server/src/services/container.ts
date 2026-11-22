@@ -485,6 +485,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     log: opts.log,
   });
   const factory = new FactoryService({
+    reviewDataDir: opts.paths.home,
     admission,
     db: opts.db,
     store: opts.store,

@@ -63,6 +63,7 @@ export function workItem(
           : i.builderSessionId,
     ...(reviewRound > 0 ? { reviewRound } : {}),
     ...(i.arbitration ? { arbitration: i.arbitration } : {}),
+    ...(i.jev ? { jev: i.jev } : {}),
     stage: i.stage,
     step,
     type: i.type,

@@ -359,6 +359,7 @@ export function createFactoryEnv(
       settings,
       exec,
       github: gh,
+      reviewDataDir: dir,
       complete: (_job, system, prompt) => env.model(system, prompt),
       archiveSession: async (sessionId) => {
         env.archived.push(sessionId);

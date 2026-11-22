@@ -32,6 +32,8 @@ import {
   SpotCheckPercent,
 } from "./factory-spot-checks";
 import {
+  JevReceipt,
+  JevTestEvidence,
   ReviewAcceptanceSpec,
   ReviewArbitration,
   ReviewFindingInput,
@@ -132,6 +134,7 @@ export function truncateReviewSummary(summary: string): string {
 export const ReviewVerdict = z.object({
   verdict: z.enum(["approve", "request_changes", "reject"]),
   summary: z.string().min(1).max(REVIEW_SUMMARY_MAX),
+  jevEvidence: JevTestEvidence.optional(),
   /** Findings with evidence and normalized severity, when supplied by the reviewer. */
   findings: z.array(ReviewFindingInput).optional(),
   /** Structured findings deferred by project review policy. */
@@ -224,9 +227,20 @@ export const FactoryItem = z.object({
   /** The plan and scope pinned at the start of review. */
   reviewSpec: ReviewAcceptanceSpec.optional(),
   arbitration: ReviewArbitration.optional(),
+  jev: JevReceipt.optional(),
+  /** Prior done-gate results and the head sent back for a single reviewer response. */
+  jevHistory: z.array(JevReceipt).optional(),
+  jevReviewHead: z.string().optional(),
   /** Completed review rounds, in order, with the head and the reviewer's dispositions. */
   reviewRounds: z
-    .array(z.object({ head: z.string(), dispositions: z.array(z.string()) }))
+    .array(
+      z.object({
+        head: z.string(),
+        dispositions: z.array(z.string()),
+        verdict: ReviewVerdict.optional(),
+        writerResponse: z.string().optional(),
+      }),
+    )
     .optional(),
   /** Priority, 0..1 (higher first); null for issues, which queue in order of arrival. */
   score: z.number().min(0).max(1).nullable(),
@@ -809,6 +823,7 @@ export const FactoryWorkItem = z.object({
   /** Review rounds and arbitration visible to the factory's session workers. */
   reviewRound: z.int().positive().optional(),
   arbitration: ReviewArbitration.optional(),
+  jev: JevReceipt.optional(),
   type: WorkType.nullable().default(null),
   trust: WorkTrust.default("trusted"),
   author: z.string().nullable().default(null),

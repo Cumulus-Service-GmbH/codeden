@@ -54,3 +54,26 @@ export const ReviewArbitration = z.object({
   confirmation: z.string().optional(),
 });
 export type ReviewArbitration = z.infer<typeof ReviewArbitration>;
+
+/** Result of the done gate, bound to the reviewed head and its history snapshot. */
+export const JevReceipt = z.object({
+  head: z.string().regex(/^[a-f0-9]{40}$/),
+  status: z.enum(["pending", "pass", "revise", "unavailable", "owner decision"]),
+  historyPath: z.string().optional(),
+  historySha256: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
+  inputSha256: z
+    .string()
+    .regex(/^[a-f0-9]{16}$/)
+    .optional(),
+  reasons: z.array(z.string()),
+});
+export type JevReceipt = z.infer<typeof JevReceipt>;
+
+/** Verbatim, criterion-indexed test output collected by the reviewer at the pinned head. */
+export const JevTestEvidence = z.object({
+  head: z.string().regex(/^[a-f0-9]{40}$/),
+  tests: z.array(z.string().min(1).max(4_000)).min(1).max(20),
+});

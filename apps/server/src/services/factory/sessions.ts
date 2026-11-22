@@ -21,6 +21,7 @@ import type {
   ProviderRunnable,
   Unavailable,
 } from "./availability";
+import { jevReviewBrief } from "./jev";
 import { type BriefLessons, builderPrompt, NO_LESSONS, reviewerPrompt } from "./prompts";
 import { revertPrompt } from "./prompts-revert";
 import { FACTORY_STARTER, isFactorySession } from "./starter";
@@ -385,7 +386,9 @@ export class FactorySessions {
       title: `Review: ${item.title}`.slice(0, 200),
       issue: item.issue ?? undefined,
       workspace,
-      input: brief(text ?? reviewerPrompt(item, vision, note, localBase, autoMerge, lessons)),
+      input: brief(
+        `${text ?? reviewerPrompt(item, vision, note, localBase, autoMerge, lessons)}\n\n${jevReviewBrief(item)}`,
+      ),
     });
   }
 

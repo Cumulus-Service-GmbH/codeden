@@ -125,6 +125,7 @@ export interface FactoryServiceDeps {
   notify: (draft: NoticeDraft, wake?: boolean) => void;
   settings: SettingsStore;
   exec: Exec;
+  reviewDataDir: string;
   github: FactoryGithub;
   /** The utility model, for the "Identify type" step (keywords decide without it). */
   complete?: (job: string, system: string, prompt: string) => Promise<string | null>;
@@ -213,6 +214,7 @@ export class FactoryService {
       notify: deps.notify,
       settings: deps.settings,
       exec: deps.exec,
+      reviewDataDir: deps.reviewDataDir,
       complete: deps.complete ?? (async () => null),
       archiveSessions: (ids) => this.archiver.push(ids),
       slots: new SlotBoard(),

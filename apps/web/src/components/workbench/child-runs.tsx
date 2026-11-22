@@ -6,6 +6,7 @@ import { useClient } from "@/lib/api";
 import { useFactoryStatus } from "@/lib/factory";
 import { ago, duration } from "@/lib/format";
 import { cn } from "@/lib/utils";
+import { JevStatus } from "./jev-status";
 
 const statusText: Record<ChildRun["status"], string> = {
   running: "Running",
@@ -65,7 +66,7 @@ export function ChildRuns({ session }: { session: Session }) {
       <p className="text-3xs text-destructive">Workers could not be listed: {String(runs.error)}</p>
     );
   }
-  if (!round && !arbitration && !list.length && skipped === 0) return null;
+  if (!round && !arbitration && !review?.jev && !list.length && skipped === 0) return null;
   return (
     <section aria-labelledby="child-runs-heading" className="space-y-2">
       <h3
@@ -80,6 +81,7 @@ export function ChildRuns({ session }: { session: Session }) {
           {round > 2 && <span className="ml-2 text-status-waiting">Past two review rounds</span>}
         </p>
       )}
+      {review?.jev && <JevStatus receipt={review.jev} />}
       {arbitration && (
         <div className="space-y-1 text-[13px]">
           <p>
@@ -90,7 +92,7 @@ export function ChildRuns({ session }: { session: Session }) {
                 running: "Running",
                 ruling: "Waiting for reviewer confirmation",
                 confirming: "Reviewer confirming",
-                jev_pending: "Jev pending",
+                jev_pending: "Reviewer confirmed",
                 blocked: "Owner decision",
               }[arbitration.state]
             }

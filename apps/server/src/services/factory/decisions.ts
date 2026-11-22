@@ -16,6 +16,7 @@ import { confirmArbiter } from "./arbiter";
 import { sessionsToArchive } from "./cleanup";
 import type { FactoryContext } from "./context";
 import { announceType } from "./intake";
+import { jevWriterResponse, submitJevReview } from "./jev";
 import type { KeptLessons } from "./lessons";
 import { closeInboxFor } from "./merge";
 import { ownedPr } from "./pr-status";
@@ -111,6 +112,8 @@ export async function setType(
     reviewSpec: undefined,
     reviewRounds: undefined,
     arbitration: undefined,
+    jev: undefined,
+    jevReviewHead: undefined,
     specApproval: null,
     note: null,
   }));
@@ -164,6 +167,8 @@ export function retry(
     reviewSpec: undefined,
     reviewRounds: undefined,
     arbitration: undefined,
+    jev: undefined,
+    jevReviewHead: undefined,
     specApproval: null,
     attempts: 0,
     // A retry is a call to spend more: the per-item cap counts afresh (its cost still shows all).
@@ -263,7 +268,17 @@ export function submitReview(
   if (verdict.verdict === "approve" && verdict.security.concerns.length > 0) {
     throw badRequest(APPROVE_WITH_CONCERNS, "approve_with_concerns");
   }
-  if (confirmArbiter(ctx, item, verdict)) {
+  const lowPolicy = ctx.projects.get(item.projectId).factoryLimits.lowFindings;
+  const settled = applyReviewFindingPolicy(verdict, item.reviewSpec, lowPolicy);
+  if (item.jevReviewHead) {
+    const recorded = submitJevReview(ctx, item, settled);
+    return {
+      recorded,
+      item,
+      message: recorded ? "Response recorded. Jev pending." : "Jev response refused for this head.",
+    };
+  }
+  if (confirmArbiter(ctx, item, settled)) {
     return { recorded: true, item, message: "Confirmation recorded. Jev pending." };
   }
   if (item.arbitration) {
@@ -273,8 +288,6 @@ export function submitReview(
       message: "This review is waiting on arbitration or an owner decision.",
     };
   }
-  const lowPolicy = ctx.projects.get(item.projectId).factoryLimits.lowFindings;
-  const settled = applyReviewFindingPolicy(verdict, item.reviewSpec, lowPolicy);
   return { ...settleVerdict(ctx, item, settled), item };
 }
 
@@ -335,7 +348,7 @@ function settleVerdict(
   const at = ctx.now().toISOString();
   ctx.store.updateItem(item.id, (i) => {
     const { rereview_sent: _s, reviewer: _r, ...rest } = withoutStrikes(i.nudges);
-    const keep = recheck && verdict.verdict === "approve" && i.review;
+    const keep = recheck && verdict.verdict === "approve" ? i.review : null;
     const nudges = keep ? approveRecheck(rest, at) : withoutRecheck(rest);
     // The head it covers: the one the reviewer was asked about, never a newer one that came
     // while it worked (`approval.ts`); a re-check's approval, the head it re-checked. Only that
@@ -349,10 +362,13 @@ function settleVerdict(
     ];
     return {
       ...i,
-      review: keep ? i.review : verdict,
+      review: keep ? { ...keep, jevEvidence: verdict.jevEvidence } : verdict,
       reviewRounds:
         covers && !prior.some((round) => round.head === covers)
-          ? [...prior, { head: covers, dispositions }]
+          ? [
+              ...prior,
+              { head: covers, dispositions, verdict, writerResponse: jevWriterResponse(ctx, i) },
+            ]
           : prior,
       nudges: withVerdictHead(nudges, covers, at),
     };
