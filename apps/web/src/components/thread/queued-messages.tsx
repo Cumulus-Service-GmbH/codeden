@@ -4,6 +4,7 @@ import { FileText, ListOrdered, Pencil, SendHorizontal, Trash2 } from "lucide-re
 import { useMemo, useState } from "react";
 import { toast } from "sonner";
 import { ImageGallery, ImageThumbnail } from "@/components/common/image-viewer";
+import { priorityDeliveryKey } from "@/components/composer/priority-delivery";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useClient } from "@/lib/api";
@@ -81,9 +82,10 @@ function QueuedRow({
     onError,
   });
   const sendNow = useMutation({
+    mutationKey: priorityDeliveryKey(session.id),
     mutationFn: () => client.queue.sendNow(session.id, message.id),
-    onSuccess: () => {
-      toast("Sent to the running turn");
+    onSuccess: ({ status }) => {
+      if (status === "steered") toast("Sent to the running turn");
       void refresh();
     },
     onError,

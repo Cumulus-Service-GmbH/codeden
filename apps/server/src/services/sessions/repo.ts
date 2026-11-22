@@ -126,6 +126,23 @@ export class SessionRepo {
     private readonly store: EventStore,
   ) {}
 
+  /** Wake a priority delivery when the runner may have reached a tool boundary. */
+  onPriorityBoundary(id: string, wake: () => void): () => void {
+    return this.store.subscribe((events) => {
+      if (
+        events.some(
+          (event) =>
+            event.type === "runner.disconnected" ||
+            (event.sessionId === id &&
+              (event.type === "agent.item.completed" ||
+                event.type.startsWith("agent.turn.") ||
+                event.type === "session.updated")),
+        )
+      )
+        wake();
+    });
+  }
+
   find(
     id: string,
   ): { session: Session; usage: Usage | null; startMeta: StoredStartMeta | null } | undefined {

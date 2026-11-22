@@ -179,7 +179,7 @@ export class ReplayProvider implements ProviderAdapter {
 
   /** The recorded provider's capabilities, minus steering (replay can't inject input). */
   capabilities(): ProviderCapabilities {
-    return { ...this.fixture.capabilities, steer: false };
+    return { ...this.fixture.capabilities, steer: false, interruptToolCall: false };
   }
 
   models(): ModelInfo[] {

@@ -79,6 +79,20 @@ export function GeneralSettings() {
           />
         </SettingRow>
         <SettingRow
+          label="Priority message wait (minutes)"
+          help="After this wait, a priority message can cancel a simple shell wait on a provider that supports stopping individual calls."
+        >
+          <NumberField
+            min={1}
+            max={60}
+            aria-label="Priority message wait (minutes)"
+            value={settings.priorityInterruptMinutes}
+            onChange={(priorityInterruptMinutes) => update({ priorityInterruptMinutes })}
+            wrapperClassName="w-20"
+            className="h-8 text-xs"
+          />
+        </SettingRow>
+        <SettingRow
           label="Pass on pull request feedback"
           help="In sessions you start, tells the agent when its pull request's checks fail, a reviewer requests changes or it has merge conflicts. Once per commit, up to three times per pull request. The project manager follows up on work it started."
         >

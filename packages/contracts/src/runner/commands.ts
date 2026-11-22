@@ -37,10 +37,14 @@ export const DiffFileStat = z.object({
 });
 export type DiffFileStat = z.infer<typeof DiffFileStat>;
 
+/** The exact call a pending priority message has been waiting on. */
+const PriorityShellCall = z.object({ threadId: Id, turnId: Id, itemId: Id, rootTurnId: Id });
+
 /**
  * Commands the server sends to a runner (§4.3), discriminated on `name`.
  * Each has a matching result schema in `RunnerCommandResults`.
  */
+
 export const RunnerCommand = z.discriminatedUnion("name", [
   /** Report sessions, terminals and journal state. */
   z.object({ name: z.literal("runner.status") }),
@@ -197,7 +201,17 @@ export const RunnerCommand = z.discriminatedUnion("name", [
   /** Start a new turn. */
   z.object({ name: z.literal("session.send"), sessionId: Id, input: UserInput }),
   /** Inject input into the running turn (requires `capabilities.steer`). */
-  z.object({ name: z.literal("session.steer"), sessionId: Id, input: UserInput }),
+  z.object({
+    name: z.literal("session.steer"),
+    sessionId: Id,
+    input: UserInput,
+    /** Ask the runner to defer steering until active shell calls finish. */
+    waitForShell: z.literal(true).optional(),
+    /** Once waiting, guard against steering a different root turn. */
+    expectedTurnId: Id.optional(),
+    /** After the wait deadline, allow cancellation of only this eligible call. */
+    interrupt: PriorityShellCall.optional(),
+  }),
   z.object({ name: z.literal("session.interrupt"), sessionId: Id }),
   /**
    * Compact the conversation now, as a turn of its own (`capabilities.compact`): the provider
@@ -460,7 +474,10 @@ export const RunnerCommandResults = {
   }),
   "session.start": z.object({ resumeToken: z.string().nullable() }),
   "session.send": Empty,
-  "session.steer": Empty,
+  "session.steer": z.object({
+    /** Shell call holding delivery, if the runner did not steer. */
+    waitingFor: PriorityShellCall.optional(),
+  }),
   "session.interrupt": Empty,
   "session.compact": Empty,
   "session.respond": Empty,

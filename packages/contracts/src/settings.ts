@@ -106,6 +106,8 @@ export const Settings = z.object({
     })
     .prefault({}),
   schemaVersion: z.literal(1).default(1),
+  /** Minutes a priority message waits before an eligible shell call can be cancelled. */
+  priorityInterruptMinutes: z.int().min(1).max(60).default(2),
   /**
    * Agent sessions starting, running a turn or waiting on the user, across all projects.
    * Additional sessions queue oldest first. PM and orchestrator sessions are exempt within

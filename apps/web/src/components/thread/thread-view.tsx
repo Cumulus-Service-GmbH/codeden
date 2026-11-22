@@ -5,6 +5,7 @@ import { Sparkles } from "lucide-react";
 import { useMemo } from "react";
 import { EmptyState } from "@/components/common/bits";
 import { SessionComposer } from "@/components/composer/composer";
+import { PriorityDeliveryStatus } from "@/components/composer/priority-delivery";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useClient } from "@/lib/api";
@@ -185,6 +186,7 @@ export function ThreadView({
         <>
           {followups && !running && <FollowupChips sessionId={sessionId} suggestions={followups} />}
           <QueuedMessages session={session} running={running} />
+          <PriorityDeliveryStatus sessionId={session.id} transcript={transcript} />
           <SessionComposer session={session} running={running} checking={checking} />
         </>
       )}

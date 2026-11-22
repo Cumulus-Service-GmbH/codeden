@@ -300,6 +300,11 @@ describe("autonomy changes on a running session (§11.2)", () => {
     });
     // Older runners leave it out: the UI then treats changes as applying from the next turn.
     expect(ProviderCapabilities.parse(caps).liveAutonomy).toBeUndefined();
+    expect(ProviderCapabilities.parse(caps).interruptToolCall).toBeUndefined();
+    expect(
+      ProviderCapabilities.parse(JSON.parse(JSON.stringify({ ...caps, interruptToolCall: true })))
+        .interruptToolCall,
+    ).toBe(true);
     expect(ProviderCapabilities.parse({ ...caps, modelListAtStart: true })).toEqual({
       ...caps,
       modelListAtStart: true,

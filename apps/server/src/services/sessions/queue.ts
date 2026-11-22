@@ -6,6 +6,7 @@ import {
 } from "@codeden/contracts";
 import { badRequest, conflict, notFound } from "../errors";
 import { isFactorySession } from "../factory/starter";
+import { runnerErrorCode } from "../runner-port";
 import type { SessionAdmission } from "./admission";
 import { type ArtifactLookup, clientInput } from "./client-items";
 import type { Outbox } from "./outbox";
@@ -86,8 +87,10 @@ export class QueueService {
         if (!this.deps.outbox.count(sessionId)) admission?.dequeue(sessionId);
         return { status: "steered" };
       } catch (error) {
+        if (runnerErrorCode(error) === "priority_cancelled") throw error;
         this.deps.outbox.restore(message);
         void this.deps.sessions.flushOutbox(sessionId).catch(() => undefined);
+        if (runnerErrorCode(error) === "no_turn") return { status: "queued" };
         throw error;
       }
     } finally {

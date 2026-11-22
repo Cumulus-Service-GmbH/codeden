@@ -81,6 +81,8 @@ const toolCallBase = {
   kind: z.literal("tool_call"),
   /** Provider-native tool name, e.g. `Bash`, `apply_patch`, `mcp__codeden__finish`. */
   toolName: z.string(),
+  /** The provider ran a shell command even if this item is displayed as a read or search. */
+  shell: z.literal(true).optional(),
   /** Short human title, e.g. `Run pnpm test`. */
   title: z.string().optional(),
   /** Raw tool input as JSON. */
@@ -153,6 +155,11 @@ export const ToolCallItem = z.discriminatedUnion("toolKind", [
   z.object({ ...toolCallBase, toolKind: z.literal("other") }),
 ]);
 export type ToolCallItem = z.infer<typeof ToolCallItem>;
+
+/** Whether a tool runs in the shell, independently of how it is displayed. */
+export function isShellCall(item: Item): boolean {
+  return item.kind === "tool_call" && (item.toolKind === "command" || item.shell === true);
+}
 
 /** A proposed plan (markdown), e.g. from plan mode. */
 export const PlanItem = z.object({

@@ -58,6 +58,7 @@ import {
   securityRulesUnenforced,
   supervisedUnsupported,
 } from "./permissions";
+import { deliverPriority } from "./priority-delivery";
 import type { Answerer, QuestionBroker } from "./questions";
 import { applyPendingConfig, updateSession } from "./reconfigure";
 import { emptyStartMeta, type SessionRepo, type StoredStartMeta } from "./repo";
@@ -129,6 +130,10 @@ export class SessionService {
    * second turn.
    */
   private readonly delivering = new Set<string>();
+  private readonly priorityWaits = new Map<
+    string,
+    { controller: AbortController; pending: number }
+  >();
 
   constructor(private readonly deps: SessionServiceDeps) {
     this.holds = new OutboxHolds({
@@ -523,7 +528,12 @@ export class SessionService {
         try {
           await this.steer(id, req.input);
         } catch (error) {
-          if (req.whenBusy === "steer" && runnerErrorCode(error) !== "compacting") throw error;
+          if (runnerErrorCode(error) === "priority_cancelled") throw error;
+          if (
+            req.whenBusy === "steer" &&
+            !["compacting", "no_turn"].includes(runnerErrorCode(error) ?? "")
+          )
+            throw error;
           const queued = this.enqueue(id, req.input, from);
           this.flushIfSettled(id);
           return queued;
@@ -578,20 +588,44 @@ export class SessionService {
   async steer(id: string, raw: UserInput): Promise<void> {
     const session = this.deps.repo.get(id);
     if (!BUSY.has(session.status)) throw conflict("No turn is running", "no_turn");
-    if (!this.provider(session.provider, id)?.capabilities.steer) {
+    const capabilities = this.provider(session.provider, id)?.capabilities;
+    if (!capabilities?.steer) {
       throw conflict("This provider cannot steer a running turn", "unsupported");
     }
     if (compactionRunning(this.deps.repo, session)) throw compactingRefusal();
     const input = this.forRunner(session, raw);
-    await this.runnerOf(id)
-      .request({ name: "session.steer", sessionId: id, input })
-      .catch((e) => {
-        throw toServiceError(e);
-      });
+    const delay = capabilities.interruptToolCall
+      ? this.deps.settings.get().priorityInterruptMinutes * 60_000
+      : undefined;
+    const wait = this.priorityWaits.get(id) ?? { controller: new AbortController(), pending: 0 };
+    wait.pending++;
+    this.priorityWaits.set(id, wait);
+    try {
+      await deliverPriority(
+        (attempt) =>
+          this.runnerOf(id).request({
+            name: "session.steer",
+            sessionId: id,
+            input,
+            waitForShell: true,
+            ...attempt,
+          }),
+        (wake) => this.deps.repo.onPriorityBoundary(id, wake),
+        delay,
+        wait.controller.signal,
+      );
+    } catch (error) {
+      throw toServiceError(error);
+    } finally {
+      // Keep Stop wired to all concurrent priority requests for this session.
+      if (--wait.pending === 0 && this.priorityWaits.get(id) === wait)
+        this.priorityWaits.delete(id);
+    }
   }
 
   async interrupt(id: string): Promise<void> {
     const session = this.deps.repo.get(id);
+    this.cancelPriorityWaits(id);
     this.deps.outbox.clear(id);
     if (session.status !== "queued") this.deps.admission?.dequeue(id);
     // Between turns, Stop ends the session's check run: no turn is running to interrupt.
@@ -668,6 +702,7 @@ export class SessionService {
    */
   async stop(id: string, opts: { confirm?: boolean } = {}): Promise<Session> {
     const session = this.deps.repo.get(id);
+    this.cancelPriorityWaits(id);
     this.deps.outbox.clear(id);
     this.deps.admission?.dequeue(id);
     this.holds.release(id);
@@ -806,6 +841,12 @@ export class SessionService {
       this.deps.admission?.dequeue(id);
     }
     return mine.length;
+  }
+
+  private cancelPriorityWaits(id: string): void {
+    const wait = this.priorityWaits.get(id);
+    this.priorityWaits.delete(id);
+    wait?.controller.abort(conflict("Priority message delivery was stopped", "priority_cancelled"));
   }
 
   // ---------------------------------------------------------------- internals
