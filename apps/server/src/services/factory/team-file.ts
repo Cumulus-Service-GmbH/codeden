@@ -221,7 +221,23 @@ export function createTeamFileRefresher(deps: TeamFileDeps) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT")
         deps.log?.(`Team files in ${dir} not listed: ${message(error)}`);
     }
-    for (const name of names) invalidate(name.slice(0, -".json".length), why);
+    for (const name of names) pendingLeftovers.set(name.slice(0, -".json".length), why);
+    checkLeftovers();
+  };
+  // Leftover files whose session couldn't be checked: a confirmed session's file is invalidated (and
+  // retried); a name that is no session is left alone; one that still can't be looked up waits.
+  const pendingLeftovers = new Map<string, string>();
+  const checkLeftovers = () => {
+    for (const [id, why] of [...pendingLeftovers]) {
+      let known: boolean;
+      try {
+        known = deps.session(id) !== undefined;
+      } catch {
+        continue;
+      }
+      pendingLeftovers.delete(id);
+      if (known) invalidate(id, why);
+    }
   };
   const refresh = (session: Session | undefined, sessionId: string) => {
     try {
@@ -250,6 +266,7 @@ export function createTeamFileRefresher(deps: TeamFileDeps) {
     }
   };
   const run = (events: readonly RawEventEnvelope[], initial: boolean) => {
+    checkLeftovers();
     const { all, projects, sessions } = teamFileChanges(events);
     const targets = new Map<string, Session | undefined>();
     for (const id of [...failed, ...sessions]) {

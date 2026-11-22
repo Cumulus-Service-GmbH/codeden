@@ -408,7 +408,7 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
       };
     },
     async listChildRuns() {
-      return delay({ runs: [], skipped: 0 }, 50);
+      return delay({ runs: [], skipped: 0, available: true }, 50);
     },
     async unarchiveSession(sessionId) {
       world.updateSession(sessionId, { archivedAt: null });

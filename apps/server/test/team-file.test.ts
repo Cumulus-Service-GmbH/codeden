@@ -170,6 +170,7 @@ it("keeps live sessions' files current, retries failures and repairs files at st
   flaky([event("inbox.updated", {})]);
   expect(read(path).team).toHaveLength(3);
   // A listing failure at start removes the files it cannot check; each is rewritten, current, as soon as it can be.
+  writeFileSync(teamFilePath(join(dir, "home"), "notasession2"), "{}");
   let listing = false;
   const unlisted = createTeamFileRefresher({
     ...deps(),
@@ -180,6 +181,8 @@ it("keeps live sessions' files current, retries failures and repairs files at st
   });
   expect(existsSync(path)).toBe(false);
   projectTeams.set(id, []);
+  // A name that is no session is left alone even when the listing fails.
+  expect(existsSync(teamFilePath(join(dir, "home"), "notasession2"))).toBe(true);
   unlisted([event("factory.loop.updated", { loop: { projectId: id } })]);
   expect(read(path).sources).toEqual({ writer: "session", planReviewer: "default" });
   listing = true;

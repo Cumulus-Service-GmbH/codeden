@@ -260,17 +260,24 @@ describe("buildStartRequest", () => {
     expect(buildStartRequest("p1", input, resolved, "   ")).not.toHaveProperty("workKey");
   });
 
-  it("sends the Team role and Saver, and leaves the pins to the Team unless a provider was picked", () => {
-    const team = resolveDraftChoice(
+  it("sends the Team role and Saver, runs a role as its Team member unless a provider was picked", () => {
+    const team = [
+      { role: "browserTester" as const, provider: "plain" as const, model: "only", effort: null },
+    ];
+    const asTeam = resolveDraftChoice(
       choice({ teamRole: "browserTester", tokenSaver: "ultra" }),
-      defaults(),
+      defaults({ team }),
     );
-    expect(buildStartRequest("p1", input, team, "")).toEqual({
+    // The composer shows and checks the member's provider, and the start carries its pins.
+    expect(asTeam.provider?.id).toBe("plain");
+    expect(buildStartRequest("p1", input, asTeam, "")).toEqual({
       projectId: "p1",
       input,
       autonomy: "auto",
       teamRole: "browserTester",
       tokenSaver: "ultra",
+      provider: "plain",
+      model: "only",
     });
     const picked = resolveDraftChoice(
       pickModel(choice({ teamRole: "browserTester" }), {
@@ -278,7 +285,7 @@ describe("buildStartRequest", () => {
         model: "big",
         effort: null,
       }),
-      defaults(),
+      defaults({ team }),
     );
     expect(buildStartRequest("p1", input, picked, "")).toMatchObject({
       teamRole: "browserTester",

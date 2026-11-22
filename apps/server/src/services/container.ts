@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { messageFrom, type Session } from "@codeden/contracts";
+import { defaultTeam, messageFrom, type Session } from "@codeden/contracts";
 import { createImageEngineRegistry, type ImageEngineRegistry } from "@codeden/providers";
 import type { Db } from "../db/client";
 import type { EventStore } from "../events/store";
@@ -263,7 +263,7 @@ export function createServices(opts: ServicesOptions): AppServices {
   const teamFiles: TeamFileDeps = {
     home: opts.paths.home,
     worktreesDir: opts.paths.worktrees,
-    defaults: () => opts.settings.get().teamSetup.team,
+    defaults: () => defaultTeam(opts.settings.get()),
     projectTeam: (projectId) => factory.data.loop(projectId)?.tuning.team ?? [],
     project: (projectId) => projects.get(projectId),
     session: (sessionId) => sessionRepo.find(sessionId)?.session,

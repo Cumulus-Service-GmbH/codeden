@@ -35,7 +35,9 @@ async function start(
         data: { loop: () => ({ tuning: { team: opts.project ?? [], resultSummaryBytes: null } }) },
         ctx: { sessions: { models: () => [] } },
       },
-      settings: { get: () => Settings.parse({ teamSetup: { team: opts.defaults ?? [] } }) },
+      settings: {
+        get: () => Settings.parse({ teamSetup: { remembered: true, team: opts.defaults ?? [] } }),
+      },
       sessionRepo,
       sessions: {
         start: async (req: StartSessionRequest) => {

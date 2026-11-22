@@ -131,7 +131,17 @@ describe("PM Chrome confirmation cards", () => {
       const services = {
         db: database.db,
         projects: { get: () => ({ kind: "local", archivedAt: null }) },
-        factory: { isUnattended: () => false, data: { loop: () => undefined } },
+        factory: {
+          isUnattended: () => false,
+          // The project's Team sets the Browser Operator: a tagged PM start needs it.
+          data: {
+            loop: () => ({
+              tuning: {
+                team: [{ role: "browserOperator", provider: "claude", model: null, effort: null }],
+              },
+            }),
+          },
+        },
         settings: { get: () => Settings.parse({}) },
         sessionRepo,
         questions,

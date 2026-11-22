@@ -360,3 +360,13 @@ export type SettingsPatch = DeepPartial<Settings>;
 export function defaultSettings(): Settings {
   return Settings.parse({});
 }
+
+/**
+ * The default Team every project's Team falls back to, role by role: the Team setup when it is
+ * set to be used for new projects (`remembered`); otherwise none.
+ */
+export function defaultTeam(settings: {
+  teamSetup: Pick<Settings["teamSetup"], "remembered" | "team">;
+}): Settings["teamSetup"]["team"] {
+  return settings.teamSetup.remembered ? settings.teamSetup.team : [];
+}

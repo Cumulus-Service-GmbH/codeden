@@ -1,4 +1,4 @@
-import type { Team } from "@codeden/contracts";
+import { Settings, type Team } from "@codeden/contracts";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { startSession } from "../src/mcp/tools/pm/sessions";
 import type { AppServices } from "../src/services/container";
@@ -28,6 +28,7 @@ function start(
     services: {
       factory: env.factory,
       projects: { get: () => env.project },
+      settings: { get: () => Settings.parse({}) },
       sessions: { start: launch },
     } as unknown as AppServices,
     role: "pm",
@@ -38,7 +39,7 @@ function start(
   });
 }
 
-it("fills Team pins and preserves free choices for unpinned, untagged and empty teams", async () => {
+it("fills Team pins, keeps free choices for unpinned and untagged starts, refuses an unset tagged role", async () => {
   setTeam([member]);
   await start();
   expect(launch.mock.lastCall?.[0]).toMatchObject({
@@ -56,9 +57,9 @@ it("fills Team pins and preserves free choices for unpinned, untagged and empty 
   setTeam([member]);
   await start({ title: "Counter" });
   expect(launch.mock.lastCall?.[0]).not.toHaveProperty("provider");
+  // A tagged role the resolved Team does not set is refused, as the guard refuses it.
   setTeam([]);
-  await start();
-  expect(launch.mock.lastCall?.[0]).not.toHaveProperty("provider");
+  await expect(start()).rejects.toThrow("TEAM_ROLE_UNSET");
 });
 
 it.each([
