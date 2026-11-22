@@ -35,6 +35,7 @@ const STARTS_SPACELESS = new RegExp(`^[${SPACELESS}]`, "u");
  * written without spaces (a pause there is not a word break), a single space otherwise.
  */
 export function separator(before: string, after: string): string {
+  // Test the last code point with ^ because a $-anchored u-flag class misses trailing astral characters on V8 14.6 (Node 26).
   const last = Array.from(before.slice(-2)).at(-1) ?? "";
   return STARTS_SPACELESS.test(last) && STARTS_SPACELESS.test(after) ? "" : " ";
 }
