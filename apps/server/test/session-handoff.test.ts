@@ -35,6 +35,7 @@ const capabilities = (
   reasoningEffort: true,
   mcp: true,
   skills: true,
+  enforcesSecurityRules: true,
   readOnly: true,
   ...patch,
 });

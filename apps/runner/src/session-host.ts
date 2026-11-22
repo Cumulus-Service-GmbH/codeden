@@ -100,6 +100,17 @@ export class SessionHost {
           (available.length > 0 ? ` (available: ${available.join(", ")})` : ""),
       );
     }
+    // Fail closed: a provider the machine's security rules don't cover (it doesn't declare
+    // `enforcesSecurityRules`) runs only where the session's project allowed such providers.
+    if (
+      adapter.capabilities().enforcesSecurityRules !== true &&
+      !cmd.options.allowUnenforcedProviders
+    ) {
+      throw new CommandError(
+        "security_rules_unenforced",
+        `${adapter.displayName} isn't covered by this machine's security rules, and this session's project doesn't allow such providers`,
+      );
+    }
     // A folder that isn't there (a host path sent to a sandbox, a removed worktree) is named as
     // such instead of failing later as a provider's `spawn ENOENT`.
     if (!existsSync(cmd.options.cwd)) throw cwdMissing(cmd.options.cwd);

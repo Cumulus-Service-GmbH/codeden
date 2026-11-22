@@ -42,6 +42,8 @@ const capabilities: ProviderCapabilities = {
   skills: false,
   liveAutonomy: true,
   readOnly: true,
+  // Its sessions run under the machine's security rules (the guard or execpolicy).
+  enforcesSecurityRules: true,
   compact: true,
   // Scripted: it needs no sign-in, so a sandbox's runner can host it (`credentialFree`).
   credentialFree: true,

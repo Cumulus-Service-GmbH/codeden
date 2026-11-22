@@ -10,6 +10,7 @@ import {
 } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { McpTokenStore } from "../src/mcp/tokens";
+import { updateProject } from "../src/mcp/tools/orchestrator/projects";
 import type { ProjectService } from "../src/services/projects/project-service";
 import type { RunnerPort } from "../src/services/runner-port";
 import { SessionLauncher } from "../src/services/sessions/launcher";
@@ -38,14 +39,31 @@ const capabilities = (
 
 /** A provider the machine's security rules don't cover, and that can't enforce Supervised. */
 const PROVIDERS: ProviderInfo[] = [
-  { id: "claude", displayName: "Claude Code", capabilities: capabilities(), models: [] },
+  {
+    id: "claude",
+    displayName: "Claude Code",
+    capabilities: capabilities({ enforcesSecurityRules: true }),
+    models: [],
+  },
   {
     id: "loose",
     displayName: "Loose CLI",
-    capabilities: capabilities({ supervised: false, enforcesSecurityRules: false }),
+    capabilities: capabilities({
+      readOnly: false,
+      supervised: false,
+      enforcesSecurityRules: false,
+    }),
+    models: [],
+  },
+  // Declares nothing about the security rules: absent counts as not enforced.
+  {
+    id: "silent",
+    displayName: "Silent CLI",
+    capabilities: capabilities({ readOnly: true }),
     models: [],
   },
 ];
+const starts: Command[] = [];
 
 type Command = RunnerCommandOf<RunnerCommandName>;
 let env: GithubEnv;
@@ -54,6 +72,7 @@ let allowed: boolean;
 beforeEach(() => {
   env = createGithubEnv();
   allowed = false;
+  starts.length = 0;
 });
 afterEach(() => env.close());
 
@@ -67,7 +86,10 @@ const runner = {
     if (command.name === "workspace.prepare") {
       return { cwd: command.path ?? env.dir, branch: command.branch ?? null, created: true };
     }
-    if (command.name === "session.start") return { resumeToken: `${command.providerId}-new` };
+    if (command.name === "session.start") {
+      starts.push(command);
+      return { resumeToken: `${command.providerId}-new` };
+    }
     if (command.name === "checkpoint.list") return { checkpoints: [] };
     return {};
   }) as RunnerPort["request"],
@@ -125,15 +147,45 @@ describe("a provider the machine's security rules don't cover", () => {
   it("is refused at start in a project that hasn't allowed it, for every role", async () => {
     const sessions = services();
     expect(await code(() => sessions.start(request()))).toBe("security_rules_unenforced");
-    expect(await code(() => sessions.start(request({ role: "pm" })))).toBe(
+    expect(await code(() => sessions.start(request({ provider: "silent", role: "pm" })))).toBe(
       "security_rules_unenforced",
     );
   });
 
-  it("starts only once the project allows providers without enforced security rules", async () => {
+  it("counts a provider that declares nothing about the rules as not covered (fail closed)", async () => {
+    expect(await code(() => services().start(request({ provider: "silent" })))).toBe(
+      "security_rules_unenforced",
+    );
+  });
+
+  it("starts only once the project allows such providers, and the runner is told so", async () => {
     allowed = true;
-    const started = await services().start(request());
+    const sessions = services();
+    const started = await sessions.start(request());
     expect(started.status).toBe("started");
+    await Promise.all(sessions.launching.values());
+    const start = starts.find((c) => c.name === "session.start") as
+      | RunnerCommandOf<"session.start">
+      | undefined;
+    expect(start?.options.allowUnenforcedProviders).toBe(true);
+  });
+
+  it("never lets the orchestrator take a project's exception", async () => {
+    allowed = true;
+    expect(
+      await code(() =>
+        services().start(
+          request({ provider: "silent", role: "orchestrator", workspace: { mode: "repo_root" } }),
+        ),
+      ),
+    ).toBe("security_rules_unenforced");
+  });
+
+  it("can't run a PM when it can't enforce read-only, even where it is allowed", async () => {
+    allowed = true;
+    expect(await code(() => services().start(request({ role: "pm" })))).toBe(
+      "read_only_unsupported",
+    );
   });
 
   it("is refused as a handoff target in a project that hasn't allowed it", async () => {
@@ -176,5 +228,15 @@ describe("a provider that can't enforce Supervised", () => {
     expect(await code(() => sessions.update(started.sessionId, { autonomy: "supervised" }))).toBe(
       "supervised_unsupported",
     );
+  });
+});
+
+describe("who can allow providers without enforced security rules", () => {
+  it("only the user's own project settings: the orchestrator's update_project can't set it", () => {
+    const parsed = updateProject.input.parse({
+      projectId: "11111111-1111-4111-8111-111111111111",
+      allowUnenforcedProviders: true,
+    });
+    expect(parsed).not.toHaveProperty("allowUnenforcedProviders");
   });
 });

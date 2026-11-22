@@ -54,7 +54,8 @@ export const ProviderCapabilities = z.object({
   /**
    * The machine's security rules (the guard on Claude Code sessions, Codex's execpolicy) are
    * enforced for this provider. False: they aren't, so a project refuses it, every role, unless
-   * the project allows such providers (`Project.allowUnenforcedProviders`). Absent means enforced.
+   * the project allows such providers (`Project.allowUnenforcedProviders`). Absent means NOT
+   * enforced (fail closed): only a provider whose sessions run under those rules declares true.
    */
   enforcesSecurityRules: z.boolean().optional(),
   /**

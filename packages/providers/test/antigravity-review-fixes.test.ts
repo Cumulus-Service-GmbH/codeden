@@ -139,6 +139,78 @@ describe("the Antigravity CLI after the provider review", () => {
     expect(sets().filter((s) => s.startsWith("model="))).toEqual([]);
   });
 
+  it("treats a fixed-level model as at its effort even when the CLI lists no thought_level", async () => {
+    const session = new AcpSession(options(), { executable: fakeAgy, spec: ANTIGRAVITY_AGENT });
+    const inner = session as unknown as {
+      setup: AcpSessionSetup;
+      applyEffort: (rpc: unknown, id: string, effort: string, strict: boolean) => Promise<boolean>;
+    };
+    inner.setup = {
+      configOptions: [
+        {
+          id: "model",
+          name: "Model",
+          category: "model",
+          type: "select",
+          currentValue: "gpt-oss-120b-medium",
+          options: [{ value: "gpt-oss-120b-medium", name: "GPT-OSS" }],
+        },
+      ],
+      models: { availableModels: [{ modelId: "gpt-oss-120b-medium", name: "GPT-OSS" }] },
+    } as AcpSessionSetup;
+    await expect(inner.applyEffort({}, "x", "high", true)).resolves.toBe(true);
+  });
+
+  it("switches when the CLI's live model differs, even back to the model it opened with", async () => {
+    const session = new AcpSession(options(), { executable: fakeAgy, spec: ANTIGRAVITY_AGENT });
+    const requests: string[] = [];
+    const rpc = {
+      request: async (method: string, params: { configId?: string; value?: string }) => {
+        requests.push(`${method}:${params.configId}=${params.value}`);
+        return null;
+      },
+    };
+    const inner = session as unknown as {
+      setup: AcpSessionSetup;
+      acpSession: string;
+      openedModel: string | undefined;
+      nextModel: string | null | undefined;
+      applyModelChange: (rpc: unknown) => Promise<void>;
+    };
+    // The CLI opened on Neon, then an update moved it to Argon on its own.
+    inner.openedModel = "gemini-4-neon";
+    inner.acpSession = "x";
+    inner.setup = {
+      configOptions: [
+        {
+          id: "model",
+          name: "Model",
+          category: "model",
+          type: "select",
+          currentValue: "gemini-4-argon",
+          options: [
+            { value: "gemini-4-neon", name: "Neon" },
+            { value: "gemini-4-argon", name: "Argon" },
+          ],
+        },
+      ],
+    };
+    inner.nextModel = "gemini-4-neon";
+    await inner.applyModelChange(rpc);
+    expect(requests).toContain("session/set_config_option:model=gemini-4-neon");
+  });
+
+  it("keeps the picker on fresh snapshots: a resumed session's saved setup isn't one", async () => {
+    const adapter = new AntigravityAdapter({ executable: fakeAgy });
+    const resumed = await adapter.openSession(options({ resumeToken: "saved-session" }));
+    sessions.push(resumed);
+    // session/load succeeded: its saved setup leaves the picker on Default.
+    expect(adapter.models().map((m) => m.id)).toEqual(["default"]);
+    const fresh = await adapter.openSession(options({ sessionId: "s2" }));
+    sessions.push(fresh);
+    expect(adapter.models().map((m) => m.id)).toContain("gemini-4-neon");
+  });
+
   it("sends no level for a model that runs at one fixed level", async () => {
     const adapter = new AntigravityAdapter({ executable: fakeAgy });
     const session = await adapter.openSession(

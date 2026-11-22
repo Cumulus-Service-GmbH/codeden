@@ -1,4 +1,4 @@
-import type { ProviderInfo } from "@codeden/contracts";
+import type { ProviderInfo, Session } from "@codeden/contracts";
 import { screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 import { PermissionsField } from "@/components/automations/permissions-field";
@@ -8,6 +8,7 @@ import {
   UNENFORCED_REASON,
 } from "@/components/composer/model-picker/logic";
 import { levelUnavailableReason, supportsSupervised } from "@/components/thread/autonomy";
+import { handoffTargetProblem } from "@/components/thread/handoff-dialog";
 import { renderWithClient } from "./utils";
 
 const provider = (patch: Partial<ProviderInfo["capabilities"]>): ProviderInfo => ({
@@ -75,10 +76,28 @@ describe("a provider the machine's security rules don't cover", () => {
     expect(tab?.kind === "provider" && tab.availability.ready).toBe(false);
   });
 
-  it("is available once the project allows it, and other providers are never refused", () => {
+  it("is available once the project allows it; only a covered provider is never refused", () => {
     expect(projectRefusal(loose, { allowUnenforcedProviders: true })).toBeNull();
-    expect(projectRefusal(provider({}), { allowUnenforcedProviders: false })).toBeNull();
-    // No project known (yet): refused all the same, fail closed.
+    const covered = provider({ enforcesSecurityRules: true });
+    expect(projectRefusal(covered, { allowUnenforcedProviders: false })).toBeNull();
+    // A provider that declares nothing counts as not covered (fail closed).
+    expect(projectRefusal(provider({}), { allowUnenforcedProviders: false })?.reason).toBe(
+      UNENFORCED_REASON,
+    );
+    // A session without a project (the orchestrator): refused all the same.
     expect(projectRefusal(loose, null)?.ready).toBe(false);
+    // No project in view at all (a global default): nothing to refuse yet.
+    expect(projectRefusal(loose, undefined)).toBeNull();
+  });
+});
+
+describe("a handoff from a Supervised session", () => {
+  it("says the target can't enforce Supervised, and a project refusal says how to allow it", () => {
+    const session = { autonomy: "supervised", planMode: false } as Session;
+    expect(handoffTargetProblem(session, loose)).toContain("can't enforce Supervised");
+    const refusal = projectRefusal(loose, { allowUnenforcedProviders: false }) ?? undefined;
+    expect(handoffTargetProblem(session, loose, refusal)).toContain(
+      "Allow providers without enforced security rules",
+    );
   });
 });

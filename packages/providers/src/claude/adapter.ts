@@ -44,6 +44,8 @@ const capabilities: ProviderCapabilities = {
   // CodeDen's policy gates every tool call, so a change applies from the next one.
   liveAutonomy: true,
   readOnly: true,
+  // Its sessions run under the machine's security rules (the guard or execpolicy).
+  enforcesSecurityRules: true,
   compact: true,
   // `system/init` and `mcpServerStatus()` report each server's state.
   mcpStatus: true,

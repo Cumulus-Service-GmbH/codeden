@@ -133,6 +133,8 @@ export interface AcpAgentSpec {
       listed: readonly string[],
       setup: AcpSessionSetup,
     ) => string | undefined;
+    /** The session's current model runs at one fixed level: there is no effort to set. */
+    fixed?: (setup: AcpSessionSetup) => boolean;
   };
   extensions?: AcpExtensions;
   /**
@@ -148,13 +150,14 @@ export interface AcpSessionConfig {
   spec: AcpAgentSpec;
   /**
    * The agent reported its session setup (models, modes): for the adapter's model list.
-   * `source`: `session` for `session/new`'s whole snapshot, `update` for the options a
+   * `source`: `session` for `session/new`'s whole snapshot, `load` for a resumed session's saved
+   * setup, `update` for the options a
    * `config_option_update` sent.
    */
   onSetup?: (
     setup: AcpSessionSetup,
     info: AcpInitializeResult,
-    source: "session" | "update",
+    source: "session" | "load" | "update",
   ) => void;
   /** The agent answered `initialize` (its capabilities), reported the moment it arrives. */
   onInfo?: (info: AcpInitializeResult) => void;

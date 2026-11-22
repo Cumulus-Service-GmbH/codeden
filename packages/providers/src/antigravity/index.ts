@@ -21,6 +21,7 @@ export {
 export {
   antigravityModelInfos,
   fallbackAntigravityModels,
+  isFixedLevelModel,
   modelThoughtLevel,
   thoughtLevel,
 } from "./models";

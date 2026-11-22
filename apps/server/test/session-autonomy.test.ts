@@ -233,6 +233,7 @@ describe("readOnlyUnsupported", () => {
     reasoningEffort: true,
     mcp: true,
     skills: false,
+    enforcesSecurityRules: true,
   };
   const provider = (readOnly?: boolean): ProviderInfo => ({
     id: "other",

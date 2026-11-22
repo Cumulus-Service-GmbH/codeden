@@ -21,7 +21,12 @@ import {
   detectAntigravity,
   isSupportedAntigravityVersion,
 } from "./detect";
-import { antigravityModelInfos, fallbackAntigravityModels, modelThoughtLevel } from "./models";
+import {
+  antigravityModelInfos,
+  fallbackAntigravityModels,
+  isFixedLevelModel,
+  modelThoughtLevel,
+} from "./models";
 import { ANTIGRAVITY_ACP_ARGS, type AntigravityProbe, probeAntigravity } from "./probe";
 
 export const ANTIGRAVITY_PROVIDER_ID = "antigravity";
@@ -42,7 +47,7 @@ export const ANTIGRAVITY_AGENT: AcpAgentSpec = {
   refusesReadOnly: true,
   refusesSupervised: true,
   unenforcedSecurityRules: true,
-  effort: { category: "thought_level", value: modelThoughtLevel },
+  effort: { category: "thought_level", value: modelThoughtLevel, fixed: isFixedLevelModel },
 };
 
 /**

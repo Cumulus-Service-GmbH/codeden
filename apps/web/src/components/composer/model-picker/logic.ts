@@ -437,15 +437,16 @@ export const UNENFORCED_REASON = "Not allowed in this project";
 
 /**
  * Why `project` refuses `provider`, or null: a provider without enforced security rules
- * (`capabilities.enforcesSecurityRules` false) runs only in a project that allows such
- * providers. Read from the capabilities, never the provider id.
+ * (`capabilities.enforcesSecurityRules` not true; absent counts as not enforced) runs only in a
+ * project that allows such providers. Without a project in view (`undefined`, a global
+ * default) nothing is refused. Read from the capabilities, never the provider id.
  */
 export function projectRefusal(
   provider: ProviderInfo,
   project: ProjectRule | null | undefined,
 ): Availability | null {
-  if (provider.capabilities.enforcesSecurityRules !== false) return null;
-  if (project?.allowUnenforcedProviders) return null;
+  if (provider.capabilities.enforcesSecurityRules === true) return null;
+  if (project === undefined || project?.allowUnenforcedProviders) return null;
   return {
     ready: false,
     reason: UNENFORCED_REASON,

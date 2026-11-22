@@ -39,17 +39,26 @@ export function modelThoughtLevel(
   setup: AcpSessionSetup,
 ): string | undefined {
   const model = findOption(setup.configOptions, "model")?.currentValue;
-  const variants = (setup.models?.availableModels ?? []).map((m) => m?.modelId);
+  const variants = modelVariants(setup);
   if (typeof model !== "string") return thoughtLevel(effort, listed);
   const own = listed.filter((l) => variants.includes(`${model}-${l}`));
-  if (own.length) return thoughtLevel(effort, own);
-  // A model listed on its own, at no level (`gpt-oss-120b-medium`), runs at its one fixed level:
-  // nothing is sent, so the session keeps the level it has.
-  if (variants.includes(model)) {
-    const current = findOption(setup.configOptions, "thought_level")?.currentValue;
-    return typeof current === "string" ? current : undefined;
-  }
-  return thoughtLevel(effort, listed);
+  return thoughtLevel(effort, own.length ? own : listed);
+}
+
+/**
+ * The session's current model runs at one fixed level: it is listed on its own, at no level
+ * (`gpt-oss-120b-medium`), with no `<model>-<level>` variants. No effort is sent for it, with or
+ * without a `thought_level` option.
+ */
+export function isFixedLevelModel(setup: AcpSessionSetup): boolean {
+  const model = findOption(setup.configOptions, "model")?.currentValue;
+  if (typeof model !== "string") return false;
+  const variants = modelVariants(setup);
+  return variants.includes(model) && !variants.some((v) => v?.startsWith(`${model}-`));
+}
+
+function modelVariants(setup: AcpSessionSetup): (string | undefined)[] {
+  return (setup.models?.availableModels ?? []).map((m) => m?.modelId);
 }
 
 export function thoughtLevel(

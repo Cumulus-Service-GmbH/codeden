@@ -44,6 +44,7 @@ const fake = {
     reasoningEffort: false,
     mcp: true,
     skills: false,
+    enforcesSecurityRules: true,
   },
 } as unknown as ProviderInfo;
 

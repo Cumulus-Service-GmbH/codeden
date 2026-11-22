@@ -12,8 +12,10 @@ import {
   type ModelChoice,
   projectRefusal,
   providerAvailability,
+  UNENFORCED_REASON,
 } from "@/components/composer/model-picker/logic";
 import { ModelPicker } from "@/components/composer/model-picker/model-picker";
+import { supportsSupervised } from "@/components/thread/autonomy";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -71,7 +73,13 @@ export function handoffTargetProblem(
 ) {
   if (!target) return null;
   if (availability && !availability.ready) {
+    // A project's refusal isn't a setup problem: its own detail says how to allow it.
+    if (availability.reason === UNENFORCED_REASON && availability.detail)
+      return availability.detail;
     return `${target.displayName} can't start sessions: ${lowerFirst(availability.reason ?? "Not ready")}.`;
+  }
+  if (session.autonomy === "supervised" && !supportsSupervised(target)) {
+    return `${target.displayName} can't enforce Supervised. Change this session's permissions first.`;
   }
   if (session.autonomy === "read_only" && !target.capabilities.readOnly) {
     return `${target.displayName} can't run read-only sessions. Change this session's permissions first.`;
@@ -196,7 +204,7 @@ function HandoffForm({
             {problem}
           </p>
         )}
-        {target && !blocked && !availability.ready && (
+        {target && !blocked && !availability.ready && availability.reason !== UNENFORCED_REASON && (
           <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
             <span>
               {availability.command ? (

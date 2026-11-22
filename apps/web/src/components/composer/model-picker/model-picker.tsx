@@ -151,7 +151,9 @@ export function ModelPicker({
       : undefined;
 
   const searching = query.trim().length > 0;
-  const searchable = openTabs.map((t) => t.provider);
+  // A provider the project refuses isn't offered in search or Favourites either.
+  const refused = (p: ProviderInfo) => projectRefusal(p, project) !== null;
+  const searchable = openTabs.map((t) => t.provider).filter((p) => !refused(p));
   // Hidden models are left out everywhere unless selected, or revealed on a provider tab.
   const listFor = (q: string, t: PickerTab | undefined, reveal: boolean) =>
     visibleRows(
@@ -212,6 +214,7 @@ export function ModelPicker({
   };
 
   const pick = (row: ModelRow) => {
+    if (refused(row.provider)) return;
     const current = shown ?? { provider: row.provider.id, model: null, effort: null };
     const next = chooseModel(current, row.provider, row.model);
     // Picking the checked row keeps "the default" as the default rather than pinning it.

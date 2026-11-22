@@ -49,6 +49,8 @@ const capabilities: ProviderCapabilities = {
   // Approval and sandbox policy are per turn (`turn/start` overrides): changes wait for it.
   liveAutonomy: false,
   readOnly: true,
+  // Its sessions run under the machine's security rules (the guard or execpolicy).
+  enforcesSecurityRules: true,
   // The Codex apps list every thread in the user's Codex home as their recents (`./history`).
   vendorHistory: true,
   // `thread/compact/start` runs a compaction turn on the thread.

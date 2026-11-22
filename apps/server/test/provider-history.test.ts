@@ -32,6 +32,7 @@ const CAPS: ProviderCapabilities = {
   reasoningEffort: true,
   mcp: true,
   skills: true,
+  enforcesSecurityRules: true,
   vendorHistory: true,
 };
 

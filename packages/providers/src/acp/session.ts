@@ -350,7 +350,9 @@ export class AcpSession implements ProviderSession {
     if (!opened.resumed) this.instructions = this.opts.systemPrompt?.trim() || undefined;
     this.setup = opened.setup;
     this.mode = currentMode(opened.setup);
-    notify(() => this.config.onSetup?.(opened.setup, this.info, "session"));
+    // A resumed session's setup is its saved one, not a fresh `session/new` snapshot.
+    const source = opened.resumed ? "load" : "session";
+    notify(() => this.config.onSetup?.(opened.setup, this.info, source));
     await this.applyMode();
     // The agent's own model, put back when the session is switched to Default.
     this.openedModel = modelsOf(opened.setup)?.current;
@@ -403,8 +405,9 @@ export class AcpSession implements ProviderSession {
     // Back to Default from a model CodeDen chose: the agent's own model from the start returns.
     const clearing = next !== undefined && !model && !!this.model;
     const target = clearing ? this.openedModel : model;
-    // The model the agent runs now: a pick of that same model is no switch.
-    const running = this.model ?? this.openedModel;
+    // The model the agent runs now (its live options first): a pick of that same model is no
+    // switch.
+    const running = modelsOf(this.setup)?.current ?? this.model ?? this.openedModel;
     const switching = !!target && target !== running;
     if (clearing && !target) {
       // The agent never said which model it started on, so there is none to go back to: it
@@ -462,7 +465,7 @@ export class AcpSession implements ProviderSession {
     strict = false,
   ): Promise<boolean> {
     const spec = this.config.spec.effort;
-    if (!spec) return true;
+    if (!spec || spec.fixed?.(this.setup)) return true;
     const own = this.agentEffort;
     if (!effort && own === undefined) return true;
     const option = findOption(this.setup.configOptions, spec.category);

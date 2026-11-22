@@ -97,3 +97,40 @@ describe("session.start", () => {
     });
   });
 });
+
+describe("session.start on a provider the machine's security rules don't cover", () => {
+  /** The Fake provider, declaring nothing about the rules (absent counts as not covered). */
+  function uncovered() {
+    const inner = new FakeProvider();
+    const opened: SessionOptions[] = [];
+    const { enforcesSecurityRules: _drop, ...caps } = inner.capabilities();
+    const adapter: ProviderAdapter = {
+      id: inner.id,
+      displayName: inner.displayName,
+      detect: () => inner.detect(),
+      capabilities: () => caps,
+      models: () => inner.models(),
+      openSession: async (opts) => {
+        opened.push(opts);
+        return inner.openSession(opts);
+      },
+    };
+    return { adapter, opened };
+  }
+
+  it("refuses it (fail closed) unless the session's project allows such providers", async () => {
+    const { adapter, opened } = uncovered();
+    host = new SessionHost(new ProviderRegistry([adapter]), () => {});
+    await expect(
+      host.start({ name: "session.start", sessionId: "s1", providerId: "fake", options }),
+    ).rejects.toMatchObject({ code: "security_rules_unenforced" });
+    expect(opened).toHaveLength(0);
+    await host.start({
+      name: "session.start",
+      sessionId: "s2",
+      providerId: "fake",
+      options: { ...options, sessionId: "s2", allowUnenforcedProviders: true },
+    });
+    expect(opened).toHaveLength(1);
+  });
+});
