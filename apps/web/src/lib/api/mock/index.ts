@@ -15,6 +15,7 @@ import { mockExportSession } from "./export-session";
 import { mockFactoryApi } from "./factory";
 import { startFactoryDemo } from "./factory-demo";
 import { mockFeatureApis } from "./feature-apis";
+import { CHECKLIST_CARD_PREFIX, closedChecklistCard, decideChecklist } from "./fixtures/checklists";
 import { makeSession } from "./fixtures/helpers";
 import { setupChecks } from "./fixtures/ops";
 import { mockInboxBulkApi } from "./inbox-bulk";
@@ -418,6 +419,17 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
     },
 
     async resolveInbox(itemId, resolution) {
+      // A checklist owner card lives on its checklist's pending proposal, not in the inbox list.
+      if (itemId.startsWith(CHECKLIST_CARD_PREFIX)) {
+        const status = resolution.status === "dismissed" ? "dismissed" : "resolved";
+        const now = new Date().toISOString();
+        const before = world.snapshot.checklists?.find((c) => c.pending?.inboxItemId === itemId);
+        if (before) {
+          const checklist = decideChecklist(before, status, now);
+          world.emitDomain({ type: "checklist.updated", sessionId: null, payload: { checklist } });
+        }
+        return closedChecklistCard(itemId, before, status, now);
+      }
       const item = world.snapshot.inbox.find((i) => i.id === itemId);
       if (!item) throw new Error("Inbox item not found");
       const now = new Date().toISOString();
@@ -445,6 +457,15 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
         );
       }
       return client.resolveInbox(itemId, { status: "resolved", note: "retry" });
+    },
+    async setChecklistEnforce(projectId, enforce) {
+      const before = world.snapshot.checklists?.find((c) => c.projectId === projectId);
+      if (!before) throw new ApiRequestError(404, "checklist_not_found", "No checklist");
+      if (before.state !== "approved")
+        throw new ApiRequestError(409, "checklist_not_approved", "Approve the checklist first");
+      const checklist = { ...before, enforce };
+      world.emitDomain({ type: "checklist.updated", sessionId: null, payload: { checklist } });
+      return checklist;
     },
     ...mockInboxBulkApi(world),
     ...mockProjectApi(world),

@@ -124,7 +124,6 @@ describe("CodeDen MCP endpoint", () => {
       "cancel_queued_run",
       "message_orchestrator",
       "read_project_notes",
-      "read_checklist",
       "update_project_notes",
       "list_automations",
       "run_automation",

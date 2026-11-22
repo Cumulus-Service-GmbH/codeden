@@ -1,6 +1,9 @@
 import {
   CODEDEN_VERSION,
+  type InboxItem,
+  inboxKindVisible,
   type RawEventEnvelope,
+  SnapshotQuery,
   UI_PROTOCOL_VERSION,
   UiClientMessage,
   type UiServerMessage,
@@ -13,6 +16,11 @@ import type { RunnersStatus } from "../runner/hub";
 import { type ArtifactLookup, clientEvent } from "../services/sessions/client-items";
 import { coalesceEvents } from "./coalesce";
 import { collectDirty, type Dirty, emptyDirty, isDirty, loadTranscript } from "./transcript";
+
+export const WsCapabilitiesQuery = SnapshotQuery.refine(
+  ({ capabilities }) => capabilities === undefined || capabilities.split(",").length <= 32,
+  { path: ["capabilities"], message: "Expected at most 32 capabilities" },
+);
 
 /** Clients further behind than this must reload the snapshot instead of replaying. */
 const MAX_CATCH_UP = 50_000;
@@ -33,6 +41,7 @@ interface Client {
   lastSent: number | undefined;
   sessionIds: Set<string> | undefined;
   agentEvents: boolean;
+  capabilities: readonly string[];
   pending: RawEventEnvelope[];
   watches: Map<string, Watch>;
   timer: NodeJS.Timeout | undefined;
@@ -76,7 +85,7 @@ export class WsHub {
   }
 
   /** Handlers for `upgradeWebSocket`. */
-  handlers(): WSEvents {
+  handlers(connectionCapabilities: readonly string[] = []): WSEvents {
     let client: Client | undefined;
     return {
       onOpen: (_event, ws) => {
@@ -85,6 +94,7 @@ export class WsHub {
           lastSent: undefined,
           sessionIds: undefined,
           agentEvents: true,
+          capabilities: [],
           pending: [],
           watches: new Map(),
           timer: undefined,
@@ -117,7 +127,9 @@ export class WsHub {
             client.pending = [];
             break;
           case "subscribe":
-            this.subscribe(client, msg.fromSeq, msg.sessionIds, msg.agentEvents);
+            this.subscribe(client, msg.fromSeq, msg.sessionIds, msg.agentEvents, [
+              ...new Set([...connectionCapabilities, ...(msg.capabilities ?? [])]),
+            ]);
             break;
           case "watch_session":
             this.watch(client, msg.sessionId, msg.fromSeq, msg.threadIds);
@@ -159,6 +171,7 @@ export class WsHub {
     fromSeq: number,
     sessionIds: string[] | undefined,
     agentEvents: boolean,
+    capabilities: readonly string[],
   ): void {
     const head = this.store.headSeq();
     client.pending = [];
@@ -172,6 +185,7 @@ export class WsHub {
     }
     client.sessionIds = sessionIds ? new Set(sessionIds) : undefined;
     client.agentEvents = agentEvents;
+    client.capabilities = capabilities;
     let cursor = fromSeq;
     for (;;) {
       const batch = this.store.listAfter(cursor, BATCH, sessionIds);
@@ -209,6 +223,10 @@ export class WsHub {
 
   private visible(client: Client, e: RawEventEnvelope): boolean {
     if (!client.agentEvents && e.type.startsWith("agent.")) return false;
+    if (e.type === "inbox.created" || e.type === "inbox.updated") {
+      const { item } = e.payload as { item: InboxItem };
+      if (!inboxKindVisible(item.kind, client.capabilities)) return false;
+    }
     const filter = client.sessionIds;
     return !filter || e.sessionId === null || filter.has(e.sessionId);
   }

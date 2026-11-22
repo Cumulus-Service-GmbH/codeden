@@ -16,6 +16,7 @@ import { browserMouse } from "./browser-mouse";
 import { browserScreenshot } from "./browser-screenshot";
 import { browserSelect } from "./browser-select";
 import { browserUpload } from "./browser-upload";
+import { readChecklist, updateChecklistItem } from "./checklist";
 import { factoryTools } from "./factory";
 import { finish } from "./finish";
 import { generateImage } from "./generate-image";
@@ -30,6 +31,8 @@ import { wakeupTools } from "./wakeups";
 /** Every CodeDen tool, in the order agents see them. Add new tools here (one file each). */
 export const allTools: AnyServerTool[] = [
   reportProgress,
+  readChecklist,
+  updateChecklistItem,
   askUser,
   shareToChat,
   suggestFollowups,

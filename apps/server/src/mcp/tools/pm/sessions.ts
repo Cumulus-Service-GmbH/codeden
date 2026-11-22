@@ -1,4 +1,5 @@
 import {
+  ChecklistItem,
   ConflictDecision,
   defaultTeam,
   messageFrom,
@@ -14,6 +15,7 @@ import {
   WorkKey,
 } from "@codeden/contracts";
 import { z } from "zod";
+import { sameChecklistPurpose } from "../../../services/checklist/checklist-service";
 import { applyTeamRole } from "../../../services/factory/team-role";
 import { defineTool, ToolError } from "../../define";
 import { currentTurn } from "../../transcript";
@@ -68,6 +70,9 @@ export const startSession = defineTool({
         "The brief for the agent: goal, context, acceptance criteria, and the decisions you already made (defaults, scope, whether to open a pull request), so the agent doesn't have to ask",
       ),
     purpose: z.string().trim().min(1).max(300),
+    checklistItemId: ChecklistItem.shape.id
+      .optional()
+      .describe("The approved checklist item for this work, when applicable"),
     workKey: WorkKey.optional(),
     scope: z
       .object({ paths: z.array(z.string()).optional(), area: z.string().optional() })
@@ -147,56 +152,124 @@ export const startSession = defineTool({
       input: { text: input.prompt, from: "pm" },
       conflict: input.conflict,
     });
-    const result = await services.sessions.start(req, {
-      // Pins the PM gave are this session's own; ones CodeDen filled from the Team are not.
-      ...((input.provider && input.provider !== "auto") || input.model
-        ? { ownTeamPins: true }
-        : {}),
-      confirmChrome: async () => {
-        if (!sessionId || services.factory.isUnattended(sessionId)) return false;
-        const approve = "Allow Chrome";
-        const outcome = await services.questions.ask(
-          sessionId,
-          currentTurn(services, sessionId),
-          {
-            header: "Start with Claude in Chrome?",
-            question: `Allow this session to connect to your browser? ${req.title?.replace(/\s+/g, " ")}`,
-            options: [{ label: approve }, { label: "Cancel" }],
-            allowFreeText: false,
-            multiSelect: false,
-          },
-          signal,
-          { waitOnly: true },
-        );
-        return (
-          !signal.aborted &&
-          outcome.status === "answered" &&
-          outcome.by === "user" &&
-          outcome.answers.q1?.length === 1 &&
-          outcome.answers.q1[0] === approve
-        );
-      },
-    });
-    switch (result.status) {
-      case "started":
-        return { status: "started", sessionId: result.sessionId };
-      case "queued":
-        return { status: "queued", sessionId: result.sessionId, behind: result.behind };
-      case "skipped":
-        return { status: "skipped", message: "Nothing was started." };
-      case "joined":
-        return {
-          status: "joined",
-          sessionId: result.sessionId,
-          message: "Sent to the existing session.",
-        };
-      case "conflict":
-        return {
-          status: "conflict",
-          message:
-            "Matching work is already running or queued; nothing was started. Choose a resolution yourself and call start_session again with it: wait (queue behind it), skip (it is the same work), join with sessionId (it adds to that work) or force with a reason. Then say in one line what you chose.",
-          existing: result.existing.map(compactWork),
-        };
+    const checklist = services.checklist?.get(projectId);
+    if (checklist?.pending?.plan && !checklist.plan) {
+      throw new ToolError("The reviewed plan is awaiting owner approval.");
+    }
+    const enforcing = checklist?.state === "approved" && checklist.enforce;
+    const itemId = input.checklistItemId;
+    const item = checklist?.items.find((entry) => entry.id === itemId);
+    const known = item !== undefined;
+    if (enforcing && !known) {
+      if (itemId) throw new ToolError(`Unknown approved checklistItemId: ${itemId}.`);
+      if (checklist.plan)
+        throw new ToolError("Work outside the pinned plan requires a reviewed revision.");
+      const expansionId = services.checklist.expansionForStart(
+        projectId,
+        project.name,
+        input.purpose,
+      );
+      return {
+        status: "approval_required",
+        message: `Not in the approved plan: an expansion card is waiting for the owner. Once approved, start again with checklistItemId ${expansionId}.`,
+      };
+    }
+    if (enforcing && item?.status === "done") {
+      throw new ToolError(
+        `Checklist item ${item.id} is done; ask the orchestrator for an expansion card.`,
+      );
+    }
+    if (
+      enforcing &&
+      item?.startPurpose !== undefined &&
+      !sameChecklistPurpose(item.startPurpose, input.purpose)
+    ) {
+      throw new ToolError(
+        `Checklist item ${item.id} was approved for "${item.startPurpose}". Use the same purpose to start this item.`,
+      );
+    }
+    const releaseLink =
+      enforcing && item ? services.checklist.reserveLink(projectId, item) : undefined;
+    if (enforcing && item && !releaseLink) {
+      throw new ToolError(`Checklist item ${item.id} already has 200 active session links.`);
+    }
+    try {
+      const result = await services.sessions.start(req, {
+        // Pins the PM gave are this session's own; ones CodeDen filled from the Team are not.
+        ...((input.provider && input.provider !== "auto") || input.model
+          ? { ownTeamPins: true }
+          : {}),
+        confirmChrome: async () => {
+          if (!sessionId || services.factory.isUnattended(sessionId)) return false;
+          const approve = "Allow Chrome";
+          const outcome = await services.questions.ask(
+            sessionId,
+            currentTurn(services, sessionId),
+            {
+              header: "Start with Claude in Chrome?",
+              question: `Allow this session to connect to your browser? ${req.title?.replace(/\s+/g, " ")}`,
+              options: [{ label: approve }, { label: "Cancel" }],
+              allowFreeText: false,
+              multiSelect: false,
+            },
+            signal,
+            { waitOnly: true },
+          );
+          return (
+            !signal.aborted &&
+            outcome.status === "answered" &&
+            outcome.by === "user" &&
+            outcome.answers.q1?.length === 1 &&
+            outcome.answers.q1[0] === approve
+          );
+        },
+      });
+      let note = itemId && !known ? { note: `Unknown checklistItemId ${itemId} was ignored.` } : {};
+      if (item && (result.status === "started" || result.status === "queued")) {
+        try {
+          const session = services.sessionRepo.find(result.sessionId)?.session;
+          if (!session || !services.checklist.link(projectId, item.id, session)) {
+            const stillListed = services.checklist
+              .get(projectId)
+              ?.items.some(({ id }) => id === item.id);
+            note = {
+              note: stillListed
+                ? `${result.status}, but the session could not be linked to item ${item.id}`
+                : `${result.status}, but item ${item.id} is no longer in the approved plan: not linked`,
+            };
+          }
+        } catch (error) {
+          console.error(`[codeden] Checklist link failed for session ${result.sessionId}`, error);
+          const message = error instanceof Error ? error.message : String(error);
+          const status = result.status === "queued" ? "Queued" : "Started";
+          note = { note: `${status}, but linking checklist item ${item.id} failed: ${message}` };
+        }
+      }
+      switch (result.status) {
+        case "started":
+          return { status: "started", sessionId: result.sessionId, ...note };
+        case "queued":
+          return { status: "queued", sessionId: result.sessionId, behind: result.behind, ...note };
+        case "skipped":
+          return { status: "skipped", message: "Nothing was started.", ...note };
+        case "joined":
+          return {
+            status: "joined",
+            sessionId: result.sessionId,
+            message: "Sent to the existing session.",
+            ...note,
+          };
+        case "conflict":
+          return {
+            status: "conflict",
+            message:
+              "Matching work is already running or queued; nothing was started. Choose a resolution yourself and call start_session again with it: wait (queue behind it), skip (it is the same work), join with sessionId (it adds to that work) or force with a reason. Then say in one line what you chose.",
+            existing: result.existing.map(compactWork),
+            ...note,
+          };
+      }
+    } finally {
+      releaseLink?.();
     }
   },
 });

@@ -2,7 +2,7 @@ import { z } from "zod";
 import { ProjectChecklist } from "./checklist";
 import { ErrorInfo, Id, Timestamp } from "./common";
 import { Automation } from "./entities/automation";
-import { InboxItem } from "./entities/inbox";
+import { InboxItem, type InboxItemKind } from "./entities/inbox";
 import { Project } from "./entities/project";
 import { ItemRecord, Session, Thread, Turn } from "./entities/session";
 import { RawEventEnvelope } from "./events";
@@ -47,7 +47,7 @@ export const Snapshot = z.object({
   generatedAt: Timestamp,
   settings: Settings,
   projects: z.array(Project),
-  checklists: z.array(ProjectChecklist).default([]),
+  checklists: z.array(ProjectChecklist).optional(),
   /**
    * Every session that isn't archived, plus the recently archived ones
    * (`SNAPSHOT_ARCHIVED_SESSIONS_DAYS`, at most `SNAPSHOT_ARCHIVED_SESSIONS_MAX`), oldest first.
@@ -102,12 +102,21 @@ export type SessionSnapshot = z.infer<typeof SessionSnapshot>;
 
 // ---------------------------------------------------------------- client -> server
 
+export const CLIENT_CAPABILITIES = ["inbox.checklist_approval"] as const;
+export const ClientCapability = z.enum(CLIENT_CAPABILITIES);
+
+/** Whether a client can receive an inbox item of this kind. */
+export function inboxKindVisible(kind: InboxItemKind, capabilities: readonly string[]): boolean {
+  return kind !== "checklist_approval" || capabilities.includes("inbox.checklist_approval");
+}
+
 export const ClientSubscribe = z.object({
   type: z.literal("subscribe"),
   /** Deliver events with `seq > fromSeq`. */
   fromSeq: z.int().nonnegative(),
   /** Restrict to these sessions (plus global events); omitted means everything. */
   sessionIds: z.array(Id).optional(),
+  capabilities: z.array(z.string().max(64)).max(32).optional(),
 });
 
 export const ClientToServerMessage = z.discriminatedUnion("type", [

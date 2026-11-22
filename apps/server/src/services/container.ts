@@ -15,6 +15,7 @@ import { reportedCommands } from "./agent-config/slash-commands";
 import { ArtifactService } from "./artifacts";
 import { AutomationService, type AutomationServiceDeps } from "./automations/automation-service";
 import { BrowserService } from "./browser/browser-service";
+import { ChecklistListener } from "./checklist/checklist-listener";
 import { ChecklistService } from "./checklist/checklist-service";
 import { type Exec, runTool } from "./exec";
 import { type FactoryOptions, FactoryService } from "./factory/factory-service";
@@ -156,6 +157,7 @@ export interface AppServices {
   utility: UtilityService;
   projects: ProjectService;
   checklist: ChecklistService;
+  checklistListener: ChecklistListener;
   /** Re-detects projects' git checkout and GitHub remote (§9): on demand, on start, after turns. */
   redetector: ProjectRedetector;
   sessionRepo: SessionRepo;
@@ -481,6 +483,11 @@ export function createServices(opts: ServicesOptions): AppServices {
     ...opts.unwatchedApprovals,
     log: opts.log,
   });
+  const checklist = new ChecklistService(opts.db, opts.store, inbox, (projectId, message) => {
+    void orchestration
+      .messagePm(projectId, message, { caller: "ui", sessionId: null })
+      .catch((error: unknown) => opts.log?.(`Checklist decision message failed: ${String(error)}`));
+  });
   const services: AppServices = {
     db: opts.db,
     store: opts.store,
@@ -492,7 +499,8 @@ export function createServices(opts: ServicesOptions): AppServices {
     secrets: opts.secrets,
     utility,
     projects,
-    checklist: new ChecklistService(opts.db, opts.store),
+    checklist,
+    checklistListener: new ChecklistListener(opts.store, sessionRepo, checklist),
     redetector,
     sessionRepo,
     admission,
