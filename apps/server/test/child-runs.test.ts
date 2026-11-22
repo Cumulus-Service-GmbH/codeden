@@ -47,3 +47,31 @@ it("reads only a regular file and refuses unsafe session ids", () => {
   expect(() => readChildRuns(runs, "s2")).toThrow();
   expect(() => childRunsFile(runs, "../x")).toThrow(/unsafe/);
 });
+
+it("drops only a partial first line when the log is longer than its 1 MB window", () => {
+  const runs = join(dir, "child-runs");
+  mkdirSync(runs, { recursive: true });
+  // 256-byte report lines with unique ids: 4096 of them fill the window exactly.
+  const report = (i: number) => {
+    const base = JSON.stringify({
+      id: `w${i}`,
+      role: "r",
+      provider: "codex",
+      model: null,
+      effort: null,
+      status: "running",
+      at: "2026-11-22T21:00:00.000Z",
+      detail: "",
+    });
+    return `${base.replace('"detail":""', `"detail":"${"x".repeat(255 - base.length)}"`)}\n`;
+  };
+  const lines = Array.from({ length: 4096 }, (_, i) => report(i)).join("");
+  expect(Buffer.byteLength(lines)).toBe(1024 * 1024);
+  // The window starts exactly at a line start: every line in it is whole.
+  writeFileSync(childRunsFile(runs, "s3"), `${"y".repeat(99)}\n${lines}`);
+  expect(readChildRuns(runs, "s3")).toMatchObject({ skipped: 0 });
+  expect(readChildRuns(runs, "s3").runs).toHaveLength(4096);
+  // The window starts one byte into a line: that line is dropped, nothing else.
+  writeFileSync(childRunsFile(runs, "s4"), `${"y".repeat(99)}\n${lines}z`);
+  expect(readChildRuns(runs, "s4").runs).toHaveLength(4095);
+});

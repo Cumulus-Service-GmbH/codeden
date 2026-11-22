@@ -297,9 +297,13 @@ it("removes leftover files of sessions that are not live at start, and replaces 
   sessions.set(live.id, live);
   const home = join(dir, "home");
   mkdirSync(join(home, "teams"), { recursive: true });
+  sessions.set("ended1", { ...sampleSession, id: "ended1", projectId: id, status: "completed" });
   writeFileSync(teamFilePath(home, "ended1"), "{}");
+  writeFileSync(teamFilePath(home, "notasession"), "{}");
   const refresh = createTeamFileRefresher(deps());
   expect(existsSync(teamFilePath(home, "ended1"))).toBe(false);
+  // A name that is no session (e.g. not CodeDen's) is left alone.
+  expect(existsSync(teamFilePath(home, "notasession"))).toBe(true);
   const path = teamFilePath(home, live.id);
   expect(existsSync(path)).toBe(true);
   chmodSync(path, 0o644);

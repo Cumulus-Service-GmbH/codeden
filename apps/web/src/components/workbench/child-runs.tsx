@@ -1,5 +1,6 @@
 import type { ChildRun, Session } from "@codeden/contracts";
 import { useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
 import { ProviderMark } from "@/components/common/bits";
 import { useClient } from "@/lib/api";
 import { ago, duration } from "@/lib/format";
@@ -22,13 +23,27 @@ const ACTIVE = new Set<Session["status"]>(["starting", "running", "waiting"]);
 /** The worker runs this session's tools started (review and role scripts), newest first. */
 export function ChildRuns({ session }: { session: Session }) {
   const client = useClient();
+  const active = ACTIVE.has(session.status);
   const runs = useQuery({
     queryKey: ["child-runs", session.id],
     queryFn: () => client.listChildRuns(session.id),
-    refetchInterval: ACTIVE.has(session.status) ? 5000 : false,
+    // Poll while the session works or a listed worker still runs.
+    refetchInterval: (query) =>
+      active || query.state.data?.runs.some((run) => run.status === "running") ? 5000 : false,
   });
+  // One more read when the session stops working, so a worker that ended between polls shows it.
+  const { refetch } = runs;
+  useEffect(() => {
+    if (!active) void refetch();
+  }, [active, refetch]);
   const list = runs.data?.runs ?? [];
-  if (!list.length) return null;
+  const skipped = runs.data?.skipped ?? 0;
+  if (runs.isError) {
+    return (
+      <p className="text-3xs text-destructive">Workers could not be listed: {String(runs.error)}</p>
+    );
+  }
+  if (!list.length && skipped === 0) return null;
   return (
     <section aria-labelledby="child-runs-heading" className="space-y-2">
       <h3
@@ -54,8 +69,12 @@ export function ChildRuns({ session }: { session: Session }) {
                 {run.effort ? ` · ${run.effort}` : ""}
               </span>
               <span className="block text-3xs text-muted-foreground/80">
-                {ago(run.startedAt)}
-                {run.endedAt
+                {run.startedAt
+                  ? ago(run.startedAt)
+                  : run.endedAt
+                    ? `ended ${ago(run.endedAt)}`
+                    : ""}
+                {run.startedAt && run.endedAt
                   ? ` · took ${duration(Date.parse(run.endedAt) - Date.parse(run.startedAt))}`
                   : ""}
                 {run.detail ? ` · ${run.detail}` : ""}
@@ -64,9 +83,9 @@ export function ChildRuns({ session }: { session: Session }) {
           </li>
         ))}
       </ul>
-      {runs.data && runs.data.skipped > 0 && (
+      {skipped > 0 && (
         <p className="text-3xs text-muted-foreground/70">
-          {runs.data.skipped} log line{runs.data.skipped === 1 ? "" : "s"} could not be read
+          {skipped} log line{skipped === 1 ? "" : "s"} could not be read
         </p>
       )}
     </section>

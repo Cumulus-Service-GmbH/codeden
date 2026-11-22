@@ -16,6 +16,9 @@ export function childRunsFile(dir: string, sessionId: string): string {
  * link or a special file), and only its last 1 MB; a missing log means no runs.
  */
 export function readChildRuns(dir: string, sessionId: string): ChildRunList {
+  // Without an atomic no-follow open (Windows) the entry can't be bound to what is read: refuse.
+  if (!constants.O_NOFOLLOW)
+    throw new Error("child-run logs can't be read without following links on this platform");
   let fd: number;
   try {
     fd = openSync(
@@ -31,11 +34,14 @@ export function readChildRuns(dir: string, sessionId: string): ChildRunList {
     if (!stat.isFile())
       throw new Error(`child-run log of session ${sessionId} is not a regular file`);
     const length = Math.min(stat.size, MAX_BYTES);
-    const buffer = Buffer.alloc(length);
-    readSync(fd, buffer, 0, length, stat.size - length);
-    const lines = buffer.toString("utf8").split("\n");
-    // A cut log starts mid-line: drop that partial first line.
-    if (stat.size > MAX_BYTES) lines.shift();
+    const start = stat.size - length;
+    // One byte more in front of a cut window tells whether it starts at a line's start.
+    const buffer = Buffer.alloc(length + (start > 0 ? 1 : 0));
+    readSync(fd, buffer, 0, buffer.length, start > 0 ? start - 1 : 0);
+    const text = buffer.toString("utf8");
+    const lines = (start > 0 ? text.slice(1) : text).split("\n");
+    // The window starts mid-line unless the byte before it ends a line: drop that partial first line.
+    if (start > 0 && buffer[0] !== 0x0a) lines.shift();
     return foldChildRuns(lines);
   } finally {
     closeSync(fd);

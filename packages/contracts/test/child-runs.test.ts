@@ -43,3 +43,10 @@ it("folds start and end lines into runs, newest first, and counts bad lines", ()
     ["r1", "succeeded", "2026-11-22T21:02:00.000Z", "CLEAN"],
   ]);
 });
+
+it("leaves the start unknown when only a run's end line was read", () => {
+  const { runs } = foldChildRuns([
+    JSON.stringify({ ...start, status: "failed", detail: "exit 3" }),
+  ]);
+  expect(runs[0]).toMatchObject({ status: "failed", startedAt: null, endedAt: start.at });
+});
