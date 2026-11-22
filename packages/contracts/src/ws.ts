@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { ProjectChecklist } from "./checklist";
 import { ErrorInfo, Id, Timestamp } from "./common";
 import { Automation } from "./entities/automation";
 import { InboxItem } from "./entities/inbox";
@@ -46,6 +47,7 @@ export const Snapshot = z.object({
   generatedAt: Timestamp,
   settings: Settings,
   projects: z.array(Project),
+  checklists: z.array(ProjectChecklist).default([]),
   /**
    * Every session that isn't archived, plus the recently archived ones
    * (`SNAPSHOT_ARCHIVED_SESSIONS_DAYS`, at most `SNAPSHOT_ARCHIVED_SESSIONS_MAX`), oldest first.

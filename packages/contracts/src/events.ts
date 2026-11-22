@@ -13,6 +13,7 @@ import {
   TurnStartedEvent,
   UsageUpdatedEvent,
 } from "./agent-events";
+import { ProjectChecklist } from "./checklist";
 import { Id, Timestamp } from "./common";
 import { Artifact } from "./entities/artifact";
 import { Automation, AutomationRun } from "./entities/automation";
@@ -75,6 +76,7 @@ export const EventEnvelope = z.discriminatedUnion("type", [
   agentEvent("item.completed", ItemCompletedEvent),
   agentEvent("usage.updated", UsageUpdatedEvent),
   // Domain events.
+  globalEvent("checklist.updated", z.object({ checklist: ProjectChecklist })),
   globalEvent("project.created", z.object({ project: Project })),
   globalEvent("project.updated", z.object({ project: Project })),
   globalEvent("project.archived", z.object({ projectId: Id })),

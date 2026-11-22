@@ -15,6 +15,7 @@ import { reportedCommands } from "./agent-config/slash-commands";
 import { ArtifactService } from "./artifacts";
 import { AutomationService, type AutomationServiceDeps } from "./automations/automation-service";
 import { BrowserService } from "./browser/browser-service";
+import { ChecklistService } from "./checklist/checklist-service";
 import { type Exec, runTool } from "./exec";
 import { type FactoryOptions, FactoryService } from "./factory/factory-service";
 import { type FactoryGithub, GithubFactoryPort } from "./factory/github-port";
@@ -150,6 +151,7 @@ export interface AppServices {
   secrets: SecretStore;
   utility: UtilityService;
   projects: ProjectService;
+  checklist: ChecklistService;
   /** Re-detects projects' git checkout and GitHub remote (§9): on demand, on start, after turns. */
   redetector: ProjectRedetector;
   sessionRepo: SessionRepo;
@@ -484,6 +486,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     secrets: opts.secrets,
     utility,
     projects,
+    checklist: new ChecklistService(opts.db, opts.store),
     redetector,
     sessionRepo,
     admission,

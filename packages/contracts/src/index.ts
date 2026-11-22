@@ -13,6 +13,7 @@ export * from "./api";
 export * from "./automations-api";
 export * from "./automations-sharing";
 export * from "./browser-api";
+export * from "./checklist";
 export * from "./checks";
 export * from "./common";
 export * from "./content-security";

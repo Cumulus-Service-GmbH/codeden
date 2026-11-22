@@ -147,6 +147,7 @@ function buildSnapshot(ctx: ApiContext): Snapshot {
     generatedAt: new Date().toISOString(),
     settings: s.settings.get(),
     projects: s.projects.list(),
+    checklists: s.checklist.list(),
     sessions: snapshotSessions(s.db),
     archivedSessionCounts: archivedSessionCounts(s.db),
     inbox: s.inbox.list({ status: "open" }),

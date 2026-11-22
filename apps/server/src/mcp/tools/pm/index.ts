@@ -1,4 +1,6 @@
-import type { AnyServerTool } from "../../define";
+import { z } from "zod";
+import { formatChecklist } from "../../../services/checklist/checklist-service";
+import { type AnyServerTool, defineTool } from "../../define";
 import { createAutomation, updateAutomation } from "./automation-edit";
 import { listAutomations, reportTriage, runAutomation } from "./automations";
 import { createIssue, getIssue, listIssues, triageIssue } from "./github";
@@ -14,6 +16,16 @@ import {
   resumeAutomation,
   skipNextRun,
 } from "./status";
+
+const readChecklist = defineTool({
+  name: "read_checklist",
+  description: "Read your project's checklist and completion.",
+  roles: ["pm"],
+  scope: "project",
+  input: z.strictObject({}),
+  handler: async (_input, { services, projectId }) =>
+    formatChecklist(services.checklist.get(projectId)),
+});
 
 /**
  * Project manager tools (§8.3, §8.4). `ask_user` is shared with agents (`../ask-user`) and
@@ -34,6 +46,7 @@ export const pmTools: AnyServerTool[] = [
   cancelQueuedRun,
   messageOrchestrator,
   readProjectNotes,
+  readChecklist,
   updateProjectNotes,
   listIssues,
   getIssue,

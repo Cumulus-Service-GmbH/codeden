@@ -6,6 +6,7 @@ import {
   automationRuns,
   automations,
   inboxItems,
+  projectChecklists,
   projects,
   sessions,
 } from "../db/schema";
@@ -36,6 +37,16 @@ export { applyDelta } from "./reducer/items";
  */
 export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
   switch (e.type) {
+    case "checklist.updated": {
+      const { checklist } = e.payload;
+      const { projectId, updatedAt } = checklist;
+      const row = { projectId, checklist, updatedAt };
+      tx.insert(projectChecklists)
+        .values(row)
+        .onConflictDoUpdate({ target: projectChecklists.projectId, set: row })
+        .run();
+      return [];
+    }
     case "project.created":
     case "project.updated": {
       const { project } = e.payload;
