@@ -15,6 +15,8 @@ import { failItem } from "./outcomes";
  */
 export const regressionInboxId = (itemId: string) => `inbox:factory-regression:${itemId}`;
 
+export const revertBlockedPausePrefix = (branch: string) => `${branch} is red and the revert`;
+
 /** How the loop's pause reason starts while a regression holds it (then the merge's PR number). */
 export const regressionPausePrefix = (branch: string) => `CI on ${branch} failed after merging #`;
 
@@ -41,7 +43,7 @@ export async function revertBlocked(
   text?: { title: string; body: string },
 ): Promise<FactoryLoop> {
   const branch = baseBranchOf(project);
-  const title = text?.title ?? `${branch} is red and the revert can't merge: ${reason}`;
+  const title = text?.title ?? `${revertBlockedPausePrefix(branch)} can't merge: ${reason}`;
   const next = failItem(ctx, loop, item, title, { kind: "stuck", countsAsFailure: false });
   const merged = revertedName(ctx, item);
   const revert = item.pr ? ` #${item.pr.number}` : "";

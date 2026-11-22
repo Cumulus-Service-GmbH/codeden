@@ -1,6 +1,7 @@
 import { baseBranchOf, budgetSpend, type FactoryContext } from "./context";
-import { budgetExceeded } from "./policy";
-import { regressionPausePrefix } from "./revert-blocked";
+import { budgetExceeded, isBudgetPause } from "./policy";
+import { regressionPausePrefix, revertBlockedPausePrefix } from "./revert-blocked";
+import { revertFailedPausePrefix } from "./revert-watch";
 
 /** A built-in halt an agent cannot clear while its cause still holds. */
 export async function resumeBlocker(
@@ -10,13 +11,10 @@ export async function resumeBlocker(
   const project = ctx.projects.get(projectId);
   const loop = ctx.store.loopOrNew(projectId, ctx.now());
   const reason = loop.pausedReason;
-  if (!reason) return null;
+  if (loop.state !== "paused" || !reason) return null;
 
   let blocked: string | null = null;
-  if (
-    reason.startsWith("daily budget reached") ||
-    reason.startsWith("daily token budget reached")
-  ) {
+  if (isBudgetPause(reason)) {
     blocked = budgetExceeded(
       budgetSpend(ctx, projectId, loop.day, project.factoryLimits),
       project.factoryLimits,
@@ -25,8 +23,8 @@ export async function resumeBlocker(
     const branch = baseBranchOf(project);
     if (
       reason.startsWith(regressionPausePrefix(branch)) ||
-      reason.startsWith(`CI on ${branch} still fails after the automatic `) ||
-      reason.startsWith(`${branch} is red and the revert`)
+      reason.startsWith(revertFailedPausePrefix(branch)) ||
+      reason.startsWith(revertBlockedPausePrefix(branch))
     ) {
       const head = await ctx.github.mainHead(projectId).catch(() => null);
       if (head?.checks !== "success") blocked = reason;

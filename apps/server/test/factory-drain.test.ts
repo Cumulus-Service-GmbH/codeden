@@ -360,6 +360,7 @@ describe("finish current work, then stop (#286)", () => {
     expect(env.factory.loopSummary(env.project.id)).toEqual({
       loopState: "draining",
       drainInFlight: 1,
+      halt: { source: "user", reason: null },
       lastControl: {
         action: "pause",
         by: "user",
@@ -377,7 +378,7 @@ describe("finish current work, then stop (#286)", () => {
       scheduled: [],
       inbox: { open: 0, items: [] },
       recent: [],
-      factory: { loopState: "draining", drainInFlight: 2, lastControl: null },
+      factory: { loopState: "draining", drainInFlight: 2, lastControl: null, halt: null },
     });
     expect(pm).toContain("Factory: draining, 2 items in flight");
     expect(await failure(() => env.factory.setGlobalKillSwitch(true, "drain"))).toBe(

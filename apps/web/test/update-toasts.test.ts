@@ -32,6 +32,14 @@ describe("notifiesFor", () => {
     expect(notifiesFor(inboxItem("b", "run_failed", { notify: "failure" }), n)).toBe(false);
   });
 
+  it("keeps resolved factory history quiet even with factory notifications on", () => {
+    const item = inboxItem("history", "automation_result", {
+      notify: "factory",
+      status: "resolved",
+    });
+    expect(notifiesFor(item, notifications({ factory: true }))).toBe(false);
+  });
+
   it("leaves approvals and questions to the sticky attention toast", () => {
     const n = notifications();
     expect(notifiesFor(inboxItem("a", "approval"), n)).toBe(false);

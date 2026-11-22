@@ -6,7 +6,11 @@ import { ToolError } from "../src/mcp/define";
 import { type ToolCaller, ToolRegistry } from "../src/mcp/registry";
 import { factoryTools } from "../src/mcp/tools/factory";
 import { factoryResume, factoryStop } from "../src/mcp/tools/factory/control";
+import { pauseLoop } from "../src/services/factory/context";
+import { drainInboxId } from "../src/services/factory/drain";
+import { regressionPausePrefix } from "../src/services/factory/revert-blocked";
 import { renderProjectDigest } from "../src/services/orchestration/digest";
+import { deriveNotices } from "../src/services/orchestration/notices";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
 
 let env: FactoryEnv;
@@ -289,6 +293,16 @@ it("attributes PM pauses and orchestrator stops and records one resolved history
       return parsed.type === "inbox.created" && parsed.payload.item.id === id;
     });
     expect(matching).toHaveLength(1);
+    expect(env.inbox.find(id)).toMatchObject({ status: "resolved", resolution: entry });
+    expect(env.inbox.list({ projectId: env.project.id, status: "resolved" })).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id })]),
+    );
+    expect(
+      deriveNotices(matching, {
+        session: (id) => env.repo.find(id)?.session,
+        finalMessage: () => null,
+      }),
+    ).toEqual([]);
     expect(matching[0]).toMatchObject({
       sessionId,
       payload: {
@@ -347,4 +361,235 @@ it("reports and refuses to resume a built-in daily budget halt while it holds", 
     changed: true,
     control: { halt: null },
   });
+});
+
+async function holdTick() {
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const store = env.factory.data;
+  const readOnce = store.readOnce.bind(store);
+  vi.spyOn(store, "readOnce").mockImplementationOnce(async (id, run) => {
+    entered.resolve();
+    await release.promise;
+    return readOnce(id, run);
+  });
+  const held = env.factory.tick(env.project.id);
+  await entered.promise;
+  return { held, release: release.resolve };
+}
+
+it("stops and records history while the project queue is held", async () => {
+  const { held, release } = await holdTick();
+  const halt = vi.spyOn(env.factory.ctx.sessions, "stopAll");
+  const stopping = env.factory.setKillSwitch(env.project.id, true);
+  try {
+    expect(project().killSwitch).toBe(true);
+    expect(loop().lastControl?.action).toBe("stop");
+    expect(env.inbox.list({ projectId: env.project.id, status: "resolved" })).toHaveLength(1);
+    expect(halt).toHaveBeenCalledWith(env.project.id);
+  } finally {
+    release();
+    await Promise.all([held, stopping]);
+  }
+});
+
+it("records stop after a completed pause", async () => {
+  await result("factory_pause", input(), "pm");
+  expect(loop()).toMatchObject({ drain: null, lastControl: { action: "pause" } });
+  expect(await result("factory_stop", input())).toMatchObject({
+    changed: true,
+    control: { state: "stopped", lastControl: { action: "stop", by: "orchestrator" } },
+  });
+});
+
+it("switches non-factory projects without recording project or global controls", async () => {
+  env.updateProject({ autonomyMode: "assisted" });
+  const second = { ...project(), id: "p-second", slug: "second" };
+  env.store.append([{ type: "project.updated", sessionId: null, payload: { project: second } }]);
+  await env.factory.setKillSwitch(second.id, true);
+  expect(env.factory.ctx.projects.get(second.id).killSwitch).toBe(true);
+  expect(env.factory.data.loop(second.id)).toBeUndefined();
+  expect(env.inbox.list({ projectId: second.id, status: "resolved" })).toEqual([]);
+  expect(env.factory.data.loop(env.project.id)).toBeDefined();
+  await env.factory.setGlobalKillSwitch(true);
+  expect(loop().lastControl).toBeNull();
+  expect(env.inbox.list({ projectId: env.project.id, status: "resolved" })).toEqual([]);
+});
+
+it("resets failures and resolves the paused inbox item on a running UI resume", async () => {
+  const paused = pauseLoop(env.factory.ctx, loop(), "3 failed merge checks or reverts in a row");
+  env.factory.data.saveLoop({ ...paused, state: "idle", consecutiveFailures: 3 });
+  await env.factory.resume(env.project.id);
+  expect(loop()).toMatchObject({ state: "idle", consecutiveFailures: 0, lastControl: null });
+  expect(env.inbox.find(`inbox:factory-paused:${env.project.id}`)).toMatchObject({
+    status: "resolved",
+  });
+});
+
+it("resolves an open drain notice when cancelling a drain", async () => {
+  await result("factory_pause", input());
+  const notice = env.inbox.get(drainInboxId(env.project.id));
+  await env.factory.setKillSwitch(env.project.id, false);
+  await startWork();
+  await result("factory_pause", input());
+  env.inbox.put(notice);
+  expect(loop().drain).not.toBeNull();
+  await env.factory.resume(env.project.id);
+  expect(loop().drain).toBeNull();
+  expect(env.inbox.get(notice.id).status).toBe("resolved");
+});
+
+it("keeps a budget halt through stop and killed ticks and refuses to resume while it holds", async () => {
+  await env.factory.setMode(env.project.id, {
+    mode: "software_factory",
+    limits: { ...project().factoryLimits, dailyBudget: { usd: 5 } },
+  });
+  env.spend = { usd: 5, tokens: 0 };
+  await env.factory.tick(env.project.id);
+  const budgetReason = loop().pausedReason;
+  await result("factory_stop", input());
+  await env.factory.tick(env.project.id);
+  expect(loop()).toMatchObject({ state: "paused", pausedReason: budgetReason });
+  expect((await call("factory_resume", input())).text).toContain(
+    "Not resumed: daily budget reached",
+  );
+  expect(project().killSwitch).toBe(true);
+  await env.factory.setKillSwitch(env.project.id, false);
+  expect(loop()).toMatchObject({ state: "paused", pausedReason: budgetReason });
+});
+
+it("refuses a red CI regression and resumes a green one after a kill in one control batch", async () => {
+  const pausedReason = `${regressionPausePrefix("main")}42; waiting for green CI`;
+  env.factory.data.saveLoop({ ...loop(), state: "paused", pausedReason });
+  env.gh.main.checks = "failure";
+  await result("factory_stop", input());
+  expect(await call("factory_resume", input())).toEqual({
+    isError: true,
+    text: `Not resumed: ${pausedReason}. That halt clears when its cause does.`,
+  });
+  env.gh.main.checks = "success";
+  const batches: ReturnType<typeof events>[] = [];
+  const unsubscribe = env.store.subscribe((batch) => batches.push(batch));
+  try {
+    expect(await result("factory_resume", input())).toMatchObject({
+      changed: true,
+      control: { state: "running", halt: null },
+    });
+  } finally {
+    unsubscribe();
+  }
+  const batch = batches.find((batch) => batch.some((e) => e.type === "project.updated"));
+  expect(batch?.map((e) => e.type)).toEqual([
+    "project.updated",
+    "inbox.created",
+    "factory.loop.updated",
+  ]);
+  expect(loop()).toMatchObject({ state: "idle", pausedReason: null });
+});
+
+it("attributes unrecorded project switches and switches after a resume to built-in halts", async () => {
+  env.updateProject({ killSwitch: true });
+  expect((await env.factory.status(env.project.id)).halt).toEqual({
+    source: "builtin",
+    reason: "kill switch",
+  });
+  await env.factory.setKillSwitch(env.project.id, false);
+  env.updateProject({ killSwitch: true });
+  expect((await env.factory.status(env.project.id)).halt).toEqual({
+    source: "builtin",
+    reason: "kill switch",
+  });
+});
+
+it("treats a tool pause during a global stop as a no-op", async () => {
+  await env.factory.setGlobalKillSwitch(true);
+  const before = events();
+  expect(await result("factory_pause", input(), "pm")).toMatchObject({
+    changed: false,
+    control: { state: "stopped" },
+  });
+  expect(events()).toEqual(before);
+  await expect(env.factory.setKillSwitch(env.project.id, true, { mode: "drain" })).rejects.toThrow(
+    "The global kill switch is on",
+  );
+});
+
+it("re-reads the project switch after waiting to resume", async () => {
+  const { held, release } = await holdTick();
+  const resuming = result("factory_resume", input());
+  const stopping = env.factory.setKillSwitch(env.project.id, true);
+  release();
+  await Promise.all([held, stopping]);
+  expect(await resuming).toMatchObject({ changed: true });
+  expect(project().killSwitch).toBe(false);
+});
+
+const pmDigest = () =>
+  renderProjectDigest({
+    project: { id: env.project.id, name: "Shop", kind: "github", mode: "software_factory" },
+    running: [],
+    queued: [],
+    scheduled: [],
+    inbox: { open: 0, items: [] },
+    recent: [],
+    factory: env.factory.loopSummary(env.project.id),
+  });
+it("uses neutral PM digest wording", async () => {
+  await result("factory_pause", input(), "pm");
+  expect(pmDigest()).toContain("Factory: stopped (a kill switch is on) — Paused by PM");
+  await result("factory_resume", input());
+  await startWork();
+  await result("factory_pause", input(), "pm");
+  expect(pmDigest()).toContain("finishing the work in flight, then stopping; nothing new starts");
+});
+
+it("omits stale pause attribution from both digests", async () => {
+  await startWork();
+  await result("factory_pause", input(), "pm");
+  env.updateProject({ autonomyMode: "assisted" });
+  await env.factory.tick(env.project.id);
+  env.updateProject({ autonomyMode: "software_factory" });
+  expect(loop().lastControl?.action).toBe("pause");
+  expect(pmDigest()).not.toContain("Paused by");
+  expect((await env.factory.digestNow(env.project.id)).text).not.toContain("Paused by");
+});
+
+it("records all global stops before starting concurrent shutdowns", async () => {
+  const second = { ...project(), id: "p-second", slug: "second" };
+  env.store.append([{ type: "project.updated", sessionId: null, payload: { project: second } }]);
+  const { held, release } = await holdTick();
+  const shutdown = Promise.withResolvers<void>();
+  const halted = vi.spyOn(env.factory.ctx.sessions, "stopAll").mockImplementation(async () => {
+    await shutdown.promise;
+    return [];
+  });
+  const stopping = env.factory.setGlobalKillSwitch(true);
+  try {
+    expect(loop().lastControl?.action).toBe("stop");
+    expect(env.factory.data.loop(second.id)?.lastControl?.action).toBe("stop");
+    expect(halted.mock.calls.map(([id]) => id)).toEqual(
+      expect.arrayContaining([env.project.id, second.id]),
+    );
+  } finally {
+    release();
+    shutdown.resolve();
+    await Promise.all([held, stopping]);
+  }
+});
+
+it("commits a completed drain's switch, pause and history together", async () => {
+  const batches: ReturnType<typeof events>[] = [];
+  const unsubscribe = env.store.subscribe((batch) => batches.push(batch));
+  try {
+    await result("factory_pause", input());
+  } finally {
+    unsubscribe();
+  }
+  const batch = batches.find((batch) => batch.some((e) => e.type === "project.updated"));
+  expect(batch?.map((e) => e.type)).toEqual([
+    "project.updated",
+    "inbox.created",
+    "factory.loop.updated",
+  ]);
+  expect(loop()).toMatchObject({ drain: null, lastControl: { action: "pause" } });
 });

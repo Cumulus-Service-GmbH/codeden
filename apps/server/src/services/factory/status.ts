@@ -106,7 +106,7 @@ export function factoryHalt(
   if ((projectKill || drain) && lastControl && lastControl.action !== "resume") {
     return { source: lastControl.by, reason: lastControl.reason };
   }
-  if (projectKill) return { source: "user", reason: "kill switch" };
+  if (projectKill) return { source: "builtin", reason: "kill switch" };
   return state === "paused" ? { source: "builtin", reason: pausedReason } : null;
 }
 

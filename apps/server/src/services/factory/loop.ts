@@ -10,6 +10,7 @@ import { builderWanted, chooseAgent } from "./agent-choice";
 import { archiveFinished, sweepFailedSessions } from "./cleanup";
 import { closedIssueOf, settleClosedIssues } from "./closed-issues";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
+import { stoppedLoop } from "./controls";
 import { advanceDrain } from "./drain";
 import { fileDueFollowUps } from "./follow-ups";
 import { classifyPending, intakeFailedChecks, intakeIssues } from "./intake";
@@ -71,7 +72,7 @@ export async function runTick(
   }
   const today = localDay(now);
   if (loop.day !== today) loop = await rollDay(project, loop, today, hooks);
-  if (killed) return save(ctx, { ...loop, state: "stopped", drain: null }, now);
+  if (killed) return save(ctx, stoppedLoop(loop), now);
   if (loop.state === "stopped") loop = { ...loop, state: "idle" };
 
   // Who is installed and signed in: detected again in the background every few minutes.
@@ -150,7 +151,7 @@ export async function runTick(
   // A drain whose work is all done stops the loop here (also while paused).
   if (loop.drain) {
     loop = await advanceDrain(ctx, project, loop);
-    if (loop.state === "stopped") return save(ctx, loop, now);
+    if (!loop.drain) return save(ctx, loop, now);
   }
 
   if (loop.state !== "paused") {

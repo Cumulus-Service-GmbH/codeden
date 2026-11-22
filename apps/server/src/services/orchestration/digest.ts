@@ -8,7 +8,7 @@ import type {
   ScheduledRun,
   WorkSummary,
 } from "@codeden/contracts";
-import { loopControlLine } from "@codeden/contracts";
+import { haltLine } from "@codeden/contracts";
 import { localDateTime, machineTimezone } from "../automations/cron";
 
 /**
@@ -87,15 +87,14 @@ export function buildProjectStatus(input: ProjectStatusInput): ProjectStatus {
 /** The factory line: only when it says more than the mode does (draining, stopped, paused). */
 function factoryLine(f: ProjectStatus["factory"]): string | null {
   if (!f) return null;
-  const control = loopControlLine(f.lastControl);
+  const control = haltLine(f.halt, f.lastControl);
   const suffix = control ? ` — ${control}` : "";
   if (f.drainInFlight !== null && f.loopState !== "stopped") {
     const n = f.drainInFlight;
     const state = f.loopState === "paused" ? "paused while draining" : "draining";
-    return `Factory: ${state}, ${n} item${n === 1 ? "" : "s"} in flight (the user chose to finish the work in flight, then stop; nothing new starts)${suffix}`;
+    return `Factory: ${state}, ${n} item${n === 1 ? "" : "s"} in flight (finishing the work in flight, then stopping; nothing new starts)${suffix}`;
   }
-  if (f.loopState === "stopped")
-    return `Factory: stopped (a kill switch is on; the user resumes it)${suffix}`;
+  if (f.loopState === "stopped") return `Factory: stopped (a kill switch is on)${suffix}`;
   if (f.loopState === "paused")
     return `Factory: paused (see factory_status for the reason)${suffix}`;
   return control ? `Factory: ${control}` : null;

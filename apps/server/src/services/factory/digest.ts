@@ -11,8 +11,8 @@ import {
   factoryNeedLabel,
   HELD_FOLLOW_UP_DAYS,
   HELD_FOLLOW_UPS_MAX,
+  haltLine,
   type InboxItem,
-  loopControlLine,
   type Project,
   SPOT_CHECK_WINDOW_DAYS,
   spotCheckProblemPercent,
@@ -29,6 +29,7 @@ import { recoverable } from "./recover";
 import { specInboxId, specPending } from "./spec-approval";
 import { digestSpotChecks, spotCheckInboxId } from "./spot-checks";
 import { lastMergeReverted } from "./stats";
+import { factoryHalt } from "./status";
 import { OWNED_STAGES } from "./store";
 import { DECISION_INBOX_PREFIX } from "./unattended";
 
@@ -53,7 +54,10 @@ export async function writeDigest(
     spend: budgetSpend(ctx, project.id, day, project.factoryLimits),
     limits: project.factoryLimits,
     pausedReason: loop.state === "paused" ? loop.pausedReason : null,
-    control: loopControlLine(loop.lastControl),
+    control: haltLine(
+      factoryHalt(ctx.settings.get().factory.killSwitch, project.killSwitch, loop),
+      loop.lastControl,
+    ),
     draining: drainLine(ctx, project.id, loop),
     spotChecks: digestSpotChecks(ctx, project.id, day),
     lessons: digestLessons(ctx, project.id, day),

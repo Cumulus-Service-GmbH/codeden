@@ -7,7 +7,6 @@ import {
   loopControlLine,
 } from "@codeden/contracts";
 import type { AppServices } from "../../../services/container";
-import { resumeBlocker } from "../../../services/factory/halt";
 import {
   defineTool,
   type ServerToolContext,
@@ -74,7 +73,7 @@ function controlTool(action: FactoryControlAction, description: string) {
           );
         }
         const projectId = controlTarget(ctx, input.projectId);
-        const { factory, projects, settings } = ctx.services;
+        const { factory } = ctx.services;
         const control = {
           by: ctx.role === "orchestrator" ? "orchestrator" : "pm",
           sessionId: ctx.sessionId,
@@ -82,16 +81,7 @@ function controlTool(action: FactoryControlAction, description: string) {
         } as const;
         let changed = false;
         if (action === "resume") {
-          if (settings.get().factory.killSwitch) {
-            throw new ToolError("The global kill switch is on. Only the user can release it.");
-          }
-          const blocked = await resumeBlocker(factory.ctx, projectId);
-          if (blocked) throw new ToolError(blocked);
-          if (projects.get(projectId).killSwitch) {
-            changed = (await factory.setKillSwitch(projectId, false, { control })).changed ?? false;
-          } else {
-            changed = (await factory.resume(projectId, control)).changed ?? false;
-          }
+          changed = (await factory.resumeControlled(projectId, control)).changed;
         } else {
           const result = await factory.setKillSwitch(projectId, true, {
             mode: action === "pause" ? "drain" : "now",
