@@ -121,8 +121,9 @@ describe("Antigravity CLI session over ACP", () => {
 
   it("sets the model, then its thinking level, at the start and when changed", async () => {
     const { session, turn } = await open({ model: "gemini-4-argon", effort: "max" });
-    // `thought_level` lists `xhigh`, but Argon's own levels stop at `high`: `max` runs at that.
-    expect(configSets()).toEqual(["model=gemini-4-argon", "thought_level=high"]);
+    // `thought_level` lists `xhigh`, but Argon's own levels stop at `high`, which is already its
+    // level: `max` runs there, and `xhigh` is never sent.
+    expect(configSets()).toEqual(["model=gemini-4-argon"]);
     await session.configure?.({ effort: "minimal" });
     await turn("go");
     expect(configSets().at(-1)).toBe("thought_level=low");

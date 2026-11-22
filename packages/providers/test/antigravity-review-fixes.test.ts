@@ -142,7 +142,12 @@ describe("the Antigravity CLI after the provider review", () => {
     const inner = session as unknown as {
       setup: AcpSessionSetup;
       agentEffort: string | undefined;
-      applyEffort: (rpc: unknown, id: string, effort: undefined, strict: boolean) => Promise<boolean>;
+      applyEffort: (
+        rpc: unknown,
+        id: string,
+        effort: undefined,
+        strict: boolean,
+      ) => Promise<boolean>;
     };
     inner.setup = {
       configOptions: [
