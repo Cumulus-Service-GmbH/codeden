@@ -14,7 +14,7 @@ export interface ReviewerChoice {
   provider: string;
   /** Null: the provider's default model. */
   model: string | null;
-  effort: ReasoningEffort | null;
+  effort?: ReasoningEffort;
   /** True when the reviewer runs on a different provider from the author. */
   crossProvider: boolean;
   /** Why the review doesn't run where the settings ask (fallback, same provider). */
@@ -64,7 +64,7 @@ export function pickReviewer(input: ReviewerInput): ReviewerChoice | ReviewerWai
         wait: false,
         provider: wanted,
         model: member ? member.model : tuning.reviewerModel,
-        effort: member?.effort ?? null,
+        ...(member?.effort ? { effort: member.effort } : {}),
         crossProvider: wanted !== author.provider,
         note: null,
       };
@@ -77,7 +77,6 @@ export function pickReviewer(input: ReviewerInput): ReviewerChoice | ReviewerWai
         wait: false,
         provider: preferred,
         model: null,
-        effort: null,
         crossProvider: true,
         note: null,
       };
@@ -91,7 +90,6 @@ export function pickReviewer(input: ReviewerInput): ReviewerChoice | ReviewerWai
         wait: false,
         provider: same as string,
         model: same === author.provider ? author.model : null,
-        effort: null,
         crossProvider: false,
         note: `No provider other than ${name(same as string)} is available; the review ran on the same provider as the author.`,
       };
@@ -118,7 +116,6 @@ function fallback(
       wait: false,
       provider: author.provider,
       model: author.model,
-      effort: null,
       crossProvider: false,
       note: `${reason}; the review ran on the builder's provider (${name(author.provider)}) in a fresh session.`,
     };
@@ -131,7 +128,6 @@ function fallback(
     wait: false,
     provider: other,
     model: other === author.provider ? author.model : null,
-    effort: null,
     crossProvider: other !== author.provider,
     note: `${reason}; the review ran on ${name(other)}.`,
   };

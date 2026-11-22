@@ -50,7 +50,9 @@ it("keeps legacy choices with an empty team", () => {
     provider: "codex",
     model: "scout",
   });
-  expect(reviewer(tuning)).toMatchObject({ provider: "codex", model: "review", effort: null });
+  const review = reviewer(tuning);
+  expect(review).toMatchObject({ provider: "codex", model: "review" });
+  expect(review).not.toHaveProperty("effort");
 });
 
 it("uses the Team choices and replaces a scout with a different pinned effort", () => {
@@ -71,11 +73,12 @@ it("uses the Team choices and replaces a scout with a different pinned effort", 
     needsFreshSession({ provider: "claude", model: "architect", effort: "low" }, scout, []),
   ).toBe(true);
   expect(reviewer(tuning)).toMatchObject({ provider: "claude", model: "reviewer", effort: "high" });
-  expect(reviewer(tuning, ["codex"])).toMatchObject({
+  const fallback = reviewer(tuning, ["codex"]);
+  expect(fallback).toMatchObject({
     provider: "codex",
     model: "author",
-    effort: null,
   });
+  expect(fallback).not.toHaveProperty("effort");
 });
 
 it("drops a pinned model and effort when its provider is unavailable", async () => {
@@ -83,10 +86,9 @@ it("drops a pinned model and effort when its provider is unavailable", async () 
   env.factory.ctx.sessions.refreshAvailability();
   await new Promise((resolve) => setImmediate(resolve));
   const wanted = { provider: "claude", model: "writer", effort: "high" } as const;
-  expect(chooseAgent(env.factory.ctx, env.project, wanted, "build")).toEqual({
+  expect(chooseAgent(env.factory.ctx, env.project, wanted, "build")).toStrictEqual({
     provider: "codex",
     model: null,
-    effort: null,
   });
 });
 

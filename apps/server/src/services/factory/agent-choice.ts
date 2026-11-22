@@ -22,14 +22,14 @@ export interface AgentWanted {
   provider: string;
   /** Null: the provider's default. Applies only to a chosen provider, never to `auto`. */
   model: string | null;
-  effort?: ReasoningEffort | null;
+  effort?: ReasoningEffort;
 }
 
 /** Where a session starts: `auto` lets the session service pick, as it always has. */
 export interface AgentChoice {
   provider: string;
   model: string | null;
-  effort?: ReasoningEffort | null;
+  effort?: ReasoningEffort;
 }
 
 /** No provider can take new work: the note to show while it waits. */
@@ -47,7 +47,13 @@ export function builderWanted(
     Partial<Pick<FactoryTuning, "team">>,
 ): AgentWanted {
   const member = teamMember(tuning.team, item.type === "docs" ? "agentsMdWriter" : "writer");
-  if (member) return { provider: member.provider, model: member.model, effort: member.effort };
+  if (member) {
+    return {
+      provider: member.provider,
+      model: member.model,
+      ...(member.effort ? { effort: member.effort } : {}),
+    };
+  }
   if (item.type === "docs" && tuning.docsBuilderProvider) {
     return { provider: tuning.docsBuilderProvider, model: tuning.docsBuilderModel };
   }
@@ -69,7 +75,11 @@ export function scoutAgent(
 ): ScoutAgent {
   const member = teamMember(tuning.team, "architect");
   const wanted = member
-    ? { provider: member.provider, model: member.model, effort: member.effort }
+    ? {
+        provider: member.provider,
+        model: member.model,
+        ...(member.effort ? { effort: member.effort } : {}),
+      }
     : { provider: tuning.scoutProvider, model: tuning.scoutModel };
   return { wanted, choice: chooseAgent(ctx, project, wanted, "scout") };
 }
@@ -105,7 +115,6 @@ export function chooseAgent(
   return {
     provider: provider ?? (available[0] as string),
     model: null,
-    ...(wanted.effort !== undefined ? { effort: null } : {}),
   };
 }
 
