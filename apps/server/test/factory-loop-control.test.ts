@@ -153,6 +153,38 @@ it("scopes PM tools to their project and lets the orchestrator control either pr
   }
 });
 
+it("a PM cannot pause or read another project's factory loop", async () => {
+  const other = { ...project(), id: "p-other", name: "Other", slug: "other" };
+  env.store.append([{ type: "project.created", sessionId: null, payload: { project: other } }]);
+  const before = events();
+  const denied = { isError: true, text: "A PM controls only its own project's factory loop" };
+  expect(await call("factory_pause", { projectId: other.id, reason }, "pm")).toEqual(denied);
+  expect(await call("factory_status", { projectId: other.id }, "pm")).toEqual(denied);
+  expect(events()).toEqual(before);
+});
+
+it("the orchestrator can pause, resume and stop another project's factory loop", async () => {
+  const other = { ...project(), id: "p-other", name: "Other", slug: "other" };
+  env.store.append([{ type: "project.created", sessionId: null, payload: { project: other } }]);
+  const args = { projectId: other.id, reason };
+  for (const [action, state] of [
+    ["pause", "paused"],
+    ["resume", "running"],
+    ["stop", "stopped"],
+  ]) {
+    expect(await result(`factory_${action}`, args)).toMatchObject({
+      projectId: other.id,
+      changed: true,
+    });
+    expect(await result("factory_status", { projectId: other.id })).toMatchObject({
+      control: { state, lastControl: { action, by: "orchestrator", reason } },
+    });
+  }
+  expect(await result("factory_status", { projectId: env.project.id })).toMatchObject({
+    control: { state: "running", lastControl: null },
+  });
+});
+
 it("records a PM's drain in the event and projection", async () => {
   await startWork();
   const response = await result("factory_pause", { reason }, "pm");
@@ -377,6 +409,24 @@ it("attributes PM pauses and orchestrator stops and records one resolved history
       control: { halt: action === "resume" ? null : { source: by, reason } },
     });
   }
+});
+
+it("shows the halt's reason and source in the factory loop status", async () => {
+  await env.factory.setMode(env.project.id, {
+    mode: "software_factory",
+    limits: { ...project().factoryLimits, dailyBudget: { usd: 5 } },
+  });
+  env.spend = { usd: 5, tokens: 0 };
+  await env.factory.tick(env.project.id);
+
+  const status = {
+    control: {
+      state: "paused",
+      halt: { source: "builtin", reason: "daily budget reached ($5.00 of $5.00)" },
+    },
+  };
+  expect(await result("factory_status", {}, "pm")).toMatchObject(status);
+  expect(await result("factory_status", { projectId: env.project.id })).toMatchObject(status);
 });
 
 it("reports and refuses to resume a built-in daily budget halt while it holds", async () => {
