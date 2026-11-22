@@ -289,6 +289,38 @@ describe("side-by-side installs", () => {
     }
   });
 
+  it("never passes npm_config_allow_scripts from the parent to the installer's npm", async () => {
+    const home = tempHome();
+    vi.stubEnv("npm_config_allow_scripts", "parent-allow-scripts");
+    try {
+      await installAppVersion({ home, version: "0.2.0", npm: fakeNpm });
+      const keys = JSON.parse(readFileSync(join(home, "app", "npm-env.json"), "utf8")) as string[];
+      expect(keys.map((key) => key.toLowerCase())).not.toContain("npm_config_allow_scripts");
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it("passes the parent's npm registry, proxy, CA and userconfig settings to the installer's npm", async () => {
+    const home = tempHome();
+    const settings = {
+      Npm_Config_Registry: "https://mirror.example/",
+      npm_config_proxy: "http://proxy.example/",
+      npm_config_https_proxy: "http://proxy.example/",
+      npm_config_ca: "parent-ca",
+      npm_config_cafile: join(home, "ca.pem"),
+      NPM_CONFIG_USERCONFIG: join(home, ".npmrc"),
+    };
+    for (const [key, value] of Object.entries(settings)) vi.stubEnv(key, value);
+    try {
+      await installAppVersion({ home, version: "0.2.0", npm: fakeNpm });
+      const keys = JSON.parse(readFileSync(join(home, "app", "npm-env.json"), "utf8")) as string[];
+      for (const key of Object.keys(settings)) expect(keys).toContain(key);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("rejects an install whose CLI reports another version and leaves nothing behind", async () => {
     const home = tempHome();
     process.env.FAKE_NPM_REPORT = "0.1.0";
