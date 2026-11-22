@@ -140,7 +140,21 @@ it.each(["supervised", "auto", "full", "read_only"] as const)(
     await expect(
       session.respond(first.item.requestId, { kind: "approval", decision: "allow_session" }),
     ).rejects.toMatchObject({ code: "invalid_answer" });
-    await session.respond(first.item.requestId, { kind: "approval", decision: "allow_once" });
+    // Only an approval the server stamped as the user's allows it, never one without a decider.
+    for (const decidedBy of [undefined, "pm", "policy"] as const) {
+      await expect(
+        session.respond(first.item.requestId, {
+          kind: "approval",
+          decision: "allow_once",
+          ...(decidedBy ? { decidedBy } : {}),
+        }),
+      ).rejects.toMatchObject({ code: "invalid_answer" });
+    }
+    await session.respond(first.item.requestId, {
+      kind: "approval",
+      decision: "allow_once",
+      decidedBy: "user",
+    });
     await expect(decision).resolves.toMatchObject({ behavior: "allow" });
 
     expect(await preToolUse(tool, input)).toBe("ask");

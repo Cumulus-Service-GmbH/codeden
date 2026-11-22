@@ -24,6 +24,7 @@ import type { AppServices } from "../services/container";
 import { badRequest, notFound } from "../services/errors";
 import { clientItemRecord } from "../services/sessions/client-items";
 import { exportSessionTranscript } from "../services/sessions/transcript-export";
+import { asUserResponse } from "./user-response";
 import { jsonBody, queryOf } from "./validate";
 
 /**
@@ -70,7 +71,11 @@ export function sessionRoutes(s: AppServices, installToken: string) {
         return c.json(body);
       })
       .post("/:id/respond", jsonBody(RespondRequest), async (c) => {
-        await s.sessions.respond(c.req.param("id"), c.req.valid("json"));
+        const body = c.req.valid("json");
+        await s.sessions.respond(c.req.param("id"), {
+          ...body,
+          response: asUserResponse(body.response),
+        });
         return c.json({ ok: true as const });
       })
       .post("/:id/stop", async (c) => c.json(await s.sessions.stop(c.req.param("id"))))

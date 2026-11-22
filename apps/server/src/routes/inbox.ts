@@ -7,6 +7,7 @@ import {
 import { Hono } from "hono";
 import type { AppServices } from "../services/container";
 import { retryRunFailed } from "../services/inbox-retry";
+import { asUserResponse } from "./user-response";
 import { jsonBody, queryOf } from "./validate";
 
 /**
@@ -26,9 +27,11 @@ export function inboxRoutes(s: AppServices) {
       c.json(s.inbox.restoreMany(c.req.valid("json").ids)),
     )
     .get("/:id", (c) => c.json(s.inbox.get(c.req.param("id"))))
-    .post("/:id/resolve", jsonBody(ResolveInboxRequest), async (c) =>
-      c.json(await s.inbox.resolve(c.req.param("id"), c.req.valid("json"))),
-    )
+    .post("/:id/resolve", jsonBody(ResolveInboxRequest), async (c) => {
+      const body = c.req.valid("json");
+      const req = body.response ? { ...body, response: asUserResponse(body.response) } : body;
+      return c.json(await s.inbox.resolve(c.req.param("id"), req));
+    })
     .post("/:id/retry", async (c) => {
       const item = await retryRunFailed(
         {

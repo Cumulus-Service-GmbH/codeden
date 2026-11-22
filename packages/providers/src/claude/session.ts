@@ -63,14 +63,15 @@ const markedHookReview: AnswerReview = {
   },
 };
 
-/** Claude in Chrome: only the user may allow it, and only once. */
+/**
+ * Claude in Chrome: only the user may allow it, and only once. The server stamps `decidedBy:
+ * "user"` at the user's own routes, so an approval without it isn't the user's.
+ */
 const singleUseReview: AnswerReview = {
   problem: (response) =>
     response.kind === "approval" &&
     (response.decision === "allow_session" ||
-      (response.decision === "allow_once" &&
-        response.decidedBy !== undefined &&
-        response.decidedBy !== "user"))
+      (response.decision === "allow_once" && response.decidedBy !== "user"))
       ? "Claude in Chrome requires a one-time user approval."
       : undefined,
 };
