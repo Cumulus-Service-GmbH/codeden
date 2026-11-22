@@ -80,6 +80,10 @@ export function useAutomationActions(projectId: string) {
     }
     setConflict(null);
     refresh();
+    if (res.status === "started" && res.run.status === "failed") {
+      toast.error("Run failed", { description: res.run.error?.message });
+      return;
+    }
     const sessionId = "sessionId" in res ? res.sessionId : null;
     toast.success(runResultText(res), {
       action: sessionId

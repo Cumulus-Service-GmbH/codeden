@@ -102,6 +102,8 @@ export function NewAutomationPage({
         toast.warning("Not run: matching work is already running", {
           description: "Use Run now on the automation to wait, join or run anyway.",
         });
+      } else if (run?.status === "started" && run.run.status === "failed") {
+        toast.error("Run failed", { description: run.run.error?.message });
       } else if (run) toast.success(runResultText(run));
       void navigate({
         to: "/projects/$projectId/automations/$automationId",
