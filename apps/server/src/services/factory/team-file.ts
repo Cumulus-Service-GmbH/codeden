@@ -195,6 +195,14 @@ export function createTeamFileRefresher(deps: TeamFileDeps) {
     for (const name of names) {
       const id = name.slice(0, -".json".length);
       if (keep.has(id)) continue;
+      // Only a known session that is no longer live loses its file; a name that is no session is left alone.
+      let known = false;
+      try {
+        known = deps.session(id) !== undefined;
+      } catch {
+        known = false;
+      }
+      if (!known) continue;
       try {
         rmSync(join(dir, name), { force: true });
       } catch (error) {

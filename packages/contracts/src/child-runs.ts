@@ -36,7 +36,8 @@ export const ChildRun = z.object({
   model: z.string().nullable(),
   effort: ReasoningEffort.nullable(),
   status: ChildRunStatus,
-  startedAt: z.string(),
+  /** Null when the run's start line is not in the log (it fell outside the part that was read). */
+  startedAt: z.string().nullable(),
   endedAt: z.string().nullable(),
   detail: z.string().nullable(),
 });
@@ -76,7 +77,7 @@ export function foldChildRuns(lines: readonly string[]): ChildRunList {
         model: r.model,
         effort: r.effort,
         status: r.status,
-        startedAt: r.at,
+        startedAt: r.status === "running" ? r.at : null,
         endedAt: r.status === "running" ? null : r.at,
         detail: r.detail,
       });
