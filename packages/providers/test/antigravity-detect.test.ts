@@ -206,3 +206,19 @@ describe("the Antigravity CLI's models before any session", () => {
     expect(adapter.models().map((m) => m.id)).toEqual(["default"]);
   });
 });
+
+describe("probeAntigravity's reports", () => {
+  it("keep a working handshake working when the caller's report throws", async () => {
+    const result = await probeAntigravity(fakeAgy, {
+      timeoutMs: 10_000,
+      onInfo: () => {
+        throw new Error("caller failed");
+      },
+      onSetup: () => {
+        throw new Error("caller failed");
+      },
+    });
+    expect(result.acp).toBe(true);
+    expect(result.setup?.configOptions?.length).toBeGreaterThan(0);
+  });
+});

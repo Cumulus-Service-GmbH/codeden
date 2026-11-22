@@ -179,7 +179,8 @@ export class AntigravityAdapter implements ProviderAdapter {
     const session = new AcpSession(opts, {
       executable: command,
       spec: ANTIGRAVITY_AGENT,
-      onSetup: (setup, info) => this.onSetup(setup, info),
+      onInfo: (info) => this.onInfo(info),
+      onSetup: (setup) => this.applySetup(setup),
       ...(this.options.startTimeoutMs ? { startTimeoutMs: this.options.startTimeoutMs } : {}),
       ...(this.options.interruptTimeoutMs
         ? { interruptTimeoutMs: this.options.interruptTimeoutMs }
@@ -194,10 +195,9 @@ export class AntigravityAdapter implements ProviderAdapter {
     return session;
   }
 
-  /** A session reported its models and modes: they are the account's current ones. */
-  private onSetup(setup: AcpSessionSetup, info: AcpInitializeResult): void {
+  /** A handshake (a session's or the probe's) arrived: its capabilities are the newest. */
+  private onInfo(info: AcpInitializeResult): void {
     this.info = info;
-    this.applySetup(setup);
   }
 
   /**
@@ -223,9 +223,7 @@ export class AntigravityAdapter implements ProviderAdapter {
     return probeAntigravity(exe, {
       ...(this.options.probeTimeoutMs ? { timeoutMs: this.options.probeTimeoutMs } : {}),
       ...(this.options.listTimeoutMs ? { setupTimeoutMs: this.options.listTimeoutMs } : {}),
-      onInfo: (info) => {
-        this.info = info;
-      },
+      onInfo: (info) => this.onInfo(info),
       onSetup: (setup) => this.applySetup(setup),
     });
   }

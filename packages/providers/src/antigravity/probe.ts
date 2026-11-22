@@ -31,6 +31,15 @@ export interface AntigravityProbeReports {
   onSetup?: (setup: AcpSessionSetup) => void;
 }
 
+/** Run a caller's report; its own failure never makes the probe's handshake count as failed. */
+function report(fn: () => void): void {
+  try {
+    fn();
+  } catch {
+    // The caller's bookkeeping failed; what the CLI answered is unchanged.
+  }
+}
+
 /** How long the throwaway session may take to list the models; then Default stands in. */
 const SETUP_TIMEOUT_MS = 8_000;
 
@@ -101,11 +110,16 @@ export async function probeAntigravity(
         timeoutMs: opts.timeoutMs ?? 20_000,
       },
     );
-    opts.onInfo?.(started.info);
-    const timeout = opts.setupTimeoutMs ?? SETUP_TIMEOUT_MS;
-    const setup = await listSetup(started.rpc, cwd, timeout, opts.onSetup);
-    await started.rpc.close();
-    return { acp: true, info: started.info, ...(setup ? { setup } : {}) };
+    try {
+      report(() => opts.onInfo?.(started.info));
+      const timeout = opts.setupTimeoutMs ?? SETUP_TIMEOUT_MS;
+      const setup = await listSetup(started.rpc, cwd, timeout, (s) =>
+        report(() => opts.onSetup?.(s)),
+      );
+      return { acp: true, info: started.info, ...(setup ? { setup } : {}) };
+    } finally {
+      await started.rpc.close();
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return {

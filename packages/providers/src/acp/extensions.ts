@@ -128,6 +128,8 @@ export interface AcpSessionConfig {
   spec: AcpAgentSpec;
   /** The agent reported its session setup (models, modes): for the adapter's model list. */
   onSetup?: (setup: AcpSessionSetup, info: AcpInitializeResult) => void;
+  /** The agent answered `initialize` (its capabilities), reported the moment it arrives. */
+  onInfo?: (info: AcpInitializeResult) => void;
   startTimeoutMs?: number;
   interruptTimeoutMs?: number;
 }

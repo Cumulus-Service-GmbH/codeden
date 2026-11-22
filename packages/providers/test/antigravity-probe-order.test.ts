@@ -1,5 +1,5 @@
 import { join } from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcpInitializeResult, AcpSessionSetup } from "../src/acp/protocol";
 import type { AntigravityProbe, AntigravityProbeReports } from "../src/antigravity/probe";
 
@@ -37,46 +37,83 @@ const info = (image: boolean): AcpInitializeResult =>
   }) as AcpInitializeResult;
 type Adapter = InstanceType<typeof AntigravityAdapter>;
 const ids = (adapter: Adapter) => adapter.models().map((m) => m.id);
-/** What a real session reports when it opens (the adapter's `onSetup`, as sessions call it). */
-const sessionReports = (adapter: Adapter, setup: AcpSessionSetup, init: AcpInitializeResult) =>
-  (adapter as unknown as { onSetup: (s: AcpSessionSetup, i: AcpInitializeResult) => void }).onSetup(
-    setup,
-    init,
-  );
+/** A real session's two reports, as `AcpSession` makes them: its handshake, then its setup. */
+const session = (adapter: Adapter) => {
+  const hooks = adapter as unknown as {
+    onInfo: (i: AcpInitializeResult) => void;
+    applySetup: (s: AcpSessionSetup) => void;
+  };
+  return { handshake: hooks.onInfo.bind(adapter), setup: hooks.applySetup.bind(adapter) };
+};
+/** Start a detection and return its probe once the adapter has started it. */
+async function probing(adapter: Adapter) {
+  const at = pending.length;
+  const done = adapter.detect();
+  await vi.waitFor(() => expect(pending.length).toBeGreaterThan(at));
+  return { done, probe: pending[at] as Pending };
+}
+
+beforeEach(() => {
+  pending.length = 0;
+});
 
 describe("the Antigravity CLI's model list and flags", () => {
   it("come from whatever arrived last: a session's report beats a probe that finishes later", async () => {
     const adapter = new AntigravityAdapter({ executable: fakeAgy });
-    const detected = adapter.detect();
-    await vi.waitFor(() => expect(pending).toHaveLength(1));
-    const probe = pending[0] as Pending;
+    const { done, probe } = await probing(adapter);
     probe.onInfo?.(info(false));
     probe.onSetup?.(listing("probe-model"));
     expect(ids(adapter)).toContain("probe-model");
-    sessionReports(adapter, listing("gemini-4-neon"), info(true));
+    const s = session(adapter);
+    s.handshake(info(true));
+    s.setup(listing("gemini-4-neon"));
     probe.finish({ acp: true, info: info(false), setup: listing("probe-model") });
-    await detected;
+    await done;
     expect(ids(adapter)).toContain("gemini-4-neon");
     expect(ids(adapter)).not.toContain("probe-model");
     expect(adapter.capabilities().images).toBe(true);
   });
 
-  it("run one detection at a time and keep a list over an empty or malformed one", async () => {
-    pending.length = 0;
+  it("keep a newer handshake's flags when an older session's setup arrives after it", async () => {
+    const adapter = new AntigravityAdapter({ executable: fakeAgy });
+    const s = session(adapter);
+    s.handshake(info(false));
+    const { done, probe } = await probing(adapter);
+    probe.onInfo?.(info(true));
+    s.setup(listing("gemini-4-neon"));
+    probe.finish({ acp: true, info: info(true) });
+    await done;
+    expect(adapter.capabilities().images).toBe(true);
+    expect(ids(adapter)).toContain("gemini-4-neon");
+  });
+
+  it("run one detection at a time", async () => {
     const adapter = new AntigravityAdapter({ executable: fakeAgy });
     const first = adapter.detect();
-    const again = adapter.detect();
-    expect(again).toBe(first);
+    expect(adapter.detect()).toBe(first);
     await vi.waitFor(() => expect(pending).toHaveLength(1));
-    pending[0]?.onSetup?.(listing("gemini-4-neon"));
     pending[0]?.finish({ acp: true });
     await first;
+    expect(pending).toHaveLength(1);
+  });
 
-    const second = adapter.detect();
-    await vi.waitFor(() => expect(pending).toHaveLength(2));
-    pending[1]?.onSetup?.({ models: { availableModels: {} } } as unknown as AcpSessionSetup);
-    pending[1]?.finish({ acp: true });
-    await expect(second).resolves.toMatchObject({ supported: true });
+  it("keep a list over an empty one and over a malformed one", async () => {
+    const adapter = new AntigravityAdapter({ executable: fakeAgy });
+    const first = await probing(adapter);
+    first.probe.onSetup?.(listing("gemini-4-neon"));
+    first.probe.finish({ acp: true });
+    await first.done;
+
+    const empty = await probing(adapter);
+    empty.probe.onSetup?.({ configOptions: [], models: { availableModels: [] } });
+    empty.probe.finish({ acp: true });
+    await empty.done;
+    expect(ids(adapter)).toContain("gemini-4-neon");
+
+    const bad = await probing(adapter);
+    bad.probe.onSetup?.({ models: { availableModels: {} } } as unknown as AcpSessionSetup);
+    bad.probe.finish({ acp: true });
+    await expect(bad.done).resolves.toMatchObject({ supported: true });
     expect(ids(adapter)).toContain("gemini-4-neon");
   });
 });
