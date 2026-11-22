@@ -98,6 +98,8 @@ export interface CheckRuns {
 const AUTO_ORDER = ["claude", "codex", "opencode", "cursor", "gemini", "antigravity"];
 
 const BUSY = new Set(["running", "waiting"]);
+/** Messages from these senders can start a turn without a global session slot. */
+const PRIORITY_SENDERS = new Set<QueueSender>(["user", "pm", "orchestrator"]);
 const NOT_STARTED = new Set(["created", "queued", "starting"]);
 /** Statuses in which the next queued message is delivered. */
 const FLUSHABLE = new Set(["idle", "interrupted", "failed"]);
@@ -453,7 +455,13 @@ export class SessionService {
     const delivering = this.delivering.has(id);
     if (BUSY.has(session.status) || delivering) {
       if (req.whenBusy === "reject") throw conflict("A turn is running", "turn_running");
-      if (req.whenBusy === "steer" && !delivering) {
+      if (
+        !delivering &&
+        (req.whenBusy === "steer" ||
+          (req.whenBusy === "queue" &&
+            (from === "pm" || from === "orchestrator") &&
+            this.provider(session.provider, id)?.capabilities.steer))
+      ) {
         try {
           await this.steer(id, req.input);
           return { status: "steered" };
@@ -466,6 +474,7 @@ export class SessionService {
     }
     const { admission, repo } = this.deps;
     if (
+      !PRIORITY_SENDERS.has(from) &&
       !isFactorySession(session) &&
       (repo.find(id)?.startMeta?.admission || !this.reserve(session))
     ) {
@@ -645,7 +654,7 @@ export class SessionService {
       const { session, startMeta } = found;
       const next = outbox.peek(id);
       if (!next) return;
-      if (!admissionHead) {
+      if (!admissionHead && !PRIORITY_SENDERS.has(next.from)) {
         if (startMeta?.admission && !session.archivedAt) return;
         if (!this.reserve(session)) {
           if (!session.archivedAt) admission?.enqueue(id);

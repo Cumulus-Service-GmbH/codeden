@@ -197,11 +197,13 @@ describe("global session admission", () => {
     const second = await start("second");
     expect(second).toMatchObject({ status: "queued", behind: [] });
     const input = { text: "queued turn", attachments: [] };
-    await expect(sessions.send(target.id, { input, whenBusy: "reject" })).rejects.toMatchObject({
+    await expect(
+      sessions.send(target.id, { input, whenBusy: "reject" }, "codeden"),
+    ).rejects.toMatchObject({
       code: "at_capacity",
     });
     expect(sessions.hasOutbox(target.id)).toBe(false);
-    expect(await sessions.send(target.id, { input, whenBusy: "queue" })).toEqual({
+    expect(await sessions.send(target.id, { input, whenBusy: "queue" }, "codeden")).toEqual({
       status: "queued",
     });
     const fork = await sessions.fork(target.id, {});
@@ -252,10 +254,11 @@ describe("global session admission", () => {
     const sessions = createSessions(admission, settings);
     const target = source();
     env.addSession({ status: "running" });
-    await sessions.send(target.id, {
-      input: { text: "queued", attachments: [] },
-      whenBusy: "queue",
-    });
+    await sessions.send(
+      target.id,
+      { input: { text: "queued", attachments: [] }, whenBusy: "queue" },
+      "codeden",
+    );
     const outbox = new Outbox(env.db.db, env.store);
     const message = outbox.peek(target.id);
     if (!message) throw new Error("missing queued message");
@@ -321,4 +324,91 @@ describe("global session admission", () => {
       expect(call("session.start")).toMatchObject({ sessionId });
     },
   );
+});
+
+describe("priority session messages at capacity", () => {
+  const input = { text: "An announcement", attachments: [] };
+  const request = { input, whenBusy: "queue" } as const;
+
+  function atCapacity() {
+    const settings = new SettingsStore(join(env.dir, "settings.json"));
+    const admission = new SessionAdmission(
+      env.repo,
+      () => 1,
+      () => 2,
+    );
+    env.addSession({ status: "running" });
+    return { admission, settings, sessions: createSessions(admission, settings) };
+  }
+
+  it.each(["user", "pm", "orchestrator"] as const)(
+    "sends an idle %s message immediately",
+    async (from) => {
+      const { admission, sessions } = atCapacity();
+      const { id } = source();
+
+      expect(await sessions.send(id, request, from)).toEqual({ status: "sent" });
+      expect(call("session.send")).toMatchObject({ sessionId: id, input });
+      expect(admission.status().waiting).toEqual([]);
+    },
+  );
+
+  it("keeps background messages behind the limit and factory messages exempt", async () => {
+    const { admission, sessions } = atCapacity();
+    const { id } = source();
+    const factory = env.addSession({ provider: "claude", startedBy: FACTORY_STARTER });
+
+    expect(admission.free()).toBe(0);
+    expect(await sessions.send(id, request, "codeden")).toEqual({ status: "queued" });
+    expect(admission.status().waiting).toHaveLength(1);
+    expect(await sessions.send(factory.id, request, "codeden")).toEqual({ status: "sent" });
+    expect(call("session.send")).toMatchObject({ sessionId: factory.id, input });
+    expect(admission.free()).toBe(0);
+  });
+
+  it.each(["pm", "orchestrator"] as const)(
+    "steers a running turn with a message from %s",
+    async (from) => {
+      const { sessions } = atCapacity();
+      const { id } = env.addSession({ provider: "claude", status: "running" });
+
+      expect(await sessions.send(id, request, from)).toEqual({ status: "steered" });
+      expect(call("session.steer")).toMatchObject({ sessionId: id, input });
+      expect(sessions.hasOutbox(id)).toBe(false);
+    },
+  );
+
+  it("flushes a queued PM message on settle when the running provider cannot steer", async ({
+    onTestFinished,
+  }) => {
+    const { admission, settings, sessions } = atCapacity();
+    const { id } = env.addSession({ provider: "plain", status: "running" });
+    const plain = PROVIDERS.find(({ id }) => id === "plain");
+    if (!plain) throw new Error("missing plain provider");
+    plain.capabilities.steer = false;
+    onTestFinished(() => {
+      plain.capabilities.steer = true;
+    });
+    const lifecycle = new SessionLifecycle({
+      db: env.db.db,
+      repo: env.repo,
+      store: env.store,
+      sessions,
+      admission,
+      settings,
+      tokens: {} as McpTokenStore,
+      utility: {} as never,
+    });
+    onTestFinished(() => lifecycle.stop());
+    lifecycle.start();
+
+    expect(await sessions.send(id, request, "pm")).toEqual({ status: "queued" });
+    expect(calls).toEqual([]);
+    env.repo.update(id, (session) => ({ ...session, status: "idle" }));
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    expect(call("session.send")).toMatchObject({ sessionId: id, input });
+    expect(sessions.hasOutbox(id)).toBe(false);
+    expect(admission.status().waiting).toEqual([]);
+  });
 });
