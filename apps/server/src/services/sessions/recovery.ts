@@ -81,31 +81,45 @@ export class SessionRecovery {
         !sessions.isDelivering(id)
       );
     };
-    let hosted = await this.hostedSessions(runner);
-    if (!hosted) return;
+    const initiallyHosted = await this.hostedSessions(runner);
+    if (!initiallyHosted) return;
     // Clear stale active statuses before any continuation asks admission for a slot.
+    // The runner can still open a session between replying and our read, the same window
+    // the first loop iteration had before.
+    const toResume: { id: string; closedOrphans: boolean }[] = [];
     for (const id of candidates) {
-      if (hosted.has(id) || !stillCutOff(id)) continue;
-      const session = repo.find(id)?.session;
-      if (!session || lastCompaction(repo, session)) continue;
-      repo.update(id, (s) => (isCutOff(s.status) ? { ...s, status: "interrupted" } : s));
+      if (initiallyHosted.has(id) || !stillCutOff(id)) continue;
+      let session = repo.find(id)?.session;
+      if (!session || !isCutOff(session.status)) continue;
+      // A dead approval can keep a resumed session waiting.
+      const closedOrphans = session.status === "waiting";
+      if (closedOrphans) {
+        repo.closeOrphanedTurns(id);
+        session = repo.find(id)?.session;
+        if (!session || !isCutOff(session.status)) continue;
+      }
+      if (lastCompaction(repo, session)) {
+        if (!closedOrphans) repo.closeOrphanedTurns(id);
+        this.settleCompaction(session);
+        continue;
+      }
+      if (session.status !== "interrupted") {
+        repo.update(id, (s) => ({ ...s, status: "interrupted" }));
+      }
+      toResume.push({ id, closedOrphans });
     }
-    for (const id of candidates) {
+    let hosted: Set<string> | undefined;
+    for (const { id, closedOrphans } of toResume) {
       if (!stillCutOff(id)) continue;
       // Resuming the candidates before this one took a while, and the session may have come
       // back by another path meanwhile: ask the runner again what it hosts now.
       hosted ??= await this.hostedSessions(runner);
-      if (!hosted) return;
+      // Interrupted sessions without a continuation are still cut off and resume on reconnect.
+      if (!hosted) break;
       if (hosted.has(id) || !stillCutOff(id)) continue;
-      // A runner that died without a word left its turns and approvals open: close them
-      // first, so a dead approval can't keep the resumed session waiting.
-      repo.closeOrphanedTurns(id);
+      if (!closedOrphans) repo.closeOrphanedTurns(id);
       const session = repo.find(id)?.session;
-      if (!session || !isCutOff(session.status)) continue;
-      if (lastCompaction(repo, session)) {
-        this.settleCompaction(session);
-        continue;
-      }
+      if (session?.status !== "interrupted") continue;
       await this.resume(session, runner.providers());
       hosted = undefined;
     }

@@ -2,6 +2,7 @@ import { join } from "node:path";
 import type { RunnerCommandName, RunnerCommandOf, Session } from "@codeden/contracts";
 import { FakeProvider } from "@codeden/providers";
 import { describe, expect, it, onTestFinished, vi } from "vitest";
+import { ingestRunnerEvent } from "../src/events/ingest";
 import { ensureHome } from "../src/paths";
 import { createServices } from "../src/services/container";
 import type { RunnerPort, RunnerRouter } from "../src/services/runner-port";
@@ -17,6 +18,7 @@ import type { SessionService } from "../src/services/sessions/session-service";
 import { SettingsStore } from "../src/settings-store";
 import { sampleSession } from "./helpers";
 import { createGithubEnv } from "./support/github-env";
+import { waitUntil } from "./support/harness";
 
 /**
  * Recovery after a runner connects, with a session started on that runner while its
@@ -51,12 +53,16 @@ describe("session recovery", () => {
     const continueAfterRestart = vi.fn(async (_id: string, _text: string): Promise<void> => {});
     // Sessions with a message, Retry or queued delivery on its way to the runner.
     const delivering = new Set<string>();
+    const queued = new Set<string>();
+    const flushOutbox = vi.fn(async (_id: string) => undefined);
+    const releaseOutboxes = vi.fn();
     const service = {
       launching: new Map<string, Promise<void>>(),
       isDelivering: (id: string) => delivering.has(id),
       continueAfterRestart,
-      sessionsWithQueuedMessages: () => [],
-      releaseOutboxes: () => undefined,
+      sessionsWithQueuedMessages: () => [...queued],
+      releaseOutboxes,
+      flushOutbox,
     } as unknown as SessionService;
     const fail = vi.fn();
     const launcher = { fail } as unknown as SessionLauncher;
@@ -91,6 +97,9 @@ describe("session recovery", () => {
       fail,
       hosted,
       delivering,
+      queued,
+      flushOutbox,
+      releaseOutboxes,
       whileStatusInFlight: (fn: () => void) => {
         onStatus = fn;
       },
@@ -288,6 +297,66 @@ describe("session recovery", () => {
     await vi.waitFor(() => expect(sweep).toHaveBeenCalledTimes(2));
     finishSweep();
   });
+
+  it("flushes outboxes and sweeps after a mid-loop status failure", async () => {
+    const cut = {
+      ...sampleSession,
+      status: "running",
+      provider: "fake",
+      resumeToken: "r",
+    } as const;
+    const sweep = vi.fn(async () => ({ hidden: [], failed: 0 }));
+    const t = setup(
+      [
+        { ...cut, id: "first" },
+        { ...cut, id: "second" },
+      ],
+      undefined,
+      sweep,
+    );
+    t.queued.add("second");
+    t.continueAfterRestart.mockImplementationOnce(async () => {
+      t.hosted.add("first");
+      t.whileStatusInFlight(() => {
+        throw new Error("Runner disconnected");
+      });
+    });
+
+    await t.recovery.onRunnerReady();
+
+    expect(t.continueAfterRestart.mock.calls.map(([id]) => id)).toEqual(["first"]);
+    expect(t.sessions.get("second")?.status).toBe("interrupted");
+    expect(t.releaseOutboxes).toHaveBeenCalledOnce();
+    expect(t.flushOutbox).toHaveBeenCalledWith("second");
+    await waitUntil(() => sweep.mock.calls.length === 1);
+
+    t.whileStatusInFlight(() => undefined);
+    await t.recovery.onRunnerReady();
+    expect(t.continueAfterRestart.mock.calls.map(([id]) => id)).toEqual(["first", "second"]);
+  });
+
+  it("skips an interrupted candidate whose delivery starts after the pre-pass", async () => {
+    const cut = {
+      ...sampleSession,
+      status: "running",
+      provider: "fake",
+      resumeToken: "r",
+    } as const;
+    const t = setup([
+      { ...cut, id: "first" },
+      { ...cut, id: "second" },
+    ]);
+    t.continueAfterRestart.mockImplementationOnce(async () => {
+      expect(t.sessions.get("second")?.status).toBe("interrupted");
+      t.delivering.add("second");
+    });
+
+    await t.recovery.onRunnerReady();
+
+    expect(t.continueAfterRestart.mock.calls.map(([id]) => id)).toEqual(["first"]);
+    expect(t.repo.closeOrphanedTurns).not.toHaveBeenCalledWith("second");
+    expect(t.fail).not.toHaveBeenCalled();
+  });
 });
 
 describe("admission during restart recovery", () => {
@@ -304,6 +373,35 @@ describe("admission during restart recovery", () => {
     const live = keepHosted
       ? env.addSession({ status: "waiting", resumeToken: "live" })
       : undefined;
+    const compact = env.addSession({
+      status: "running",
+      resumeToken: "compact",
+      createdAt: "2026-11-07T09:59:59.000Z",
+    });
+    ingestRunnerEvent(env.db.db, env.store, "r1", {
+      type: "event",
+      seq: 1,
+      ts: compact.createdAt,
+      event: {
+        kind: "agent",
+        sessionId: compact.id,
+        event: { type: "thread.started", thread: { id: "root" } },
+      },
+    });
+    ingestRunnerEvent(env.db.db, env.store, "r1", {
+      type: "event",
+      seq: 2,
+      ts: compact.createdAt,
+      event: {
+        kind: "agent",
+        sessionId: compact.id,
+        event: { type: "turn.started", threadId: "root", turnId: "compact", kind: "compact" },
+      },
+    });
+    const missingToken = env.addSession({
+      status: "running",
+      createdAt: "2026-11-07T09:59:58.000Z",
+    });
     const liveBefore = live && env.repo.get(live.id);
     const hosted = new Set(live ? [live.id] : []);
     const starts: RunnerCommandOf<"session.start">[] = [];
@@ -327,6 +425,7 @@ describe("admission during restart recovery", () => {
           case "session.send":
             throw Object.assign(new Error("Unknown session"), { code: "unknown_session" });
           case "session.start":
+            expect(env.repo.get(compact.id).status).toBe("idle");
             starts.push(command);
             hosted.add(command.sessionId);
             return { resumeToken: command.options.resumeToken };
@@ -354,6 +453,8 @@ describe("admission during restart recovery", () => {
 
     await recovery.onRunnerReady();
 
+    expect(env.repo.turn(compact.id, "compact")?.status).toBe("interrupted");
+    expect(env.repo.get(missingToken.id).status).toBe("failed");
     expect(delivered()).toEqual(candidates.slice(0, immediate).map(continuation));
     expect(admission.status()).toMatchObject({
       active: 4,
@@ -372,7 +473,7 @@ describe("admission during restart recovery", () => {
     for (const [index, { id }] of candidates.slice(0, 2).entries()) {
       env.repo.update(id, (s) => ({ ...s, status: "idle" }));
       lifecycle.drainQueue();
-      await new Promise<void>((resolve) => setImmediate(resolve));
+      await waitUntil(() => starts.length >= immediate + index + 1);
       expect(delivered()).toEqual(candidates.slice(0, immediate + index + 1).map(continuation));
     }
     expect(admission.status().waiting).toEqual([]);
