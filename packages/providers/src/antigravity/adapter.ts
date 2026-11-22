@@ -90,6 +90,8 @@ export class AntigravityAdapter implements ProviderAdapter {
   private planListed: boolean | undefined;
   /** Bumped by every probe and every session setup, so a slower probe never replaces newer facts. */
   private generation = 0;
+  /** The generation whose model list is shown (0: Default). */
+  private listed = 0;
   private found: { command: ResolvedCommand; version: string | null } | undefined;
 
   constructor(private readonly options: AntigravityAdapterOptions = {}) {}
@@ -122,11 +124,13 @@ export class AntigravityAdapter implements ProviderAdapter {
   async detect(): Promise<ProviderStatus> {
     // A reinstall or an uninstall since the last detection: look again.
     this.found = undefined;
+    // Taken before the lookup, so detections that overtake each other keep their order.
+    const generation = ++this.generation;
     return detectAntigravity({
       ...(this.options.executable ? { executable: this.options.executable } : {}),
       ...(this.options.locate ? { locate: this.options.locate } : {}),
       ...(this.options.probeTimeoutMs ? { timeoutMs: this.options.probeTimeoutMs } : {}),
-      probe: (exe, version) => this.probe(exe, version),
+      probe: (exe, version) => this.probe(exe, version, generation),
     });
   }
 
@@ -189,34 +193,43 @@ export class AntigravityAdapter implements ProviderAdapter {
   /** A session reported its models and modes: they are the account's current ones. */
   private onSetup(setup: AcpSessionSetup, info: AcpInitializeResult): void {
     this.info = info;
-    this.generation++;
-    this.applySetup(setup);
+    this.applySetup(setup, ++this.generation);
   }
 
-  /** Take a session's modes and models; a list it can't read leaves the current ones. */
-  private applySetup(setup: AcpSessionSetup): void {
+  /**
+   * Take a reported setup's modes and models unless a newer one was already taken (a probe that
+   * lists nothing doesn't count); a list it can't read leaves the current one.
+   */
+  private applySetup(setup: AcpSessionSetup, generation: number): void {
+    if (generation < this.listed) return;
     try {
       const modes = modeIds(setup);
       if (modes.length) this.planListed = modes.includes(ANTIGRAVITY_AGENT.modes.plan ?? "plan");
       const models = antigravityModelInfos(setup);
-      if (models) this.catalog.set(models);
+      if (!models) return;
+      this.catalog.set(models);
+      this.listed = generation;
     } catch {
       // A malformed reply: Default (or the last good list) stands.
     }
   }
 
   /** Detection found a supported copy: sessions run it, after the handshake shows its flags. */
-  private async probe(exe: ResolvedCommand, version: string | null): Promise<AntigravityProbe> {
-    this.found = { command: exe, version };
-    const generation = ++this.generation;
+  private async probe(
+    exe: ResolvedCommand,
+    version: string | null,
+    generation: number,
+  ): Promise<AntigravityProbe> {
     const result = await probeAntigravity(exe, {
       ...(this.options.probeTimeoutMs ? { timeoutMs: this.options.probeTimeoutMs } : {}),
       ...(this.options.listTimeoutMs ? { setupTimeoutMs: this.options.listTimeoutMs } : {}),
     });
-    // Only the newest report counts: a later probe or a real session opened meanwhile wins.
-    if (this.generation !== generation) return result;
-    if (result.info) this.info = result.info;
-    if (result.setup) this.applySetup(result.setup);
+    // The newest detection names the CLI and its flags; a later one or a real session wins.
+    if (this.generation === generation) {
+      this.found = { command: exe, version };
+      if (result.info) this.info = result.info;
+    }
+    if (result.setup) this.applySetup(result.setup, generation);
     return result;
   }
 }

@@ -52,4 +52,19 @@ describe("detection probes that finish out of order", () => {
     await expect(third).resolves.toMatchObject({ supported: true });
     expect(adapter.models().map((m) => m.id)).toContain("gemini-4-argon");
   });
+
+  it("keep an older probe's list when the newer one listed nothing", async () => {
+    pending.length = 0;
+    const adapter = new AntigravityAdapter({ executable: fakeAgy });
+    const older = adapter.detect();
+    await vi.waitFor(() => expect(pending).toHaveLength(1));
+    const newer = adapter.detect();
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    // The newer probe's throwaway session timed out; the older one's list still counts.
+    pending[1]?.({ acp: true });
+    await newer;
+    pending[0]?.({ acp: true, setup: listing("gemini-4-neon") });
+    await older;
+    expect(adapter.models().map((m) => m.id)).toContain("gemini-4-neon");
+  });
 });
