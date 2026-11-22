@@ -2,4 +2,4 @@
 section: fixed
 ---
 
-- **CLI updates.** The installer ignores inherited npm configuration variables that can interfere with a side-by-side update.
+- **CLI updates.** The installer keeps inherited npm registry, proxy, certificate, and user config settings and filters out other inherited npm configuration variables during side-by-side updates.
