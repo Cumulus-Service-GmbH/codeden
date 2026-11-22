@@ -28,7 +28,6 @@ export interface SegmentQueue<T> {
  */
 const SPACELESS =
   "\\p{scx=Han}\\p{scx=Hiragana}\\p{scx=Katakana}\\p{scx=Thai}\\p{scx=Lao}\\p{scx=Khmer}\\p{scx=Myanmar}\\u3000-\\u303f\\uff01-\\uff60";
-const ENDS_SPACELESS = new RegExp(`[${SPACELESS}]$`, "u");
 const STARTS_SPACELESS = new RegExp(`^[${SPACELESS}]`, "u");
 
 /**
@@ -36,7 +35,8 @@ const STARTS_SPACELESS = new RegExp(`^[${SPACELESS}]`, "u");
  * written without spaces (a pause there is not a word break), a single space otherwise.
  */
 export function separator(before: string, after: string): string {
-  return ENDS_SPACELESS.test(before) && STARTS_SPACELESS.test(after) ? "" : " ";
+  const last = Array.from(before.slice(-2)).at(-1) ?? "";
+  return STARTS_SPACELESS.test(last) && STARTS_SPACELESS.test(after) ? "" : " ";
 }
 
 /** Join transcribed pieces the way their language is written, skipping empty ones. */
