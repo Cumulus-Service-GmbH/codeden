@@ -2,8 +2,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { startAgent } from "../acp/process";
-import type { AcpInitializeResult } from "../acp/protocol";
-import { AcpRpcError, METHOD_NOT_FOUND } from "../acp/rpc";
+import type { AcpInitializeResult, AcpSessionSetup } from "../acp/protocol";
+import { type AcpRpc, AcpRpcError, METHOD_NOT_FOUND } from "../acp/rpc";
 import type { ResolvedCommand } from "../util/exec";
 
 /**
@@ -19,18 +19,48 @@ export interface AntigravityProbe {
   acp: boolean;
   /** What it reported in `initialize` (its capabilities). */
   info?: AcpInitializeResult;
+  /** What a throwaway session listed (models, thinking levels), when it opened in time. */
+  setup?: AcpSessionSetup;
   /** Why the ACP server didn't start, when it didn't. */
   error?: string;
 }
 
+/** How long the throwaway session may take to list the models; then Default stands in. */
+const SETUP_TIMEOUT_MS = 8_000;
+
 /**
- * Start `agy acp` once and check it answers `initialize` with ACP version 1. Only the handshake
- * runs: no `authenticate`, no session (that would save a conversation and start the user's MCP
- * servers), no model call. Never throws.
+ * Open one throwaway session (no MCP servers, no prompt) to read the account's models and
+ * thinking levels. Undefined when it fails or is slow: a signed-out CLI, an old one, a hang.
+ */
+async function listSetup(
+  rpc: AcpRpc,
+  cwd: string,
+  timeoutMs: number,
+): Promise<AcpSessionSetup | undefined> {
+  let timer: NodeJS.Timeout | undefined;
+  const late = new Promise<undefined>((resolve) => {
+    timer = setTimeout(() => resolve(undefined), timeoutMs);
+  });
+  const opened = rpc
+    .request<AcpSessionSetup>("session/new", { cwd, mcpServers: [] })
+    .then((setup) => setup ?? undefined)
+    .catch(() => undefined);
+  try {
+    return await Promise.race([opened, late]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Start `agy acp` once, check it answers `initialize` with ACP version 1, and open one throwaway
+ * session in an empty scratch folder to list the account's models (`listSetup`). No
+ * `authenticate`, no prompt and so no model call; CodeDen passes no MCP servers, though the
+ * CLI may start the user's own and keep the empty session in its history. Never throws.
  */
 export async function probeAntigravity(
   exe: ResolvedCommand,
-  opts: { timeoutMs?: number } = {},
+  opts: { timeoutMs?: number; setupTimeoutMs?: number } = {},
 ): Promise<AntigravityProbe> {
   let stderr = "";
   let cwd: string | undefined;
@@ -55,8 +85,9 @@ export async function probeAntigravity(
         timeoutMs: opts.timeoutMs ?? 20_000,
       },
     );
+    const setup = await listSetup(started.rpc, cwd, opts.setupTimeoutMs ?? SETUP_TIMEOUT_MS);
     await started.rpc.close();
-    return { acp: true, info: started.info };
+    return { acp: true, info: started.info, ...(setup ? { setup } : {}) };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     return {

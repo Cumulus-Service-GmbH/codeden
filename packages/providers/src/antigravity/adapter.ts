@@ -72,6 +72,8 @@ export interface AntigravityAdapterOptions {
   executable?: ResolvedCommand;
   /** Where to look for the CLI (tests); default PATH, then `~/.local/bin`. */
   locate?: LocateOptions;
+  /** Max time the probe's throwaway session may take to list the models (tests). */
+  listTimeoutMs?: number;
   /** Max time for a probe (detection). */
   probeTimeoutMs?: number;
   startTimeoutMs?: number;
@@ -86,6 +88,8 @@ export class AntigravityAdapter implements ProviderAdapter {
   private info: AcpInitializeResult | undefined;
   /** Whether the last session listed a `plan` mode; unknown until one has. */
   private planListed: boolean | undefined;
+  /** Setups real sessions reported, so a slower probe never replaces a newer list. */
+  private setups = 0;
   private found: { command: ResolvedCommand; version: string | null } | undefined;
 
   constructor(private readonly options: AntigravityAdapterOptions = {}) {}
@@ -147,8 +151,9 @@ export class AntigravityAdapter implements ProviderAdapter {
   }
 
   /**
-   * The CLI lists its models only in a session, so there is no `refreshModels`: Default stands
-   * in until a session reports the account's list.
+   * The CLI lists its models only in a session, so there is no `refreshModels`: detection's probe
+   * opens a throwaway one to read them, real sessions refresh them, and Default stands
+   * in until one of them reports the account's list.
    */
   onModelsChanged(listener: () => void): () => void {
     return this.catalog.subscribe(listener);
@@ -184,6 +189,11 @@ export class AntigravityAdapter implements ProviderAdapter {
   /** A session reported its models and modes: they are the account's current ones. */
   private onSetup(setup: AcpSessionSetup, info: AcpInitializeResult): void {
     this.info = info;
+    this.setups++;
+    this.applySetup(setup);
+  }
+
+  private applySetup(setup: AcpSessionSetup): void {
     const modes = modeIds(setup);
     if (modes.length) this.planListed = modes.includes(ANTIGRAVITY_AGENT.modes.plan ?? "plan");
     const models = antigravityModelInfos(setup);
@@ -193,10 +203,14 @@ export class AntigravityAdapter implements ProviderAdapter {
   /** Detection found a supported copy: sessions run it, after the handshake shows its flags. */
   private async probe(exe: ResolvedCommand, version: string | null): Promise<AntigravityProbe> {
     this.found = { command: exe, version };
+    const before = this.setups;
     const result = await probeAntigravity(exe, {
       ...(this.options.probeTimeoutMs ? { timeoutMs: this.options.probeTimeoutMs } : {}),
+      ...(this.options.listTimeoutMs ? { setupTimeoutMs: this.options.listTimeoutMs } : {}),
     });
     if (result.info) this.info = result.info;
+    // The probe's session lists the models before any real one; a real session's newer list wins.
+    if (result.setup && this.setups === before) this.applySetup(result.setup);
     return result;
   }
 }

@@ -7,7 +7,8 @@
 // Like agy: sessions report `modes`, `models` and config options (`model`, `thought_level`,
 // `mode`); `session/set_config_option` answers with every option.
 // FAKE_AGY_AUTH=missing: `session/new` fails as signed out. FAKE_AGY_LOG: every message the
-// client sends, one JSON line each. FAKE_AGY_REJECT_FILE: while that file exists,
+// client sends, one JSON line each. FAKE_AGY_NEW_HANG=1: `session/new` never answers.
+// FAKE_AGY_DROP_MODEL: that model is left out of the list. FAKE_AGY_REJECT_FILE: while that file exists,
 // `session/set_config_option` fails. FAKE_AGY_REPLY: the text each `session/prompt` streams.
 import { appendFileSync, existsSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
@@ -45,6 +46,11 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     case "session/new":
       if (env.FAKE_AGY_AUTH === "missing") {
         return send({ id: msg.id, error: { code: -32000, message: "Authentication required" } });
+      }
+      if (env.FAKE_AGY_NEW_HANG === "1") return;
+      if (env.FAKE_AGY_DROP_MODEL) {
+        const model = setup.configOptions.find((o) => o.id === "model");
+        if (model) model.options = model.options.filter((o) => o.value !== env.FAKE_AGY_DROP_MODEL);
       }
       return send({ id: msg.id, result: setup });
     case "session/load":

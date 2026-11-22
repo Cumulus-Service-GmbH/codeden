@@ -149,6 +149,19 @@ describe("Antigravity CLI session over ACP", () => {
     expect(logged("session/prompt")).toHaveLength(1);
   });
 
+  it("refreshes the models detection read when a real session lists newer ones", async () => {
+    const adapter = new AntigravityAdapter({ executable: fakeAgy });
+    await adapter.detect();
+    expect(adapter.models().map((m) => m.id)).toContain("claude-opus-5-5");
+    const session = await adapter.openSession(
+      options({ env: { FAKE_AGY_DROP_MODEL: "claude-opus-5-5" } }),
+    );
+    sessions.push(session);
+    const ids = adapter.models().map((m) => m.id);
+    expect(ids).toContain("gemini-4-neon");
+    expect(ids).not.toContain("claude-opus-5-5");
+  });
+
   it("refuses to open a given CLI that is too old", async () => {
     const adapter = new AntigravityAdapter({ executable: fakeAgy });
     process.env.FAKE_AGY_VERSION = "1.5.11";

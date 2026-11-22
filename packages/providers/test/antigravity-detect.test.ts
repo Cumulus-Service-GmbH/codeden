@@ -30,7 +30,13 @@ const captured = JSON.parse(readFileSync(join(fixtures, "capture.json"), "utf8")
 };
 
 afterEach(() => {
-  for (const key of ["FAKE_AGY_VERSION", "FAKE_AGY_NO_ACP"]) delete process.env[key];
+  for (const key of [
+    "FAKE_AGY_VERSION",
+    "FAKE_AGY_NO_ACP",
+    "FAKE_AGY_NEW_HANG",
+    "FAKE_AGY_DROP_MODEL",
+  ])
+    delete process.env[key];
   clearExecutableCache();
 });
 
@@ -180,5 +186,23 @@ describe("detectAntigravity", () => {
       steer: false,
       fork: false,
     });
+  });
+});
+
+describe("the Antigravity CLI's models before any session", () => {
+  it("are read at detection from a throwaway session, with no prompt sent", async () => {
+    const adapter = new AntigravityAdapter({ executable: fakeAgy });
+    expect(adapter.models().map((m) => m.id)).toEqual(["default"]);
+    await adapter.detect();
+    const ids = adapter.models().map((m) => m.id);
+    expect(ids).toEqual(expect.arrayContaining(["default", "gemini-4-neon", "claude-opus-5-5"]));
+  });
+
+  it("stay Default when the throwaway session doesn't answer in time, and detection still passes", async () => {
+    process.env.FAKE_AGY_NEW_HANG = "1";
+    const adapter = new AntigravityAdapter({ executable: fakeAgy, listTimeoutMs: 300 });
+    const status = await adapter.detect();
+    expect(status).toMatchObject({ installed: true, supported: true, issues: [] });
+    expect(adapter.models().map((m) => m.id)).toEqual(["default"]);
   });
 });
