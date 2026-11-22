@@ -75,6 +75,9 @@ describe("orchestration (§8): role sessions, digest, tools, notices, conflicts"
         "list_projects",
         "create_project",
         "update_project",
+        "merge_pull_request",
+        "resume_session",
+        "stop_session",
         "message_pm",
         "ask_pm",
         "list_inbox",
@@ -85,6 +88,9 @@ describe("orchestration (§8): role sessions, digest, tools, notices, conflicts"
       expect.arrayContaining(["start_session", "get_project_status", "ask_user"]),
     );
     expect(names("pm")).not.toContain("ask_pm");
+    expect(names("pm")).not.toContain("stop_session");
+    expect(names("pm")).not.toContain("resume_session");
+    expect(names("pm")).not.toContain("merge_pull_request");
     expect(names("agent")).not.toContain("start_session");
     expect(names("agent")).not.toContain("get_overview");
     const denied = await call(

@@ -17,6 +17,15 @@ import { jsonBody, queryOf } from "./validate";
 export function inboxRoutes(s: AppServices) {
   return new Hono()
     .get("/", queryOf(ListInboxQuery), (c) => c.json(s.inbox.list(c.req.valid("query"))))
+    .get("/decision-cards", (c) => c.json(s.decisions.pending()))
+    .post("/decision-cards/:id/approve", async (c) => {
+      await s.decisions.confirm(c.req.param("id"), {
+        role: "owner",
+        projectId: null,
+        sessionId: null,
+      });
+      return c.json({ approved: true });
+    })
     .get("/counts", (c) => c.json(s.inbox.counts()))
     .post("/dismiss", jsonBody(DismissInboxRequest), (c) => {
       const { ids, filter, note } = c.req.valid("json");

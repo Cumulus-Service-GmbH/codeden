@@ -216,6 +216,9 @@ export const messageSession = defineTool({
   }),
   handler: async ({ sessionId, text, whenBusy }, { services, projectId }) => {
     const session = agentSessionOf(services, sessionId, projectId);
+    if (session.status === "stopped") {
+      throw new ToolError("Resuming a stopped session requires a confirmed orchestrator plan");
+    }
     const res = await services.sessions.send(
       session.id,
       {
@@ -233,12 +236,13 @@ export const stopSession = defineTool({
   name: "stop_session",
   description:
     "Stop one of this project's agent sessions (it can be resumed later). Use it for duplicates, runaway work or work that is no longer wanted; say why in reason.",
-  roles: ["pm"],
+  roles: ["orchestrator"],
   scope: "project",
   alwaysLoad: true,
   input: z.object({ sessionId: z.string().min(1), reason: z.string().max(500).optional() }),
   handler: async ({ sessionId }, { services, projectId }) => {
     const session = agentSessionOf(services, sessionId, projectId);
+    if (session.id !== sessionId) throw new ToolError("Use the full session ID");
     if (ENDED.has(session.status))
       throw new ToolError(`Session ${session.id} already ${session.status}`);
     const stopped = await services.sessions.stop(session.id);

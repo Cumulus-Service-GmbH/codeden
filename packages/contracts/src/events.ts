@@ -15,6 +15,7 @@ import {
 } from "./agent-events";
 import { ProjectChecklist } from "./checklist";
 import { Id, Timestamp } from "./common";
+import { DecisionCard, DecisionConfirmation, PlanApprovalStep } from "./decision-rights";
 import { Artifact } from "./entities/artifact";
 import { Automation, AutomationRun } from "./entities/automation";
 import { InboxItem } from "./entities/inbox";
@@ -161,6 +162,12 @@ export const EventEnvelope = z.discriminatedUnion("type", [
   /** A runner terminal exited. */
   globalEvent("pty.exited", z.object({ ptyId: PtyId, exitCode: z.int().nullable() })),
   // GitHub sync (§9); `sessionId` is the PR's linked session when there is one.
+  globalEvent("decision.raised", DecisionCard),
+  globalEvent("decision.confirmed", DecisionConfirmation),
+  globalEvent("decision.step_consumed", z.object({ id: Id, step: PlanApprovalStep })),
+  globalEvent("decision.github_claimed", z.object({ id: Id })),
+  globalEvent("decision.github_stale", z.object({ id: Id })),
+  globalEvent("decision.github_posted", z.object({ id: Id })),
   globalEvent("github.synced", GITHUB_EVENT_PAYLOADS["github.synced"]),
   globalEvent("issue.opened", GITHUB_EVENT_PAYLOADS["issue.opened"]),
   globalEvent("issue.labeled", GITHUB_EVENT_PAYLOADS["issue.labeled"]),

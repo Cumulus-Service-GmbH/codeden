@@ -1,6 +1,7 @@
-import type { McpTokenClaims } from "@codeden/contracts";
+import { type McpTokenClaims, PlanApprovalStep } from "@codeden/contracts";
 import { z } from "zod";
 import type { AppServices } from "../services/container";
+import { tierFor } from "../services/decision-approvals";
 import { errorMessage, ServiceError } from "../services/errors";
 import {
   type AnyServerTool,
@@ -62,7 +63,12 @@ export class ToolRegistry {
     return this.forRole(role, caller).map((tool) => describeTool(tool));
   }
 
-  async call(name: string, args: unknown, caller: ToolCaller): Promise<ToolCallResult> {
+  async call(
+    name: string,
+    args: unknown,
+    caller: ToolCaller,
+    plan?: { cardId: string; projectId: string },
+  ): Promise<ToolCallResult> {
     const tool = this.forRole(caller.role, caller).find((t) => t.name === name);
     if (!tool) return { text: `Unknown tool: ${name}`, isError: true };
     const parsed = tool.input.safeParse(args ?? {});
@@ -72,16 +78,26 @@ export class ToolRegistry {
     if (tool.scope === "session" && !caller.sessionId) {
       return { text: `${name} needs a session`, isError: true };
     }
-    if (tool.scope === "project" && !caller.projectId) {
+    const projectId = plan?.projectId ?? caller.projectId;
+    if (tool.scope === "project" && !projectId) {
       return { text: `${name} needs a project`, isError: true };
     }
     try {
+      const tier = tierFor(name);
+      if (tier !== undefined || plan) {
+        const step = PlanApprovalStep.parse({ action: name, args: args ?? {} });
+        const target = step.args.projectId ?? projectId;
+        if (typeof target !== "string" || (plan && target !== plan.projectId)) {
+          throw new ToolError("The step must target the card's project");
+        }
+        this.services.decisions.authorize(caller, target, step, plan?.cardId);
+      }
       const output = await tool.handler(parsed.data, {
         role: caller.role,
         caller: caller.caller,
         signal: caller.signal,
         sessionId: caller.sessionId,
-        projectId: caller.projectId,
+        projectId,
         services: this.services,
       } as never);
       if (output instanceof ToolOutput) {

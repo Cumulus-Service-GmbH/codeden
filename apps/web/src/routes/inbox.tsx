@@ -4,6 +4,7 @@ import { AlertTriangle, CheckCheck, Inbox } from "lucide-react";
 import { useEffect, useState } from "react";
 import { EmptyState, SectionLabel } from "@/components/common/bits";
 import { DismissView, useBulkDismiss } from "@/components/inbox/bulk-dismiss";
+import { DecisionCards, useDecisionCards } from "@/components/inbox/decision-cards";
 import { FOCUSED_ENTRY, InboxEntry, inboxEntryId } from "@/components/inbox/inbox-entry";
 import { ConflictCard } from "@/components/project/conflict-card";
 import { Button } from "@/components/ui/button";
@@ -75,17 +76,21 @@ export function InboxPage({ focusItemId }: { focusItemId?: string }) {
   const [filter, setFilter] = useState<InboxFilter>("all");
   const conflicts = useQuery({ queryKey: ["conflicts"], queryFn: () => client.listConflicts() });
   const conflictList = conflicts.data ?? [];
+  const decisionCards = useDecisionCards();
+  const cards = decisionCards.data ?? [];
+  const cardsShown = conflictFilters.has(filter);
   const groups = groupInbox(items, filter);
-  const counts = inboxCounts(items, conflictList.length);
+  const counts = inboxCounts(items, conflictList.length + cards.length);
   const resolved = items.filter((i) => i.status !== "open").slice(0, 5);
   // Conflicts count under All and Needs an answer: there, nothing is listed and no count shown
   // until they're known, so the header, the tabs and the list agree.
-  const countKnown = (f: InboxFilter) => loaded && !(conflictFilters.has(f) && conflicts.isPending);
+  const countKnown = (f: InboxFilter) =>
+    loaded && !(conflictFilters.has(f) && (conflicts.isPending || decisionCards.isPending));
   const conflictsShown = conflictFilters.has(filter);
   const showConflicts = conflictsShown && conflictList.length > 0;
-  const nothingListed = groups.length === 0 && !showConflicts;
+  const nothingListed = groups.length === 0 && !showConflicts && (!cardsShown || !cards.length);
   const body =
-    !loaded || (nothingListed && conflictsShown && conflicts.isPending)
+    !loaded || (nothingListed && conflictsShown && (conflicts.isPending || decisionCards.isPending))
       ? "loading"
       : !nothingListed
         ? "list"
@@ -153,6 +158,7 @@ export function InboxPage({ focusItemId }: { focusItemId?: string }) {
             ))}
           </div>
 
+          {cardsShown && <DecisionCards cards={cards} />}
           {body === "loading" ? (
             <InboxLoading />
           ) : body === "conflicts-error" ? (

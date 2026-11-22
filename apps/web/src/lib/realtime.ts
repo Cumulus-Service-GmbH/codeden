@@ -12,7 +12,7 @@ import type { CodeDenClient } from "./api/client";
 import { syncSessionQueries } from "./archived-sessions";
 import { invalidateAutomations } from "./automations";
 import { invalidateFactory } from "./factory";
-import { snapshotKey } from "./queries";
+import { decisionCardsKey, snapshotKey } from "./queries";
 import { applyDomainEvent } from "./snapshot-reducer";
 import { updatesKey } from "./updates";
 
@@ -78,6 +78,13 @@ export function startRealtime(client: CodeDenClient, queryClient: QueryClient): 
       invalidateWorkbench(queryClient, env);
       invalidateAutomations(queryClient, env);
       invalidateFactory(queryClient, env);
+      if (
+        env.type === "decision.raised" ||
+        env.type === "decision.confirmed" ||
+        env.type === "decision.github_stale"
+      ) {
+        void queryClient.invalidateQueries({ queryKey: decisionCardsKey });
+      }
     }
     if (env.seq > conn().seq) conn().setSeq(env.seq);
     for (const l of listeners) l(env);
