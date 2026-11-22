@@ -1,8 +1,11 @@
+import { EventEnvelope } from "@codeden/contracts";
 import { eq } from "drizzle-orm";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { factoryLoops } from "../src/db/schema";
+import { ToolError } from "../src/mcp/define";
 import { type ToolCaller, ToolRegistry } from "../src/mcp/registry";
 import { factoryTools } from "../src/mcp/tools/factory";
+import { factoryResume, factoryStop } from "../src/mcp/tools/factory/control";
 import { renderProjectDigest } from "../src/services/orchestration/digest";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
 
@@ -29,6 +32,14 @@ async function result(name: string, args: unknown, role?: ToolCaller["role"]) {
   return JSON.parse(response.text);
 }
 
+const services = () =>
+  ({
+    factory: env.factory,
+    projects: env.factory.ctx.projects,
+    sessionRepo: env.repo,
+    settings: env.settings,
+  }) as never;
+
 beforeEach(async () => {
   vi.useFakeTimers({ toFake: ["Date"] });
   vi.setSystemTime(new Date(2026, 10, 22, 23, 50));
@@ -37,12 +48,7 @@ beforeEach(async () => {
     mode: "software_factory",
     limits: env.project.factoryLimits,
   });
-  tools = new ToolRegistry(factoryTools, {
-    factory: env.factory,
-    projects: env.factory.ctx.projects,
-    sessionRepo: env.repo,
-    settings: env.settings,
-  } as never);
+  tools = new ToolRegistry(factoryTools, services());
 });
 afterEach(() => {
   env?.close();
@@ -233,4 +239,112 @@ it("reports a repeated concurrent stop as a no-op", async () => {
   expect(first.changed).toBe(true);
   expect(second.changed).toBe(false);
   expect(second.control.lastControl.reason).toBe(reason);
+});
+
+it("lists only pause and status for the PM and refuses resume and stop without changes", async () => {
+  const listed = tools.list("pm", caller("pm")).map((tool) => tool.name);
+  expect(listed).toEqual(expect.arrayContaining(["factory_pause", "factory_status"]));
+  const before = { events: events(), project: project(), loop: loop() };
+  for (const name of ["factory_resume", "factory_stop"]) {
+    expect(listed).not.toContain(name);
+    expect(await call(name, input(), "pm")).toEqual({
+      isError: true,
+      text: `Unknown tool: ${name}`,
+    });
+  }
+  expect({ events: events(), project: project(), loop: loop() }).toEqual(before);
+});
+
+it("refuses direct PM calls to resume and stop", async () => {
+  const ctx = { ...caller("pm"), services: services() };
+  const error = new ToolError(
+    "Only the orchestrator (or the user, in the factory view) can resume, stop or kill the factory loop. A project manager can pause its own project with factory_pause.",
+  );
+  for (const tool of [factoryResume, factoryStop]) {
+    const rejection = tool.handler(input(), ctx);
+    await expect(rejection).rejects.toThrow(error);
+    await expect(rejection).rejects.toBeInstanceOf(ToolError);
+  }
+});
+
+it("attributes PM pauses and orchestrator stops and records one resolved history item per action", async () => {
+  const batches: ReturnType<typeof events>[] = [];
+  env.store.subscribe((batch) => {
+    batches.push(batch);
+  });
+  for (const [action, by, title] of [
+    ["pause", "pm", "Paused by PM"],
+    ["resume", "orchestrator", "Resumed by orchestrator"],
+    ["stop", "orchestrator", "Stopped by orchestrator"],
+    ["resume", "orchestrator", "Resumed by orchestrator"],
+  ] as const) {
+    expect(await result(`factory_${action}`, input(), by)).toMatchObject({ changed: true });
+    const at = loop().lastControl?.at;
+    expect(at).toBeDefined();
+    const id = `inbox:factory-control:${env.project.id}:${action}:${at}`;
+    const entry = { action, by, reason };
+    const matching = events().filter((e) => {
+      if (e.type !== "inbox.created") return false;
+      const parsed = EventEnvelope.parse(e);
+      return parsed.type === "inbox.created" && parsed.payload.item.id === id;
+    });
+    expect(matching).toHaveLength(1);
+    expect(matching[0]).toMatchObject({
+      sessionId,
+      payload: {
+        item: {
+          id,
+          kind: "automation_result",
+          notify: "factory",
+          status: "resolved",
+          projectId: env.project.id,
+          sessionId,
+          resolvedAt: at,
+          resolution: entry,
+          title: `${title}: ${reason}`,
+          body: expect.stringContaining(project().name),
+        },
+      },
+    });
+    expect(batches.find((batch) => batch.some((event) => event.seq === matching[0]?.seq))).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "factory.loop.updated",
+          payload: expect.objectContaining({
+            loop: expect.objectContaining({
+              lastControl: { ...entry, at, sessionId },
+            }),
+          }),
+        }),
+      ]),
+    );
+    expect(await result("factory_status", input(), by)).toMatchObject({
+      control: { halt: action === "resume" ? null : { source: by, reason } },
+    });
+  }
+});
+
+it("reports and refuses to resume a built-in daily budget halt while it holds", async () => {
+  await env.factory.setMode(env.project.id, {
+    mode: "software_factory",
+    limits: { ...project().factoryLimits, dailyBudget: { usd: 5 } },
+  });
+  env.spend = { usd: 5, tokens: 0 };
+  await env.factory.tick(env.project.id);
+  const budgetReason = "daily budget reached ($5.00 of $5.00)";
+  expect(loop()).toMatchObject({ state: "paused", pausedReason: budgetReason });
+  const before = { events: events(), project: project(), loop: loop() };
+  expect(await call("factory_resume", input())).toEqual({
+    isError: true,
+    text: `Not resumed: ${budgetReason}. That halt clears when its cause does.`,
+  });
+  expect({ events: events(), project: project(), loop: loop() }).toEqual(before);
+  expect(await result("factory_status", input())).toMatchObject({
+    control: { halt: { source: "builtin", reason: budgetReason } },
+  });
+  env.spend = { usd: 0, tokens: 0 };
+  expect(await result("factory_resume", input())).toMatchObject({
+    changed: true,
+    control: { halt: null },
+  });
 });

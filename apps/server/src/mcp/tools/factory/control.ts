@@ -7,6 +7,7 @@ import {
   loopControlLine,
 } from "@codeden/contracts";
 import type { AppServices } from "../../../services/container";
+import { resumeBlocker } from "../../../services/factory/halt";
 import {
   defineTool,
   type ServerToolContext,
@@ -51,6 +52,7 @@ export function controlStatus(status: FactoryStatus) {
   return {
     state: runState(status),
     lastControl: status.lastControl,
+    halt: status.halt,
     line: loopControlLine(status.lastControl),
   };
 }
@@ -58,14 +60,19 @@ export function controlStatus(status: FactoryStatus) {
 function controlTool(action: FactoryControlAction, description: string) {
   return defineTool({
     name: `factory_${action}`,
-    description: `${description} The reason is required and shown to the user. Use these tools for every factory pause, resume and stop. Never edit settings or call the API by hand. A PM controls only its own project. The orchestrator must pass projectId and can control any factory project.`,
-    roles: ["orchestrator", "pm"],
+    description: `${description} The reason is required and recorded in the inbox. Use these tools for factory loop controls. Never edit settings or call the API by hand. The orchestrator must pass projectId and can target any factory project.`,
+    roles: action === "pause" ? ["orchestrator", "pm"] : ["orchestrator"],
     scope: "global",
     alwaysLoad: true,
     isAvailable: controlAvailable,
     input: FactoryControlRequest,
     handler: (input, ctx) =>
       asTool(async () => {
+        if (action !== "pause" && ctx.role !== "orchestrator") {
+          throw new ToolError(
+            "Only the orchestrator (or the user, in the factory view) can resume, stop or kill the factory loop. A project manager can pause its own project with factory_pause.",
+          );
+        }
         const projectId = controlTarget(ctx, input.projectId);
         const { factory, projects, settings } = ctx.services;
         const control = {
@@ -78,11 +85,13 @@ function controlTool(action: FactoryControlAction, description: string) {
           if (settings.get().factory.killSwitch) {
             throw new ToolError("The global kill switch is on. Only the user can release it.");
           }
+          const blocked = await resumeBlocker(factory.ctx, projectId);
+          if (blocked) throw new ToolError(blocked);
           if (projects.get(projectId).killSwitch) {
             changed = (await factory.setKillSwitch(projectId, false, { control })).changed ?? false;
+          } else {
+            changed = (await factory.resume(projectId, control)).changed ?? false;
           }
-          const loop = await factory.resume(projectId, control);
-          changed = changed || (loop.changed ?? false);
         } else {
           const result = await factory.setKillSwitch(projectId, true, {
             mode: action === "pause" ? "drain" : "now",
@@ -102,10 +111,13 @@ function controlTool(action: FactoryControlAction, description: string) {
 
 export const factoryPause = controlTool(
   "pause",
-  "Pause the factory after its work in flight finishes.",
+  "Pause the factory after its work in flight finishes. A PM can pause only its own project.",
 );
 export const factoryResume = controlTool(
   "resume",
-  "Resume a paused or stopped factory, or cancel its drain.",
+  "The orchestrator can resume a paused or stopped factory, or cancel its drain, unless a built-in halt still blocks it.",
 );
-export const factoryStop = controlTool("stop", "Stop the factory and its sessions immediately.");
+export const factoryStop = controlTool(
+  "stop",
+  "The orchestrator can stop the factory and its sessions immediately.",
+);

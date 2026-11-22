@@ -26,7 +26,7 @@ import { asTool, forSession, inFactoryProject } from "./shared";
 export const factoryStatus = defineTool({
   name: "factory_status",
   description:
-    "Read a factory loop and its last pause, resume or stop, including the actor, time and reason. A PM reads only its own project. The orchestrator must pass projectId. When draining, the factory finishes its current work before stopping and `drain.inFlight` says how many items are left. The result also includes limits (auto-merge, trusted authors), spend against the daily budget, each work item's pipeline (bug, feature, docs) and step, issues ignored because their author isn't trusted, the merge checks of open pull requests, recent merges, failures and reverts, and the dark factory's scout.",
+    "Read a factory loop, its current halt source and reason, and its last pause, resume or stop, including the actor, time and reason. A PM reads only its own project. The orchestrator must pass projectId. When draining, the factory finishes its current work before stopping and `drain.inFlight` says how many items are left. The result also includes limits (auto-merge, trusted authors), spend against the daily budget, each work item's pipeline (bug, feature, docs) and step, issues ignored because their author isn't trusted, the merge checks of open pull requests, recent merges, failures and reverts, and the dark factory's scout.",
   roles: ["pm", "orchestrator"],
   scope: "global",
   alwaysLoad: true,

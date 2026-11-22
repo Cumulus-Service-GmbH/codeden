@@ -1,4 +1,4 @@
-import { loopControlLine, type Project } from "@codeden/contracts";
+import { haltLine, loopControlLine, type Project } from "@codeden/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link, useLocation } from "@tanstack/react-router";
 import { AlertTriangle, Factory, FileText, Newspaper, Play, SlidersHorizontal } from "lucide-react";
@@ -106,7 +106,8 @@ export function FactoryPanel({ project }: { project: Project }) {
   });
 
   if (!f) return <Skeleton className="h-72 w-full rounded-xl" />;
-  const control = loopControlLine(f.lastControl);
+  const halt = haltLine(f.halt, f.lastControl);
+  const control = halt ?? loopControlLine(f.lastControl);
   const stopped = f.killSwitch || f.globalKillSwitch || f.loopState === "stopped";
   const readyCount = f.inProgress.filter(
     (w) => w.step === "merge" && w.stage === "verifying",
@@ -180,7 +181,7 @@ export function FactoryPanel({ project }: { project: Project }) {
                 ? "The global kill switch is on: no project's factory runs."
                 : !f.visionExists
                   ? "The vision file is missing; the loop will not start work without it."
-                  : f.pausedReason
+                  : !halt && f.pausedReason
                     ? `Paused: ${f.pausedReason}`
                     : null}
               {control && <span className="block">{control}</span>}

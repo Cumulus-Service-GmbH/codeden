@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { isDeepStrictEqual } from "node:util";
 import {
+  controlTitle,
   type FactoryDigest,
   type FactoryItem,
   type FactoryItemStage,
@@ -15,6 +16,7 @@ import {
 } from "@codeden/contracts";
 import { and, asc, desc, eq, inArray, isNull, or, sql } from "drizzle-orm";
 import type { Db } from "../../db/client";
+import { projects } from "../../db/schema-core";
 import {
   factoryDigests,
   factoryItems,
@@ -147,6 +149,46 @@ export class FactoryStore {
     };
     if (!extra.length && current && sameLoop(current, loop))
       return { ...loop, updatedAt: current.updatedAt };
+    const control = loop.lastControl;
+    if (control && control.at !== current?.lastControl?.at) {
+      const { action, by, reason, sessionId, at } = control;
+      const projectId = loop.projectId;
+      const project = this.db
+        .select({ name: projects.name })
+        .from(projects)
+        .where(eq(projects.id, projectId))
+        .get();
+      extra = [
+        ...extra,
+        {
+          type: "inbox.created",
+          sessionId,
+          payload: {
+            item: {
+              id: `inbox:factory-control:${projectId}:${action}:${at}`,
+              kind: "automation_result",
+              status: "resolved",
+              priority: "low",
+              notify: "factory",
+              title: controlTitle(control),
+              body: `Factory loop for ${project?.name ?? projectId}.`,
+              projectId,
+              sessionId,
+              threadId: null,
+              itemId: null,
+              requestId: null,
+              issue: null,
+              pr: null,
+              automationRunId: null,
+              createdAt: at,
+              updatedAt: at,
+              resolvedAt: at,
+              resolution: { action, by, reason },
+            },
+          },
+        },
+      ];
+    }
     const next = { ...loop, updatedAt: new Date().toISOString() };
     this.events.append([
       ...extra,

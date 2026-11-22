@@ -60,6 +60,7 @@ import { advanceDrain, drainInboxId, drainStatus, startDrain } from "./drain";
 import { fileFollowUp } from "./follow-ups";
 import { dismissFollowUp } from "./follow-ups-held";
 import type { FactoryGithub } from "./github-port";
+import { resumeBlocker } from "./halt";
 import { itemCosts } from "./item-cost";
 import { allowLargeChange } from "./large-change";
 import { forgetLesson, keepLessons } from "./lessons";
@@ -437,7 +438,7 @@ export class FactoryService {
     const source = opts.control ?? userControl;
     if (on && opts.mode === "drain") return this.drain(projectId, opts.drainLimitMin, opts.control);
     return this.serialize(projectId, on ? "stop" : "resume after kill", async () => {
-      if (!on && opts.control) this.assertCanResume();
+      if (!on && opts.control) await this.assertCanResume(projectId);
       const project = this.deps.projects.get(projectId);
       const now = this.ctx.now();
       const loop = this.data.loopOrNew(projectId, now);
@@ -522,8 +523,8 @@ export class FactoryService {
    * to normal. Runs after the ticks already queued, so a tick in flight never brings either back.
    */
   resume(projectId: string, source?: ControlSource): Promise<FactoryLoop & { changed?: boolean }> {
-    return this.serialize(projectId, "resume", () => {
-      if (source) this.assertCanResume();
+    return this.serialize(projectId, "resume", async () => {
+      if (source) await this.assertCanResume(projectId);
       const loop = this.data.loopOrNew(projectId, this.ctx.now());
       if (loop.state !== "paused" && loop.state !== "draining" && !loop.drain) {
         return controlResult(loop, source, false);
@@ -911,10 +912,12 @@ export class FactoryService {
     );
   }
 
-  private assertCanResume(): void {
+  private async assertCanResume(projectId: string): Promise<void> {
+    const blocked = await resumeBlocker(this.ctx, projectId);
     if (this.deps.settings.get().factory.killSwitch) {
       throw conflict("The global kill switch is on. Only the user can release it.");
     }
+    if (blocked) throw conflict(blocked);
   }
 
   /** Write the switch and an optional loop update in the same event batch. */

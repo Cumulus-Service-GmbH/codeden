@@ -1,4 +1,5 @@
 import {
+  type FactoryHalt,
   type FactoryItem,
   type FactoryItemCost,
   type FactoryLoop,
@@ -90,6 +91,25 @@ function mergeChecks(i: FactoryItem): FactoryMergeChecks | null {
   };
 }
 
+/** Derive the effective halt from the switches and loop snapshot. */
+export function factoryHalt(
+  globalKill: boolean,
+  projectKill: boolean,
+  {
+    drain,
+    lastControl,
+    state,
+    pausedReason,
+  }: Pick<FactoryLoop, "drain" | "lastControl" | "state" | "pausedReason">,
+): FactoryHalt | null {
+  if (globalKill) return { source: "user", reason: "global kill switch" };
+  if ((projectKill || drain) && lastControl && lastControl.action !== "resume") {
+    return { source: lastControl.by, reason: lastControl.reason };
+  }
+  if (projectKill) return { source: "user", reason: "kill switch" };
+  return state === "paused" ? { source: "builtin", reason: pausedReason } : null;
+}
+
 /** `GET /api/projects/:id/factory`: everything the factory panel shows (§10.1 visibility). */
 export async function buildStatus(ctx: FactoryContext, projectId: string): Promise<FactoryStatus> {
   const project = ctx.projects.get(projectId);
@@ -126,6 +146,7 @@ export async function buildStatus(ctx: FactoryContext, projectId: string): Promi
     loopState: project.killSwitch || globalKill ? "stopped" : loop.state,
     pausedReason: loop.pausedReason,
     lastControl: loop.lastControl,
+    halt: factoryHalt(globalKill, project.killSwitch, loop),
     killSwitch: project.killSwitch,
     globalKillSwitch: globalKill,
     drain: drainStatus(ctx, projectId, loop),

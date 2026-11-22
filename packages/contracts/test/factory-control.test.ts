@@ -1,5 +1,13 @@
 import { expect, it } from "vitest";
-import { FactoryControlRequest, FactoryLoop, FactoryLoopControl, loopControlLine } from "../src";
+import {
+  controlTitle,
+  FactoryControlRequest,
+  FactoryHalt,
+  FactoryLoop,
+  FactoryLoopControl,
+  haltLine,
+  loopControlLine,
+} from "../src";
 
 const at = "2026-11-22T10:00:00.000Z";
 const control = {
@@ -51,4 +59,28 @@ it("formats pause and stop attribution", () => {
   expect(loopControlLine({ ...control, by: "user", reason: null })).toBe("Paused by you");
   expect(loopControlLine({ ...control, action: "resume" })).toBeNull();
   expect(loopControlLine(null)).toBeNull();
+});
+
+it("round-trips halts and formats halt and resume attribution", () => {
+  const builtin = { source: "builtin", reason: "daily budget reached ($5.00 of $5.00)" };
+  expect(FactoryHalt.parse(JSON.parse(JSON.stringify(FactoryHalt.parse(builtin))))).toEqual(
+    builtin,
+  );
+  expect(haltLine(FactoryHalt.parse(builtin))).toBe(
+    "Halted (built-in): daily budget reached ($5.00 of $5.00)",
+  );
+  expect(haltLine({ source: "pm", reason: control.reason }, { ...control, by: "pm" })).toBe(
+    "Paused by PM: CI is red on main",
+  );
+  expect(haltLine({ source: "orchestrator", reason: control.reason })).toBe(
+    "Stopped by orchestrator: CI is red on main",
+  );
+  expect(haltLine({ source: "user", reason: null })).toBe("Stopped by you");
+  expect(controlTitle(control)).toBe("Paused by orchestrator: CI is red on main");
+  expect(controlTitle({ ...control, action: "stop" })).toBe(
+    "Stopped by orchestrator: CI is red on main",
+  );
+  expect(controlTitle({ ...control, action: "resume" })).toBe(
+    "Resumed by orchestrator: CI is red on main",
+  );
 });

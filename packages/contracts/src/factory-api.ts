@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { GitHubIssueRef, GitHubPrRef, Id, ProviderId, Timestamp } from "./common";
 import { AutonomyMode, FactoryLimits, FactoryLoopState, MergePath } from "./factory";
-import { FactoryLoopControl } from "./factory-control";
+import { FactoryHalt, FactoryLoopControl } from "./factory-control";
 import { FactoryItemCost } from "./factory-cost";
 import { DigestFollowUps, FactoryFollowUp, ReviewFollowUps } from "./factory-follow-ups";
 import {
@@ -893,6 +893,8 @@ export const FactoryStatus = z.object({
   loopState: FactoryLoopState,
   /** The most recent effective pause, resume or stop. */
   lastControl: FactoryLoopControl.nullable().default(null),
+  /** Why the factory is currently paused, draining or stopped. */
+  halt: FactoryHalt.nullable().default(null),
   pausedReason: z.string().nullable(),
   /** The project's switch; `globalKillSwitch` stops every project. */
   killSwitch: z.boolean(),
