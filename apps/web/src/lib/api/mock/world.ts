@@ -165,7 +165,7 @@ export class MockWorld {
           turnId: entry.turnId,
           position: position++,
           item: entry.item,
-          createdAt: now,
+          createdAt: entry.createdAt ?? now,
           updatedAt: now,
         });
       }

@@ -40,6 +40,7 @@ export interface ItemEntry {
   item: Item;
   turnId: string;
   threadId: string;
+  createdAt?: string;
   /** Order within the thread, when known from the server projection. */
   position?: number;
 }
@@ -110,6 +111,7 @@ export function transcriptFromSnapshot(snap: SessionSnapshot): TranscriptState {
       turnId: r.turnId,
       threadId: r.threadId,
       position: r.position,
+      createdAt: r.createdAt,
     };
     ensureThread(state, r.threadId).itemIds.push(r.item.id);
   }
@@ -200,7 +202,13 @@ export function applyAgentEvent(
 
   const upsertItem = (threadId: string, turnId: string, item: Item) => {
     const existing = state.items[item.id];
-    state.items[item.id] = { item, threadId, turnId };
+    state.items[item.id] = {
+      ...existing,
+      item,
+      threadId,
+      turnId,
+      createdAt: existing?.createdAt ?? ts,
+    };
     if (!existing) touchThread(threadId).itemIds.push(item.id);
   };
 

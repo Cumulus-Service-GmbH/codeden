@@ -19,6 +19,12 @@ function launcher(tokenSaver?: TokenSaverSettings): SessionLauncher {
   } as unknown as LauncherDeps);
 }
 
+it("includes a standing background-wait instruction in Fake sessions with token saver off", () => {
+  const prompt = launcher().sessionOptions({ ...sampleSession, provider: "fake" }).systemPrompt;
+  expect(prompt).toContain("Run long waits in the background");
+  expect(prompt).toContain("keep the turn responsive to new messages");
+});
+
 describe("token saver note", () => {
   it("is absent when off or not configured", () => {
     expect(tokenSaverNote("off")).toBeNull();

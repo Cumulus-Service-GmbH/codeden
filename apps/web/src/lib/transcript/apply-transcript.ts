@@ -96,6 +96,7 @@ export function applyTranscriptMessage(
       threadId: r.threadId,
       turnId: r.turnId,
       position: r.position,
+      createdAt: r.createdAt,
     };
     if (existing) continue;
     const t = thread(r.threadId);
