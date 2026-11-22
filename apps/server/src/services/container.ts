@@ -19,7 +19,7 @@ import { ChecklistService } from "./checklist/checklist-service";
 import { type Exec, runTool } from "./exec";
 import { type FactoryOptions, FactoryService } from "./factory/factory-service";
 import { type FactoryGithub, GithubFactoryPort } from "./factory/github-port";
-import { refreshTeamFiles, type TeamFileDeps } from "./factory/team-file";
+import { createTeamFileRefresher, type TeamFileDeps } from "./factory/team-file";
 import { FILE_RESET_NOTICES, reportFileReset } from "./file-reset-notice";
 import { ConfigFiles } from "./files/config-files";
 import { createGitBroker, type GitBroker } from "./git-broker";
@@ -464,7 +464,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     log: opts.log,
   });
   // Keep every session's Team file current, so its tools see a Team or model change at once.
-  opts.store.subscribe((events) => refreshTeamFiles(teamFiles, events));
+  opts.store.subscribe(createTeamFileRefresher(teamFiles));
   const unwatchedApprovals = new UnwatchedApprovals({
     store: opts.store,
     repo: sessionRepo,
