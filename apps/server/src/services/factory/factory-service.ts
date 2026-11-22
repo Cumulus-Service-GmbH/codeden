@@ -84,7 +84,7 @@ import {
 import { SlotBoard } from "./slots";
 import { assertSpecAllowsPr, decideSpec } from "./spec-approval";
 import { decideSpotCheck, fileSpotCheckIssue } from "./spot-checks";
-import { buildStatus, factoryHalt } from "./status";
+import { buildStatus, factoryHalt, runState } from "./status";
 import { FactoryStore } from "./store";
 import { answerProviderQuestion, recordDecision, unattendedSession } from "./unattended";
 import { readVision, writeVision } from "./vision";
@@ -184,6 +184,8 @@ export class FactoryService {
       github: deps.github,
       sessions: new FactorySessions({
         sessions: deps.sessions,
+        isKilled: (projectId) =>
+          deps.projects.get(projectId).killSwitch || deps.settings.get().factory.killSwitch,
         repo: deps.repo,
         runner: deps.runner,
         availability: new ProviderAvailability({
@@ -531,6 +533,7 @@ export class FactoryService {
 
   /** Resume from the current state, including releasing a project kill switch if needed. */
   resumeControlled(projectId: string, source: ControlSource): Promise<{ changed: boolean }> {
+    const requestedAfter = this.data.loop(projectId)?.lastControl?.at;
     return this.serialize(projectId, "controlled resume", async () => {
       if (this.deps.settings.get().factory.killSwitch) {
         throw conflict("The global kill switch is on. Only the user can release it.");
@@ -538,6 +541,12 @@ export class FactoryService {
       const blocked = await resumeBlocker(this.ctx, projectId);
       if (this.deps.settings.get().factory.killSwitch) {
         throw conflict("The global kill switch is on. Only the user can release it.");
+      }
+      const latest = this.data.loop(projectId)?.lastControl;
+      if (latest && (!requestedAfter || latest.at > requestedAfter) && latest.action !== "resume") {
+        throw conflict(
+          `A newer ${latest.action} by ${latest.by} landed while this resume waited; nothing was resumed`,
+        );
       }
       if (blocked) throw conflict(blocked);
       return this.resumeLoop(projectId, source);
@@ -551,6 +560,7 @@ export class FactoryService {
     const release = source !== undefined && project.killSwitch;
     const paused = loop.state === "paused" || loop.state === "draining" || loop.drain !== null;
     const changed = release || paused;
+    if (source && !changed) return { loop, changed };
     // Work whose revert merged goes back to its builder, also when CI never said green.
     revertsOnResume(this.ctx, projectId);
     const next = {
@@ -560,7 +570,10 @@ export class FactoryService {
       consecutiveFailures: 0,
       drain: null,
       lastControl:
-        changed && isFactoryMode(project.autonomyMode)
+        changed &&
+        (release || !project.killSwitch) &&
+        !this.deps.settings.get().factory.killSwitch &&
+        isFactoryMode(project.autonomyMode)
           ? controlRecord(loop, "resume", source ?? userControl, now)
           : loop.lastControl,
     };
@@ -585,6 +598,13 @@ export class FactoryService {
     const globalKill = this.deps.settings.get().factory.killSwitch;
     return {
       loopState: project.killSwitch || globalKill ? "stopped" : loop.state,
+      state: runState({
+        globalKillSwitch: globalKill,
+        killSwitch: project.killSwitch,
+        lastControl: loop.lastControl,
+        drain: loop.drain !== null,
+        loopState: loop.state,
+      }),
       lastControl: loop.lastControl,
       halt: factoryHalt(globalKill, project.killSwitch, loop),
       drainInFlight: drainStatus(this.ctx, projectId, loop)?.inFlight ?? null,

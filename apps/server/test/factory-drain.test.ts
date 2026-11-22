@@ -359,6 +359,7 @@ describe("finish current work, then stop (#286)", () => {
     await drain();
     expect(env.factory.loopSummary(env.project.id)).toEqual({
       loopState: "draining",
+      state: "draining",
       drainInFlight: 1,
       halt: { source: "user", reason: null },
       lastControl: {

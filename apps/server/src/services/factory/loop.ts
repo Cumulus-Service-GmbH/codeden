@@ -65,14 +65,24 @@ export async function runTick(
   const project = ctx.projects.get(projectId);
   const now = ctx.now();
   let loop = ctx.store.loopOrNew(projectId, now);
-  const killed = project.killSwitch || ctx.settings.get().factory.killSwitch;
+  const killed = () =>
+    ctx.projects.get(projectId).killSwitch || ctx.settings.get().factory.killSwitch;
+  const controlAtStart = loop.lastControl?.at;
+  const saveTick = (next: FactoryLoop) => {
+    if (!killed()) return save(ctx, next, now);
+    const current = ctx.store.loop(projectId);
+    if (current && current.lastControl?.at !== controlAtStart) {
+      return save(ctx, stoppedLoop(current), now);
+    }
+    return save(ctx, stoppedLoop(next), now);
+  };
   if (!isFactoryMode(project.autonomyMode) || project.archivedAt) {
     if (loop.state !== "idle" && loop.state !== "stopped") loop = { ...loop, state: "idle" };
     return save(ctx, { ...loop, drain: null }, now);
   }
   const today = localDay(now);
   if (loop.day !== today) loop = await rollDay(project, loop, today, hooks);
-  if (killed) return save(ctx, stoppedLoop(loop), now);
+  if (killed()) return saveTick(loop);
   if (loop.state === "stopped") loop = { ...loop, state: "idle" };
 
   // Who is installed and signed in: detected again in the background every few minutes.
@@ -149,9 +159,10 @@ export async function runTick(
   // The one "N merges to spot-check" item follows the merges set aside and the checks recorded.
   settleSpotCheckInbox(ctx, project);
   // A drain whose work is all done stops the loop here (also while paused).
+  if (killed()) return saveTick(loop);
   if (loop.drain) {
     loop = await advanceDrain(ctx, project, loop);
-    if (!loop.drain) return save(ctx, loop, now);
+    if (!loop.drain) return saveTick(loop);
   }
 
   if (loop.state !== "paused") {
@@ -159,7 +170,7 @@ export async function runTick(
     const over = budgetExceeded(spend, project.factoryLimits);
     if (over) loop = { ...loop, state: "paused", pausedReason: over };
   }
-  if (loop.state === "paused") return save(ctx, loop, now);
+  if (loop.state === "paused") return saveTick(loop);
 
   // While draining nothing new is taken on: no intake, no classification, no scout, and only
   // the drain's own items may claim an agent (a fresh builder after its builder was lost, or a
@@ -182,7 +193,7 @@ export async function runTick(
   if (project.autonomyMode === "dark_factory" && !drained) {
     loop = await advanceScout(ctx, project, loop);
   }
-  return save(ctx, { ...loop, state: deriveState(ctx, projectId, loop) }, now);
+  return saveTick({ ...loop, state: deriveState(ctx, projectId, loop) });
 }
 
 /** One item's step: an error is noted on the item and never stops the tick. */

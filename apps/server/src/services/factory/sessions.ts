@@ -8,7 +8,7 @@ import {
   type StartSessionResponse,
   type UserInput,
 } from "@codeden/contracts";
-import { errorMessage, ServiceError } from "../errors";
+import { conflict, errorMessage, ServiceError } from "../errors";
 import type { RunnerPort } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
 import { stripLeadingTags } from "../sessions/role-tag";
@@ -63,6 +63,7 @@ export function neverRanTurn(repo: Pick<SessionRepo, "turnCount">, s: Session): 
 
 export interface FactorySessionsDeps {
   sessions: SessionService;
+  isKilled: (projectId: string) => boolean;
   repo: SessionRepo;
   runner: RunnerPort;
   availability: ProviderAvailability;
@@ -463,7 +464,10 @@ export class FactorySessions {
    * another workspace: in a project folder that isn't a git repository they are refused
    * (`not_a_repo`), never run in the folder in place.
    */
-  private start(req: StartSessionRequestInit): Promise<StartSessionResponse> {
+  private async start(
+    req: StartSessionRequestInit & { projectId: string },
+  ): Promise<StartSessionResponse> {
+    if (this.deps.isKilled(req.projectId)) throw conflict("The factory kill switch is on");
     return this.deps.sessions.start(
       StartSessionRequest.parse({
         role: "agent",

@@ -315,7 +315,7 @@ export function renderDigest(
   ].join(", ");
   const lines = [`Factory digest for ${projectName}, ${d.day}`, ""];
   if (control) lines.push(`${control}.`, "");
-  if (pausedReason) lines.push(`The loop is paused: ${pausedReason}.`, "");
+  if (pausedReason && !control) lines.push(`The loop is paused: ${pausedReason}.`, "");
   if (draining) {
     lines.push(`${draining}: the factory takes on no new work and stops once they finish.`, "");
   }

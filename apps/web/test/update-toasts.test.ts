@@ -40,6 +40,16 @@ describe("notifiesFor", () => {
     expect(notifiesFor(item, notifications({ factory: true }))).toBe(false);
   });
 
+  it.each(["resolved", "dismissed"] as const)("keeps %s failures and approvals quiet", (status) => {
+    expect(
+      notifiesFor(
+        inboxItem("failure", "run_failed", { status, notify: "failure" }),
+        notifications(),
+      ),
+    ).toBe(false);
+    expect(notifiesFor(inboxItem("approval", "approval", { status }), notifications())).toBe(false);
+  });
+
   it("leaves approvals and questions to the sticky attention toast", () => {
     const n = notifications();
     expect(notifiesFor(inboxItem("a", "approval"), n)).toBe(false);

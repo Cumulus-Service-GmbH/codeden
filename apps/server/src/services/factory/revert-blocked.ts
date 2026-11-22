@@ -40,10 +40,12 @@ export async function revertBlocked(
   loop: FactoryLoop,
   item: FactoryItem,
   reason: string,
-  text?: { title: string; body: string },
+  text?: { title: string; body: string; pauseDetail?: string },
 ): Promise<FactoryLoop> {
   const branch = baseBranchOf(project);
-  const title = text?.title ?? `${revertBlockedPausePrefix(branch)} can't merge: ${reason}`;
+  const prefix = revertBlockedPausePrefix(branch);
+  const pauseReason = `${prefix} ${text?.pauseDetail ?? `can't merge: ${reason}`}`;
+  const title = text?.title ?? pauseReason;
   const next = failItem(ctx, loop, item, title, { kind: "stuck", countsAsFailure: false });
   const merged = revertedName(ctx, item);
   const revert = item.pr ? ` #${item.pr.number}` : "";
@@ -69,5 +71,5 @@ export async function revertBlocked(
       )
       .catch((error: unknown) => ctx.log?.(`factory: comment: ${errorMessage(error)}`));
   }
-  return pauseLoop(ctx, next, title, { inbox: false });
+  return pauseLoop(ctx, next, pauseReason, { inbox: false });
 }

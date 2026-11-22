@@ -8,7 +8,11 @@ import { factoryTools } from "../src/mcp/tools/factory";
 import { factoryResume, factoryStop } from "../src/mcp/tools/factory/control";
 import { pauseLoop } from "../src/services/factory/context";
 import { drainInboxId } from "../src/services/factory/drain";
-import { regressionPausePrefix } from "../src/services/factory/revert-blocked";
+import {
+  regressionPausePrefix,
+  revertBlocked,
+  revertBlockedPausePrefix,
+} from "../src/services/factory/revert-blocked";
 import { renderProjectDigest } from "../src/services/orchestration/digest";
 import { deriveNotices } from "../src/services/orchestration/notices";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
@@ -59,8 +63,8 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-async function startWork() {
-  env.factory.data.createItem({
+function queueWork() {
+  return env.factory.data.createItem({
     projectId: env.project.id,
     workKey: "issue:10",
     title: "Add a counter",
@@ -79,6 +83,10 @@ async function startWork() {
     acceptanceCriteria: ["Counter increments"],
     issue: { number: 10, url: "https://github.com/acme/app/issues/10", title: "Add a counter" },
   });
+}
+
+async function startWork() {
+  queueWork();
   await env.factory.tick(env.project.id);
   expect(env.starts).toHaveLength(1);
 }
@@ -104,6 +112,10 @@ it("requires a target from the orchestrator, confines the PM and validates reaso
   expect((await call("factory_pause", { projectId: "other", reason }, "pm")).text).toBe(
     "A PM controls only its own project's factory loop",
   );
+  expect(await call("factory_status", { projectId: "other" }, "pm")).toEqual({
+    isError: true,
+    text: "A PM controls only its own project's factory loop",
+  });
   for (const value of [undefined, " "]) {
     expect((await call("factory_stop", { ...input(), reason: value })).text).toContain(
       "Invalid input for factory_stop, nothing was done",
@@ -487,16 +499,16 @@ it("refuses a red CI regression and resumes a green one after a kill in one cont
   expect(loop()).toMatchObject({ state: "idle", pausedReason: null });
 });
 
-it("attributes unrecorded project switches and switches after a resume to built-in halts", async () => {
+it("attributes legacy project switches to the user", async () => {
   env.updateProject({ killSwitch: true });
   expect((await env.factory.status(env.project.id)).halt).toEqual({
-    source: "builtin",
+    source: "user",
     reason: "kill switch",
   });
   await env.factory.setKillSwitch(env.project.id, false);
   env.updateProject({ killSwitch: true });
   expect((await env.factory.status(env.project.id)).halt).toEqual({
-    source: "builtin",
+    source: "user",
     reason: "kill switch",
   });
 });
@@ -514,14 +526,17 @@ it("treats a tool pause during a global stop as a no-op", async () => {
   );
 });
 
-it("re-reads the project switch after waiting to resume", async () => {
+it("refuses a queued resume after a newer stop", async () => {
   const { held, release } = await holdTick();
-  const resuming = result("factory_resume", input());
+  const resuming = call("factory_resume", input());
   const stopping = env.factory.setKillSwitch(env.project.id, true);
   release();
   await Promise.all([held, stopping]);
-  expect(await resuming).toMatchObject({ changed: true });
-  expect(project().killSwitch).toBe(false);
+  expect(await resuming).toEqual({
+    isError: true,
+    text: "A newer stop by user landed while this resume waited; nothing was resumed",
+  });
+  expect(project().killSwitch).toBe(true);
 });
 
 const pmDigest = () =>
@@ -536,7 +551,9 @@ const pmDigest = () =>
   });
 it("uses neutral PM digest wording", async () => {
   await result("factory_pause", input(), "pm");
-  expect(pmDigest()).toContain("Factory: stopped (a kill switch is on) — Paused by PM");
+  expect(pmDigest()).toContain(
+    "Factory: paused (see factory_status for the reason) — Paused by PM",
+  );
   await result("factory_resume", input());
   await startWork();
   await result("factory_pause", input(), "pm");
@@ -593,3 +610,121 @@ it("commits a completed drain's switch, pause and history together", async () =>
   ]);
   expect(loop()).toMatchObject({ drain: null, lastControl: { action: "pause" } });
 });
+
+it("preserves stop attribution when a UI resume leaves the switch on", async () => {
+  await env.factory.setMode(env.project.id, {
+    mode: "software_factory",
+    limits: { ...project().factoryLimits, dailyBudget: { usd: 5 } },
+  });
+  env.spend = { usd: 5, tokens: 0 };
+  await env.factory.tick(env.project.id);
+  expect(loop().pausedReason).toContain("daily budget reached");
+  await result("factory_stop", input());
+  const stopControl = loop().lastControl;
+  await env.factory.resume(env.project.id);
+  expect(project().killSwitch).toBe(true);
+  expect(loop().lastControl).toEqual(stopControl);
+  expect((await env.factory.status(env.project.id)).halt).toMatchObject({ source: "orchestrator" });
+});
+
+it("leaves failures, history and the paused item alone on a running tool resume", async () => {
+  const paused = pauseLoop(env.factory.ctx, loop(), "2 failed merge checks or reverts in a row");
+  env.factory.data.saveLoop({ ...paused, state: "idle", consecutiveFailures: 2 });
+  const before = events();
+  expect(await result("factory_resume", input())).toMatchObject({ changed: false });
+  expect(loop().consecutiveFailures).toBe(2);
+  expect(events()).toEqual(before);
+  expect(env.inbox.get(`inbox:factory-paused:${env.project.id}`).status).toBe("open");
+});
+
+it("prints a built-in pause once in the daily digest", async () => {
+  const pausedReason = "3 failed merge checks or reverts in a row";
+  env.factory.data.saveLoop({ ...loop(), state: "paused", pausedReason });
+  const digest = (await env.factory.digestNow(env.project.id)).text;
+  expect(digest).toContain(`Halted (built-in): ${pausedReason}`);
+  expect(digest.split(pausedReason)).toHaveLength(2);
+});
+
+it("refuses resume when a blocked revert has a custom display title and CI is red", async () => {
+  const item = queueWork();
+  env.gh.main.checks = "failure";
+  const paused = await revertBlocked(env.factory.ctx, project(), loop(), item, "start failed", {
+    title: "Could not start the revert",
+    body: "CI is still red.",
+  });
+  env.factory.data.saveLoop(paused);
+  expect(await call("factory_resume", input())).toMatchObject({ isError: true });
+  expect(loop().pausedReason).toContain(revertBlockedPausePrefix("main"));
+  expect(loop().state).toBe("paused");
+});
+
+it("refuses resume of a stored legacy stopped loop with a red CI regression", async () => {
+  const pausedReason = `${regressionPausePrefix("main")}42; waiting for green CI`;
+  env.factory.data.saveLoop({ ...loop(), state: "stopped", pausedReason });
+  env.gh.main.checks = "failure";
+  const before = events();
+  expect(await call("factory_resume", input())).toEqual({
+    isError: true,
+    text: `Not resumed: ${pausedReason}. That halt clears when its cause does.`,
+  });
+  expect(events()).toEqual(before);
+});
+
+it("does not save a drain after Stop now interrupts its scout shutdown", async () => {
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<string[]>();
+  vi.spyOn(env.factory.ctx.sessions, "stopScouts").mockImplementationOnce(() => {
+    entered.resolve();
+    return release.promise;
+  });
+  const draining = result("factory_pause", input());
+  await entered.promise;
+  await result("factory_stop", input());
+  const before = events();
+  release.resolve([]);
+  expect(await draining).toMatchObject({ changed: false, control: { state: "stopped" } });
+  expect(loop().drain).toBeNull();
+  expect(events()).toEqual(before);
+});
+
+it("ignores resolved inbox history when deriving agent notices", async () => {
+  await startWork();
+  const session = env.repo.find(
+    env.factory.data.items(env.project.id, ["building"])[0]?.builderSessionId ?? "",
+  )?.session;
+  if (!session) throw new Error("Expected a factory builder session");
+  await result("factory_pause", input());
+  const history = events().findLast((e) => e.type === "inbox.created");
+  if (!history) throw new Error("Expected a factory inbox event");
+  const parsed = EventEnvelope.parse(history);
+  if (parsed.type !== "inbox.created") throw new Error("Expected inbox history");
+  const item = { ...parsed.payload.item, kind: "run_failed", sessionId: session.id };
+  expect(
+    deriveNotices([{ ...history, payload: { item } }], {
+      session: () => session,
+      finalMessage: () => null,
+    }),
+  ).toEqual([]);
+});
+
+it.each(["project", "global"] as const)(
+  "prevents a tick from starting work after the %s Stop now has returned",
+  async (scope) => {
+    queueWork();
+    const sessions = env.factory.ctx.sessions;
+    const startBuilder = sessions.startBuilder.bind(sessions);
+    const start = vi.spyOn(sessions, "startBuilder").mockImplementationOnce(async (...args) => {
+      if (scope === "project") await env.factory.setKillSwitch(env.project.id, true);
+      else await env.factory.setGlobalKillSwitch(true);
+      return startBuilder(...args);
+    });
+    await env.factory.tick(env.project.id);
+    expect(start).toHaveBeenCalledOnce();
+    expect(env.starts).toHaveLength(0);
+    expect(loop()).toMatchObject({
+      state: "stopped",
+      drain: null,
+      lastControl: { action: "stop" },
+    });
+  },
+);

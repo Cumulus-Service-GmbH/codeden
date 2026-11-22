@@ -89,14 +89,14 @@ function factoryLine(f: ProjectStatus["factory"]): string | null {
   if (!f) return null;
   const control = haltLine(f.halt, f.lastControl);
   const suffix = control ? ` — ${control}` : "";
-  if (f.drainInFlight !== null && f.loopState !== "stopped") {
+  const state = f.state ?? f.loopState;
+  if (f.drainInFlight !== null && state !== "stopped") {
     const n = f.drainInFlight;
-    const state = f.loopState === "paused" ? "paused while draining" : "draining";
-    return `Factory: ${state}, ${n} item${n === 1 ? "" : "s"} in flight (finishing the work in flight, then stopping; nothing new starts)${suffix}`;
+    const label = f.loopState === "paused" ? "paused while draining" : "draining";
+    return `Factory: ${label}, ${n} item${n === 1 ? "" : "s"} in flight (finishing the work in flight, then stopping; nothing new starts)${suffix}`;
   }
-  if (f.loopState === "stopped") return `Factory: stopped (a kill switch is on)${suffix}`;
-  if (f.loopState === "paused")
-    return `Factory: paused (see factory_status for the reason)${suffix}`;
+  if (state === "stopped") return `Factory: stopped (a kill switch is on)${suffix}`;
+  if (state === "paused") return `Factory: paused (see factory_status for the reason)${suffix}`;
   return control ? `Factory: ${control}` : null;
 }
 

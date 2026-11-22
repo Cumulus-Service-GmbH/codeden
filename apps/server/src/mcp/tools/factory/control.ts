@@ -1,12 +1,12 @@
 import {
   type FactoryControlAction,
   FactoryControlRequest,
-  type FactoryRunState,
   type FactoryStatus,
   isFactoryMode,
   loopControlLine,
 } from "@codeden/contracts";
 import type { AppServices } from "../../../services/container";
+import { runState } from "../../../services/factory/status";
 import {
   defineTool,
   type ServerToolContext,
@@ -40,16 +40,9 @@ export function controlTarget(ctx: ServerToolContext<"global">, projectId?: stri
   return projectId;
 }
 
-function runState(status: FactoryStatus): FactoryRunState {
-  if (status.globalKillSwitch) return "stopped";
-  if (status.killSwitch) return status.lastControl?.action === "pause" ? "paused" : "stopped";
-  if (status.drain) return "draining";
-  return status.loopState === "paused" ? "paused" : "running";
-}
-
 export function controlStatus(status: FactoryStatus) {
   return {
-    state: runState(status),
+    state: runState({ ...status, drain: status.drain !== null }),
     lastControl: status.lastControl,
     halt: status.halt,
     line: loopControlLine(status.lastControl),
