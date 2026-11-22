@@ -112,7 +112,7 @@ function mcpConfigArgs(input: QueryOptionsInput): Record<string, string | null> 
   return { "mcp-config": input.mcpConfigFile };
 }
 
-/** Build the `query()` options for a session (§7.2). `chrome: null` serializes to `--chrome`. */
+/** Build the `query()` options for a session (§7.2). A null value serializes as a flag. */
 export function buildQueryOptions(input: QueryOptionsInput): Options {
   const { session } = input;
   const permissionMode = permissionModeFor(session.autonomy, session.planMode);
@@ -120,7 +120,8 @@ export function buildQueryOptions(input: QueryOptionsInput): Options {
   // plan is approved, which the CLI only accepts when it was launched allowing it.
   const bypass = permissionModeFor(session.autonomy, false) === "bypassPermissions";
   const effort = claudeEffort(session.effort);
-  const extraArgs = { ...mcpConfigArgs(input), ...(session.chrome ? { chrome: null } : {}) };
+  const extraArgs = mcpConfigArgs(input);
+  if (session.chrome !== undefined) extraArgs[session.chrome ? "chrome" : "no-chrome"] = null;
   return {
     ...executableOptions(input.executable),
     cwd: session.cwd,
@@ -136,7 +137,7 @@ export function buildQueryOptions(input: QueryOptionsInput): Options {
     ...(input.resume ? { resume: input.resume } : {}),
     // Read-only sessions (orchestrator, PMs) never get the edit tools (§11.2).
     ...(session.readOnly ? { disallowedTools: [...EDIT_TOOLS] } : {}),
-    ...(Object.keys(extraArgs).length > 0 ? { extraArgs } : {}),
+    extraArgs,
     ...trustedMcpTools(session.mcpServers),
     systemPrompt: {
       type: "preset",

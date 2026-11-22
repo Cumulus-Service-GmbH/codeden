@@ -381,7 +381,13 @@ export class ClaudeSession implements ProviderSession {
       q = this.config.query({
         prompt: prompts,
         options: buildQueryOptions({
-          session: { ...this.opts, autonomy: this.autonomy, planMode: this.planMode },
+          session: {
+            ...this.opts,
+            autonomy: this.autonomy,
+            planMode: this.planMode,
+            // An inherited Chrome default must not enable it for an ineligible session.
+            chrome: this.opts.chrome ?? false,
+          },
           executable: this.config.executable,
           canUseTool: this.canUseTool,
           hooks: { PreToolUse: [{ hooks: [preToolUse] }] },

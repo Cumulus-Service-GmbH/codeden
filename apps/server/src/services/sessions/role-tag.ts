@@ -6,9 +6,10 @@
  */
 export const BROWSER_OPERATOR_TAG = "[Browser Operator]";
 
-/** Checks whether the text starts with a bracketed tag after optional whitespace. */
-export function startsWithTag(text: string): boolean {
-  return /^\s*\[[^\]]*\]/.test(text);
+/** Checks for a leading role tag written literally in an automation title template. */
+export function startsWithLiteralTag(text: string): boolean {
+  const tag = /^\s*\[[^\]]*\]/.exec(text)?.[0];
+  return tag !== undefined && !tag.includes("{{");
 }
 
 /** Removes all leading bracketed tags and their surrounding whitespace. */

@@ -238,7 +238,7 @@ export const SessionOptions = z.object({
   /**
    * True: start the agent with Claude in Chrome (Claude Code's `--chrome`).
    * Only Browser Operator sessions on the home runner get it (`SessionLauncher.sessionOptions`).
-   * Absent means off.
+   * Absent means CodeDen explicitly starts Claude with `--no-chrome`.
    */
   chrome: z.boolean().optional(),
   /** Extra system prompt appended to the provider's own. */

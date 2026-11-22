@@ -40,6 +40,7 @@ import { notFound } from "../errors";
 import { ACTIVE_RUN_STATUSES, ACTIVE_SESSION_STATUSES } from "./conflicts";
 import type { ForkStart } from "./fork";
 import type { LaunchFork } from "./launcher";
+import { BROWSER_OPERATOR_TAG } from "./role-tag";
 import type { UnansweredStart } from "./unanswered-start";
 
 /** Session ids per query of `modelsOf`, so no query has too many parameters. */
@@ -61,6 +62,8 @@ export interface PendingStart {
  * whether their latest turn carries the user's request (`LoopGuard`).
  */
 export type StoredStartMeta = SessionStartMeta & {
+  /** The new Claude agent session was explicitly titled as a Browser Operator. */
+  chromeOptIn?: true;
   pending?: PendingStart | null;
   admission?: { seq: number; since: string } | null;
   prFeedback?: Record<string, { rounds: number; keys: string[] }>;
@@ -141,10 +144,16 @@ export class SessionRepo {
 
   /** Insert a new session (and its start metadata) in one transaction. */
   create(session: Session, startMeta: StoredStartMeta): void {
+    const meta: StoredStartMeta =
+      session.role === "agent" &&
+      session.provider === "claude" &&
+      session.title?.startsWith(BROWSER_OPERATOR_TAG)
+        ? { ...startMeta, chromeOptIn: true }
+        : startMeta;
     this.store.append(
       [{ type: "session.created", sessionId: session.id, payload: { session } }],
       (tx) => {
-        tx.update(sessions).set({ startMeta }).where(eq(sessions.id, session.id)).run();
+        tx.update(sessions).set({ startMeta: meta }).where(eq(sessions.id, session.id)).run();
       },
     );
   }
