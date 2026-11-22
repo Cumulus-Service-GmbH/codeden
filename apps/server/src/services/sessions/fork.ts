@@ -14,6 +14,7 @@ import { confirmedCheckpoint, forkPointMissing, forkTurn } from "./fork-turn";
 import type { LaunchFork } from "./launcher";
 import { inheritedStarter } from "./origin";
 import type { SessionRepo, StoredStartMeta } from "./repo";
+import { stripLeadingTags } from "./role-tag";
 import { requireGitRepo } from "./start-workspace";
 
 const BUSY = new Set(["running", "waiting"]);
@@ -79,7 +80,7 @@ export function forkBlocker(
 
 /** `<source title> (fork)`, kept within the title limit. */
 export function forkTitle(source: Session): string {
-  const base = (source.title ?? source.purpose).trim();
+  const base = stripLeadingTags((source.title ?? source.purpose).trim()) || "Session";
   return base.length + FORK_SUFFIX.length <= TITLE_MAX
     ? `${base}${FORK_SUFFIX}`
     : `${base.slice(0, TITLE_MAX - FORK_SUFFIX.length).trimEnd()}${FORK_SUFFIX}`;

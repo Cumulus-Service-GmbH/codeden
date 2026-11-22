@@ -17,7 +17,7 @@ import { errorMessage } from "../errors";
 import type { OrchestrationService } from "../orchestration/orchestration-service";
 import { findConflicts } from "../sessions/conflicts";
 import type { SessionRepo } from "../sessions/repo";
-import { startsWithTag, stripLeadingTags } from "../sessions/role-tag";
+import { startsWithLiteralTag, stripLeadingTags } from "../sessions/role-tag";
 import type { SessionService } from "../sessions/session-service";
 import {
   overConcurrencyCap,
@@ -286,12 +286,13 @@ export class AutomationExecutor {
     if (automation.action.type !== "start_session") throw new Error("not a session action");
     const action = automation.action;
     const prompt = renderTemplate(action.prompt, req.vars);
-    let title = automation.name;
+    const defaultTitle = stripLeadingTags(automation.name) || "Automation";
+    let title = defaultTitle;
     if (action.title) {
       const rendered = renderTemplate(action.title, req.vars);
-      title = startsWithTag(action.title)
+      title = startsWithLiteralTag(action.title)
         ? rendered
-        : stripLeadingTags(rendered) || automation.name;
+        : stripLeadingTags(rendered) || defaultTitle;
     }
     const start = StartSessionRequest.parse({
       projectId: project.id,

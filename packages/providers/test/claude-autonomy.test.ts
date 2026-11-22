@@ -108,6 +108,16 @@ function open(sdk: ReturnType<typeof stubSdk>, opts: Partial<SessionOptions> = {
   return { session, preToolUse, permission, approvals };
 }
 
+it.each([
+  [true, "chrome"],
+  [false, "no-chrome"],
+  [undefined, "no-chrome"],
+])("launches the Claude SDK with Chrome set to %s", (chrome, flag) => {
+  const sdk = stubSdk();
+  open(sdk, { chrome, env: { CLAUDE_CODE_ENABLE_CFC: "1" } });
+  expect(sdk.launches[0]?.extraArgs).toEqual({ [flag]: null });
+});
+
 const settle = () => new Promise((r) => setTimeout(r, 20));
 const forcePush = { command: "git push --force" };
 const writeOutside = { file_path: outside, content: "x" };

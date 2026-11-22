@@ -66,12 +66,13 @@ export interface LauncherDeps extends RunnerDeps {
 }
 
 /** Whether this session starts Claude in Chrome on the home runner. */
-export function startsWithChrome(session: Session, runner: RunnerPort): boolean {
+function startsWithChrome(session: Session, runner: RunnerPort, repo: SessionRepo): boolean {
   return (
     session.provider === "claude" &&
     session.role === "agent" &&
     (session.title ?? "").startsWith(BROWSER_OPERATOR_TAG) &&
-    !isRemoteRunner(runner)
+    !isRemoteRunner(runner) &&
+    repo.find(session.id)?.startMeta?.chromeOptIn === true
   );
 }
 
@@ -397,7 +398,7 @@ export class SessionLauncher {
       mcpServers,
       ...(ownBranch(session) ? { ownBranch: ownBranch(session) } : {}),
       ...(project?.agentCiEnv === false ? { ciEnv: false } : {}),
-      ...(startsWithChrome(session, runner) ? { chrome: true } : {}),
+      ...(startsWithChrome(session, runner, this.deps.repo) ? { chrome: true } : {}),
     });
   }
 
