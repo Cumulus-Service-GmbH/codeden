@@ -167,6 +167,8 @@ export class ProviderUtilityService implements UtilityService {
     const title = out
       ?.split("\n")[0]
       ?.replace(/^["'#\s]+|["'.\s]+$/g, "")
+      .replace(/^(?:\[[^\]]*\]\s*)+/, "")
+      .trim()
       .slice(0, 80);
     return title ? title : null;
   }

@@ -229,6 +229,12 @@ export const SessionOptions = z.object({
   model: z.string().optional(),
   effort: ReasoningEffort.optional(),
   autonomy: AutonomyLevel,
+  /**
+   * True: start the agent with Claude in Chrome (Claude Code's `--chrome`).
+   * Only Browser Operator sessions on the home runner get it (`SessionLauncher.sessionOptions`).
+   * Absent means off.
+   */
+  chrome: z.boolean().optional(),
   /** Extra system prompt appended to the provider's own. */
   systemPrompt: z.string().optional(),
   /** Provider session/thread id from a previous `resumeToken()`. */
