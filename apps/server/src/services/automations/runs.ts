@@ -76,8 +76,8 @@ export class RunStore {
       .map(toRun);
   }
 
-  latest(automationId: string): AutomationRun | null {
-    return this.list({ automationId, limit: 1 })[0] ?? null;
+  latest(automationId: string, projectId?: string): AutomationRun | null {
+    return this.list({ automationId, projectId, limit: 1 })[0] ?? null;
   }
 
   /** Queued or running runs of one automation in one project. */
