@@ -88,8 +88,8 @@ export class AntigravityAdapter implements ProviderAdapter {
   private info: AcpInitializeResult | undefined;
   /** Whether the last session listed a `plan` mode; unknown until one has. */
   private planListed: boolean | undefined;
-  /** Setups real sessions reported, so a slower probe never replaces a newer list. */
-  private setups = 0;
+  /** Bumped by every probe and every session setup, so a slower probe never replaces newer facts. */
+  private generation = 0;
   private found: { command: ResolvedCommand; version: string | null } | undefined;
 
   constructor(private readonly options: AntigravityAdapterOptions = {}) {}
@@ -189,28 +189,34 @@ export class AntigravityAdapter implements ProviderAdapter {
   /** A session reported its models and modes: they are the account's current ones. */
   private onSetup(setup: AcpSessionSetup, info: AcpInitializeResult): void {
     this.info = info;
-    this.setups++;
+    this.generation++;
     this.applySetup(setup);
   }
 
+  /** Take a session's modes and models; a list it can't read leaves the current ones. */
   private applySetup(setup: AcpSessionSetup): void {
-    const modes = modeIds(setup);
-    if (modes.length) this.planListed = modes.includes(ANTIGRAVITY_AGENT.modes.plan ?? "plan");
-    const models = antigravityModelInfos(setup);
-    if (models) this.catalog.set(models);
+    try {
+      const modes = modeIds(setup);
+      if (modes.length) this.planListed = modes.includes(ANTIGRAVITY_AGENT.modes.plan ?? "plan");
+      const models = antigravityModelInfos(setup);
+      if (models) this.catalog.set(models);
+    } catch {
+      // A malformed reply: Default (or the last good list) stands.
+    }
   }
 
   /** Detection found a supported copy: sessions run it, after the handshake shows its flags. */
   private async probe(exe: ResolvedCommand, version: string | null): Promise<AntigravityProbe> {
     this.found = { command: exe, version };
-    const before = this.setups;
+    const generation = ++this.generation;
     const result = await probeAntigravity(exe, {
       ...(this.options.probeTimeoutMs ? { timeoutMs: this.options.probeTimeoutMs } : {}),
       ...(this.options.listTimeoutMs ? { setupTimeoutMs: this.options.listTimeoutMs } : {}),
     });
+    // Only the newest report counts: a later probe or a real session opened meanwhile wins.
+    if (this.generation !== generation) return result;
     if (result.info) this.info = result.info;
-    // The probe's session lists the models before any real one; a real session's newer list wins.
-    if (result.setup && this.setups === before) this.applySetup(result.setup);
+    if (result.setup) this.applySetup(result.setup);
     return result;
   }
 }
