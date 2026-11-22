@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { AutonomyLevel, ProviderId, QuietHours, ReasoningEffort } from "./common";
 import { Team } from "./team";
+import { TokenSaverSettings } from "./token-saver";
 import { UpdateMode } from "./updates";
 import { DictationEngine, WhisperModelId } from "./voice-api";
 
@@ -293,6 +294,8 @@ export const Settings = z.object({
       autoRetry: z.boolean().default(true),
     })
     .prefault({}),
+  /** The token saver note in agent system prompts (#602); see `TokenSaverSettings`. */
+  tokenSaver: TokenSaverSettings.prefault({}),
   /** Master switch; individual automations are still off by default (§10). */
   automations: z
     .object({

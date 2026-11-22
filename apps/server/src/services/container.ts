@@ -265,6 +265,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     tokens: mcpTokens,
     git: gitBroker,
     sandboxes,
+    tokenSaver: () => opts.settings.get().tokenSaver,
     log: opts.log,
   });
   // Before the session service: a start in a project the start-up check hasn't reached checks it.

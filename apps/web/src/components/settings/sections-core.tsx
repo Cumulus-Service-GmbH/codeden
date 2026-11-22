@@ -14,6 +14,7 @@ import { CustomModelSettings } from "./custom-models";
 import { ModelVisibilitySettings } from "./model-visibility";
 import { ProviderHistorySettings } from "./provider-history";
 import { Segmented, SettingRow, SettingsSection, useSettings } from "./settings-ui";
+import { TokenSaverSettingsSection } from "./token-saver";
 import { UpdateModeSetting } from "./update-mode";
 
 export function GeneralSettings() {
@@ -95,6 +96,7 @@ export function GeneralSettings() {
           />
         </SettingRow>
       </SettingsSection>
+      <TokenSaverSettingsSection />
       <AgentEnvironmentSettings />
       <SettingsSection title="Background work">
         <SettingRow

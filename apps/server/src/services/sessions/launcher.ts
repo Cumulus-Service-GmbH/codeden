@@ -5,6 +5,8 @@ import {
   type Project,
   type Session,
   SessionOptions,
+  type TokenSaverSettings,
+  tokenSaverLevel,
   type UserInput,
   type WorkspaceRequest,
 } from "@codeden/contracts";
@@ -34,6 +36,7 @@ import type { SessionRepo } from "./repo";
 import { BROWSER_OPERATOR_TAG } from "./role-tag";
 import { withSetupNote } from "./setup-failure";
 import { seenSetups, settleSetup } from "./setup-gate";
+import { tokenSaverNote } from "./token-saver";
 import { setUnanswered, unansweredCode } from "./unanswered-start";
 
 export interface LauncherDeps extends RunnerDeps {
@@ -63,6 +66,8 @@ export interface LauncherDeps extends RunnerDeps {
   git?: GitBroker;
   /** Sandboxes for projects whose sessions run in containers (`docs/remote-runners.md` §8). */
   sandboxes?: Pick<SandboxService, "wants" | "place" | "release">;
+  /** The token saver settings (`Settings.tokenSaver`, #602); absent means off. */
+  tokenSaver?: () => TokenSaverSettings;
 }
 
 /** Whether this session starts Claude in Chrome on the home runner. */
@@ -388,7 +393,7 @@ export class SessionLauncher {
       autonomy: session.autonomy,
       planMode: session.planMode ?? false,
       resumeToken: session.resumeToken ?? undefined,
-      systemPrompt: codedenSystemPrompt(session, project),
+      systemPrompt: this.systemPrompt(session, project),
       // The orchestrator and PMs never write project code (§11.2). Agent sessions at the
       // `read_only` level carry it in `autonomy`, so it can change live.
       readOnly: session.role !== "agent",
@@ -399,6 +404,20 @@ export class SessionLauncher {
       ...(project?.agentCiEnv === false ? { ciEnv: false } : {}),
       ...(startsWithChrome(session, runner) ? { chrome: true } : {}),
     });
+  }
+
+  /**
+   * The CodeDen system prompt, plus the token saver note at the session's level (#602), for every
+   * session and provider. Providers with `capabilities.systemPrompt` keep it on resume and after
+   * compaction; the others get it wherever they take the system prompt (ACP agents: in front of
+   * the first prompt).
+   */
+  private systemPrompt(session: Session, project: Project | null): string {
+    const base = codedenSystemPrompt(session, project);
+    const settings = this.deps.tokenSaver?.();
+    if (!settings) return base;
+    const note = tokenSaverNote(tokenSaverLevel(settings, session.role, session.projectId));
+    return note ? `${base}\n\n${note}` : base;
   }
 
   /** A fork's workspace plan while its worktree doesn't exist yet (`ForkStart`). */
