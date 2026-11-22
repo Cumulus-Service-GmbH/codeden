@@ -10,7 +10,7 @@ import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { listInstalled, readPointer, UpdateService } from "@codeden/server";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { CLI_ROOT, type FakeRegistry, packCli, startFakeRegistry } from "./support/fake-registry";
 import { installPublishedCopy } from "./support/published-install";
 
@@ -37,7 +37,7 @@ describe.skipIf(!built)("self-update with a fake registry (§16)", () => {
 
   beforeAll(async () => {
     base = realpathSync.native(mkdtempSync(join(tmpdir(), "codeden-self-update-")));
-    const npmUserConfig = join(base, "npm-user-config");
+    const npmUserConfig = join(base, ".npmrc");
     writeFileSync(npmUserConfig, "");
     // pnpm exports the user's npm config as npm_config_*; keep it out of the real npm install.
     for (const key of Object.keys(process.env)) {
@@ -47,6 +47,9 @@ describe.skipIf(!built)("self-update with a fake registry (§16)", () => {
       }
     }
     process.env.NPM_CONFIG_USERCONFIG = npmUserConfig;
+    // The installer drops npm config variables, so give it an isolated default user config too.
+    vi.stubEnv("HOME", base);
+    vi.stubEnv("USERPROFILE", base);
     home = join(base, "home");
     // Linked runtime deps in <base>/node_modules also serve the version installed under <base>/home.
     entry = installPublishedCopy(base, { linkDeps: true });
@@ -56,6 +59,7 @@ describe.skipIf(!built)("self-update with a fake registry (§16)", () => {
   }, 120_000);
 
   afterAll(async () => {
+    vi.unstubAllEnvs();
     delete process.env.NPM_CONFIG_USERCONFIG;
     for (const key of Object.keys(process.env)) {
       if (key.toLowerCase().startsWith("npm_config_")) delete process.env[key];

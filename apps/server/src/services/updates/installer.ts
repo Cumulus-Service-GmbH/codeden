@@ -78,6 +78,11 @@ export async function installAppVersion(opts: InstallAppOptions): Promise<void> 
         cwd: staging,
         timeoutMs: opts.timeoutMs ?? 600_000,
         onLine: progress,
+        baseEnv: Object.fromEntries(
+          Object.entries(process.env).filter(
+            ([key]) => !key.toLowerCase().startsWith("npm_config_"),
+          ),
+        ),
         // Never let an `npm exec -g` / global config turn this into a global install.
         env: { npm_config_global: "false", npm_config_location: "project" },
       },

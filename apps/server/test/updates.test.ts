@@ -266,6 +266,24 @@ describe("side-by-side installs", () => {
     expect(listInstalled(home).map((v) => v.version)).toEqual(["0.2.0"]);
   });
 
+  it("keeps parent npm configuration out of the installer", async () => {
+    const home = tempHome();
+    vi.stubEnv("npm_config_allow_scripts", "parent-allow-scripts");
+    vi.stubEnv("NPM_CONFIG_USERCONFIG", "parent-user-config");
+    vi.stubEnv("Npm_Config_Registry", "parent-registry");
+    try {
+      await installAppVersion({ home, version: "0.2.0", npm: fakeNpm });
+      expect(JSON.parse(readFileSync(join(home, "app", "npm-env.json"), "utf8"))).toEqual([
+        "npm_config_global",
+        "npm_config_location",
+        "npm_config_progress",
+        "npm_config_update_notifier",
+      ]);
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it("rejects an install whose CLI reports another version and leaves nothing behind", async () => {
     const home = tempHome();
     process.env.FAKE_NPM_REPORT = "0.1.0";
