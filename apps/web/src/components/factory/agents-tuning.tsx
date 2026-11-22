@@ -146,6 +146,7 @@ export function AgentPicker({
   meanwhile,
   setByTeam = false,
   staleModel,
+  modelDescribedBy,
   onChange,
 }: {
   id: string;
@@ -161,6 +162,7 @@ export function AgentPicker({
   meanwhile?: string;
   setByTeam?: boolean;
   staleModel?: boolean;
+  modelDescribedBy?: string;
   onChange: (provider: string, model: string | null) => void;
 }) {
   const providers = useSnapshotData((s) => s.runner.providers, []);
@@ -186,6 +188,7 @@ export function AgentPicker({
         provider={providers.find((p) => p.id === provider)}
         value={model}
         staleModel={staleModel}
+        describedBy={modelDescribedBy}
         disabled={setByTeam}
         onChange={(next) => onChange(provider, next)}
       />
@@ -269,6 +272,7 @@ function ModelSelect({
   value,
   disabled,
   staleModel,
+  describedBy,
   onChange,
 }: {
   id: string;
@@ -277,16 +281,19 @@ function ModelSelect({
   value: string | null;
   disabled?: boolean;
   staleModel?: boolean;
+  describedBy?: string;
   onChange: (model: string | null) => void;
 }) {
   const models = provider?.models ?? [];
-  const known = value === null || models.some((m) => m.id === value);
+  const listedModel =
+    models.find((m) => m.id === value) ?? models.find((m) => m.resolvedId === value);
   return (
     <Field label={label} htmlFor={id}>
       <select
         id={id}
+        aria-describedby={describedBy}
         className={SELECT}
-        value={value ?? ""}
+        value={listedModel?.id ?? value ?? ""}
         disabled={disabled || !provider}
         onChange={(e) => onChange(e.target.value || null)}
       >
@@ -296,7 +303,7 @@ function ModelSelect({
             {m.label}
           </option>
         ))}
-        {!known && value && (
+        {!listedModel && value && (
           <option value={value}>{staleModel ? `${value} (not listed)` : value}</option>
         )}
       </select>

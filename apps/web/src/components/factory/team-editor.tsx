@@ -81,6 +81,7 @@ export function TeamEditor({
               ({ id, resolvedId }) => id === pinnedModel || resolvedId === pinnedModel,
             ),
         );
+        const modelWarningId = staleModel ? `${id}-${role}-model-warning` : undefined;
         return (
           <div
             key={role}
@@ -94,6 +95,7 @@ export function TeamEditor({
                 provider={member?.provider ?? ""}
                 model={member?.model ?? null}
                 staleModel={staleModel}
+                modelDescribedBy={modelWarningId}
                 autoValue=""
                 autoLabel="Not set"
                 onChange={(provider, model) =>
@@ -133,8 +135,8 @@ export function TeamEditor({
               Clear
             </Button>
             {staleModel && member && provider && (
-              <div className="col-span-full flex flex-wrap items-center gap-2 text-3xs text-muted-foreground">
-                <span>
+              <div className="col-span-full flex flex-wrap items-center gap-2 text-3xs">
+                <span id={modelWarningId} className="text-status-waiting">
                   {member.model} isn't in {provider.displayName}'s current model list. Starts may
                   fail.
                 </span>
@@ -142,6 +144,7 @@ export function TeamEditor({
                   type="button"
                   variant="outline"
                   size="sm"
+                  aria-label={`Use the provider's default for ${label}`}
                   onClick={() => changeRole(role, { ...member, model: null })}
                 >
                   Use the provider's default
