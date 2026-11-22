@@ -31,6 +31,7 @@ import {
   SpotCheck,
   SpotCheckPercent,
 } from "./factory-spot-checks";
+import { ReviewFindingInput } from "./review-policy";
 import { AutonomyPolicy, Team } from "./team";
 
 /**
@@ -126,6 +127,8 @@ export function truncateReviewSummary(summary: string): string {
 export const ReviewVerdict = z.object({
   verdict: z.enum(["approve", "request_changes", "reject"]),
   summary: z.string().min(1).max(REVIEW_SUMMARY_MAX),
+  /** Findings with evidence and normalized severity, when supplied by the reviewer. */
+  findings: z.array(ReviewFindingInput).optional(),
   /** One entry per acceptance criterion. */
   criteria: z
     .array(z.object({ criterion: z.string(), met: z.boolean(), note: z.string().optional() }))

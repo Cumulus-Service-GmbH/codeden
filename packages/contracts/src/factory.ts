@@ -67,6 +67,8 @@ export type MergePath = z.infer<typeof MergePath>;
  * agent judgement).
  */
 export const FactoryLimits = z.object({
+  /** Whether LOW findings are sent back for a fix or deferred to follow-up work. */
+  lowFindings: z.enum(["fix", "defer"]).default("defer"),
   /** Agents working at once (the swarm): builders, reviewers, the scout and area reviewers. */
   maxConcurrentSessions: z.int().positive().default(2),
   /** Automatic merges per day (only while `autoMerge` is on). */

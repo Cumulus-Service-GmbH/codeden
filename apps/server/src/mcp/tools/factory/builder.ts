@@ -4,6 +4,7 @@ import {
   FactoryReproductionReport,
   LESSONS_PER_VERDICT,
   REVIEW_SUMMARY_MAX,
+  ReviewFinding,
   ReviewVerdictSubmission,
   truncateReviewSummary,
 } from "@codeden/contracts";
@@ -64,6 +65,9 @@ export const factorySubmitReview = defineTool({
       ...input,
       summary: truncateReviewSummary(input.summary),
       lessons: cleanLessons(input.lessons),
+      ...(input.findings
+        ? { findings: input.findings.map((finding) => ReviewFinding.parse(finding)) }
+        : {}),
     };
     const res = await asTool(() =>
       services.factory.submitReview(services.sessionRepo.get(sessionId), verdict),

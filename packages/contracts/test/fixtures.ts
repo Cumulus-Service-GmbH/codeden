@@ -200,6 +200,7 @@ export const sampleProject: Project = {
   autonomyMode: "assisted",
   visionPath: ".codeden/VISION.md",
   factoryLimits: {
+    lowFindings: "defer",
     maxConcurrentSessions: 2,
     maxMergesPerDay: 5,
     dailyBudget: { usd: 20 },
