@@ -106,6 +106,7 @@ export interface FactoryServiceDeps {
   projects: ProjectService;
   repo: SessionRepo;
   sessions: SessionService;
+  admission: FactoryContext["admission"];
   runner: RunnerPort;
   usage: FactoryContext["usage"];
   inbox: InboxService;
@@ -175,6 +176,7 @@ export class FactoryService {
       }),
       projects: deps.projects,
       repo: deps.repo,
+      admission: deps.admission,
       usage: deps.usage,
       inbox: deps.inbox,
       notify: deps.notify,

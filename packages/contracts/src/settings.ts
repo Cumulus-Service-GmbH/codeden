@@ -96,6 +96,13 @@ const CustomModelList = z
  */
 export const Settings = z.object({
   schemaVersion: z.literal(1).default(1),
+  /**
+   * Agent sessions starting, running a turn or waiting on the user, across all projects.
+   * Additional sessions queue oldest first. PM and orchestrator sessions are exempt within
+   * one PM per project plus one orchestrator. The factory's per-project "Agents at once"
+   * limit still applies.
+   */
+  limits: z.object({ maxActiveSessions: z.int().min(1).max(64).default(4) }).prefault({}),
   appearance: z
     .object({
       theme: z.enum(["system", "dark", "light"]).default("dark"),

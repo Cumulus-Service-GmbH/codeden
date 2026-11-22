@@ -43,6 +43,7 @@ import {
   singleRunner,
 } from "./runner-port";
 import type { SecretStore } from "./secrets";
+import { SessionAdmission } from "./sessions/admission";
 import { AutoRetry, type AutoRetryDeps } from "./sessions/auto-retry";
 import { ChecksLoop } from "./sessions/checks-loop";
 import { GeneratedImages } from "./sessions/generated-images";
@@ -152,6 +153,7 @@ export interface AppServices {
   redetector: ProjectRedetector;
   sessionRepo: SessionRepo;
   sessions: SessionService;
+  admission: SessionAdmission;
   /** The queued-message tray: list, edit, delete and send-now. */
   queue: QueueService;
   lifecycle: SessionLifecycle;
@@ -273,7 +275,14 @@ export function createServices(opts: ServicesOptions): AppServices {
     onGithubChanged: (projectId) => github.sync.soon(projectId, { now: true }),
     log: opts.log,
   });
+  const admission = new SessionAdmission(
+    sessionRepo,
+    () => opts.settings.get().limits.maxActiveSessions,
+    () => projects.list().length,
+    () => lifecycle.scheduleDrain(),
+  );
   sessions = new SessionService({
+    admission,
     repo: sessionRepo,
     projects,
     runner: opts.runner,
@@ -307,6 +316,7 @@ export function createServices(opts: ServicesOptions): AppServices {
   });
   sessions.setCheckRuns(checksLoop);
   const queue = new QueueService({
+    admission,
     outbox,
     repo: sessionRepo,
     sessions,
@@ -314,6 +324,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     providers: (sessionId) => runners.forSession(sessionId).providers(),
   });
   const lifecycle = new SessionLifecycle({
+    admission,
     db: opts.db,
     store: opts.store,
     repo: sessionRepo,
@@ -400,6 +411,7 @@ export function createServices(opts: ServicesOptions): AppServices {
   });
   const providerHistory = new ProviderHistoryService({ db: opts.db, runner: opts.runner, runners });
   const worktreeCleanup = new WorktreeCleanup({
+    admission,
     repo: sessionRepo,
     projects,
     runner: opts.runner,
@@ -413,6 +425,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     log: opts.log,
   });
   const factory = new FactoryService({
+    admission,
     db: opts.db,
     store: opts.store,
     projects,
@@ -452,6 +465,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     projects,
     redetector,
     sessionRepo,
+    admission,
     sessions,
     queue,
     lifecycle,

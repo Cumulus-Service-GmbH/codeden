@@ -48,6 +48,7 @@ export function sessionRoutes(s: AppServices, installToken: string) {
         const record = s.orchestration.conflicts.record(req, result.existing);
         return c.json({ ...result, conflictId: record.id }, 409);
       })
+      .get("/admission", (c) => c.json(s.admission.status()))
       .get("/:id", (c) => c.json(s.sessions.detail(c.req.param("id"))))
       .patch("/:id", jsonBody(UpdateSessionRequest), async (c) =>
         c.json(await s.sessions.update(c.req.param("id"), c.req.valid("json"))),

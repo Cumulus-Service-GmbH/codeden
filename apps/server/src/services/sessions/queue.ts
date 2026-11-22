@@ -1,5 +1,6 @@
 import type { ProviderInfo, QueuedMessage, SendQueuedNowResponse } from "@codeden/contracts";
 import { badRequest, conflict, notFound } from "../errors";
+import type { SessionAdmission } from "./admission";
 import { type ArtifactLookup, clientInput } from "./client-items";
 import type { Outbox } from "./outbox";
 import type { SessionRepo } from "./repo";
@@ -8,6 +9,7 @@ import type { SessionService } from "./session-service";
 export interface QueueServiceDeps {
   outbox: Outbox;
   repo: SessionRepo;
+  admission?: SessionAdmission;
   sessions: SessionService;
   artifacts: ArtifactLookup;
   /** The providers loaded by the runner that hosts this session. */
@@ -40,6 +42,9 @@ export class QueueService {
 
   delete(sessionId: string, messageId: string): void {
     this.deps.outbox.remove(this.require(sessionId, messageId), "deleted");
+    if (!this.deps.outbox.count(sessionId) && this.deps.repo.get(sessionId).status !== "queued") {
+      this.deps.admission?.dequeue(sessionId);
+    }
   }
 
   /**

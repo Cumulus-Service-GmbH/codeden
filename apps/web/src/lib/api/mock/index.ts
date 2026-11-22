@@ -97,6 +97,21 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
       listener("open");
       return () => {};
     },
+    sessions: {
+      admission: async () => {
+        const active = world.snapshot.sessions.filter(
+          (s) => s.status === "starting" || s.status === "running" || s.status === "waiting",
+        );
+        const control = active.filter((s) => s.role !== "agent").length;
+        const exemption = 1 + world.snapshot.projects.filter((p) => !p.archivedAt).length;
+        return {
+          limit: world.snapshot.settings.limits.maxActiveSessions,
+          active: active.length - Math.min(control, exemption),
+          control,
+          waiting: [],
+        };
+      },
+    },
     getSessionDetail: (id) =>
       delay(
         {

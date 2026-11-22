@@ -137,6 +137,7 @@ export interface ScoutNowFacts {
   globalKillSwitch: boolean;
   /** Factory sessions in a turn (they hold agent slots). */
   activeSessions: number;
+  globalFree?: number;
   /** Why today's budget is spent (`budgetExceeded`), or null. */
   overBudget: string | null;
   /** Reviews, fixes, rebases and builds waiting for an agent: they get free ones first. */
@@ -168,11 +169,13 @@ export function scoutNowBlocker(
   if (facts.wip?.holding) {
     return `${wipText(facts.wip)}: the scout finds new work once open pull requests merge.`;
   }
-  const free = freeSlots(facts.activeSessions, project.factoryLimits);
-  if (free === 0) {
+  const localFree = freeSlots(facts.activeSessions, project.factoryLimits);
+  if (localFree === 0) {
     const max = project.factoryLimits.maxConcurrentSessions;
     return `No free agent: all ${max} ${max === 1 ? "is" : "are"} working (Agents at once).`;
   }
+  const free = Math.min(localFree, facts.globalFree ?? Infinity);
+  if (free === 0) return "No free agent: all global agent slots are in use or queued.";
   if (free <= (facts.waitingForAgent ?? 0)) {
     return "No free agent: reviews, fixes and builds waiting for one come first.";
   }
@@ -189,6 +192,7 @@ export function scoutNowFacts(
   return {
     globalKillSwitch: ctx.settings.get().factory.killSwitch,
     activeSessions: busySlots(ctx, project.id),
+    globalFree: ctx.admission.free(),
     overBudget: budgetExceeded(spend, project.factoryLimits),
     waitingForAgent: ctx.slots.ahead(project.id, "scout", SCOUT_SLOT),
     wip: wipOf(ctx, project, loop),

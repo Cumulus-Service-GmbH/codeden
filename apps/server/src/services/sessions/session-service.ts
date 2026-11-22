@@ -28,6 +28,7 @@ import type { McpTokenStore } from "../../mcp/tokens";
 import type { SettingsStore } from "../../settings-store";
 import type { ArtifactService } from "../artifacts";
 import { badRequest, conflict, ServiceError } from "../errors";
+import { isFactorySession } from "../factory/starter";
 import type { InboxService } from "../inbox-service";
 import { projectDefaultProvider } from "../projects/project-config";
 import type { ProjectService } from "../projects/project-service";
@@ -40,6 +41,7 @@ import {
   toServiceError,
 } from "../runner-port";
 import type { UtilityService } from "../utility";
+import type { SessionAdmission } from "./admission";
 import { freezeChecks, roundAfter, withRound } from "./checks";
 import { compactingRefusal, compactionRunning, compactRefusal, startCompaction } from "./compact";
 import { derivePurpose, deriveWorkKey, findConflicts } from "./conflicts";
@@ -52,12 +54,13 @@ import { isTransientRunnerError, isTurnRunningError, OutboxHolds } from "./outbo
 import { planModeUnsupported, readOnlyUnsupported } from "./permissions";
 import type { Answerer, QuestionBroker } from "./questions";
 import { applyPendingConfig, updateSession } from "./reconfigure";
-import type { SessionRepo, StoredStartMeta } from "./repo";
+import { emptyStartMeta, type SessionRepo, type StoredStartMeta } from "./repo";
 import { planReview } from "./review";
 import { startWorkspace } from "./start-workspace";
 
 export interface SessionServiceDeps extends RunnerDeps {
   repo: SessionRepo;
+  admission?: SessionAdmission;
   projects: ProjectService;
   inbox: InboxService;
   artifacts: ArtifactService;
@@ -120,7 +123,10 @@ export class SessionService {
   constructor(private readonly deps: SessionServiceDeps) {
     this.holds = new OutboxHolds({
       retryMs: deps.outboxRetryMs,
-      onRetry: (id) => void this.flushOutbox(id).catch(() => undefined),
+      onRetry: (id) => {
+        this.deps.admission?.scheduleDrain();
+        void this.flushOutbox(id).catch(() => undefined);
+      },
     });
   }
 
@@ -238,24 +244,63 @@ export class SessionService {
       }
     }
 
-    const queued = queuedBehind.length > 0;
-    const session = this.buildSession(req, project, { purpose, workKey, scope, queued });
-    const meta: StoredStartMeta = {
-      workspaceMode: workspace.mode,
-      workspaceFallback: null,
-      forced,
-      queuedBehind,
-      // A pending start keeps its pasted images as artifacts, like a queued message.
-      pending: queued
-        ? { input: req.input && this.externalize(session, req.input), workspace }
-        : null,
-    };
-    repo.create(session, meta);
-    if (queued) {
-      return { status: "queued", sessionId: session.id, behind: queuedBehind };
+    const session = this.buildSession(req, project, {
+      purpose,
+      workKey,
+      scope,
+      queued: queuedBehind.length > 0,
+    });
+    const queued = this.createAndLaunch(
+      session,
+      {
+        workspaceMode: workspace.mode,
+        workspaceFallback: null,
+        forced,
+        queuedBehind,
+      },
+      workspace,
+      req.input,
+    );
+    return queued
+      ? { status: "queued", sessionId: session.id, behind: queuedBehind }
+      : { status: "started", sessionId: session.id };
+  }
+
+  private createAndLaunch(
+    session: Session,
+    meta: StoredStartMeta,
+    workspace: WorkspaceRequest,
+    input?: UserInput,
+  ): boolean {
+    const { admission, repo } = this.deps;
+    const waitingForConflict = session.status === "queued";
+    const waitingForSlot = !waitingForConflict && !this.reserve(session);
+    try {
+      if (waitingForConflict || waitingForSlot) {
+        repo.create(
+          { ...session, status: "queued" },
+          {
+            ...meta,
+            // A pending start keeps pasted images as artifacts, like a queued message.
+            pending: { workspace, input: input && this.externalize(session, input) },
+          },
+        );
+        if (waitingForSlot) admission?.enqueue(session.id);
+        return true;
+      }
+      repo.create(session, { ...meta, pending: null });
+      this.launchInBackground(session.id, input, workspace, meta.forkStart?.fork);
+      return false;
+    } finally {
+      if (!this.launching.has(session.id)) admission?.release(session.id);
     }
-    this.launchInBackground(session.id, req.input, workspace);
-    return { status: "started", sessionId: session.id };
+  }
+
+  private reserve(session: Session): boolean {
+    return (
+      isFactorySession(session) ||
+      (this.deps.admission?.tryReserve(session.id, session.role) ?? true)
+    );
   }
 
   /**
@@ -267,8 +312,7 @@ export class SessionService {
     const { repo, projects } = this.deps;
     await this.sourceProjectChecked(id);
     const plan = await planFork({ repo, projects, runner: this.runnerOf(id) }, id, req);
-    repo.create(plan.session, plan.meta);
-    this.launchInBackground(plan.session.id, undefined, plan.start.workspace, plan.start.fork);
+    this.createAndLaunch(plan.session, plan.meta, plan.start.workspace);
     return { sessionId: plan.session.id };
   }
 
@@ -282,8 +326,7 @@ export class SessionService {
     const { repo, projects, utility } = this.deps;
     await this.sourceProjectChecked(id);
     const plan = await planHandoff({ repo, projects, runner: this.runnerOf(id), utility }, id, req);
-    repo.create(plan.session, plan.meta);
-    this.launchInBackground(plan.session.id, undefined, plan.start.workspace, plan.start.fork);
+    this.createAndLaunch(plan.session, plan.meta, plan.start.workspace);
     return { sessionId: plan.session.id };
   }
 
@@ -297,8 +340,7 @@ export class SessionService {
     const { repo, projects } = this.deps;
     await this.sourceProjectChecked(id);
     const plan = await planReview({ repo, projects, runner: this.runnerOf(id) }, id, req);
-    repo.create(plan.session, plan.meta);
-    this.launchInBackground(plan.session.id, undefined, plan.start.workspace, plan.start.fork);
+    this.createAndLaunch(plan.session, plan.meta, plan.start.workspace);
     return { sessionId: plan.session.id };
   }
 
@@ -310,16 +352,25 @@ export class SessionService {
 
   /** Start a queued session whose blockers finished (called by the queue). */
   startQueued(session: Session): void {
-    const meta = this.deps.repo.find(session.id)?.startMeta;
-    const pending = meta?.pending ?? { workspace: { mode: "worktree" as const } };
-    this.deps.repo.setStartMeta(session.id, (m) => ({
-      ...(m ?? meta ?? fallbackMeta()),
-      pending: null,
-    }));
-    this.deps.repo.update(session.id, (s) =>
-      s.status === "queued" ? { ...s, status: "starting" } : s,
-    );
-    this.launchInBackground(session.id, pending.input, pending.workspace);
+    const { admission, repo } = this.deps;
+    try {
+      const meta = repo.find(session.id)?.startMeta;
+      const pending = meta?.pending ?? { workspace: { mode: "worktree" as const } };
+      admission?.dequeue(session.id);
+      repo.setStartMeta(session.id, (m) => ({
+        ...(m ?? emptyStartMeta()),
+        pending: null,
+      }));
+      repo.update(session.id, (s) => (s.status === "queued" ? { ...s, status: "starting" } : s));
+      this.launchInBackground(
+        session.id,
+        pending.input,
+        meta?.forkStart?.workspace ?? pending.workspace,
+        meta?.forkStart?.fork,
+      );
+    } finally {
+      if (!this.launching.has(session.id)) admission?.release(session.id);
+    }
   }
 
   /** Send now, steer or queue (`whenBusy`); `from` labels the message if it is queued. */
@@ -345,6 +396,17 @@ export class SessionService {
       }
       return this.enqueue(id, req.input, from);
     }
+    const { admission, repo } = this.deps;
+    if (
+      !isFactorySession(session) &&
+      (repo.find(id)?.startMeta?.admission || !this.reserve(session))
+    ) {
+      if (req.whenBusy === "reject") throw conflict("All agent slots are in use", "turn_running");
+      const queued = this.enqueue(id, req.input, from);
+      this.holds.release(id);
+      admission?.enqueue(id);
+      return queued;
+    }
     // Its place in the queue, should it end up there: ahead of messages that arrive meanwhile.
     const place = this.deps.outbox.reserve();
     try {
@@ -364,6 +426,8 @@ export class SessionService {
       }
       this.holds.hold(id, true);
       return this.enqueue(id, req.input, from, place);
+    } finally {
+      admission?.release(id);
     }
     this.holds.release(id);
     return { status: "sent" };
@@ -410,6 +474,10 @@ export class SessionService {
       checking: this.checkRuns?.isRunning(id) ?? false,
     });
     if (refusal) throw refusal;
+    const { admission } = this.deps;
+    if (admission && !admission.tryReserve(id, session.role)) {
+      throw conflict("All agent slots are in use; try again when one frees", "turn_running");
+    }
     this.delivering.add(id);
     try {
       await startCompaction(
@@ -418,6 +486,7 @@ export class SessionService {
       );
     } finally {
       this.delivering.delete(id);
+      admission?.release(id);
       // Messages that arrived meanwhile go once the compaction is over (or didn't start).
       if (this.deps.outbox.count(id) > 0) this.flushIfSettled(id);
     }
@@ -456,6 +525,7 @@ export class SessionService {
   async stop(id: string): Promise<Session> {
     const session = this.deps.repo.get(id);
     this.deps.outbox.clear(id);
+    this.deps.admission?.dequeue(id);
     this.holds.release(id);
     if (session.status !== "queued" && session.status !== "created") {
       try {
@@ -475,20 +545,41 @@ export class SessionService {
     );
   }
 
+  canFlushOutbox(session: Session, admissionHead = false): boolean {
+    const id = session.id;
+    return (
+      !this.holds.isHeld(id) &&
+      !this.delivering.has(id) &&
+      !this.deps.admission?.isHeld(id) &&
+      (!session.archivedAt || admissionHead) &&
+      (FLUSHABLE.has(session.status) ||
+        (admissionHead && !BUSY.has(session.status) && !NOT_STARTED.has(session.status)))
+    );
+  }
+
   /**
    * Send the next queued message once no turn is running (idle, or after a failed or
    * interrupted turn). If delivery fails the message goes back in its place and delivery
    * pauses (`OutboxHolds`); only an error that is not a runner restart fails the session. A
    * turn still running on the runner is no error: the message waits for its end.
    */
-  async flushOutbox(id: string): Promise<void> {
-    if (this.holds.isHeld(id) || this.delivering.has(id)) return;
-    const next = this.deps.outbox.peek(id);
+  async flushOutbox(id: string, admissionHead = false): Promise<void> {
+    const { admission, repo, outbox } = this.deps;
+    const found = repo.find(id);
+    if (!found || !this.canFlushOutbox(found.session, admissionHead)) return;
+    const { session, startMeta } = found;
+    const next = outbox.peek(id);
     if (!next) return;
-    const session = this.deps.repo.get(id);
-    if (!FLUSHABLE.has(session.status)) return;
-    this.deps.outbox.remove(next, "sent");
+    if (!admissionHead) {
+      if (startMeta?.admission) return;
+      if (!this.reserve(session)) {
+        admission?.enqueue(id);
+        return;
+      }
+    }
     try {
+      if (admissionHead) admission?.dequeue(id);
+      outbox.remove(next, "sent");
       await this.sendNow(session, next.input, next.from);
     } catch (error) {
       if (isTurnRunningError(error)) {
@@ -502,12 +593,15 @@ export class SessionService {
       if (!transient && session.status !== "failed") {
         this.deps.launcher.fail(id, `send-${Date.now()}`, error);
       }
+    } finally {
+      admission?.release(id);
     }
   }
 
   /** A runner is ready again: retry the paused deliveries of its sessions (§4.2). */
   releaseOutboxes(which?: (sessionId: string) => boolean): void {
     this.holds.releaseAll(which);
+    this.deps.admission?.scheduleDrain();
   }
 
   /** A turn is on its way to the runner for this session (sent, the runner hasn't answered). */
@@ -524,7 +618,18 @@ export class SessionService {
   async continueAfterRestart(id: string, text: string): Promise<void> {
     if (this.delivering.has(id)) return;
     const session = this.deps.repo.get(id);
-    await this.sendNow(session, { text, attachments: [], from: "codeden" }, "codeden");
+    const input: UserInput = { text, attachments: [], from: "codeden" };
+    if (this.deps.repo.find(id)?.startMeta?.admission) return;
+    if (!this.reserve(session)) {
+      this.enqueue(id, input, "codeden");
+      this.deps.admission?.enqueue(id);
+      return;
+    }
+    try {
+      await this.sendNow(session, input, "codeden");
+    } finally {
+      this.deps.admission?.release(id);
+    }
   }
 
   sessionsWithQueuedMessages(): string[] {
@@ -670,7 +775,10 @@ export class SessionService {
     const prepared = input ? this.forRunner(session, input) : undefined;
     const promise = this.deps.launcher
       .launch(id, { input: prepared, workspace, ...(fork ? { fork } : {}) })
-      .finally(() => this.launching.delete(id));
+      .finally(() => {
+        this.launching.delete(id);
+        this.deps.admission?.release(id);
+      });
     this.launching.set(id, promise);
   }
 
@@ -790,8 +898,4 @@ function roleModelDefaults(
   // An unknown provider (runner not connected yet) is let through, as for plan mode.
   const hasEffort = info?.capabilities.reasoningEffort ?? true;
   return { model: defaults.model, effort: hasEffort ? defaults.effort : null };
-}
-
-function fallbackMeta(): StoredStartMeta {
-  return { workspaceMode: "worktree", workspaceFallback: null, forced: null, queuedBehind: [] };
 }

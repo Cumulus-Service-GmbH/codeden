@@ -12,10 +12,12 @@ import { badRequest, errorMessage } from "../errors";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
 import { type RunnerDeps, runnerErrorCode, runnerForSession } from "../runner-port";
+import type { SessionAdmission } from "./admission";
 import type { SessionRepo } from "./repo";
 
 export interface WorktreeCleanupDeps extends RunnerDeps {
   repo: SessionRepo;
+  admission?: SessionAdmission;
   projects: ProjectService;
   store: EventStore;
   settings: () => Settings;
@@ -148,6 +150,7 @@ export class WorktreeCleanup {
     if (IN_USE.has(current.status) || current.status === "idle") {
       await this.deps.stopSession(id);
     }
+    this.deps.admission?.dequeue(id);
     this.deps.repo.update(id, (s) =>
       s.archivedAt ? s : { ...s, archivedAt: this.now().toISOString() },
     );

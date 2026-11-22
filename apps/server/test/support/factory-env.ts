@@ -321,6 +321,7 @@ export function createFactoryEnv(
 
   const build = () =>
     new FactoryService({
+      admission: { free: () => Infinity },
       db: db.db,
       store,
       projects,

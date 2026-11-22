@@ -12,7 +12,9 @@ import type { EventStore } from "../../events/store";
 import type { McpTokenStore } from "../../mcp/tokens";
 import type { SettingsStore } from "../../settings-store";
 import { errorMessage } from "../errors";
+import { isFactorySession } from "../factory/starter";
 import type { UtilityService } from "../utility";
+import type { SessionAdmission } from "./admission";
 import { findConflicts } from "./conflicts";
 import type { SessionRepo } from "./repo";
 import type { SessionService } from "./session-service";
@@ -21,6 +23,7 @@ export interface LifecycleDeps {
   db: Db;
   store: EventStore;
   repo: SessionRepo;
+  admission?: SessionAdmission;
   sessions: SessionService;
   settings: SettingsStore;
   utility: UtilityService;
@@ -56,19 +59,54 @@ export class SessionLifecycle {
 
   stop(): void {
     this.unsubscribe?.();
+    this.unsubscribe = undefined;
   }
 
   /** Start every queued session that no longer conflicts with earlier work. */
   drainQueue(): void {
-    const queued = this.deps.repo.queued();
+    const { admission, repo, sessions } = this.deps;
+    const blocked = new Set<string>();
+    const queued = repo.queued();
     queued.forEach((session, index) => {
+      const meta = repo.find(session.id)?.startMeta;
+      // Admission-only starts already passed their own conflict policy (including force and fork).
+      if (meta?.admission && meta.queuedBehind.length === 0) return;
       const later = new Set(queued.slice(index + 1).map((s) => s.id));
       const others = this.deps.repo
         .activeWork(session.projectId)
         .filter((w) => w.id !== session.id && !later.has(w.id));
       const blockers = findConflicts({ workKey: session.workKey, scope: session.scope }, others);
-      if (blockers.length === 0) this.deps.sessions.startQueued(session);
+      if (blockers.length > 0) {
+        blocked.add(session.id);
+        return;
+      }
+      if (meta?.admission) return;
+      if (
+        !admission ||
+        isFactorySession(session) ||
+        admission.tryReserve(session.id, session.role)
+      ) {
+        sessions.startQueued(session);
+      } else {
+        admission.enqueue(session.id);
+      }
     });
+    if (!admission) return;
+    for (const { id } of admission.waiters()) {
+      const session = repo.find(id)?.session;
+      if (!session || (session.status !== "queued" && !sessions.hasOutbox(id))) {
+        admission.dequeue(id);
+        continue;
+      }
+      if (blocked.has(id) || admission.isHeld(id) || sessions.isDelivering(id)) continue;
+      if (session.status !== "queued" && !sessions.canFlushOutbox(session, true)) continue;
+      if (!admission.tryReserve(id, session.role, true)) break;
+      if (session.status === "queued") sessions.startQueued(session);
+      else
+        void sessions
+          .flushOutbox(id, true)
+          .catch((error) => this.deps.log?.(`queue: ${errorMessage(error)}`));
+    }
   }
 
   private onEvents(events: RawEventEnvelope[]): void {
@@ -82,6 +120,13 @@ export class SessionLifecycle {
         if (settled && this.deps.sessions.hasOutbox(session.id)) {
           setImmediate(() => void this.deps.sessions.flushOutbox(session.id));
         }
+      } else if (
+        e.type === "message.dequeued" ||
+        e.type === "settings.updated" ||
+        e.type === "project.created" ||
+        e.type === "project.updated"
+      ) {
+        sessionsChanged = true;
       } else if (
         (e.type === "agent.item.started" || e.type === "agent.item.completed") &&
         e.sessionId
@@ -121,11 +166,12 @@ export class SessionLifecycle {
     }
   }
 
-  private scheduleDrain(): void {
-    if (this.drainScheduled) return;
+  scheduleDrain(): void {
+    if (!this.unsubscribe || this.drainScheduled) return;
     this.drainScheduled = true;
     setImmediate(() => {
       this.drainScheduled = false;
+      if (!this.unsubscribe) return;
       try {
         this.drainQueue();
       } catch (error) {

@@ -60,6 +60,7 @@ export interface PendingStart {
  */
 export type StoredStartMeta = SessionStartMeta & {
   pending?: PendingStart | null;
+  admission?: { seq: number; since: string } | null;
   prFeedback?: Record<string, { rounds: number; keys: string[] }>;
   /**
    * Whether the turn this role session's last accepted delivery started carries the user's
@@ -95,6 +96,10 @@ export type StoredStartMeta = SessionStartMeta & {
    */
   startUnanswered?: UnansweredStart | null;
 };
+
+export function emptyStartMeta(): StoredStartMeta {
+  return { workspaceMode: "worktree", workspaceFallback: null, forced: null, queuedBehind: [] };
+}
 
 /**
  * A folder as `SessionRepo.inFolder` compares it: forward slashes, no trailing slash, ASCII
@@ -271,6 +276,25 @@ export class SessionRepo {
       .orderBy(desc(sessions.createdAt))
       .all()
       .map(rowToSession);
+  }
+
+  /** Uncapped rows that occupy a slot or have a persisted place in the admission queue. */
+  admissionRows() {
+    return this.db
+      .select({
+        id: sessions.id,
+        role: sessions.role,
+        status: sessions.status,
+        meta: sessions.startMeta,
+      })
+      .from(sessions)
+      .where(
+        or(
+          inArray(sessions.status, ["starting", "running", "waiting"]),
+          sql`json_extract(${sessions.startMeta}, '$.admission.seq') is not null`,
+        ),
+      )
+      .all();
   }
 
   /** Queued sessions, oldest first. */

@@ -1,4 +1,5 @@
 import {
+  AdmissionStatus,
   ArchivedSessionsPage,
   ClaudeSdkStatus,
   CompactSessionResponse,
@@ -115,6 +116,7 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
     watchSession: (id, fromSeq, onMessage) => socket.watch(id, fromSeq, onMessage),
     onConnectionChange: (listener) => socket.onState(listener),
 
+    sessions: { admission: () => get("/sessions/admission", AdmissionStatus.parse) },
     getSessionDetail: (id) => get(`/sessions/${enc(id)}`, (v) => SessionDetail.parse(v)),
     getSessions: (ids) =>
       get(`/sessions?${new URLSearchParams({ ids: ids.join(",") })}`, (v) =>

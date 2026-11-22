@@ -1,3 +1,4 @@
+export * from "./admission";
 /**
  * @codeden/contracts: the shared, zod-typed language of CodeDen.
  * Everything that crosses a process or network boundary is defined here first.
