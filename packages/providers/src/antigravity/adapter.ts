@@ -21,7 +21,7 @@ import {
   detectAntigravity,
   isSupportedAntigravityVersion,
 } from "./detect";
-import { antigravityModelInfos, fallbackAntigravityModels, thoughtLevel } from "./models";
+import { antigravityModelInfos, fallbackAntigravityModels, modelThoughtLevel } from "./models";
 import { ANTIGRAVITY_ACP_ARGS, type AntigravityProbe, probeAntigravity } from "./probe";
 
 export const ANTIGRAVITY_PROVIDER_ID = "antigravity";
@@ -32,13 +32,15 @@ export const ANTIGRAVITY_PROVIDER_ID = "antigravity";
  * `default` mode, which asks before edits and commands "per your permission settings"; there is
  * no read-only mode, so CodeDen can't guarantee read-only and doesn't offer it. Plan mode is
  * its `plan` mode. CodeDen's reasoning effort is its `thought_level` option
- * (`thoughtLevel`: `minimal` runs at `low`, a level a model lacks at the nearest one it has).
+ * (`modelThoughtLevel`: `minimal` runs at `low`, a level the current model lacks at the nearest
+ * one it has).
  */
 export const ANTIGRAVITY_AGENT: AcpAgentSpec = {
   label: "Antigravity CLI",
   args: ANTIGRAVITY_ACP_ARGS,
   modes: { agent: "default", plan: "plan" },
-  effort: { category: "thought_level", value: thoughtLevel },
+  refusesReadOnly: true,
+  effort: { category: "thought_level", value: modelThoughtLevel },
 };
 
 /**
@@ -211,6 +213,11 @@ export class AntigravityAdapter implements ProviderAdapter {
    */
   private applySetup(setup: AcpSessionSetup): void {
     try {
+      // A snapshot that says which modes it has (even none) decides plan mode, with or without
+      // models; one that doesn't leaves it as it was.
+      if (setup.modes !== undefined || findOption(setup.configOptions, "mode")) {
+        this.planListed = modeIds(setup).includes(ANTIGRAVITY_AGENT.modes.plan ?? "plan");
+      }
       const listed = antigravityModelInfos(setup);
       if (!listed) return;
       // Each model's efforts come from `models.availableModels`. A `config_option_update`
@@ -228,11 +235,6 @@ export class AntigravityAdapter implements ProviderAdapter {
               ...(was.defaultEffort ? { defaultEffort: was.defaultEffort } : {}),
             };
           });
-      // A snapshot that says which modes it has (even none) decides plan mode; one that
-      // doesn't leaves it as it was.
-      if (setup.modes !== undefined || findOption(setup.configOptions, "mode")) {
-        this.planListed = modeIds(setup).includes(ANTIGRAVITY_AGENT.modes.plan ?? "plan");
-      }
       this.catalog.set(models);
     } catch {
       // A malformed reply: Default (or the last good list) stands.

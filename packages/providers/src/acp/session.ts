@@ -114,8 +114,19 @@ export class AcpSession implements ProviderSession {
     this.acpSession = opts.resumeToken;
   }
 
+  /** Refuse `read_only` on an agent that can't be held to it (`spec.refusesReadOnly`). */
+  private refuseReadOnly(level: AutonomyLevel): void {
+    if (level === "read_only" && this.config.spec.refusesReadOnly) {
+      throw new ProviderSessionError(
+        "unsupported",
+        `${this.config.spec.label} can't run read-only: not every edit and command reaches CodeDen`,
+      );
+    }
+  }
+
   /** Start the agent and open (or resume) its session. */
   async start(): Promise<void> {
+    this.refuseReadOnly(this.opts.autonomy);
     this.events.push({ type: "thread.started", thread: { id: this.mapper.threadId } });
     this.addNotice(this.config.spec.allowListNotice?.(this.opts.cwd), AGENT_ALLOW_LIST_NOTICE);
     await this.ensureAgent();
@@ -132,6 +143,7 @@ export class AcpSession implements ProviderSession {
 
   /** Applies from the next permission request; read-only also switches to the read-only mode. */
   async setAutonomy(level: AutonomyLevel): Promise<void> {
+    this.refuseReadOnly(level);
     this.policy.setAutonomy(level);
     if (!this.planning) await this.applyMode().catch(() => undefined);
   }
@@ -393,10 +405,16 @@ export class AcpSession implements ProviderSession {
       if (this.nextEffort === undefined) this.nextEffort = effort ?? null;
       throw error;
     }
-    // An effort the agent doesn't list (yet) stays pending for a later turn, not dropped.
+    // An effort the agent doesn't list now fails the turn before its prompt (it would run at
+    // another effort unannounced) and stays pending for the next.
     if (!applied) {
       if (this.nextEffort === undefined) this.nextEffort = effort ?? null;
-      return;
+      // Putting back the agent's own level waits quietly; a chosen effort fails the turn.
+      if (!effort) return;
+      throw new ProviderSessionError(
+        "effort_unavailable",
+        `${this.config.spec.label} doesn't offer that reasoning effort right now; choose another`,
+      );
     }
     this.effort = effort;
     if (this.nextEffort === nextEffort) this.nextEffort = undefined;
@@ -428,7 +446,7 @@ export class AcpSession implements ProviderSession {
     let pickable = true;
     const pick = (listed: readonly string[]) => {
       const value = effort
-        ? spec.value(effort, listed)
+        ? spec.value(effort, listed, this.setup)
         : own && listed.includes(own)
           ? own
           : undefined;
@@ -441,7 +459,8 @@ export class AcpSession implements ProviderSession {
     const next = strict ? await applied : await applied.catch(() => undefined);
     if (!next) return false;
     this.applyReply(before, next);
-    if (!effort) this.agentEffort = undefined;
+    // The agent's own level is forgotten only once it is back (set now, or already current).
+    if (!effort && pickable) this.agentEffort = undefined;
     return pickable;
   }
 

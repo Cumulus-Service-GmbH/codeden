@@ -18,7 +18,12 @@ export {
   detectAntigravity,
   isSupportedAntigravityVersion,
 } from "./detect";
-export { antigravityModelInfos, fallbackAntigravityModels, thoughtLevel } from "./models";
+export {
+  antigravityModelInfos,
+  fallbackAntigravityModels,
+  modelThoughtLevel,
+  thoughtLevel,
+} from "./models";
 export {
   ANTIGRAVITY_ACP_ARGS,
   type AntigravityProbe,

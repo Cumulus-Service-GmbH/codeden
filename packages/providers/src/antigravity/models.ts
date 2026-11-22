@@ -28,6 +28,23 @@ const DOCUMENTED: readonly ReasoningEffort[] = ["low", "medium", "high", "xhigh"
  * doesn't list takes the nearest lower level it does (a model without `max` runs `max` at
  * `xhigh`), else the nearest higher one. Pure.
  */
+/**
+ * `thoughtLevel` for the session's current model: of the levels `thought_level` lists, only those
+ * the model offers (its `models.availableModels` variants, `gemini-4-argon-high`), when the
+ * session names any for it, so an effort never runs above the model's own maximum.
+ */
+export function modelThoughtLevel(
+  effort: ReasoningEffort,
+  listed: readonly string[],
+  setup: AcpSessionSetup,
+): string | undefined {
+  const model = findOption(setup.configOptions, "model")?.currentValue;
+  const variants = (setup.models?.availableModels ?? []).map((m) => m?.modelId);
+  const own =
+    typeof model === "string" ? listed.filter((l) => variants.includes(`${model}-${l}`)) : [];
+  return thoughtLevel(effort, own.length ? own : listed);
+}
+
 export function thoughtLevel(
   effort: ReasoningEffort,
   listed: readonly string[],

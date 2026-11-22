@@ -106,13 +106,23 @@ export interface AcpAgentSpec {
   /** Its mode ids: full tools, planning, and read-only (when it has them). */
   modes: { agent: string; plan?: string; readOnly?: string };
   /**
+   * The agent can't be held to read-only (no read-only mode, and not every call reaches
+   * CodeDen): its sessions refuse the `read_only` level, at the start and as a change.
+   */
+  refusesReadOnly?: true;
+  /**
    * How CodeDen's reasoning effort reaches the agent, when it can: the config option of
    * `category` (`thought_level`, say), set with `session/set_config_option` to the value `value`
-   * picks from the ones the session lists. Without it, efforts are ignored.
+   * picks from the ones the session lists, given the session's setup (its current model's own
+   * levels, say). Without it, efforts are ignored.
    */
   effort?: {
     category: string;
-    value: (effort: ReasoningEffort, listed: readonly string[]) => string | undefined;
+    value: (
+      effort: ReasoningEffort,
+      listed: readonly string[],
+      setup: AcpSessionSetup,
+    ) => string | undefined;
   };
   extensions?: AcpExtensions;
   /**

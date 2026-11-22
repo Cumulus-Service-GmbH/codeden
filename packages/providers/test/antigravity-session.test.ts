@@ -121,8 +121,8 @@ describe("Antigravity CLI session over ACP", () => {
 
   it("sets the model, then its thinking level, at the start and when changed", async () => {
     const { session, turn } = await open({ model: "gemini-4-argon", effort: "max" });
-    // Argon lists `xhigh` as a thinking level, so `max` runs at it.
-    expect(configSets()).toEqual(["model=gemini-4-argon", "thought_level=xhigh"]);
+    // `thought_level` lists `xhigh`, but Argon's own levels stop at `high`: `max` runs at that.
+    expect(configSets()).toEqual(["model=gemini-4-argon", "thought_level=high"]);
     await session.configure?.({ effort: "minimal" });
     await turn("go");
     expect(configSets().at(-1)).toBe("thought_level=low");
@@ -250,12 +250,14 @@ describe("Antigravity CLI session over ACP", () => {
     expect(logged("initialize")).toEqual([]);
   });
 
-  it("plans in its `plan` mode, and stays in `default` read-only", async () => {
-    await open({ planMode: true });
+  it("plans in its `plan` mode, and refuses read-only at the start and as a change", async () => {
+    const { session } = await open({ planMode: true });
     expect(configSets()).toEqual(["mode=plan"]);
-    const readOnly = await open({ autonomy: "read_only" });
-    await readOnly.session.setAutonomy?.("read_only");
-    expect(configSets()).toEqual(["mode=plan"]);
+    await expect(session.setAutonomy?.("read_only")).rejects.toMatchObject({ code: "unsupported" });
+    const adapter = new AntigravityAdapter({ executable: fakeAgy });
+    await expect(adapter.openSession(options({ autonomy: "read_only" }))).rejects.toMatchObject({
+      code: "unsupported",
+    });
   });
 
   it("explains how to sign in when the CLI has no login", async () => {

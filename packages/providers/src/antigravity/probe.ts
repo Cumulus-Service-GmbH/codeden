@@ -71,7 +71,7 @@ export async function listSetup(
     })
     .catch((error) => {
       // Refused for authentication: the CLI answers, but isn't signed in.
-      if (!late && classifyAcpError(error) === "auth") onSignedOut?.();
+      if (!late && performance.now() <= due && classifyAcpError(error) === "auth") onSignedOut?.();
       return undefined;
     });
   try {

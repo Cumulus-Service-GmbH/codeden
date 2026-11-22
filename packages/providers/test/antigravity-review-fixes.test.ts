@@ -4,11 +4,12 @@ import { join } from "node:path";
 import type { AgentEvent, SessionOptions } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AcpSessionSetup } from "../src/acp/protocol";
+import { type AcpRpc, AcpRpcError } from "../src/acp/rpc";
 import { AcpSession } from "../src/acp/session";
 import type { ProviderSession } from "../src/adapter";
 import { ANTIGRAVITY_AGENT, AntigravityAdapter } from "../src/antigravity/adapter";
 import { detectAntigravity } from "../src/antigravity/detect";
-import { probeAntigravity } from "../src/antigravity/probe";
+import { listSetup, probeAntigravity } from "../src/antigravity/probe";
 import { clearExecutableCache } from "../src/util/locate";
 
 // These tests start the fake CLI as a real process: room for a busy machine.
@@ -131,8 +132,59 @@ describe("the Antigravity CLI after the provider review", () => {
     inner.setup = { configOptions: [] };
     inner.acpSession = "x";
     inner.nextEffort = "high";
-    await inner.applyModelChange({});
+    // The turn fails before its prompt rather than run at another effort, and it stays pending.
+    await expect(inner.applyModelChange({})).rejects.toMatchObject({ code: "effort_unavailable" });
     expect(inner.nextEffort).toBe("high");
+  });
+
+  it("keeps the CLI's own level until it is back, when clearing an effort can't restore it yet", async () => {
+    const session = new AcpSession(options(), { executable: fakeAgy, spec: ANTIGRAVITY_AGENT });
+    const inner = session as unknown as {
+      setup: AcpSessionSetup;
+      agentEffort: string | undefined;
+      applyEffort: (rpc: unknown, id: string, effort: undefined, strict: boolean) => Promise<boolean>;
+    };
+    inner.setup = {
+      configOptions: [
+        {
+          id: "thought_level",
+          name: "Thinking",
+          category: "thought_level",
+          type: "select",
+          currentValue: "low",
+          options: [{ value: "low", name: "Low" }],
+        },
+      ],
+    };
+    inner.agentEffort = "xhigh";
+    await expect(inner.applyEffort({}, "x", undefined, true)).resolves.toBe(false);
+    expect(inner.agentEffort).toBe("xhigh");
+  });
+
+  it("clears plan mode on a snapshot that lists no modes, even without models", () => {
+    const adapter = new AntigravityAdapter({ executable: fakeAgy });
+    const apply = (adapter as unknown as { applySetup: (s: AcpSessionSetup) => void }).applySetup;
+    expect(adapter.capabilities().planMode).toBe(true);
+    apply.call(adapter, { modes: { availableModes: [] } });
+    expect(adapter.capabilities().planMode).toBe(false);
+  });
+
+  it("never reports sign-out for a refusal that arrives after the probe's deadline", async () => {
+    let refuse: (error: Error) => void = () => undefined;
+    const rpc = {
+      request: () => new Promise((_resolve, reject) => (refuse = reject)),
+    } as unknown as AcpRpc;
+    const now = vi.spyOn(performance, "now").mockReturnValue(1_000);
+    try {
+      const signedOut = vi.fn();
+      const listed = listSetup(rpc, "/tmp", 60_000, undefined, signedOut);
+      now.mockReturnValue(1_000 + 60_001);
+      refuse(new AcpRpcError(-32000, "Authentication required"));
+      await expect(listed).resolves.toBeUndefined();
+      expect(signedOut).not.toHaveBeenCalled();
+    } finally {
+      now.mockRestore();
+    }
   });
 
   it("reports the CLI as signed out when its throwaway session is refused for that", async () => {
