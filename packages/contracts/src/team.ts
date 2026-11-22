@@ -68,6 +68,8 @@ export const TEAM_FILE_ENV = "TEAM_FILE";
 export const TeamFile = z.object({
   version: z.literal(1),
   projectId: z.string().min(1),
+  /** The project's folder and its worktrees folder: tools use this Team only for code inside them. */
+  roots: z.array(z.string().min(1)).min(1),
   team: Team,
   updatedAt: z.string(),
 });

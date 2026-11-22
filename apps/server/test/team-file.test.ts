@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { TEAM_FILE_ENV, type Team, TeamFile } from "@codeden/contracts";
@@ -6,7 +6,12 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import { type Database, openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
 import { runTool } from "../src/services/exec";
-import { loopProjects, teamFilePath, writeTeamFile } from "../src/services/factory/team-file";
+import {
+  loopProjects,
+  refreshTeamFile,
+  teamFilePath,
+  writeTeamFile,
+} from "../src/services/factory/team-file";
 import { ProjectService } from "../src/services/projects/project-service";
 import { type LauncherDeps, SessionLauncher } from "../src/services/sessions/launcher";
 import { sampleSession } from "./helpers";
@@ -47,6 +52,7 @@ const launcher = (team: Map<string, Team>) =>
     runner: { mcpProxyUrl: () => null },
     projects,
     home: join(dir, "home"),
+    worktreesDir: join(dir, "wt"),
     team: (projectId: string) => team.get(projectId) ?? null,
   } as unknown as LauncherDeps);
 
@@ -67,8 +73,8 @@ it("passes TEAM_FILE with the project's current Team, empty until the project ha
 
 it("rewrites the file in place and refuses unsafe project ids", () => {
   const home = join(dir, "home");
-  writeTeamFile(home, "p1", opus);
-  writeTeamFile(home, "p1", []);
+  writeTeamFile(home, "p1", opus, ["/work"]);
+  writeTeamFile(home, "p1", [], ["/work"]);
   expect(JSON.parse(readFileSync(teamFilePath(home, "p1"), "utf8")).team).toEqual([]);
   expect(() => teamFilePath(home, "../x")).toThrow(/unsafe/);
 });
@@ -88,4 +94,28 @@ it("finds the projects whose factory loop changed", () => {
       event("project.updated", "b"),
     ]),
   ).toEqual(["a"]);
+});
+
+it("binds the file to the project's folders and removes it when a refresh fails", async () => {
+  const id = await addProject();
+  const path = launcher(new Map([[id, opus]])).sessionOptions({ ...sampleSession, projectId: id })
+    .env?.[TEAM_FILE_ENV] as string;
+  const project = projects.get(id);
+  expect(TeamFile.parse(JSON.parse(readFileSync(path, "utf8"))).roots).toEqual([
+    project.path,
+    join(dir, "wt", project.slug),
+  ]);
+  const logs: string[] = [];
+  refreshTeamFile({
+    home: join(dir, "home"),
+    worktreesDir: join(dir, "wt"),
+    projectId: id,
+    team: () => {
+      throw new Error("db closed");
+    },
+    project: () => project,
+    log: (message) => logs.push(message),
+  });
+  expect(existsSync(path)).toBe(false);
+  expect(logs[0]).toMatch(/old file removed: db closed/);
 });
