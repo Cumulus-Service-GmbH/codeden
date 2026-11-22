@@ -96,7 +96,7 @@ describe("decision approvals", () => {
 });
 
 describe("GitHub approval client", () => {
-  it("checks the live head and posts both approval artifacts for the recorded SHA", async () => {
+  it("checks the live head and posts the owner record, comment and review once", async () => {
     const env = createGithubEnv();
     try {
       const pr = env.gh.addPr(
@@ -131,6 +131,16 @@ describe("GitHub approval client", () => {
           path: `/repos/acme/widgets/issues/${pr.number}/comments`,
           status: 201,
           body: {
+            body: `<!-- codeden-owner-approval:v1\n${JSON.stringify({
+              ...githubTarget,
+              decisionId: next.id,
+            })}\n-->`,
+          },
+        },
+        {
+          path: `/repos/acme/widgets/issues/${pr.number}/comments`,
+          status: 201,
+          body: {
             body: `Approved by the owner in CodeDen. Decision ${next.id}. Merge-verify head: ${target.headSha}.`,
           },
         },
@@ -144,7 +154,7 @@ describe("GitHub approval client", () => {
       await env.close();
     }
   });
-  it("leaves the comment and reports a rejected self-review without replaying either post", async () => {
+  it("leaves the owner record and comment when self-review is rejected, without replaying", async () => {
     const env = createGithubEnv();
     try {
       const pr = env.gh.addPr("self-review", {}, { headSha: target.headSha });
@@ -157,6 +167,18 @@ describe("GitHub approval client", () => {
       await expect(service.postGithub(card.id, pm)).rejects.toThrow("own pull request");
       await expect(service.postGithub(card.id, pm)).rejects.toThrow("unused owner approval");
       expect(env.gh.requests.filter(({ method }) => method === "POST")).toMatchObject([
+        {
+          path: `/repos/acme/widgets/issues/${pr.number}/comments`,
+          status: 201,
+          body: {
+            body: `<!-- codeden-owner-approval:v1\n${JSON.stringify({
+              ...target,
+              repository: "acme/widgets",
+              pullNumber: pr.number,
+              decisionId: card.id,
+            })}\n-->`,
+          },
+        },
         { path: `/repos/acme/widgets/issues/${pr.number}/comments`, status: 201 },
         { path: `/repos/acme/widgets/pulls/${pr.number}/reviews`, status: 422 },
       ]);

@@ -1,4 +1,4 @@
-import type { GitHubApprovalTarget } from "@codeden/contracts";
+import { type GitHubApprovalTarget, MergeVerifyOwnerApproval } from "@codeden/contracts";
 import { ServiceError } from "../errors";
 import type { GithubClient } from "./client";
 
@@ -37,6 +37,12 @@ export function githubApprovalPort(client: GithubClient) {
       const decision = `Approved by the owner in CodeDen. Decision ${cardId}.`;
       await client.run(async (octokit) => {
         if (target.kind === "merge_verify") {
+          const record = MergeVerifyOwnerApproval.parse({ ...target, decisionId: cardId });
+          await octokit.rest.issues.createComment({
+            ...repo,
+            issue_number: target.pullNumber,
+            body: `<!-- codeden-owner-approval:v1\n${JSON.stringify(record)}\n-->`,
+          });
           await octokit.rest.issues.createComment({
             ...repo,
             issue_number: target.pullNumber,

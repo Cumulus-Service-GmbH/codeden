@@ -1,7 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { GitHubApprovalTarget, PlanApprovalSteps } from "../src";
+import { GitHubApprovalTarget, MergeVerifyOwnerApproval, PlanApprovalSteps } from "../src";
 
 describe("approval bindings", () => {
+  it("round-trips an owner decision bound to an exact PR head", () => {
+    const record = {
+      kind: "merge_verify",
+      repository: "owner/repo",
+      pullNumber: 10,
+      headSha: "a".repeat(40),
+      decisionId: "d13a65ee-becf-4976-b1fa-06dd11052ac5",
+    };
+    expect(MergeVerifyOwnerApproval.parse(JSON.parse(JSON.stringify(record)))).toEqual(record);
+    expect(MergeVerifyOwnerApproval.safeParse({ ...record, headSha: "main" }).success).toBe(false);
+    expect(MergeVerifyOwnerApproval.safeParse({ ...record, decisionId: "" }).success).toBe(false);
+  });
+
   it("round-trips a repository and exact pull request head", () => {
     const target = {
       kind: "merge_verify",

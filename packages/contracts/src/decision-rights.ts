@@ -2,15 +2,16 @@ import { z } from "zod";
 import { Id, JsonValue } from "./common";
 
 const repository = z.string().regex(/^[a-z\d][a-z\d-]*\/[a-z\d_.-]+$/i);
+const mergeVerifyTarget = z.strictObject({
+  kind: z.literal("merge_verify"),
+  repository,
+  pullNumber: z.int().positive(),
+  headSha: z.string().regex(/^[a-f0-9]{40}$/),
+});
 
 /** The exact repository and gate that an owner can approve. */
 export const GitHubApprovalTarget = z.discriminatedUnion("kind", [
-  z.strictObject({
-    kind: z.literal("merge_verify"),
-    repository,
-    pullNumber: z.int().positive(),
-    headSha: z.string().regex(/^[a-f0-9]{40}$/),
-  }),
+  mergeVerifyTarget,
   z.strictObject({
     kind: z.literal("environment_release"),
     repository,
@@ -22,6 +23,9 @@ export const GitHubApprovalTarget = z.discriminatedUnion("kind", [
   }),
 ]);
 export type GitHubApprovalTarget = z.infer<typeof GitHubApprovalTarget>;
+
+/** JSON payload in a codeden-owner-approval:v1 PR comment, tied to one owner decision. */
+export const MergeVerifyOwnerApproval = mergeVerifyTarget.extend({ decisionId: z.uuid() });
 
 /** The action and full arguments of a step shown on an owner approval card. */
 export const PlanApprovalStep = z.strictObject({
