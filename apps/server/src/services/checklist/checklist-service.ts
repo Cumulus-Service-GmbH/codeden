@@ -341,10 +341,10 @@ export class ChecklistService {
         next.approvedAt = updatedAt;
         next.items = pending.plan.tasks.map(({ id, text }) => {
           const old = previous.get(id);
-          const scopeAddition =
-            old?.scopeAddition ??
-            (current.state === "approved" && !old ? { approvedAt: updatedAt } : undefined);
           if (old?.text === text) return { ...old, startPurpose: text };
+          if (old) return { ...old, text, startPurpose: text, updatedAt };
+          const scopeAddition =
+            current.state === "approved" ? { approvedAt: updatedAt } : undefined;
           return { id, text, startPurpose: text, status: "todo", updatedAt, scopeAddition };
         });
         const approved = new Map(next.items.map((item) => [item.id, item]));

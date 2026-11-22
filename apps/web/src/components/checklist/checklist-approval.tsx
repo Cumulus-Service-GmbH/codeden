@@ -241,9 +241,11 @@ export function ProposalChanges({
         <p className="wrap-break-word font-mono text-3xs" title={plan.sha}>
           {plan.sha}
         </p>
-        {checklist.plan && (
+        {(pending.diff.length > 0 || reordered) && (
           <div className="mt-1">
-            <p className="text-2xs font-medium">Changes to approved plan</p>
+            <p className="text-2xs font-medium">
+              {checklist.plan ? "Changes to approved plan" : "Changes to current checklist"}
+            </p>
             <DiffList lines={lines} />
             {reordered && (
               <div className="mt-1 text-2xs">

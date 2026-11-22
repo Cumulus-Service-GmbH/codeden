@@ -164,13 +164,14 @@ it("strips supplied work provenance from full checklist replacements", () => {
   expect(checklist.update(projectId, { items: [item] }).items[0]?.needsOwner).toEqual(needsOwner);
 });
 
+const reviewed = (tasks: { id: string; text: string }[]) => ({
+  tasks,
+  sha: createHash("sha256").update(JSON.stringify(tasks)).digest("hex"),
+  reviewRef: "review-1",
+});
+
 it("pins the reviewed plan only after owner approval and shows only revised scope in the diff", () => {
   const tasks = [{ id: "a", text: "A" }];
-  const reviewed = (entries: typeof tasks) => ({
-    tasks: entries,
-    sha: createHash("sha256").update(JSON.stringify(entries)).digest("hex"),
-    reviewRef: "review-1",
-  });
   expect(() =>
     checklist.proposePlan(projectId, { ...reviewed(tasks), sha: "0".repeat(64) }),
   ).toThrow();
@@ -197,4 +198,20 @@ it("pins the reviewed plan only after owner approval and shows only revised scop
     plan: revision,
     items: [{ id: "a" }, { id: "b", scopeAddition: { approvedAt: at }, startPurpose: "B" }],
   });
+});
+
+it("preserves live state when approving a reworded plan task", () => {
+  const first = checklist.proposePlan(projectId, reviewed([{ id: "a", text: "A" }])).pending;
+  if (!first) throw new Error("Expected plan approval");
+  checklist.decide(first.inboxItemId, "resolved");
+  expect(checklist.link(projectId, "a", session)).toBe(true);
+  const progress = { status: "done", note: "Checked", eta, needsOwner } as const;
+  checklist.updateItem(projectId, "a", progress, session);
+
+  const revision = checklist.proposePlan(projectId, reviewed([{ id: "a", text: "A2" }])).pending;
+  if (!revision) throw new Error("Expected revision approval");
+  checklist.decide(revision.inboxItemId, "resolved");
+  expect(checklist.get(projectId)?.items).toMatchObject([
+    { id: "a", text: "A2", startPurpose: "A2", sessionIds: [session.id], ...progress },
+  ]);
 });
