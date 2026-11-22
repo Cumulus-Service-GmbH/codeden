@@ -17,7 +17,7 @@ import { errorMessage } from "../errors";
 import type { OrchestrationService } from "../orchestration/orchestration-service";
 import { findConflicts } from "../sessions/conflicts";
 import type { SessionRepo } from "../sessions/repo";
-import { startsWithLiteralTag, stripLeadingTags } from "../sessions/role-tag";
+import { BROWSER_OPERATOR_TAG, startsWithLiteralTag, stripLeadingTags } from "../sessions/role-tag";
 import type { SessionService } from "../sessions/session-service";
 import {
   overConcurrencyCap,
@@ -53,6 +53,8 @@ export interface FireRequest {
   issue?: GithubIssue | GitHubIssueRef;
   /** Manual runs: the caller's decision after a `conflict`. */
   conflict?: ConflictDecision;
+  /** Manual runs: whether a person started this run from the UI. */
+  byPerson?: boolean;
   /**
    * The permission level of the session a run starts: the action's, capped at the level a
    * person approved (`runAutonomy`); undefined leaves it to the project's default.
@@ -315,7 +317,12 @@ export class AutomationExecutor {
       },
       conflict: decision,
     });
-    const res = await this.deps.sessions.start(start);
+    const chromeApproved =
+      (req.triggeredBy !== "manual" || req.byPerson) &&
+      action.title?.trimStart().startsWith(BROWSER_OPERATOR_TAG);
+    const res = await this.deps.sessions.start(start, {
+      ...(chromeApproved ? { chromeApproved: true } : {}),
+    });
     switch (res.status) {
       case "conflict":
         if (req.triggeredBy === "manual" && !decision) {

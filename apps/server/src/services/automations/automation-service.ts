@@ -331,7 +331,7 @@ export class AutomationService implements AutomationPort {
     const { automation, project } = this.inProject(automationId, req.projectId);
     const fire = this.fireRequest(automation, project, "manual", req.context);
     const autonomy = this.runAutonomy(automation, project, opts.byPerson);
-    return this.fire({ ...fire, conflict: req.conflict, autonomy });
+    return this.fire({ ...fire, conflict: req.conflict, autonomy, byPerson: opts.byPerson });
   }
 
   // ---------------------------------------------------------------- internals

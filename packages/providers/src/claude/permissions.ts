@@ -18,7 +18,9 @@ import {
 const FINISH_PLAN = "Finish the plan and present it with ExitPlanMode; once the user approves it";
 
 /** The decision for one tool call. */
-export type Gate = { ask: false } | { ask: true; action: ApprovalAction; reason: string };
+export type Gate =
+  | { ask: false }
+  | { ask: true; action: ApprovalAction; reason: string; singleUse?: true };
 
 /**
  * Native permission mode per autonomy level (§11.2):
@@ -138,6 +140,14 @@ export class ClaudePolicy {
    * earlier `cd` persists between Bash calls); relative paths resolve from it.
    */
   gate(toolName: string, input: Record<string, unknown>, dir?: string): Gate {
+    if (toolName.startsWith("mcp__claude-in-chrome__")) {
+      return {
+        ask: true,
+        action: "tool",
+        reason: "Claude in Chrome uses your browser",
+        singleUse: true,
+      };
+    }
     if (toolName === QUESTION_TOOL) {
       return { ask: true, action: "other", reason: "The agent is asking a question" };
     }

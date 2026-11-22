@@ -474,11 +474,23 @@ export class ClaudeSession implements ProviderSession {
       toolName,
       toolInput: toJson(input),
       toolCallItemId: options.toolUseID,
-      options: ["allow_once", "allow_session", "deny"],
+      options: gate.singleUse ? ["allow_once", "deny"] : ["allow_once", "allow_session", "deny"],
       ...(str(input, "command") ? { command: str(input, "command"), cwd: this.opts.cwd } : {}),
       ...(str(input, "file_path") ? { paths: [str(input, "file_path") as string] } : {}),
     };
-    const response = await this.broker.request(ctx, item, options.signal);
+    const review = gate.singleUse
+      ? {
+          problem: (response: RuntimeResponse) =>
+            response.kind === "approval" &&
+            (response.decision === "allow_session" ||
+              (response.decision === "allow_once" &&
+                response.decidedBy !== undefined &&
+                response.decidedBy !== "user"))
+              ? "Claude in Chrome requires a one-time user approval."
+              : undefined,
+        }
+      : undefined;
+    const response = await this.broker.request(ctx, item, options.signal, review);
     return this.toPermissionResult(toolName, input, response);
   };
 

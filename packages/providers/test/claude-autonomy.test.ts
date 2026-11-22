@@ -8,7 +8,7 @@ import type {
   Query,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentEvent, SessionOptions } from "@codeden/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClaudeSession } from "../src/claude/session";
 
 /** A stand-in for the SDK's `query()`: records options and permission-mode changes. */
@@ -121,6 +121,39 @@ it.each([
 const settle = () => new Promise((r) => setTimeout(r, 20));
 const forcePush = { command: "git push --force" };
 const writeOutside = { file_path: outside, content: "x" };
+
+it.each(["supervised", "auto", "full", "read_only"] as const)(
+  "requires single-use Chrome tool approval in %s",
+  async (autonomy) => {
+    const sdk = stubSdk();
+    const { session, preToolUse, permission, approvals } = open(sdk, { autonomy, chrome: true });
+    const tool = "mcp__claude-in-chrome__navigate";
+    const input = { url: "https://example.com/" };
+    expect(await preToolUse(tool, input)).toBe("ask");
+    const decision = permission(tool, input);
+    await vi.waitFor(() => expect(approvals()).toHaveLength(1));
+    const first = approvals()[0];
+    if (first?.type !== "item.started" || first.item.kind !== "approval_request") {
+      throw new Error("Expected approval");
+    }
+    expect(first.item.options).toEqual(["allow_once", "deny"]);
+    await expect(
+      session.respond(first.item.requestId, { kind: "approval", decision: "allow_session" }),
+    ).rejects.toMatchObject({ code: "invalid_answer" });
+    await session.respond(first.item.requestId, { kind: "approval", decision: "allow_once" });
+    await expect(decision).resolves.toMatchObject({ behavior: "allow" });
+
+    expect(await preToolUse(tool, input)).toBe("ask");
+    const again = permission(tool, input);
+    await vi.waitFor(() => expect(approvals()).toHaveLength(2));
+    const second = approvals()[1];
+    if (second?.type !== "item.started" || second.item.kind !== "approval_request") {
+      throw new Error("Expected another approval");
+    }
+    await session.respond(second.item.requestId, { kind: "approval", decision: "deny" });
+    await expect(again).resolves.toMatchObject({ behavior: "deny" });
+  },
+);
 
 describe("Claude autonomy changes on a live session", () => {
   it("stops asking for in-worktree risky actions after a switch to full", async () => {

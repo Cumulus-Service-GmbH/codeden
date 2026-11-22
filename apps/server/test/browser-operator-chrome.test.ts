@@ -1,17 +1,27 @@
 import { randomUUID } from "node:crypto";
-import { RunnerCommand, type Session, type SessionOptions, Settings } from "@codeden/contracts";
-import { describe, expect, it } from "vitest";
+import {
+  type Item,
+  RunnerCommand,
+  type Session,
+  type SessionOptions,
+  Settings,
+  type StartSessionRequest,
+} from "@codeden/contracts";
+import { describe, expect, it, vi } from "vitest";
 import { buildQueryOptions } from "../../../packages/providers/src/claude/options";
 import { agentSessionOptions } from "../../runner/src/session-env";
 import { openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
+import { startSession } from "../src/mcp/tools/pm/sessions";
+import type { AppServices } from "../src/services/container";
 import { forkTitle } from "../src/services/sessions/fork";
 import { handoffTitle } from "../src/services/sessions/handoff";
 import { type LauncherDeps, SessionLauncher } from "../src/services/sessions/launcher";
+import { QuestionBroker } from "../src/services/sessions/questions";
 import { SessionRepo } from "../src/services/sessions/repo";
 import { startsWithLiteralTag, stripLeadingTags } from "../src/services/sessions/role-tag";
 import { ProviderUtilityService } from "../src/services/utility";
-import { sampleSession } from "./helpers";
+import { sampleSession, sampleSessionEvent } from "./helpers";
 
 const localRunner = { mcpProxyUrl: () => "http://127.0.0.1:1/mcp" };
 const remoteRunner = { ...localRunner, remote: () => ({}) };
@@ -91,6 +101,97 @@ describe("Claude in Chrome for Browser Operator sessions", () => {
       expect(reopened.sessionOptions(repo.get(browserOperator.id)).chrome).toBe(true);
       expect(reopened.sessionOptions(titledLegacy).chrome).toBeUndefined();
     } finally {
+      database.close();
+    }
+  });
+});
+
+describe("PM Chrome confirmation cards", () => {
+  it.each([
+    ["user", "Allow Chrome", "started"],
+    ["user", "Cancel", "skipped"],
+    ["pm", "Allow Chrome", "skipped"],
+    ["timeout", "", "skipped"],
+    ["abort", "", "skipped"],
+    ["already aborted", "", "skipped"],
+  ] as const)("handles %s answering %s", async (answerer, answer, status) => {
+    const database = openDatabase(":memory:");
+    const controller = new AbortController();
+    try {
+      const store = new EventStore(database.db);
+      store.append(sampleSessionEvent());
+      const sessionRepo = new SessionRepo(database.db, store);
+      const sendMessage = vi.fn(async () => {});
+      const questions = new QuestionBroker({
+        db: database.db,
+        store,
+        sendMessage: () => sendMessage,
+        waitMs: answerer === "timeout" ? 0 : undefined,
+      });
+      const services = {
+        db: database.db,
+        projects: { get: () => ({ kind: "local", archivedAt: null }) },
+        factory: { isUnattended: () => false },
+        sessionRepo,
+        questions,
+        sessions: {
+          start: async (
+            _req: StartSessionRequest,
+            opts?: { confirmChrome?: () => Promise<boolean> },
+          ) =>
+            (await opts?.confirmChrome?.())
+              ? { status: "started", sessionId: "operator" }
+              : { status: "skipped" },
+        },
+      } as unknown as AppServices;
+      if (answerer === "already aborted") controller.abort();
+      const started = startSession.handler(
+        startSession.input.parse({
+          title: "[Browser Operator] Open the documentation",
+          prompt: "Open the documentation.",
+          purpose: "Open the documentation",
+          provider: "claude",
+        }),
+        {
+          services,
+          projectId: "p1",
+          sessionId: sampleSession.id,
+          role: "pm",
+          caller: "mcp",
+          signal: controller.signal,
+        },
+      );
+      if (answerer === "already aborted") {
+        await expect(started).resolves.toMatchObject({ status });
+        expect(store.listAfter(0).some((event) => event.type === "inbox.created")).toBe(false);
+        return;
+      }
+      const card = await vi.waitFor(() => {
+        const item = store
+          .listAfter(0)
+          .filter((event) => event.type === "agent.item.started")
+          .map((event) => (event.payload as { item: Item }).item)
+          .find((item) => item.kind === "user_question");
+        if (!item) throw new Error("Expected the Chrome confirmation card");
+        return item;
+      });
+      expect(card.questions[0]?.allowFreeText).toBe(false);
+      const response = { kind: "answer" as const, answers: { q1: [answer || "Allow Chrome"] } };
+      if (answerer === "user" || answerer === "pm") {
+        await questions.respond(sampleSession.id, card.requestId, response, answerer);
+      } else if (answerer === "abort") {
+        controller.abort();
+      }
+      await expect(started).resolves.toMatchObject({ status });
+      if (answerer === "timeout" || answerer === "abort") {
+        expect(sessionRepo.item(sampleSession.id, card.id)?.item.status).toBe("cancelled");
+        await expect(questions.respond(sampleSession.id, card.requestId, response)).rejects.toThrow(
+          "already answered",
+        );
+        expect(sendMessage).not.toHaveBeenCalled();
+      }
+    } finally {
+      controller.abort();
       database.close();
     }
   });
