@@ -131,7 +131,7 @@ describe("PM Chrome confirmation cards", () => {
       const services = {
         db: database.db,
         projects: { get: () => ({ kind: "local", archivedAt: null }) },
-        factory: { isUnattended: () => false },
+        factory: { isUnattended: () => false, data: { loop: () => undefined } },
         sessionRepo,
         questions,
         sessions: {
