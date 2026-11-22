@@ -147,6 +147,8 @@ describe("runner-link", () => {
     });
     const stall = createServer((socket) => {
       socket.on("error", () => undefined);
+      // Drain the unanswered upgrade request so the socket can see the client's close.
+      socket.resume();
       accepted.push(socket);
       onConnection();
     });
