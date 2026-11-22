@@ -17,7 +17,7 @@ import { codedenSystemPrompt, MCP_SERVER_NAME } from "../../mcp/prompt";
 import type { McpTokenStore } from "../../mcp/tokens";
 import type { ArtifactService } from "../artifacts";
 import { errorMessage, ServiceError } from "../errors";
-import { writeTeamFile } from "../factory/team-file";
+import { teamRoots, writeTeamFile } from "../factory/team-file";
 import type { GitBroker } from "../git-broker";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
@@ -327,13 +327,21 @@ export class SessionLauncher {
       : null;
     this.markVendorHistory(runner, session);
     const turnsBefore = this.deps.repo.turnCount(session.id);
+    let options: SessionOptions;
+    try {
+      options = this.sessionOptions(session, token);
+    } catch (error) {
+      // Nothing reached the runner (e.g. the Team file could not be written): retire the token.
+      if (token) this.deps.tokens.revoke(token);
+      throw error;
+    }
     try {
       const result = await runner.request(
         {
           name: "session.start",
           sessionId: session.id,
           providerId: session.provider,
-          options: this.sessionOptions(session, token),
+          options,
           input,
         },
         START_TIMEOUT_MS,
@@ -417,11 +425,15 @@ export class SessionLauncher {
    * so a start or resume always sees the current Team; the container rewrites it on every change.
    */
   private teamEnv(session: Session): { env: Record<string, string> } | null {
-    if (!session.projectId || !this.deps.team) return null;
+    const project = this.projectOf(session);
+    if (!session.projectId || !project || !this.deps.team) return null;
     // Every project session gets the path, even with no Team yet (an empty Team), so a Team set
     // later reaches it. A failed write fails the start: never run on a stale or missing Team.
     const team = this.deps.team(session.projectId) ?? [];
-    return { env: { [TEAM_FILE_ENV]: writeTeamFile(this.deps.home, session.projectId, team) } };
+    const roots = teamRoots(project, this.deps.worktreesDir);
+    return {
+      env: { [TEAM_FILE_ENV]: writeTeamFile(this.deps.home, session.projectId, team, roots) },
+    };
   }
 
   /**

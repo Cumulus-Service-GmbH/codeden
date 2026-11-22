@@ -49,6 +49,7 @@ it("round-trips a Team file", () => {
   const file = TeamFile.parse({
     version: 1,
     projectId: "p1",
+    roots: ["/work/app", "/home/.codeden/wt/app"],
     team: [{ role: "reviewer", provider: "claude", model: "claude-opus-5-5", effort: "high" }],
     updatedAt: "2026-11-22T19:00:00.000Z",
   });
