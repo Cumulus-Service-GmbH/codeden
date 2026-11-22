@@ -32,8 +32,38 @@ describe("retiring an archived role conversation", () => {
     };
     await expect(retireRoleSession({ stop, revokeTokens, warn }, "o1")).resolves.toBeUndefined();
     expect(stop).toHaveBeenCalledTimes(1);
-    expect(warn).toHaveBeenCalledWith(
-      "Revoking the tokens of archived role session o1 failed; stopping it anyway",
+    expect(warn).toHaveBeenCalledWith("Revoking the tokens of archived role session o1 failed");
+  });
+
+  it("tries the revocation again without the runner, and says when it still failed", async () => {
+    const warn = vi.fn();
+    const stop = vi.fn(async () => {
+      throw failure("runner_unavailable");
+    });
+    let calls = 0;
+    const revokeTokens = vi.fn(() => {
+      calls++;
+      if (calls < 3) throw new Error("token store busy");
+    });
+    await retireRoleSession({ stop, revokeTokens, warn }, "o1");
+    expect(revokeTokens).toHaveBeenCalledTimes(3);
+    expect(warn).toHaveBeenLastCalledWith(
+      "Stopping archived role session o1 failed again (runner_unavailable); its tokens are revoked",
+    );
+
+    const stuck = vi.fn();
+    await retireRoleSession(
+      {
+        stop,
+        revokeTokens: () => {
+          throw new Error("token store closed");
+        },
+        warn: stuck,
+      },
+      "o2",
+    );
+    expect(stuck).toHaveBeenLastCalledWith(
+      "Stopping archived role session o2 failed again (runner_unavailable); its tokens could not be revoked",
     );
   });
 
@@ -47,7 +77,7 @@ describe("retiring an archived role conversation", () => {
     ).resolves.toBeUndefined();
     expect(stop).toHaveBeenCalledTimes(2);
     expect(warn).toHaveBeenLastCalledWith(
-      "Stopping archived role session o1 failed again (runner_timeout); its tokens stay revoked",
+      "Stopping archived role session o1 failed again (runner_timeout); its tokens are revoked",
     );
     expect(warn.mock.calls.flat().join(" ")).not.toContain("runner said no");
   });

@@ -48,7 +48,7 @@ describe("stopping a session while its runner is unreachable", () => {
       );
       expect(request).toHaveBeenCalledTimes(3);
       expect(warn).toHaveBeenLastCalledWith(
-        "Stopping archived role session s1 failed again (runner_unavailable); its tokens stay revoked",
+        "Stopping archived role session s1 failed again (runner_unavailable); its tokens are revoked",
       );
       await expect(sessions.stop("s1")).resolves.toMatchObject({ status: "stopped" });
     } finally {
