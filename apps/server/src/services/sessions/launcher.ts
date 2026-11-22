@@ -79,11 +79,13 @@ export interface LauncherDeps extends RunnerDeps {
 
 /** Whether this session starts Claude in Chrome on the home runner. */
 function startsWithChrome(session: Session, repo: SessionRepo): boolean {
+  if (session.role !== "agent") return false;
+  const meta = repo.find(session.id)?.startMeta;
   return (
-    session.provider === "claude" &&
-    session.role === "agent" &&
-    (session.title ?? "").startsWith(BROWSER_OPERATOR_TAG) &&
-    repo.find(session.id)?.startMeta?.chromeOptIn === true
+    meta?.chromeRequested ??
+    (session.provider === "claude" &&
+      (session.title ?? "").startsWith(BROWSER_OPERATOR_TAG) &&
+      meta?.chromeOptIn === true)
   );
 }
 

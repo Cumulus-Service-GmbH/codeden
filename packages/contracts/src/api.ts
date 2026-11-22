@@ -184,6 +184,8 @@ export const StartSessionRequest = z.object({
    * plan is approved. Agent sessions on a provider with `capabilities.planMode` only.
    */
   planMode: z.boolean().optional(),
+  /** Explicit user opt-in to connecting this local session to Chrome. */
+  chrome: z.boolean().optional(),
   /**
    * Keep going until checks pass (§9 Project checks): after each turn CodeDen runs the project's
    * checks and sends failures back to the agent. Agent sessions in a project with checks only;

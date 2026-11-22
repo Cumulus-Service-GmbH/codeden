@@ -36,6 +36,7 @@ import { LinkMcpUpstream } from "./mcp/link-upstream";
 import { HttpMcpUpstream, handleMcpRequest, type McpUpstream } from "./mcp/proxy";
 import { ProcessSupervisor } from "./process/supervisor";
 import { TerminalHost } from "./pty/terminal-host";
+import { runnerProfile } from "./runner-profile";
 import { SessionHost } from "./session-host";
 import { CheckRunner } from "./workspace/checks";
 import { WorkspaceFsHost } from "./workspace/fs";
@@ -293,6 +294,7 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   log(`runner ${journal.runnerId} listening on 127.0.0.1:${port}`);
   const loopDelay = monitorEventLoopDelay({ resolution: 20 });
   loopDelay.enable();
+  const profile = runnerProfile(process.env.CODEDEN_RUNNER_PROFILE === "1");
   const diagnostics = setInterval(() => {
     const eventLoopMaxMs = Math.round(loopDelay.max / 1e6);
     loopDelay.reset();
@@ -303,10 +305,11 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
       replayMaxMs ||
       journalQueuedBytes ||
       socketQueuedBytes ||
-      eventLoopMaxMs >= 100
+      eventLoopMaxMs >= 100 ||
+      profile
     ) {
       log(
-        `runner diagnostics: eventLoopMaxMs=${eventLoopMaxMs} appendCount=${appendCount} appendMaxMs=${appendMaxMs.toFixed(1)} replayMaxMs=${replayMaxMs.toFixed(1)} journalQueuedBytes=${journalQueuedBytes} socketQueuedBytes=${socketQueuedBytes}`,
+        `runner diagnostics: eventLoopMaxMs=${eventLoopMaxMs} appendCount=${appendCount} appendMaxMs=${appendMaxMs.toFixed(1)} replayMaxMs=${replayMaxMs.toFixed(1)} journalQueuedBytes=${journalQueuedBytes} socketQueuedBytes=${socketQueuedBytes}${profile ? ` ${profile()}` : ""}`,
       );
     }
   }, 60_000).unref();

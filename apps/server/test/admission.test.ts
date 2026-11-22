@@ -1,6 +1,8 @@
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type ApiContext, createApi } from "../src/routes/api";
+import { sessionRoutes } from "../src/routes/sessions";
+import type { AppServices } from "../src/services/container";
 import { SessionAdmission } from "../src/services/sessions/admission";
 import { SettingsStore } from "../src/settings-store";
 import { createGithubEnv } from "./support/github-env";
@@ -25,6 +27,42 @@ function admission(projects = 0) {
 }
 
 describe("session admission", () => {
+  it("runs a selected waiter next without skipping the slot limit", () => {
+    const slots = admission();
+    const first = env.addSession({ status: "queued" });
+    const next = env.addSession({ status: "idle" });
+    const last = env.addSession({ status: "queued" });
+    expect(slots.tryReserve("active", "agent")).toBe(true);
+    slots.enqueue(first.id);
+    slots.enqueue(next.id);
+    expect(slots.runNext(next.id)).toBe(true);
+    slots.enqueue(last.id);
+    expect(
+      admission()
+        .waiters()
+        .map(({ id }) => id),
+    ).toEqual([next.id, first.id, last.id]);
+    expect(slots.tryReserve(next.id, "agent", true)).toBe(false);
+    expect(slots.runNext("missing")).toBe(false);
+  });
+
+  it("returns the new queue order from the Run next route", async () => {
+    const slots = admission();
+    const first = env.addSession({ status: "queued" });
+    const next = env.addSession({ status: "queued" });
+    slots.enqueue(first.id);
+    slots.enqueue(next.id);
+    const api = sessionRoutes({ admission: slots } as AppServices, "test");
+    const response = await api.request(`/${next.id}/admission/run-next`, { method: "POST" });
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      waiting: [
+        { sessionId: next.id, place: 1 },
+        { sessionId: first.id, place: 2 },
+      ],
+    });
+  });
+
   it("counts active sessions and reservations as a union, and frees released slots", () => {
     const slots = admission();
     const { id } = env.addSession({ status: "idle" });

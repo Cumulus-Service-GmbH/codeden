@@ -91,6 +91,10 @@ export const FactoryLimits = z.object({
       usd: z.number().positive().optional(),
     })
     .prefault({}),
+  /** Optional per-item cap on independent reviewer spend since the last retry. */
+  reviewBudget: z
+    .object({ tokens: z.int().positive().optional(), usd: z.number().positive().optional() })
+    .optional(),
   /**
    * What counts against the daily budget: `factory` (default) is the factory's own sessions
    * (builders, reviewers, the scout, reverts); `project` is every session in the project.

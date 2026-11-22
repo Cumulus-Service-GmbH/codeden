@@ -56,6 +56,22 @@ export class SessionAdmission {
     this.onRelease?.();
   }
 
+  runNext(id: string): boolean {
+    const waiters = this.waiters();
+    const head = waiters[0];
+    const meta = this.repo.find(id)?.startMeta;
+    const admission = meta?.admission;
+    if (!head || !admission || !waiters.some((entry) => entry.id === id)) return false;
+    if (head.id !== id) {
+      this.repo.setStartMeta(id, () => ({
+        ...meta,
+        admission: { ...admission, seq: head.seq - 1 },
+      }));
+    }
+    this.scheduleDrain();
+    return true;
+  }
+
   dequeue(id: string): void {
     const meta = this.repo.find(id)?.startMeta;
     if (!meta?.admission) return;

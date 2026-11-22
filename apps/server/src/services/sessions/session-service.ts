@@ -334,6 +334,18 @@ export class SessionService {
       scope,
       queued: queuedBehind.length > 0,
     });
+    if (
+      req.chrome &&
+      (session.startedBy.kind !== "user" ||
+        session.role !== "agent" ||
+        (project?.execution.backend ?? "local") !== "local" ||
+        !this.provider(session.provider)?.capabilities.chrome)
+    ) {
+      throw badRequest(
+        "Chrome requires a user-started local agent with Chrome support",
+        "chrome_unavailable",
+      );
+    }
     const queued = this.createAndLaunch(
       session,
       {
@@ -342,6 +354,7 @@ export class SessionService {
         forced,
         queuedBehind,
         chromeOptIn: options.chromeApproved,
+        chromeRequested: req.chrome,
         ...(options.ownTeamPins ? { ownTeamPins: true as const } : {}),
         ...(req.tokenSaver ? { tokenSaver: req.tokenSaver } : {}),
       },

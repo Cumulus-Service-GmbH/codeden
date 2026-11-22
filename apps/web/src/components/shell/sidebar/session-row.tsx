@@ -1,9 +1,13 @@
 import type { Session } from "@codeden/contracts";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { ArrowUpToLine } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { toast } from "sonner";
 import { IssueBadge, PrBadge } from "@/components/common/bits";
 import { StatusDot } from "@/components/common/status-dot";
+import { useClient } from "@/lib/api";
 import { ageShort, statusTone } from "@/lib/format";
-import { useAdmission } from "@/lib/queries";
+import { admissionKey, useAdmission } from "@/lib/queries";
 import { useSessionActions } from "@/lib/session-actions";
 import { cn } from "@/lib/utils";
 import { childRow, NavRow, rowBase } from "./nav-row";
@@ -57,6 +61,13 @@ export function SessionRow({ session }: { session: Session }) {
   const actions = useSessionActions(session);
   const { data: admission } = useAdmission(false);
   const waiter = admission?.waiting.find((entry) => entry.sessionId === session.id);
+  const client = useClient();
+  const queryClient = useQueryClient();
+  const runNext = useMutation({
+    mutationFn: () => client.sessions.runNext(session.id),
+    onSuccess: (status) => queryClient.setQueryData(admissionKey, status),
+    onError: (error) => toast.error(error.message),
+  });
   const menu = useRowMenu();
   const [renaming, setRenaming] = useState(false);
   const row = useRef<HTMLDivElement>(null);
@@ -64,6 +75,14 @@ export function SessionRow({ session }: { session: Session }) {
   const settled = tone === "done" || tone === "idle";
   const title = session.title ?? session.purpose;
   const entries = sessionMenuEntries(actions, () => setRenaming(true));
+
+  if (waiter && waiter.place > 1) {
+    entries.unshift({
+      label: "Run next",
+      icon: <ArrowUpToLine />,
+      onSelect: () => runNext.mutate(),
+    });
+  }
 
   return (
     <RowMenu menu={menu} entries={entries}>

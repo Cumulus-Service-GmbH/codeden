@@ -2,6 +2,7 @@ import {
   type AutonomyLevel,
   type ConflictRecord,
   DEFAULT_CHECK_ROUNDS,
+  type Project,
   type ProviderInfo,
   type ReasoningEffort,
   type StartSessionRequestInit,
@@ -31,6 +32,7 @@ export interface DraftChoice {
    * provider reports `capabilities.planMode`.
    */
   planMode: boolean;
+  chrome?: boolean;
   /**
    * Keep going until checks pass (§9 Project checks); offered only when the project has checks.
    * Absent on drafts saved before it existed: off.
@@ -71,6 +73,7 @@ export interface DraftDefaults {
         autonomy: AutonomyLevel | null;
         /** False when the project folder isn't a git repository (`Project.isGitRepo`). */
         isGitRepo?: boolean;
+        execution?: Project["execution"];
       }
     | undefined;
   /** Settings → Providers → Agent sessions. */
@@ -90,6 +93,8 @@ export interface ResolvedDraft {
   autonomy: AutonomyLevel;
   /** On only where the provider supports plan mode. */
   planMode: boolean;
+  chrome?: boolean;
+  chromeAvailable?: boolean;
   /** Off at Read-only, where the agent can't fix anything. */
   untilChecksPass: boolean;
   checkRounds: number;
@@ -160,8 +165,12 @@ export function resolveDraftChoice(choice: DraftChoice, defaults: DraftDefaults)
   );
   const fallback = provider?.models.find((m) => m.isDefault) ?? provider?.models[0];
   const autonomy = choice.autonomy ?? project?.autonomy ?? defaults.defaultAutonomy;
+  const chromeAvailable =
+    Boolean(provider?.capabilities.chrome) && (project?.execution?.backend ?? "local") === "local";
   return {
     provider,
+    chromeAvailable,
+    chrome: chromeAvailable && choice.chrome === true,
     model: (mine ? choice.model : null) ?? preset?.model ?? fallback?.id ?? null,
     effort: provider?.capabilities.reasoningEffort
       ? ((mine ? choice.effort : null) ?? preset?.effort ?? null)
@@ -202,6 +211,7 @@ export function buildStartRequest(
     projectId,
     input,
     autonomy: resolved.autonomy,
+    ...(resolved.chromeAvailable ? { chrome: resolved.chrome ?? false } : {}),
     ...(resolved.planMode ? { planMode: true } : {}),
     // The server freezes the project's checks; without any it ignores these.
     ...(resolved.untilChecksPass

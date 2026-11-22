@@ -79,6 +79,41 @@ describe("Claude in Chrome for Browser Operator sessions", () => {
     expect("chrome" in options).toBe(false);
   });
 
+  it("opens an explicitly opted-in session without a role tag", () => {
+    const database = openDatabase(":memory:");
+    try {
+      const repo = new SessionRepo(database.db, new EventStore(database.db));
+      const session = { ...browserOperator, title: "Check the login page" };
+      repo.create(session, {
+        workspaceMode: "worktree",
+        workspaceFallback: null,
+        forced: null,
+        queuedBehind: [],
+        chromeRequested: true,
+      });
+      expect(launcher(false, repo).sessionOptions(session).chrome).toBe(true);
+    } finally {
+      database.close();
+    }
+  });
+
+  it("honors an unchecked Chrome option even with a Browser Operator tag", () => {
+    const database = openDatabase(":memory:");
+    try {
+      const repo = new SessionRepo(database.db, new EventStore(database.db));
+      repo.create(browserOperator, {
+        workspaceMode: "worktree",
+        workspaceFallback: null,
+        forced: null,
+        queuedBehind: [],
+        chromeRequested: false,
+      });
+      expect(launcher(false, repo).sessionOptions(browserOperator).chrome).toBeUndefined();
+    } finally {
+      database.close();
+    }
+  });
+
   it("requires a recorded opt-in when opening a saved session", () => {
     const database = openDatabase(":memory:");
     try {
@@ -110,7 +145,7 @@ describe("PM Chrome confirmation cards", () => {
   it.each([
     ["user", "Allow Chrome", "started"],
     ["user", "Cancel", "skipped"],
-    ["pm", "Allow Chrome", "skipped"],
+    ["pm", "Allow Chrome", "started"],
     ["timeout", "", "skipped"],
     ["abort", "", "skipped"],
     ["already aborted", "", "skipped"],
@@ -188,8 +223,14 @@ describe("PM Chrome confirmation cards", () => {
       });
       expect(card.questions[0]?.allowFreeText).toBe(false);
       const response = { kind: "answer" as const, answers: { q1: [answer || "Allow Chrome"] } };
-      if (answerer === "user" || answerer === "pm") {
-        await questions.respond(sampleSession.id, card.requestId, response, answerer);
+      if (answerer === "pm") {
+        await expect(
+          questions.respond(sampleSession.id, card.requestId, response, "pm"),
+        ).rejects.toMatchObject({ code: "user_confirmation_required" });
+        expect(sessionRepo.item(sampleSession.id, card.id)?.item.status).toBe("in_progress");
+        await questions.respond(sampleSession.id, card.requestId, response, "user");
+      } else if (answerer === "user") {
+        await questions.respond(sampleSession.id, card.requestId, response, "user");
       } else if (answerer === "abort") {
         controller.abort();
       }

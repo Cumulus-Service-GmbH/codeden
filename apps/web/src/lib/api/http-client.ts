@@ -116,7 +116,10 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
     watchSession: (id, fromSeq, onMessage) => socket.watch(id, fromSeq, onMessage),
     onConnectionChange: (listener) => socket.onState(listener),
 
-    sessions: { admission: () => get("/sessions/admission", AdmissionStatus.parse) },
+    sessions: {
+      admission: () => get("/sessions/admission", AdmissionStatus.parse),
+      runNext: (id) => post(`/sessions/${enc(id)}/admission/run-next`, {}, AdmissionStatus.parse),
+    },
     getSessionDetail: (id) => get(`/sessions/${enc(id)}`, (v) => SessionDetail.parse(v)),
     getSessions: (ids) =>
       get(`/sessions?${new URLSearchParams({ ids: ids.join(",") })}`, (v) =>

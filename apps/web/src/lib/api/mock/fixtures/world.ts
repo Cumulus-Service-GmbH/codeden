@@ -278,6 +278,7 @@ export const providers: ProviderInfo[] = [
       ...caps,
       // As the real adapters declare them (`enforcesSecurityRules`).
       enforcesSecurityRules: true,
+      chrome: true,
       securityRulesWorktreesOnly: true,
       liveAutonomy: true,
       mcpStatus: true,

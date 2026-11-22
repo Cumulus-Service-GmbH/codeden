@@ -61,6 +61,12 @@ export function sessionRoutes(s: AppServices, installToken: string) {
         return c.json({ ...result, conflictId: record.id }, 409);
       })
       .get("/admission", (c) => c.json(s.admission.status()))
+      .post("/:id/admission/run-next", (c) => {
+        if (!s.admission.runNext(c.req.param("id"))) {
+          throw notFound("This session is no longer waiting for a slot", "not_queued");
+        }
+        return c.json(s.admission.status());
+      })
       .get("/:id", (c) => c.json(s.sessions.detail(c.req.param("id"))))
       .patch("/:id", jsonBody(UpdateSessionRequest), async (c) =>
         c.json(await s.sessions.update(c.req.param("id"), c.req.valid("json"))),

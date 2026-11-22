@@ -108,7 +108,11 @@ export class QuestionBroker {
     if (item.status !== "in_progress")
       throw conflict("The question was already answered", "answered");
     const waiter = this.waiters.get(requestId);
-    if (item.id.startsWith(CONFIRMATION_PREFIX) && !waiter) {
+    const confirmation = item.id.startsWith(CONFIRMATION_PREFIX);
+    if (confirmation && by !== "user") {
+      throw conflict("Only the user can answer this confirmation", "user_confirmation_required");
+    }
+    if (confirmation && !waiter) {
       this.put(sessionId, record, { ...item, status: "cancelled" });
       throw conflict("The confirmation expired", "answered");
     }
