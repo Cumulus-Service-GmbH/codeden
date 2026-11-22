@@ -66,14 +66,16 @@ const defaultDeps: PlanDeps = {
     }
   },
   isAlive: isProcessAlive,
-  async healthy(port) {
-    try {
-      const res = await fetch(`http://127.0.0.1:${port}/api/health`, {
-        signal: AbortSignal.timeout(2000),
-      });
-      return HealthResponse.safeParse(await res.json()).success;
-    } catch {
-      return false;
-    }
-  },
+  healthy: (port) => serverHealthy(`http://127.0.0.1:${port}`),
 };
+
+export async function serverHealthy(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(new URL("/api/health", url), {
+      signal: AbortSignal.timeout(2000),
+    });
+    return res.ok && HealthResponse.safeParse(await res.json()).success;
+  } catch {
+    return false;
+  }
+}

@@ -88,7 +88,7 @@ export interface StartServerOptions {
   /** Wait for the runner handshake before resolving. Default false. */
   waitForRunner?: boolean;
   /** Called when a client requests shutdown via the API (the CLI exits the process). */
-  onShutdownRequest?: () => void;
+  onShutdownRequest?: (exitCode: number) => void;
   /** Secret storage: the OS keychain by default; `"memory"` for tests. */
   secrets?: SecretStore | "memory";
   /** Utility-model jobs (§7.4); one-shots through the runner's providers by default. */
@@ -340,7 +340,12 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
     log,
     shutdown: ({ stopRunner }) => {
       setTimeout(() => {
-        void close({ stopRunner }).then(() => opts.onShutdownRequest?.());
+        void close({ stopRunner })
+          .catch((error: unknown) => {
+            log(`server shutdown failed: ${String(error)}`);
+            return 1;
+          })
+          .then((exitCode) => opts.onShutdownRequest?.(exitCode ?? 0));
       }, 50);
     },
   });

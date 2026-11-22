@@ -197,6 +197,8 @@ describe("app menu", () => {
     checkForUpdates: noop,
     openDocs: noop,
     openLogs: noop,
+    exportDiagnostics: noop,
+    retryLoading: noop,
     quit: noop,
     zoom: noop,
   };
