@@ -16,6 +16,19 @@ import { type TranscriptState, transcriptFromSnapshot } from "./transcript/reduc
 
 export const snapshotKey = ["snapshot"] as const;
 
+export const admissionKey = ["admission"] as const;
+
+/** The sidebar meter polls; its session rows share the cached result. */
+export function useAdmission(poll = true) {
+  const client = useClient();
+  return useQuery({
+    queryKey: admissionKey,
+    queryFn: () => client.sessions.admission(),
+    staleTime: 5_000,
+    refetchInterval: poll ? 5_000 : false,
+  });
+}
+
 /** The app snapshot (projects, sessions, inbox, automations, settings), kept live by realtime. */
 export function useSnapshot() {
   const client = useClient();

@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { IssueBadge, PrBadge } from "@/components/common/bits";
 import { StatusDot } from "@/components/common/status-dot";
 import { ageShort, statusTone } from "@/lib/format";
+import { useAdmission } from "@/lib/queries";
 import { useSessionActions } from "@/lib/session-actions";
 import { cn } from "@/lib/utils";
 import { childRow, NavRow, rowBase } from "./nav-row";
@@ -54,6 +55,8 @@ function RenameField({
  */
 export function SessionRow({ session }: { session: Session }) {
   const actions = useSessionActions(session);
+  const { data: admission } = useAdmission(false);
+  const waiter = admission?.waiting.find((entry) => entry.sessionId === session.id);
   const menu = useRowMenu();
   const [renaming, setRenaming] = useState(false);
   const row = useRef<HTMLDivElement>(null);
@@ -91,6 +94,14 @@ export function SessionRow({ session }: { session: Session }) {
             >
               {title}
             </span>
+            {admission && waiter && (
+              <span
+                className="inline-flex h-[18px] shrink-0 items-center whitespace-nowrap rounded-full border border-border px-1.5 text-3xs text-muted-foreground tabular-nums"
+                title={`Waiting for a free agent slot (${admission.active} of ${admission.limit} in use)`}
+              >
+                Queued · #{waiter.place}
+              </span>
+            )}
             {session.pr ? (
               <PrBadge pr={session.pr} />
             ) : session.issue ? (

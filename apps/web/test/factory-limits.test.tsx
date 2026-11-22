@@ -125,3 +125,49 @@ describe("factory settings in the autonomy dialog", () => {
     success.mockRestore();
   });
 });
+
+it("saves Team pins with factory tuning and replaces remembered roles in Save setup", async () => {
+  const client = createMockClient();
+  await client.updateSettings({
+    teamSetup: {
+      remembered: false,
+      team: [{ role: "architect", provider: "claude", model: null, effort: null }],
+      resultSummaryBytes: null,
+    },
+  });
+  const setMode = vi.spyOn(client.factory, "setMode");
+  renderWithClient(<AutonomyDialog project={storefront} open onOpenChange={() => {}} />, client, {
+    withRouter: true,
+  });
+
+  const writer = await screen.findByLabelText("Writer provider", { exact: true });
+  await waitFor(() => expect(writer.querySelector('option[value="codex"]')).toBeTruthy());
+  fireEvent.change(writer, { target: { value: "codex" } });
+  fireEvent.change(screen.getByLabelText("Writer effort"), { target: { value: "high" } });
+  fireEvent.change(screen.getByLabelText("Result summaries for the project manager"), {
+    target: { value: "1024" },
+  });
+  const builder = screen.getByLabelText<HTMLSelectElement>("Builder provider");
+  expect(builder.disabled).toBe(true);
+  expect(builder.selectedOptions[0]?.textContent).toBe("Set by Team");
+
+  const team = [{ role: "writer", provider: "codex", model: null, effort: "high" }];
+  fireEvent.click(screen.getByRole("switch", { name: "Use for new projects" }));
+  fireEvent.click(screen.getByRole("button", { name: "Save setup" }));
+  await screen.findByText("Saved");
+  expect((await client.getSnapshot()).settings.teamSetup).toEqual({
+    remembered: true,
+    team,
+    resultSummaryBytes: 1024,
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+  await waitFor(() =>
+    expect(setMode.mock.calls[0]?.[1].tuning).toMatchObject({
+      team,
+      resultSummaryBytes: 1024,
+    }),
+  );
+  const reloaded = await client.factory.status(storefront.id);
+  expect(reloaded.tuning).toMatchObject({ team, resultSummaryBytes: 1024 });
+});

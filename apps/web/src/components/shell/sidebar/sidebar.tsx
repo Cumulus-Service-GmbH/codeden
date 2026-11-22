@@ -25,6 +25,7 @@ import { Logo } from "../logo";
 import { NavRow, rowBase } from "./nav-row";
 import { SortableProjectGroup } from "./project-list";
 import { SidebarFooter } from "./sidebar-footer";
+import { SlotMeter } from "./slot-meter";
 
 /** Waiting sessions in a soft amber box; hidden when nothing waits (§11.1). */
 function WaitingOnYou({
@@ -172,6 +173,7 @@ export function Sidebar({ width, onClose }: { width: number | string; onClose?: 
         className="mt-3 min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:block!"
       >
         <div className="flex min-w-0 flex-col gap-1 px-3 pb-3">
+          <SlotMeter />
           {pinned.length > 0 && (
             <section aria-label="Pinned projects" className="flex flex-col gap-1">
               <div className="flex h-7 items-center gap-1.5 pt-1 pl-2">

@@ -63,6 +63,20 @@ export function GeneralSettings() {
         description="What CodeDen does by itself to keep agent sessions going."
       >
         <SettingRow
+          label="Agents at once"
+          help="Agent sessions that can run at the same time, across all projects. More wait in a queue and start in order as slots free. Project managers and the orchestrator don't count."
+        >
+          <NumberField
+            min={1}
+            max={64}
+            aria-label="Agents at once"
+            value={settings.limits.maxActiveSessions}
+            onChange={(maxActiveSessions) => update({ limits: { maxActiveSessions } })}
+            wrapperClassName="w-20"
+            className="h-8 text-xs"
+          />
+        </SettingRow>
+        <SettingRow
           label="Pass on pull request feedback"
           help="In sessions you start, tells the agent when its pull request's checks fail, a reviewer requests changes or it has merge conflicts. Once per commit, up to three times per pull request. The project manager follows up on work it started."
         >

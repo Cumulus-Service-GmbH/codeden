@@ -1,4 +1,4 @@
-import type { FactoryTuning } from "@codeden/contracts";
+import { type FactoryTuning, teamMember } from "@codeden/contracts";
 import { useId } from "react";
 import { Field } from "@/components/automations/form-bits";
 import { InfoHint } from "@/components/common/info-hint";
@@ -30,7 +30,7 @@ function queueLow(minBacklog: number): string {
 }
 
 /** The dark factory's scout limits in the factory settings. */
-export function ScoutTuning<T extends ScoutDraft>({
+export function ScoutTuning<T extends ScoutDraft & Partial<Pick<FactoryTuning, "team">>>({
   tuning,
   onChange,
 }: {
@@ -112,6 +112,7 @@ export function ScoutTuning<T extends ScoutDraft>({
         <AgentPicker
           id={`${id}-agent`}
           label="Scout"
+          setByTeam={Boolean(teamMember(tuning.team, "architect"))}
           provider={tuning.scoutProvider}
           model={tuning.scoutModel}
           hint="Runs the scout and its area reviewers, long-lived agents that read a lot of code each round. Automatic: the project's provider. A scout or area reviewer on another provider or model starts afresh at its next round."

@@ -1,4 +1,10 @@
-import type { FactoryTuning, ProviderInfo, ReviewerFallback, SetupCheck } from "@codeden/contracts";
+import {
+  type FactoryTuning,
+  type ProviderInfo,
+  type ReviewerFallback,
+  type SetupCheck,
+  teamMember,
+} from "@codeden/contracts";
 import { type ReactNode, useId } from "react";
 import { Field } from "@/components/automations/form-bits";
 import {
@@ -48,7 +54,7 @@ export function AgentsTuning({
   value,
   onChange,
 }: {
-  value: AgentsDraft;
+  value: AgentsDraft & Partial<Pick<FactoryTuning, "team">>;
   onChange: (next: AgentsDraft) => void;
 }) {
   const id = useId();
@@ -66,6 +72,7 @@ export function AgentsTuning({
         <AgentPicker
           id={`${id}-b`}
           label="Builder"
+          setByTeam={Boolean(teamMember(value.team, "writer"))}
           provider={value.builderProvider}
           model={value.builderModel}
           meanwhile="builders start on another available provider"
@@ -76,6 +83,7 @@ export function AgentsTuning({
         <AgentPicker
           id={`${id}-d`}
           label="Docs builder"
+          setByTeam={Boolean(teamMember(value.team, "agentsMdWriter"))}
           provider={value.docsBuilderProvider ?? ""}
           model={value.docsBuilderModel}
           autoValue=""
@@ -89,6 +97,7 @@ export function AgentsTuning({
         <AgentPicker
           id={`${id}-r`}
           label="Reviewer"
+          setByTeam={Boolean(teamMember(value.team, "reviewer"))}
           provider={value.reviewerProvider}
           model={value.reviewerModel}
           autoLabel="Automatic (a different provider from the builder)"
@@ -135,6 +144,7 @@ export function AgentPicker({
   autoLabel,
   hint,
   meanwhile,
+  setByTeam = false,
   onChange,
 }: {
   id: string;
@@ -147,7 +157,8 @@ export function AgentPicker({
   autoLabel?: string;
   hint?: string;
   /** What happens while the chosen provider can't run, e.g. "reviews wait". */
-  meanwhile: string;
+  meanwhile?: string;
+  setByTeam?: boolean;
   onChange: (provider: string, model: string | null) => void;
 }) {
   const providers = useSnapshotData((s) => s.runner.providers, []);
@@ -159,9 +170,10 @@ export function AgentPicker({
         label={`${label} provider`}
         providers={providers}
         checks={checks}
-        value={provider}
+        value={setByTeam ? autoValue : provider}
+        disabled={setByTeam}
         autoValue={autoValue}
-        autoLabel={autoLabel}
+        autoLabel={setByTeam ? "Set by Team" : autoLabel}
         hint={hint}
         meanwhile={meanwhile}
         onChange={(next) => onChange(next, null)}
@@ -171,6 +183,7 @@ export function AgentPicker({
         label={`${label} model`}
         provider={providers.find((p) => p.id === provider)}
         value={model}
+        disabled={setByTeam}
         onChange={(next) => onChange(provider, next)}
       />
     </>
@@ -187,6 +200,7 @@ function ProviderSelect({
   autoLabel = "Automatic",
   hint,
   meanwhile,
+  disabled,
   onChange,
 }: {
   id: string;
@@ -198,7 +212,8 @@ function ProviderSelect({
   autoLabel?: string;
   hint?: string;
   /** What happens while the chosen provider can't run, e.g. "reviews wait". */
-  meanwhile: string;
+  meanwhile?: string;
+  disabled?: boolean;
   onChange: (provider: string) => void;
 }) {
   const chosen = providers.find((p) => p.id === value);
@@ -219,13 +234,19 @@ function ProviderSelect({
             (run <code className="rounded bg-muted px-1 font-mono">{availability.command}</code>)
           </>
         )}
-        . Until it can run, {meanwhile}.
+        .{meanwhile && ` Until it can run, ${meanwhile}.`}
       </span>
     );
   }
   return (
     <Field label={label} htmlFor={id} hint={hint} help={help}>
-      <select id={id} className={SELECT} value={value} onChange={(e) => onChange(e.target.value)}>
+      <select
+        id={id}
+        className={SELECT}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+      >
         <option value={autoValue}>{autoLabel}</option>
         {providers.map((p) => (
           <option key={p.id} value={p.id}>
@@ -243,12 +264,14 @@ function ModelSelect({
   label,
   provider,
   value,
+  disabled,
   onChange,
 }: {
   id: string;
   label: string;
   provider: ProviderInfo | undefined;
   value: string | null;
+  disabled?: boolean;
   onChange: (model: string | null) => void;
 }) {
   const models = provider?.models ?? [];
@@ -259,7 +282,7 @@ function ModelSelect({
         id={id}
         className={SELECT}
         value={value ?? ""}
-        disabled={!provider}
+        disabled={disabled || !provider}
         onChange={(e) => onChange(e.target.value || null)}
       >
         <option value="">{provider ? "Provider default" : "Choose a provider first"}</option>
