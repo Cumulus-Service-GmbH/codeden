@@ -49,7 +49,8 @@ async function turn(session: ProviderSession): Promise<AgentEvent | undefined> {
     const next = await it.next();
     if (next.done) return undefined;
     const t = next.value.type;
-    if (t === "turn.completed" || t === "turn.failed" || t === "turn.interrupted") return next.value;
+    if (t === "turn.completed" || t === "turn.failed" || t === "turn.interrupted")
+      return next.value;
   }
 }
 

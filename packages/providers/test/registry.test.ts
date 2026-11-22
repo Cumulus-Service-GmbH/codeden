@@ -48,7 +48,8 @@ describe("provider registry", () => {
       skills: true,
       planMode: true,
       steer: false,
-      readOnly: true,
+      readOnly: false,
+      modelListAtStart: true,
       liveAutonomy: true,
     });
     for (const p of listProviders()) {
