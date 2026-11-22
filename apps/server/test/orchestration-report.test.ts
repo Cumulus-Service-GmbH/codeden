@@ -74,6 +74,11 @@ describe("reportTo: orchestrator", () => {
 
     beforeAll(async () => {
       h = await startHarness({ orchestration: { wake: { debounceMs: 50, maxWaitMs: 300 } } });
+      // A PM's start is judged by its own session's Team, so the calling PM must exist.
+      const session: Session = { ...sampleSession, id: PM, role: "pm", projectId: h.projectId };
+      h.server.services.store.append([
+        { type: "session.created", sessionId: PM, payload: { session } },
+      ]);
     });
     afterAll(async () => {
       await h?.close();
