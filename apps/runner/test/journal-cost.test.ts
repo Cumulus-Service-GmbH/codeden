@@ -1,14 +1,16 @@
 import { appendFileSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import type { AgentEvent, RunnerEvent } from "@codeden/contracts";
+import type { AgentEvent, RunnerEvent, RunnerToServerMessage } from "@codeden/contracts";
 import {
   FakeProvider,
   type ProviderAdapter,
   ProviderRegistry,
   type ProviderSession,
 } from "@codeden/providers";
+import { WSContext } from "hono/ws";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { type RunnerCore, ServerConnection } from "../src/connection";
 import { DeltaBatcher } from "../src/delta-batcher";
 import { Journal } from "../src/journal";
 import { SessionHost } from "../src/session-host";
@@ -17,7 +19,12 @@ import { SessionHost } from "../src/session-host";
  * Bytes the runner writes to disk, and its temp-file renames (one per whole-file rewrite):
  * which file, at what (fake) time.
  */
-const io = vi.hoisted(() => ({ bytes: 0, renames: [] as { file: string; at: number }[] }));
+const io = vi.hoisted(() => ({
+  bytes: 0,
+  appendSizes: [] as number[],
+  tearNextAppend: false,
+  renames: [] as { file: string; at: number }[],
+}));
 
 vi.mock("node:fs", async (importOriginal) => {
   const fs = await importOriginal<typeof import("node:fs")>();
@@ -31,6 +38,12 @@ vi.mock("node:fs", async (importOriginal) => {
     ...fs,
     appendFileSync: ((file, data, options) => {
       io.bytes += size(data);
+      io.appendSizes.push(size(data));
+      if (io.tearNextAppend && typeof data === "string") {
+        io.tearNextAppend = false;
+        fs.appendFileSync(file, data.slice(0, data.indexOf("\n") + 8), options);
+        throw new Error("simulated torn append");
+      }
       return fs.appendFileSync(file, data, options);
     }) as typeof fs.appendFileSync,
     writeFileSync: ((file, data, options) => {
@@ -60,8 +73,93 @@ afterEach(() => {
 
 function resetIo(): void {
   io.bytes = 0;
+  io.appendSizes = [];
+  io.tearNextAppend = false;
   io.renames = [];
 }
+
+it("coalesces streamed records, respects serialized byte bounds and publishes after append", () => {
+  const dir = join(home, "bounded-deltas");
+  const seen: number[] = [];
+  const journal = new Journal(dir, {
+    onAppend: (message) => {
+      const written = readFileSync(join(dir, "journal.jsonl"), "utf8");
+      expect(written).toContain(`"seq":${message.seq},`);
+      seen.push(message.seq);
+    },
+  });
+  // Control characters expand to six bytes each in the JSON line.
+  for (let i = 0; i < 3; i++) journal.queueDelta(textDelta("\u0000".repeat(10_000)));
+  journal.queueDelta(textDelta("y".repeat(140_000)));
+  journal.queueDelta(textDelta("last delta"));
+  journal.append(draining("fence"));
+  expect(io.appendSizes).toHaveLength(5);
+  expect(io.appendSizes.filter((bytes) => bytes > 128 * 1024)).toHaveLength(1);
+  expect(seen).toEqual([1, 2, 3, 4, 5, 6]);
+  expect(journal.queuedBytes).toBe(io.appendSizes.reduce((total, bytes) => total + bytes, 0));
+  expect(journal.takeAppendDiagnostics()).toMatchObject({ appendCount: 5 });
+  expect(journal.takeAppendDiagnostics()).toMatchObject({ appendCount: 0 });
+  journal.close();
+  expect(new Journal(dir).after(0).map((event) => event.seq)).toEqual(seen);
+});
+
+it("refuses further writes after a torn batch and recovers its complete prefix on restart", () => {
+  const dir = join(home, "torn-batch");
+  const onAppend = vi.fn();
+  const onAppendError = vi.fn();
+  const journal = new Journal(dir, { onAppend, onAppendError });
+  journal.queueDelta(textDelta("one"));
+  journal.queueDelta(textDelta("two"));
+  io.tearNextAppend = true;
+  expect(() => journal.flushDeltas()).toThrow("simulated torn append");
+  expect(onAppend).not.toHaveBeenCalled();
+  expect(() => journal.append(draining("stop"))).toThrow("simulated torn append");
+  expect(() => journal.close()).toThrow("simulated torn append");
+  expect(onAppendError).toHaveBeenCalledExactlyOnceWith(new Error("simulated torn append"));
+
+  const reopened = new Journal(dir);
+  expect(reopened.after(0).map((event) => event.seq)).toEqual([1]);
+  expect(reopened.append(draining("recovered")).seq).toBe(2);
+  reopened.close();
+});
+
+it("replays persisted records first and sends pending deltas once the runner attaches", async () => {
+  const sent: RunnerToServerMessage[] = [];
+  const journal = new Journal(join(home, "attach-with-pending"), {
+    onAppend: (message) => connection.deliver(message),
+  });
+  const socket = new WSContext({
+    readyState: 1,
+    send: (data) => sent.push(JSON.parse(String(data))),
+    close: () => undefined,
+  });
+  const connection = new ServerConnection(
+    socket,
+    { journal, registry: new ProviderRegistry([]) } as RunnerCore,
+    () => undefined,
+  );
+  const sequences = () => sent.flatMap((msg) => (msg.type === "event" ? [msg.seq] : []));
+  journal.append(draining("persisted"));
+  journal.queueDelta(textDelta("pending"));
+  await connection.handle({ type: "resume", lastAckedSeq: 0 });
+  expect(sequences()).toEqual([1]);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(sequences()).toEqual([1, 2]);
+  journal.close();
+});
+
+it("flushes a count-bounded stream batch and yields before appending its remainder", async () => {
+  const journal = new Journal(join(home, "stream-turn"));
+  for (let i = 0; i < 17; i++) journal.queueDelta(textDelta(`chunk ${i}`));
+  expect(journal.lastSeq).toBe(16);
+  expect(io.appendSizes).toHaveLength(1);
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  expect(journal.lastSeq).toBe(17);
+  expect(io.appendSizes).toHaveLength(2);
+  journal.ack(17);
+  expect(journal.queuedBytes).toBe(0);
+  journal.close();
+});
 
 const THREAD = "t-root";
 const TURN = "turn-1";
@@ -196,7 +294,7 @@ describe("Journal acks", () => {
     journal.ack(1);
     journal.ack(3);
     journal.ack(4);
-    expect(io).toEqual({ bytes: 0, renames: [] });
+    expect(io).toEqual({ bytes: 0, appendSizes: [], tearNextAppend: false, renames: [] });
     expect(lines(dir)).toHaveLength(6);
     // At the next persist: four acked events, and rewriting the two left costs less.
     vi.advanceTimersByTime(250);
