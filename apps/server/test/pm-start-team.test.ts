@@ -158,6 +158,74 @@ it("resolves the PM and Team policies for the role and purpose", async () => {
   expect(started[0]?.autonomy).toBe("auto");
 });
 
+it("uses the strictest matching purpose rule in a free-text purpose", async () => {
+  const { started } = await start(
+    { title: "[Writer] Fix it", purpose: "Update USER TABLE documentation" },
+    {
+      project: [writer],
+      teamPolicy: {
+        writer: { "*": "full", documentation: "auto", "user table": "supervised" },
+      },
+    },
+  );
+  expect(started[0]?.autonomy).toBe("supervised");
+});
+
+it("does not match purpose keys inside another word", async () => {
+  const { started } = await start(
+    { title: "[Writer] Fix it", purpose: "Update documentation" },
+    { project: [writer], teamPolicy: { writer: { "*": "auto", doc: "supervised" } } },
+  );
+  expect(started[0]?.autonomy).toBe("auto");
+});
+
+it("applies current policy to a running agent with no stored floor", async () => {
+  const database = openDatabase(":memory:");
+  try {
+    const repo = new SessionRepo(database.db, new EventStore(database.db));
+    const session = {
+      ...sampleSession,
+      projectId: "p1",
+      title: "[Writer] Work",
+      purpose: "documentation",
+      autonomy: "supervised" as const,
+    };
+    repo.create(session, {
+      workspaceMode: "repo_root",
+      workspaceFallback: null,
+      forced: null,
+      queuedBehind: [],
+    });
+    const update = vi.fn(async () => ({ autonomy: "full" }));
+    const services = {
+      sessionRepo: repo,
+      sessions: { update },
+      settings: { get: () => Settings.parse({}) },
+      factory: {
+        data: {
+          loop: () => ({ tuning: { autonomyPolicy: { writer: { documentation: "supervised" } } } }),
+        },
+      },
+    } as unknown as AppServices;
+    await expect(
+      setSessionAutonomy.handler(
+        { sessionId: session.id, autonomy: "full", reason: "Try to lower supervision" },
+        {
+          services,
+          projectId: "p1",
+          sessionId: "pm1",
+          role: "pm",
+          caller: "mcp",
+          signal: new AbortController().signal,
+        },
+      ),
+    ).rejects.toThrow("Autonomy policy requires supervised");
+    expect(update).not.toHaveBeenCalled();
+  } finally {
+    database.close();
+  }
+});
+
 it("raises a running agent to supervised, audits the reason, and refuses a later downgrade", async () => {
   const database = openDatabase(":memory:");
   try {
@@ -179,7 +247,12 @@ it("raises a running agent to supervised, audits the reason, and refuses a later
         providers: () => [{ id: session.provider, capabilities: { supervised: true } }],
       },
     } as unknown as SessionServiceDeps);
-    const services = { sessionRepo: repo, sessions } as AppServices;
+    const services = {
+      sessionRepo: repo,
+      sessions,
+      settings: { get: () => Settings.parse({}) },
+      factory: { data: { loop: () => undefined } },
+    } as unknown as AppServices;
     const ctx = {
       services,
       projectId: "p1",
@@ -227,7 +300,7 @@ it("raises a running agent to supervised, audits the reason, and refuses a later
 });
 
 it.each(Object.entries(TEAM_ROLE_TAGS))("checks every Team role %s", async (tag, role) => {
-  const title = `${tag.toLowerCase()} Work`;
+  const title = `${tag} Work`;
   await expect(start({ title }, {})).rejects.toThrow("TEAM_ROLE_UNSET");
   await expect(
     start({ title, provider: "codex" }, { project: [{ ...writer, role }] }),

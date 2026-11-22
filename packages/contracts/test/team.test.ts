@@ -48,6 +48,11 @@ it.each([
   expect(teamRoleOfTitle(`Work [${tag}]`)).toBeNull();
 });
 
+it("requires exact case for Team role tags", () => {
+  expect(teamRoleOfTitle("[writer] Work")).toBeNull();
+  expect(teamRoleOfTitle("[Browser tester] Work")).toBeNull();
+});
+
 it("round-trips a Team file", () => {
   const file = TeamFile.parse({
     version: 1,

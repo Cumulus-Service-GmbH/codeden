@@ -30,11 +30,11 @@ import {
 } from "./recheck";
 import { CLEAN_REVIEW, environmentStrikes, replaceBlockedReviewer } from "./review-environment";
 import {
-  canReviewItem,
   pickReviewer,
   type ReviewerChoice,
   type ReviewerWait,
   reviewAuthorProvider,
+  reviewVendorIsDistinct,
 } from "./reviewer-choice";
 import { isBusy } from "./sessions";
 import { claimSlot, reviewTier } from "./slots";
@@ -173,7 +173,7 @@ export async function ensureReviewer(
   const old = recheckOf(item);
   if (item.reviewerSessionId && (!item.review || old)) {
     const reviewer = ctx.repo.find(item.reviewerSessionId)?.session;
-    if (!reviewer || !canReviewItem(ctx, item, reviewer.provider)) {
+    if (!reviewer || reviewVendorIsDistinct(ctx, item, reviewer.provider) === false) {
       if (reviewer && isBusy(reviewer)) await ctx.sessions.stop(reviewer.id);
       item = ctx.store.updateItem(item.id, (i) => ({
         ...i,

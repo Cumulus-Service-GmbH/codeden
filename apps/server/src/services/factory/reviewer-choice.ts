@@ -36,11 +36,16 @@ export function reviewAuthorProvider(ctx: FactoryContext, item: FactoryItem): st
   return builder?.provider ?? item.builderProvider;
 }
 
-export function canReviewItem(ctx: FactoryContext, item: FactoryItem, reviewer: string): boolean {
+/** Whether the reviewer is independent, or undefined while either vendor is unknown. */
+export function reviewVendorIsDistinct(ctx: FactoryContext, item: FactoryItem, reviewer: string) {
   const author = reviewAuthorProvider(ctx, item);
   const vendor = author ? ctx.sessions.modelVendor(author) : undefined;
   const reviewerVendor = ctx.sessions.modelVendor(reviewer);
-  return !!vendor && !!reviewerVendor && reviewerVendor !== vendor;
+  return vendor && reviewerVendor ? reviewerVendor !== vendor : undefined;
+}
+
+export function canReviewItem(ctx: FactoryContext, item: FactoryItem, reviewer: string): boolean {
+  return reviewVendorIsDistinct(ctx, item, reviewer) === true;
 }
 
 /** A review requires two known, distinct model vendors. */

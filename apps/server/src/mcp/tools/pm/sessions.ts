@@ -14,7 +14,11 @@ import {
 import { z } from "zod";
 import type { AppServices } from "../../../services/container";
 import { applyTeamRole } from "../../../services/factory/team-role";
-import { assertAutonomy, resolveAutonomy } from "../../../services/sessions/autonomy-policy";
+import {
+  assertAutonomy,
+  resolveAutonomy,
+  stricter,
+} from "../../../services/sessions/autonomy-policy";
 import { defineTool, type ToolAvailabilityContext, ToolError } from "../../define";
 import { currentTurn } from "../../transcript";
 import { agentSessionOf, compactSession, compactWork, projectFor } from "../shared/helpers";
@@ -112,7 +116,7 @@ export const startSession = defineTool({
     assertAutonomy(input.autonomy, autonomyFloor);
     // A tagged role the resolved Team does not set has no pin to start on: refused, as the guard refuses it.
     // [Arbiter] is a Team role tag CodeDen does not resolve yet: refused like an unset role.
-    const reserved = /^\[Arbiter\]/i.test(input.title ?? "");
+    const reserved = /^\[Arbiter\]/.test(input.title ?? "");
     if ((role && !member) || reserved) {
       throw new ToolError(
         `TEAM_ROLE_UNSET: this project's Team (with the default Team) sets no ${input.title?.match(/^\[[^\]]+\]/)?.[0]}; set that role in CodeDen`,
@@ -214,6 +218,17 @@ export const setSessionAutonomy = defineTool({
     if (ENDED.has(session.status) || session.archivedAt) {
       throw new ToolError("The agent session has ended.");
     }
+    const { settings, factory, sessionRepo } = ctx.services;
+    const currentFloor = resolveAutonomy(
+      teamRoleOfTitle(session.title ?? undefined),
+      session.purpose,
+      settings.get().autonomy.pmPolicy,
+      factory.data.loop(ctx.projectId)?.tuning.autonomyPolicy,
+    );
+    assertAutonomy(
+      autonomy,
+      stricter(currentFloor, sessionRepo.find(session.id)?.startMeta?.autonomyFloor),
+    );
     const updated = await ctx.services.sessions.update(
       session.id,
       { autonomy },

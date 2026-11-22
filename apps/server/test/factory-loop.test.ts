@@ -270,6 +270,24 @@ describe("factory loop state machine (§10.1)", () => {
     expect(item(verifying.id).reviewerSessionId).not.toBe(formerReviewer);
   });
 
+  it("keeps a busy reviewer while the runner reports no providers", async () => {
+    env = createFactoryEnv();
+    enable();
+    const verifying = await toVerifying(backlogItem());
+    const reviewer = verifying.reviewerSessionId as string;
+    await env.setStatus(reviewer, "running");
+    const providers = env.providers;
+    env.providers = [];
+    await tick();
+    expect(env.stopped).not.toContain(reviewer);
+    expect(item(verifying.id)).toMatchObject({ reviewerSessionId: reviewer, review: null });
+    expect(() => review(verifying)).toThrow("Try again");
+    expect(item(verifying.id).review).toBeNull();
+
+    env.providers = providers;
+    await expect(review(verifying)).resolves.toMatchObject({ recorded: true });
+  });
+
   it("waits when only the author's vendor is available", async () => {
     env = createFactoryEnv({ providers: ["claude"] });
     enable();
@@ -329,15 +347,9 @@ describe("factory loop state machine (§10.1)", () => {
     const loop = env.factory.data.loopOrNew(env.project.id);
     expect(loop.state).toBe("paused");
     expect(env.inbox.find(`inbox:factory-regression:${it1.id}`)?.priority).toBe("high");
-    // The generated revert has no verified model vendor after an external push.
+    expect(revert.builderProvider).toBe(merged.builderProvider);
     await tick();
-    expect(item(revert.id)).toMatchObject({
-      reviewerSessionId: null,
-      note: expect.stringContaining("author's model vendor is unknown"),
-    });
-    // A revert attributed to a known writer can still be reviewed while the loop is paused.
-    env.factory.data.updateItem(revert.id, (i) => ({ ...i, builderProvider: "claude" }));
-    await tick();
+    expect(item(revert.id).reviewerProvider).toBe("codex");
     // No builder worktree: the reviewer gets one on the revert PR's head, fetched by CodeDen,
     // so the review itself is offline.
     const reviewStart = env.starts.find((s) => s.workKey === `factory:review:${revert.pr?.number}`);

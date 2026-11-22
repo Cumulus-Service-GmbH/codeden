@@ -61,11 +61,7 @@ export const TEAM_ROLE_TAGS: Record<string, TeamRole> = {
 /** Only the first bracketed tag at the start of the title selects a role. */
 export function teamRoleOfTitle(title: string | undefined): TeamRole | null {
   const tag = title?.match(/^\[[^\]]+\]/)?.[0];
-  return tag
-    ? (Object.entries(TEAM_ROLE_TAGS).find(
-        ([label]) => label.toLowerCase() === tag.toLowerCase(),
-      )?.[1] ?? null)
-    : null;
+  return tag ? (TEAM_ROLE_TAGS[tag] ?? null) : null;
 }
 
 /** Find the configured member for a role, if any. */
