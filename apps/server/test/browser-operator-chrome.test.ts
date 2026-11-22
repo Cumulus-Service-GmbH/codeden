@@ -2,6 +2,7 @@ import { type Session, type SessionOptions, Settings } from "@codeden/contracts"
 import { describe, expect, it } from "vitest";
 import { buildQueryOptions } from "../../../packages/providers/src/claude/options";
 import { type LauncherDeps, SessionLauncher } from "../src/services/sessions/launcher";
+import { startsWithTag, stripLeadingTags } from "../src/services/sessions/role-tag";
 import { ProviderUtilityService } from "../src/services/utility";
 import { sampleSession } from "./helpers";
 
@@ -51,6 +52,25 @@ describe("Claude in Chrome for Browser Operator sessions", () => {
     const options = launcher(remote).sessionOptions({ ...browserOperator, ...patch }, "tok");
     expect("chrome" in options).toBe(false);
     expect(queryArgs(options)).not.toHaveProperty("chrome");
+  });
+});
+
+describe("role tags in derived titles", () => {
+  it.each([
+    ["[Browser Operator] Fix", "Fix"],
+    ["  [A] [Browser Operator]x", "x"],
+    ["Fix [Browser Operator]", "Fix [Browser Operator]"],
+  ])("strips only leading tags from %s", (title, expected) => {
+    expect(stripLeadingTags(title)).toBe(expected);
+  });
+
+  it.each([
+    ["[Browser Operator] Fix", true],
+    ["  [A] Fix", true],
+    ["Fix [Browser Operator]", false],
+    ["[Unclosed", false],
+  ])("checks for a leading tag in %s", (title, expected) => {
+    expect(startsWithTag(title)).toBe(expected);
   });
 });
 
