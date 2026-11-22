@@ -49,6 +49,7 @@ function options(extra: Partial<SessionOptions> = {}): SessionOptions {
     mcpServers: [],
     additionalDirectories: [],
     planMode: false,
+    allowUnenforcedProviders: true,
     ...extra,
     env: { FAKE_AGY_LOG: logFile(), ...extra.env },
   };

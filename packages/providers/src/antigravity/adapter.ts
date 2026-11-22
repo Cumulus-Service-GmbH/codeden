@@ -40,14 +40,18 @@ export const ANTIGRAVITY_AGENT: AcpAgentSpec = {
   args: ANTIGRAVITY_ACP_ARGS,
   modes: { agent: "default", plan: "plan" },
   refusesReadOnly: true,
+  refusesSupervised: true,
+  unenforcedSecurityRules: true,
   effort: { category: "thought_level", value: modelThoughtLevel },
 };
 
 /**
  * Honest flags (Principle 5). Approvals go through the CLI's permission requests, decided by
- * CodeDen's policy for every call (so autonomy changes apply live). Read-only is off: the CLI
- * asks only per its own permission settings, so not every edit or command is sure to reach it. Plan
- * mode is its `plan` mode; resume is `session/load`; reasoning effort is its thinking level.
+ * CodeDen's policy for every call (so autonomy changes apply live). Read-only and Supervised are
+ * off: the CLI asks only per its own permission settings, so not every edit or command is sure
+ * to reach CodeDen. The machine's security rules (the guard, Codex's execpolicy) don't cover it
+ * either (`enforcesSecurityRules` false): a project runs it only once it allows such providers.
+ * Plan mode is its `plan` mode; resume is `session/load`; reasoning effort is its thinking level.
  * Skills: the CLI loads its own, from `~/.gemini/config/skills/<name>/`, in every session.
  * Not wired up: questions, steering (ACP can't add input to a running prompt), subagents,
  * rollback and fork. Images and MCP servers (CodeDen's tools are an HTTP MCP server) follow
@@ -70,6 +74,8 @@ const BASE_CAPABILITIES: ProviderCapabilities = {
   skills: true,
   liveAutonomy: true,
   readOnly: false,
+  supervised: false,
+  enforcesSecurityRules: false,
   modelListAtStart: true,
 };
 

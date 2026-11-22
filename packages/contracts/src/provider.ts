@@ -46,6 +46,18 @@ export const ProviderCapabilities = z.object({
    */
   modelListAtStart: z.boolean().optional(),
   /**
+   * The `supervised` level is enforced: every edit and command reaches CodeDen, which asks the
+   * user. False: not every one is sure to (the agent's own settings may let some run), so its
+   * sessions can't use `supervised`. Absent means enforced.
+   */
+  supervised: z.boolean().optional(),
+  /**
+   * The machine's security rules (the guard on Claude Code sessions, Codex's execpolicy) are
+   * enforced for this provider. False: they aren't, so a project refuses it, every role, unless
+   * the project allows such providers (`Project.allowUnenforcedProviders`). Absent means enforced.
+   */
+  enforcesSecurityRules: z.boolean().optional(),
+  /**
    * The `read_only` permission level is enforced natively: no file edits, no writing shell
    * commands, no commits or pushes (§11.2). When false (or absent), sessions on this provider
    * cannot use `read_only`.
@@ -268,6 +280,12 @@ export const SessionOptions = z.object({
    * (the session's project turned it off, `Project.agentCiEnv`, §4.2). Absent means true.
    */
   ciEnv: z.boolean().optional(),
+  /**
+   * True: the session's project allows providers for which the machine's security rules aren't
+   * enforced (`Project.allowUnenforcedProviders`). Absent means it doesn't: such a provider
+   * refuses to start the session (fail closed).
+   */
+  allowUnenforcedProviders: z.boolean().optional(),
   /** Extra directories the agent may read/write. */
   additionalDirectories: z.array(z.string()).default([]),
   /**

@@ -26,3 +26,34 @@ export function planModeUnsupported(role: Role, provider: ProviderInfo | undefin
   if (!provider || provider.capabilities.planMode) return null;
   return `${provider.displayName} has no plan mode`;
 }
+
+/**
+ * Why a session cannot use the `supervised` level on a provider, or null when it can: the
+ * provider must enforce it (`capabilities.supervised` not false), since Supervised promises
+ * that every edit and command reaches the user. An unknown provider is let through, as above.
+ */
+export function supervisedUnsupported(
+  level: AutonomyLevel,
+  provider: ProviderInfo | undefined,
+): string | null {
+  if (level !== "supervised" || !provider || provider.capabilities.supervised !== false) {
+    return null;
+  }
+  return `${provider.displayName} can't enforce Supervised: not every edit and command is sure to reach you`;
+}
+
+/**
+ * Why a project's sessions cannot run on a provider for which the machine's security rules
+ * aren't enforced (`capabilities.enforcesSecurityRules` false), or null when they can: every
+ * role, unless the project allows such providers (`Project.allowUnenforcedProviders`, off by
+ * default). A session without a project (the orchestrator) never can. Fail closed: nothing
+ * looks at what the work is.
+ */
+export function securityRulesUnenforced(
+  provider: ProviderInfo | undefined,
+  project: { allowUnenforcedProviders: boolean } | null | undefined,
+): string | null {
+  if (provider?.capabilities.enforcesSecurityRules !== false) return null;
+  if (project?.allowUnenforcedProviders) return null;
+  return `${provider.displayName} isn't covered by this machine's security rules, so this project doesn't allow it. Turn on "Allow providers without enforced security rules" in the project's settings to use it.`;
+}

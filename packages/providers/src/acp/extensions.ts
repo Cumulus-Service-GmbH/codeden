@@ -111,6 +111,16 @@ export interface AcpAgentSpec {
    */
   refusesReadOnly?: true;
   /**
+   * The agent can't be held to Supervised (not every edit and command is sure to reach
+   * CodeDen): its sessions refuse the `supervised` level, at the start and as a change.
+   */
+  refusesSupervised?: true;
+  /**
+   * The machine's security rules aren't enforced for this agent: a session starts only when its
+   * project allows such providers (`SessionOptions.allowUnenforcedProviders`), else it refuses.
+   */
+  unenforcedSecurityRules?: true;
+  /**
    * How CodeDen's reasoning effort reaches the agent, when it can: the config option of
    * `category` (`thought_level`, say), set with `session/set_config_option` to the value `value`
    * picks from the ones the session lists, given the session's setup (its current model's own

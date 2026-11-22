@@ -18,6 +18,7 @@ const options: SessionOptions = {
   mcpServers: [],
   additionalDirectories: [],
   planMode: false,
+  allowUnenforcedProviders: true,
 };
 const list = (...ids: string[]): AcpConfigOption[] => [
   {

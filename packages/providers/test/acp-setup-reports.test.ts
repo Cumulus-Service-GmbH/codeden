@@ -89,6 +89,7 @@ describe("what an ACP session reports to its adapter after a config_option_updat
       mcpServers: [],
       additionalDirectories: [],
       planMode: false,
+      allowUnenforcedProviders: true,
       env: { FAKE_AGY_PUSH_DROP_MODEL: "claude-opus-5-5" },
     });
     try {

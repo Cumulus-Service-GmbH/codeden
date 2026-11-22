@@ -114,18 +114,34 @@ export class AcpSession implements ProviderSession {
     this.acpSession = opts.resumeToken;
   }
 
-  /** Refuse `read_only` on an agent that can't be held to it (`spec.refusesReadOnly`). */
+  /**
+   * Refuse a level the agent can't be held to: `read_only` (`spec.refusesReadOnly`) or
+   * `supervised` (`spec.refusesSupervised`).
+   */
   private refuseReadOnly(level: AutonomyLevel): void {
-    if (level === "read_only" && this.config.spec.refusesReadOnly) {
+    const { spec } = this.config;
+    if (level === "read_only" && spec.refusesReadOnly) {
       throw new ProviderSessionError(
         "unsupported",
-        `${this.config.spec.label} can't run read-only: not every edit and command reaches CodeDen`,
+        `${spec.label} can't run read-only: not every edit and command reaches CodeDen`,
+      );
+    }
+    if (level === "supervised" && spec.refusesSupervised) {
+      throw new ProviderSessionError(
+        "unsupported",
+        `${spec.label} can't enforce Supervised: not every edit and command reaches CodeDen`,
       );
     }
   }
 
   /** Start the agent and open (or resume) its session. */
   async start(): Promise<void> {
+    if (this.config.spec.unenforcedSecurityRules && !this.opts.allowUnenforcedProviders) {
+      throw new ProviderSessionError(
+        "security_rules_unenforced",
+        `${this.config.spec.label} isn't covered by this machine's security rules, and this project doesn't allow such providers`,
+      );
+    }
     this.refuseReadOnly(this.opts.autonomy);
     this.events.push({ type: "thread.started", thread: { id: this.mapper.threadId } });
     this.addNotice(this.config.spec.allowListNotice?.(this.opts.cwd), AGENT_ALLOW_LIST_NOTICE);

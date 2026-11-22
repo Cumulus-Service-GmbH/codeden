@@ -81,6 +81,7 @@ describe("issue triage (§10)", () => {
       killSwitch: false,
       timezone: null,
       agentCiEnv: true,
+      allowUnenforcedProviders: false,
       execution: { backend: "local" },
       pinned: false,
       sortOrder: 0,

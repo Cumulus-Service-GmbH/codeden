@@ -305,6 +305,11 @@ describe("autonomy changes on a running session (§11.2)", () => {
       modelListAtStart: true,
     });
     expect(ProviderCapabilities.parse(caps).modelListAtStart).toBeUndefined();
+    const unenforced = { ...caps, supervised: false, enforcesSecurityRules: false };
+    expect(ProviderCapabilities.parse(unenforced)).toEqual(unenforced);
+    // Absent means enforced: every provider that predates the flags.
+    expect(ProviderCapabilities.parse(caps).supervised).toBeUndefined();
+    expect(ProviderCapabilities.parse(caps).enforcesSecurityRules).toBeUndefined();
   });
 });
 

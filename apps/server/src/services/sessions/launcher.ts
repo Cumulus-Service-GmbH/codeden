@@ -414,6 +414,7 @@ export class SessionLauncher {
       mcpServers,
       ...(ownBranch(session) ? { ownBranch: ownBranch(session) } : {}),
       ...(project?.agentCiEnv === false ? { ciEnv: false } : {}),
+      ...(project?.allowUnenforcedProviders ? { allowUnenforcedProviders: true } : {}),
       ...(home ? this.teamEnv(session) : {}),
       ...(home && startsWithChrome(session, this.deps.repo) ? { chrome: true } : {}),
     });

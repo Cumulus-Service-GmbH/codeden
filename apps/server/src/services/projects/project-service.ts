@@ -140,6 +140,9 @@ export class ProjectService {
     if (patch.pinned !== undefined) next.pinned = patch.pinned;
     // Applies to agent sessions opened from now on; running ones keep the environment they have.
     if (patch.agentCiEnv !== undefined) next.agentCiEnv = patch.agentCiEnv;
+    if (patch.allowUnenforcedProviders !== undefined) {
+      next.allowUnenforcedProviders = patch.allowUnenforcedProviders;
+    }
     // Applies to sessions started from now on; running ones stay where they run.
     if (patch.execution !== undefined) {
       if (patch.execution.backend === "docker" && current.kind !== "github") {
@@ -315,6 +318,7 @@ export class ProjectService {
       killSwitch: false,
       timezone: null,
       agentCiEnv: true,
+      allowUnenforcedProviders: false,
       execution: { backend: "local" as const },
       pinned: false,
       sortOrder: this.nextSortOrder(),

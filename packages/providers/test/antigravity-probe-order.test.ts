@@ -110,6 +110,7 @@ describe("the Antigravity CLI's model list and flags", () => {
         mcpServers: [],
         additionalDirectories: [],
         planMode: false,
+        allowUnenforcedProviders: true,
       });
       try {
         // Through AcpSession's own reports: the fake CLI's handshake has images, its list Neon.

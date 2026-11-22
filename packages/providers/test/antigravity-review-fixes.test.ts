@@ -39,6 +39,7 @@ const options = (extra: Partial<SessionOptions> = {}): SessionOptions => ({
   mcpServers: [],
   additionalDirectories: [],
   planMode: false,
+  allowUnenforcedProviders: true,
   ...extra,
   env: { FAKE_AGY_LOG: logFile(), ...extra.env },
 });
@@ -71,6 +72,36 @@ afterEach(async () => {
 describe("the Antigravity CLI after the provider review", () => {
   it("doesn't offer read-only: its default mode asks only per its own permission settings", () => {
     expect(new AntigravityAdapter({ executable: fakeAgy }).capabilities().readOnly).toBe(false);
+  });
+
+  it("doesn't offer Supervised either, and says the security rules don't cover it", () => {
+    expect(new AntigravityAdapter({ executable: fakeAgy }).capabilities()).toMatchObject({
+      supervised: false,
+      enforcesSecurityRules: false,
+    });
+  });
+
+  it("can't start in Supervised or switch into it", async () => {
+    const adapter = new AntigravityAdapter({ executable: fakeAgy });
+    await expect(adapter.openSession(options({ autonomy: "supervised" }))).rejects.toMatchObject({
+      code: "unsupported",
+    });
+    const session = await adapter.openSession(options());
+    sessions.push(session);
+    await expect(session.setAutonomy?.("supervised")).rejects.toMatchObject({
+      code: "unsupported",
+    });
+  });
+
+  it("refuses to start unless the session's project allows providers without enforced rules", async () => {
+    const adapter = new AntigravityAdapter({ executable: fakeAgy });
+    const refused = { ...options(), allowUnenforcedProviders: undefined };
+    await expect(adapter.openSession(refused)).rejects.toMatchObject({
+      code: "security_rules_unenforced",
+    });
+    const allowed = await adapter.openSession(options());
+    sessions.push(allowed);
+    expect(allowed).toBeDefined();
   });
 
   it("fails the start when the CLI refuses the session's model, instead of running another", async () => {

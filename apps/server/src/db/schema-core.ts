@@ -74,6 +74,9 @@ export const projects = sqliteTable(
     timezone: text("timezone"),
     /** Agent sessions run with `CI=true` (§4.2); the migration keeps it on for every project. */
     agentCiEnv: integer("agent_ci_env", { mode: "boolean" }).notNull().default(true),
+    allowUnenforcedProviders: integer("allow_unenforced_providers", { mode: "boolean" })
+      .notNull()
+      .default(false),
     /** Where new agent sessions run (`Project.execution.backend`); `local` for older projects. */
     executionBackend: text("execution_backend", { enum: ["local", "docker"] })
       .notNull()

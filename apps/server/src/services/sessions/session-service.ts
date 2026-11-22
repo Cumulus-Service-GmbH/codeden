@@ -52,7 +52,12 @@ import type { InputDecorator } from "./input-decorator";
 import type { LaunchFork, SessionLauncher } from "./launcher";
 import type { Outbox } from "./outbox";
 import { isTransientRunnerError, isTurnRunningError, OutboxHolds } from "./outbox-holds";
-import { planModeUnsupported, readOnlyUnsupported } from "./permissions";
+import {
+  planModeUnsupported,
+  readOnlyUnsupported,
+  securityRulesUnenforced,
+  supervisedUnsupported,
+} from "./permissions";
 import type { Answerer, QuestionBroker } from "./questions";
 import { applyPendingConfig, updateSession } from "./reconfigure";
 import { emptyStartMeta, type SessionRepo, type StoredStartMeta } from "./repo";
@@ -159,6 +164,9 @@ export class SessionService {
         );
       }
     }
+    if (req.autonomy === "supervised") {
+      this.assertSupervisedSupported(session.provider, req.autonomy, id);
+    }
     if (req.autonomy === "read_only" || req.planMode !== undefined) {
       if (req.autonomy === "read_only") {
         this.assertReadOnlySupported(session.role, session.provider, req.autonomy, id);
@@ -182,6 +190,24 @@ export class SessionService {
   ) {
     const problem = readOnlyUnsupported(role, level, this.provider(providerId, sessionId));
     if (problem) throw badRequest(problem, "read_only_unsupported");
+  }
+
+  /**
+   * Reject a new session whose provider its project doesn't allow (the machine's security rules
+   * aren't enforced for it and the project hasn't allowed such providers), for every role, or
+   * that would run `supervised` on a provider that can't enforce it.
+   */
+  private assertProviderAllowed(session: Session): void {
+    const project = session.projectId ? this.deps.projects.get(session.projectId) : null;
+    const unenforced = securityRulesUnenforced(this.provider(session.provider), project);
+    if (unenforced) throw badRequest(unenforced, "security_rules_unenforced");
+    this.assertSupervisedSupported(session.provider, session.autonomy);
+  }
+
+  /** Reject `supervised` on a provider that can't enforce it (`capabilities.supervised`). */
+  private assertSupervisedSupported(providerId: string, level: AutonomyLevel, sessionId?: string) {
+    const problem = supervisedUnsupported(level, this.provider(providerId, sessionId));
+    if (problem) throw badRequest(problem, "supervised_unsupported");
   }
 
   /** Reject plan mode for role sessions and on providers without `capabilities.planMode`. */
@@ -341,6 +367,8 @@ export class SessionService {
     archived?: Session,
   ): boolean {
     const { admission, repo } = this.deps;
+    // Every new session (a start, a fork, a handoff to another provider) passes here.
+    this.assertProviderAllowed(session);
     const waitingForConflict = session.status === "queued";
     const waitingForSlot = !waitingForConflict && !this.reserve(session);
     try {

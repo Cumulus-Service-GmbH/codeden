@@ -106,6 +106,11 @@ export const UpdateProjectRequest = z.object({
   /** Run this project's agent sessions with `CI=true`, or not (`Project.agentCiEnv`, §4.2). */
   agentCiEnv: z.boolean().optional(),
   /**
+   * Allow providers without enforced security rules in this project
+   * (`Project.allowUnenforcedProviders`).
+   */
+  allowUnenforcedProviders: z.boolean().optional(),
+  /**
    * Where new agent sessions run (`Project.execution`). `docker` is refused for a project that
    * isn't on GitHub and while Docker isn't available, with the reason.
    */
