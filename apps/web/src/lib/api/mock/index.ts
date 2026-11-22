@@ -407,6 +407,9 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
         worktree: { status: before.worktreePath ? "removed" : "none", message: null },
       };
     },
+    async listChildRuns() {
+      return delay({ runs: [], skipped: 0 }, 50);
+    },
     async unarchiveSession(sessionId) {
       world.updateSession(sessionId, { archivedAt: null });
       const session = world.snapshot.sessions.find((s) => s.id === sessionId);

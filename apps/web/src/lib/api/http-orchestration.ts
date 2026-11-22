@@ -1,5 +1,6 @@
 import {
   ArchiveSessionResponse,
+  ChildRunList,
   ConflictRecord,
   GithubConnection,
   GithubIssueDetails,
@@ -75,7 +76,12 @@ export function httpGithubApi(http: Fetcher): GithubApi {
 
 type SessionAndConflictApi = Pick<
   CodeDenClient,
-  "updateSession" | "archiveSession" | "unarchiveSession" | "listConflicts" | "resolveConflict"
+  | "updateSession"
+  | "listChildRuns"
+  | "archiveSession"
+  | "unarchiveSession"
+  | "listConflicts"
+  | "resolveConflict"
 >;
 
 /** `PATCH /api/sessions/:id` and `/api/conflicts` (§8.4). */
@@ -83,6 +89,8 @@ export function httpSessionConflictApi(http: Fetcher): SessionAndConflictApi {
   return {
     updateSession: (id, patch) =>
       http.call("PATCH", `/sessions/${enc(id)}`, patch, (v) => Session.parse(v)),
+    listChildRuns: (id) =>
+      http.get(`/sessions/${enc(id)}/child-runs`, (v) => ChildRunList.parse(v)),
     archiveSession: (id, opts) =>
       http.post(`/sessions/${enc(id)}/archive`, opts ?? {}, (v) => ArchiveSessionResponse.parse(v)),
     unarchiveSession: (id) =>

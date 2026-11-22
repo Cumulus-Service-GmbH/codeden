@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import {
+  CHILD_RUNS_FILE_ENV,
   type McpServerConfig,
   type Project,
   type Session,
@@ -28,6 +29,7 @@ import {
   runnerForSession,
   runnerUnavailable,
 } from "../runner-port";
+import { childRunsFile } from "./child-runs";
 import { type PreparedWorkspace, prepareCloneWorkspace } from "./clone-workspace";
 import { slugWords } from "./conflicts";
 import type { ForkStart } from "./fork";
@@ -71,6 +73,8 @@ export interface LauncherDeps extends RunnerDeps {
   tokenSaver?: () => TokenSaverSettings;
   /** What sessions on this disk resolve their Team from; they get it as `TEAM_FILE`. */
   teamFiles?: TeamFileDeps;
+  /** Where sessions on this disk log the worker runs their tools start (`CHILD_RUNS_FILE`). */
+  childRunsDir?: string;
 }
 
 /** Whether this session starts Claude in Chrome on the home runner. */
@@ -415,7 +419,7 @@ export class SessionLauncher {
       ...(ownBranch(session) ? { ownBranch: ownBranch(session) } : {}),
       ...(project?.agentCiEnv === false ? { ciEnv: false } : {}),
       ...(project?.allowUnenforcedProviders ? { allowUnenforcedProviders: true } : {}),
-      ...(home ? this.teamEnv(session) : {}),
+      ...(home ? { env: { ...this.teamEnv(session), ...this.childRunsEnv(session) } } : {}),
       ...(home && startsWithChrome(session, this.deps.repo) ? { chrome: true } : {}),
     });
   }
@@ -424,11 +428,18 @@ export class SessionLauncher {
    * `TEAM_FILE` for a session in a project with a Team. The Team is written to its file first,
    * so a start or resume always sees the current Team; the container rewrites it on every change.
    */
-  private teamEnv(session: Session): { env: Record<string, string> } | null {
-    if (!session.projectId || !this.deps.teamFiles) return null;
+  private teamEnv(session: Session): Record<string, string> {
+    if (!session.projectId || !this.deps.teamFiles) return {};
     // Every project session gets the path, even before any Team is set, so a Team set later
     // reaches it. A failed write (or an unreadable project) fails the start: never run without it.
-    return { env: { [TEAM_FILE_ENV]: writeTeamFile(this.deps.teamFiles, session) } };
+    return { [TEAM_FILE_ENV]: writeTeamFile(this.deps.teamFiles, session) };
+  }
+
+  /** `CHILD_RUNS_FILE`: where the session's tools log the worker runs they start (its folder made first). */
+  private childRunsEnv(session: Session): Record<string, string> {
+    if (!this.deps.childRunsDir) return {};
+    mkdirSync(this.deps.childRunsDir, { recursive: true, mode: 0o700 });
+    return { [CHILD_RUNS_FILE_ENV]: childRunsFile(this.deps.childRunsDir, session.id) };
   }
 
   /**

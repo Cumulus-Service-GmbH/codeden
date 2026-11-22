@@ -15,6 +15,7 @@ export * from "./automations-sharing";
 export * from "./browser-api";
 export * from "./checklist";
 export * from "./checks";
+export * from "./child-runs";
 export * from "./common";
 export * from "./content-security";
 export * from "./desktop";

@@ -13,6 +13,7 @@ import { ago, compact, duration, statusLabel } from "@/lib/format";
 import { useSession } from "@/lib/queries";
 import { useTranscriptsStore } from "@/stores/transcripts";
 import { useVoiceStore } from "@/stores/voice";
+import { ChildRuns } from "./child-runs";
 import { LoadedConfig } from "./loaded-config";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
@@ -208,6 +209,8 @@ export function DetailsPanel({ session }: { session: Session }) {
       </section>
 
       <ContextWindow session={session} />
+
+      <ChildRuns session={session} />
 
       <LoadedConfig session={session} />
       <div className="flex items-center justify-between gap-3 text-[13px]">
