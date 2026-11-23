@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
+import type { Team } from "@codeden/contracts";
 import { vi } from "vitest";
 import type { ExecResult } from "../../src/services/exec";
 import type { FactoryEnv } from "./factory-env";
@@ -48,3 +49,8 @@ export const jevEvidence = (head: string) => ({
     "VITEST_MAX_WORKERS=2 pnpm -s vitest run --reporter=verbose test/counter.test.ts | grep -iE 'increments'\n✓ Counter increments\n Test Files  1 passed (1)\n Tests  1 passed (1)",
   ],
 });
+
+export const reviewTeam: Team = [
+  { role: "writer", provider: "claude", model: "fixture-writer", effort: null },
+  { role: "reviewer", provider: "codex", model: "fixture-reviewer", effort: null },
+];

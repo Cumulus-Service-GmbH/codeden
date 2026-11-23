@@ -209,7 +209,7 @@ export async function advanceVerifying(
       current.jev?.head === pr.headSha ||
       outcome === "pass")
   ) {
-    if (!(await advanceJev(ctx, project, current, pr.headSha))) {
+    if (!(await advanceJev(ctx, project, current, pr.headSha, loop.tuning))) {
       leaveQueue(ctx, ctx.store.item(current.id) ?? current);
       return loop;
     }

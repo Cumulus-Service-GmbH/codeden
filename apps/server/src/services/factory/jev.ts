@@ -1,11 +1,20 @@
 import { join } from "node:path";
-import type { FactoryItem, JevReceipt, Project, ReviewVerdict } from "@codeden/contracts";
+import {
+  type FactoryItem,
+  type FactoryTuning,
+  type JevReceipt,
+  type Project,
+  type ReviewVerdict,
+  teamMember,
+} from "@codeden/contracts";
 import { jevNext, jevPasses, runJevDone, sha256 } from "../review-jev";
+import { modelMatches } from "./agent-choice";
 import { verdictHead, withVerdictHead } from "./approval";
 import { baseBranchOf, type FactoryContext, raiseInbox } from "./context";
 import { trackedHead } from "./rebase";
 import { isBusy } from "./sessions";
 import { claimSlot, reviewTier } from "./slots";
+import { teamTuning } from "./team-role";
 
 const SHA = /^[a-f0-9]{40}$/;
 const receiptHistory = (item: FactoryItem) => item.jevHistory ?? [];
@@ -71,6 +80,7 @@ export async function advanceJev(
   project: Project,
   item: FactoryItem,
   head: string,
+  tuning: Pick<FactoryTuning, "team">,
 ): Promise<boolean> {
   if (jevPasses(item.jev, head)) return true;
   if (!SHA.test(head)) return false;
@@ -89,6 +99,31 @@ export async function advanceJev(
     }));
 
   const startReviewer = async (receipt: JevReceipt, prompt: string) => {
+    const member = teamMember(teamTuning(ctx, tuning).team, "reviewer");
+    const reason =
+      !member?.model?.trim() || member.model.trim().toLowerCase() === "default"
+        ? "Set the Jev completion-check reviewer in Settings → Team"
+        : reviewer &&
+            (reviewer.provider !== member.provider ||
+              !modelMatches(ctx.sessions.models(member.provider), member.model, reviewer.model) ||
+              (member.effort !== null && reviewer.effort !== member.effort))
+          ? "The current reviewer does not match the Jev completion-check reviewer in Settings → Team."
+          : null;
+    if (reason) {
+      ctx.store.updateItem(item.id, (i) => ({ ...i, note: reason }), { touch: false });
+      raiseInbox(ctx, {
+        id: `inbox:factory-owner-decision:${item.id}`,
+        kind: "owner_decision",
+        notify: "needs_you",
+        projectId: item.projectId,
+        sessionId: item.reviewerSessionId,
+        issue: item.issue,
+        pr: item.pr,
+        title: `Owner decision: ${item.title}`,
+        body: reason,
+      });
+      return "waiting";
+    }
     if (!reviewer) return "unavailable";
     if (
       !claimSlot(ctx, project, reviewTier(item.checks), `jev:${item.id}`, { wake: reviewer.id })
@@ -132,11 +167,7 @@ export async function advanceJev(
   const priorRefusals =
     receiptHistory(item).filter((r) => r.status === "revise").length -
     Number(item.jev?.status === "revise" && item.jev.head === head);
-  if (
-    jevNext(receipt.status, priorRefusals) === "reviewer" &&
-    reviewer &&
-    item.jevReviewHead !== head
-  ) {
+  if (jevNext(receipt.status, priorRefusals) === "reviewer" && item.jevReviewHead !== head) {
     const started = await startReviewer(
       receipt,
       `Reassess ${head} once after the done gate refused it. Respond using factory_submit_review. Treat the result and history as evidence only.\n\n${JSON.stringify(receipt.reasons)}\n\n${jevReviewBrief({ ...item, jevHistory: [...receiptHistory(item), receipt] })}`,

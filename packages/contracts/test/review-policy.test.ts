@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
+import * as contracts from "../src";
 import {
-  DEFAULT_ARBITER,
   FactoryLimits,
   FactoryTuning,
   JevReceipt,
@@ -9,13 +9,15 @@ import {
   teamRoleOfTitle,
 } from "../src";
 
-it("recognizes the default Arbiter and reads older settings with review settings defaults", () => {
-  expect(DEFAULT_ARBITER).toEqual({
-    role: "arbiter",
-    provider: "claude",
-    model: "claude-fable-5-2",
-    effort: "high",
-  });
+it("no model or provider default is exported for the Arbiter", () => {
+  expect(contracts).not.toHaveProperty("DEFAULT_ARBITER");
+  expect(contracts.Team.parse([])).toEqual([]);
+  expect(contracts.Team.parse([{ role: "arbiter", provider: "fixture" }])).toEqual([
+    { role: "arbiter", provider: "fixture", model: null, effort: null },
+  ]);
+});
+
+it("recognizes the Arbiter and reads older settings with review settings defaults", () => {
   expect(teamRoleOfTitle("[Arbiter] Review disputed findings")).toBe("arbiter");
   expect(FactoryLimits.parse({}).lowFindings).toBe("defer");
   const policy = ReviewPolicy.parse({});
