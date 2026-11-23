@@ -86,7 +86,7 @@ export function RightPanel({ sessionId, width }: { sessionId: string; width: num
         {active === "github" && <GitHubPanel sessionId={sessionId} />}
         {active === "workers" && (
           <div role="tabpanel" aria-label="Workers" className="h-full space-y-3 overflow-auto p-4">
-            <TeamWorkers sessionId={sessionId} />
+            <TeamWorkers sessionId={sessionId} session={session} />
           </div>
         )}
         {active === "details" && session && <DetailsPanel session={session} />}

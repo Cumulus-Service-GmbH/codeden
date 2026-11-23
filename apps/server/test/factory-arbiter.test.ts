@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { ReviewPolicy } from "@codeden/contracts";
+import { describe, expect, it, vi } from "vitest";
 import { arbiterLane, reviewEscalation } from "../src/services/factory/arbiter";
+
+import { createFactoryEnv } from "./support/factory-env";
+import { APPROVE, factorySteps } from "./support/factory-steps";
 
 describe("factory Arbiter", () => {
   it("requires enforced security and read-only execution or a tool-free lane", () => {
@@ -101,3 +105,60 @@ it.each(["approve", "request_changes", "reject"] as const)(
     );
   },
 );
+
+it("the Arbiter rounds setting round-trips", async () => {
+  const env = createFactoryEnv();
+  const { enable } = factorySteps(() => env);
+  try {
+    await enable("software_factory", {
+      tuning: { reviewPolicy: ReviewPolicy.parse({ arbiterRounds: 3 }) },
+    });
+    expect((await env.factory.status(env.project.id)).tuning.reviewPolicy?.arbiterRounds).toBe(3);
+  } finally {
+    await env.close();
+  }
+});
+
+it("the review flow stops after N Arbiter rounds", async () => {
+  const env = createFactoryEnv();
+  const { enable, item, review, tick, verifying } = factorySteps(() => env);
+  const sessions = env.factory.ctx.sessions;
+  const providerInfo = sessions.providerInfo("claude");
+  if (!providerInfo) throw new Error("Expected the Claude provider fixture");
+  vi.spyOn(sessions, "providerInfo").mockImplementation((id) =>
+    id === "claude"
+      ? { ...providerInfo, capabilities: { ...providerInfo.capabilities, toolFreeRuns: true } }
+      : undefined,
+  );
+  const arbitrate = vi
+    .spyOn(sessions, "runToolFreeArbiter")
+    .mockResolvedValue("The finding stands.");
+  const disputed = { ...APPROVE, verdict: "request_changes" as const };
+  try {
+    await enable("software_factory", {
+      tuning: { reviewPolicy: ReviewPolicy.parse({ reviewerRounds: 1, arbiterRounds: 2 }) },
+    });
+    const { id } = await verifying();
+    const reviewer = item(id).reviewerSessionId;
+    if (!reviewer) throw new Error("Expected a reviewer session");
+    await review(id, disputed);
+    await env.setStatus(reviewer, "idle");
+    const decisionId = `inbox:factory-owner-decision:${id}`;
+    for (const round of [1, 2]) {
+      await tick();
+      expect(arbitrate).toHaveBeenCalledTimes(round);
+      expect(item(id).arbitration?.round).toBe(round);
+      await tick();
+      expect(item(id).arbitration?.state).toBe("confirming");
+      await review(id, disputed);
+      await env.setStatus(reviewer, "idle");
+      if (round === 1) expect(env.inbox.find(decisionId)).toBeUndefined();
+    }
+    await tick();
+    expect(arbitrate).toHaveBeenCalledTimes(2);
+    expect(item(id).arbitration?.state).toBe("blocked");
+    expect(env.inbox.find(decisionId)).toMatchObject({ kind: "owner_decision" });
+  } finally {
+    await env.close();
+  }
+});

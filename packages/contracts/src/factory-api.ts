@@ -227,6 +227,8 @@ export const FactoryItem = z.object({
   /** The plan and scope pinned at the start of review. */
   reviewSpec: ReviewAcceptanceSpec.optional(),
   arbitration: ReviewArbitration.optional(),
+  /** Arbiter rounds started for this item, including across retries. */
+  arbiterRoundsUsed: z.int().positive().optional(),
   jev: JevReceipt.optional(),
   /** Prior done-gate results and the head sent back for a single reviewer response. */
   jevHistory: z.array(JevReceipt).optional(),

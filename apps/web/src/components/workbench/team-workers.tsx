@@ -1,6 +1,7 @@
-import type { TeamRun, TeamWorker } from "@codeden/contracts";
+import type { Session, TeamRun, TeamWorker } from "@codeden/contracts";
 import { Fragment } from "react";
 import { useSnapshot } from "@/lib/queries";
+import { ChildRuns } from "./child-runs";
 
 function estimatedMinutes(run: TeamRun, startedAt: number | undefined): number | undefined {
   if (startedAt === undefined) return undefined;
@@ -46,38 +47,52 @@ function JevStatus({ jev }: { jev: NonNullable<TeamWorker["jev"]> }) {
   );
 }
 
-export function TeamWorkers({ sessionId }: { sessionId: string }) {
+export function TeamWorkers({ sessionId, session }: { sessionId: string; session?: Session }) {
   const { data } = useSnapshot();
   const runs = data?.teamRuns?.filter(
     (run) =>
       run.coordinatorId === sessionId ||
       run.workers.some((worker) => worker.sessionId === sessionId),
   );
+  const factory = session?.startedBy.kind === "pm" && session.startedBy.id === "factory";
+  if (factory && !runs?.length) return <ChildRuns session={session} />;
   if (!runs?.length) {
     return <p className="text-xs text-muted-foreground">No Team workers for this session</p>;
   }
-  return runs.map((run) => (
-    <section key={run.id} className="space-y-1 text-xs" aria-label={`${run.teamName} workers`}>
-      <h3 className="font-medium">{run.teamName}</h3>
-      <ul className="space-y-1">
-        {run.workers.map((worker) => {
-          const minutes =
-            worker.status === "running" ? estimatedMinutes(run, worker.startedAt) : undefined;
-          return (
-            <li key={worker.itemId}>
-              {run.items.find((item) => item.id === worker.itemId)?.text} · {worker.status}
-              {worker.step && ` · ${worker.step}`}
-              {worker.arbiter && ` · ${worker.arbiter.verdict}`}
-              {worker.attempt > 0 && ` · Round ${worker.attempt}/${run.limits.maxRounds}`}
-              {minutes !== undefined && ` · ETA ~${minutes} min`}
-              {worker.jev && <JevStatus jev={worker.jev} />}
-            </li>
-          );
-        })}
-      </ul>
-      {run.notice && <p role="status">{run.notice}</p>}
-    </section>
-  ));
+  return (
+    <>
+      {factory && <ChildRuns session={session} />}
+      {runs.map((run) => (
+        <section key={run.id} className="space-y-1 text-xs" aria-label={`${run.teamName} workers`}>
+          <h3 className="font-medium">{run.teamName}</h3>
+          <ul className="space-y-1">
+            {run.workers.map((worker) => {
+              const minutes =
+                worker.status === "running" ? estimatedMinutes(run, worker.startedAt) : undefined;
+              return (
+                <li key={worker.itemId}>
+                  {run.items.find((item) => item.id === worker.itemId)?.text} · {worker.status}
+                  {worker.step === "Arbiter" ? (
+                    <>
+                      {" "}
+                      · <span>Arbiter · round 1 of 1</span>
+                    </>
+                  ) : (
+                    worker.step && ` · ${worker.step}`
+                  )}
+                  {worker.arbiter && ` · ${worker.arbiter.verdict}`}
+                  {worker.attempt > 0 && ` · Round ${worker.attempt}/${run.limits.maxRounds}`}
+                  {minutes !== undefined && ` · ETA ~${minutes} min`}
+                  {worker.jev && <JevStatus jev={worker.jev} />}
+                </li>
+              );
+            })}
+          </ul>
+          {run.notice && <p role="status">{run.notice}</p>}
+        </section>
+      ))}
+    </>
+  );
 }
 
 export function TeamRunProgress({ run }: { run: TeamRun }) {

@@ -48,7 +48,8 @@ export type ReviewAcceptanceSpec = z.input<typeof ReviewAcceptanceSpec>;
 /** App-side state of the escalation for a pinned review head. */
 export const ReviewArbitration = z.object({
   head: z.string(),
-  state: z.enum(["running", "ruling", "confirming", "jev_pending", "blocked"]),
+  state: z.enum(["queued", "running", "ruling", "confirming", "jev_pending", "blocked"]),
+  round: z.int().positive().optional(),
   sessionId: z.string().optional(),
   ruling: z.string().optional(),
   confirmation: z.string().optional(),

@@ -279,8 +279,15 @@ export function submitReview(
       message: recorded ? "Response recorded. Jev pending." : "Jev response refused for this head.",
     };
   }
-  if (confirmArbiter(ctx, item, settled)) {
-    const next = settled.verdict === "approve" ? "Jev pending." : "Owner decision needed.";
+  const arbiterLimit = ctx.store.loop(item.projectId)?.tuning.reviewPolicy?.arbiterRounds;
+  if (confirmArbiter(ctx, item, settled, arbiterLimit)) {
+    const state = ctx.store.item(item.id)?.arbitration?.state;
+    const next =
+      state === "jev_pending"
+        ? "Jev pending."
+        : state === "queued"
+          ? "Another Arbiter round is queued."
+          : "Owner decision needed.";
     return { recorded: true, item, message: `Confirmation recorded. ${next}` };
   }
   if (item.arbitration) {

@@ -37,6 +37,7 @@ import {
 } from "./rebase";
 import { adoptAgentPr } from "./rebuild";
 import { recheckCause } from "./recheck";
+import { isAutoReReview, reviseRoundsAllowed } from "./rereview";
 import { checkRevert } from "./revert";
 import { ensureReviewer, reviewerStalled } from "./reviewer";
 import { isBusy } from "./sessions";
@@ -216,13 +217,18 @@ export async function advanceVerifying(
     if (current.arbitration?.state === "jev_pending" && outcome !== "pass") return loop;
   }
 
+  const owesAutoRevise =
+    outcome === "fail" &&
+    pr.headSha &&
+    isAutoReReview(current, pr.headSha) &&
+    current.attempts < reviseRoundsAllowed(current, loop.tuning.maxFixAttempts);
   if (
     pr.headSha &&
     (current.arbitration
       ? current.arbitration.state !== "jev_pending" || current.arbitration.head !== pr.headSha
-      : reviewEscalation(current, loop.tuning.reviewPolicy ?? {}))
+      : !owesAutoRevise && reviewEscalation(current, loop.tuning.reviewPolicy ?? {}))
   ) {
-    if (!current.arbitration) {
+    if (!current.arbitration || current.arbitration.state === "queued") {
       const stopped = await beforeAgentTurn(current);
       if (stopped) return stopped;
     }

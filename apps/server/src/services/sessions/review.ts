@@ -150,12 +150,13 @@ export async function planReview(
     .catch((error: unknown) => {
       throw toServiceError(error);
     });
+  const patch = diff.diff ?? "";
   const lines =
     diff.files?.reduce((total, file) => total + file.additions + file.deletions, 0) ??
-    diff.diff.split("\n").length;
+    patch.split("\n").length;
   if (
     reviewRound({}, history, { head: latest?.commit ?? null, lines }).blocked ||
-    Buffer.byteLength(diff.diff) > 1_000_000
+    Buffer.byteLength(patch) > 1_000_000
   ) {
     throw badRequest("The diff is too large for one review", "review_diff_size");
   }

@@ -538,6 +538,19 @@ const ITEM_DEFAULTS = {
 
 /** An item as read from the projection, with the fields newer versions added. */
 export function withItemDefaults(item: FactoryItem): FactoryItem {
+  const arbitration = item.arbitration;
+  if (
+    arbitration &&
+    arbitration.round === undefined &&
+    (arbitration.state !== "blocked" || arbitration.sessionId || arbitration.ruling)
+  ) {
+    return {
+      ...ITEM_DEFAULTS,
+      ...item,
+      arbiterRoundsUsed: item.arbiterRoundsUsed ?? 1,
+      arbitration: { ...arbitration, round: item.arbiterRoundsUsed ?? 1 },
+    };
+  }
   return { ...ITEM_DEFAULTS, ...item };
 }
 

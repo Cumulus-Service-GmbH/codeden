@@ -84,11 +84,21 @@ export function ChildRuns({ session }: { session: Session }) {
       {review?.jev && <JevStatus receipt={review.jev} />}
       {arbitration && (
         <div className="space-y-1 text-[13px]">
+          {arbitration.round && (
+            <p>
+              Arbiter · round {arbitration.round} of {policy?.arbiterRounds ?? 1}
+            </p>
+          )}
           <p>
-            <span className="font-medium">Arbiter</span>
-            {" · "}
+            {!arbitration.round && (
+              <>
+                <span className="font-medium">Arbiter</span>
+                {" · "}
+              </>
+            )}
             {
               {
+                queued: "Waiting for another round",
                 running: "Running",
                 ruling: "Waiting for reviewer confirmation",
                 confirming: "Reviewer confirming",

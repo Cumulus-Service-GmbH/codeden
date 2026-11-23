@@ -4,6 +4,7 @@ import { expect, it, vi } from "vitest";
 import { ChecklistSection } from "@/components/checklist/checklist-section";
 import { PipelineDiagram } from "@/components/factory/pipeline-diagram";
 import { ChildRuns } from "@/components/workbench/child-runs";
+import { TeamWorkers } from "@/components/workbench/team-workers";
 import { createMockClient } from "@/lib/api/mock";
 import { factoryKeys } from "@/lib/factory";
 import { renderWithClient } from "./utils";
@@ -119,4 +120,15 @@ it("shows that the completion check was skipped because Jev is not configured", 
   const message = "Jev not configured, completion check skipped";
   expect(await workers.findByText(message)).toBeTruthy();
   expect(await checklist.findByText(message)).toBeTruthy();
+});
+
+it("the Workers pane shows the Arbiter role and its round n of N", async () => {
+  const { client, session, item, status } = await arbiterFixture();
+  vi.spyOn(client.factory, "status").mockResolvedValue({
+    ...status,
+    tuning: { ...status.tuning, reviewPolicy: ReviewPolicy.parse({ arbiterRounds: 3 }) },
+    inProgress: [{ ...item, arbitration: { ...item.arbitration, round: 2 } }],
+  });
+  renderWithClient(<TeamWorkers sessionId={session.id} session={session} />, client);
+  expect(await screen.findByText("Arbiter · round 2 of 3")).toBeTruthy();
 });

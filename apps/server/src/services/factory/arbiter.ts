@@ -24,13 +24,21 @@ export function arbiterLane(
 }
 
 export function reviewEscalation(
-  item: { review: { verdict: string } | null; reviewRounds?: readonly { head: string }[] },
+  item: {
+    review: { verdict: string } | null;
+    reviewRounds?: readonly { head: string; verdict?: { verdict: string } }[];
+  },
   input: Partial<ReviewPolicy>,
 ) {
   const policy = ReviewPolicy.parse(input);
+  const rounds = item.reviewRounds ?? [];
+  const lastResolved = rounds.findLastIndex(
+    (round) => round.verdict !== undefined && round.verdict.verdict !== "request_changes",
+  );
   return (
     item.review?.verdict === "request_changes" &&
-    (item.reviewRounds?.length ?? 0) >= Math.min(policy.reviewerRounds, policy.totalRounds)
+    (rounds.length >= policy.totalRounds ||
+      rounds.length - lastResolved - 1 >= policy.reviewerRounds)
   );
 }
 
@@ -83,7 +91,13 @@ export async function advanceArbiter(
     else block(ctx, item, current.head, "The Arbiter ended without a ruling.");
     return;
   }
-  if (current) return;
+  if (current && current.state !== "queued") return;
+  const policy = ReviewPolicy.parse(loop.tuning.reviewPolicy ?? {});
+  const used = item.arbiterRoundsUsed ?? current?.round ?? 0;
+  if (used >= policy.arbiterRounds) {
+    block(ctx, item, head, "The Arbiter round limit has been reached.", current?.ruling);
+    return;
+  }
   const reviewer = item.reviewerSessionId
     ? ctx.repo.find(item.reviewerSessionId)?.session
     : undefined;
@@ -91,12 +105,11 @@ export async function advanceArbiter(
   const arbiter = teamMember(teamTuning(ctx, loop.tuning).team, "arbiter") ?? DEFAULT_ARBITER;
   const provider = ctx.sessions.providerInfo(arbiter.provider);
   const lane = provider?.capabilities && arbiterLane(provider.capabilities);
-  const policy = ReviewPolicy.parse(loop.tuning.reviewPolicy ?? {});
   if (!lane || !ctx.sessions.providers().includes(arbiter.provider)) {
     block(ctx, item, head, "The configured Arbiter has no available, permitted execution lane.");
     return;
   }
-  if ((item.reviewRounds?.length ?? 0) + 2 > policy.totalRounds) {
+  if ((item.reviewRounds?.length ?? 0) + used + 2 > policy.totalRounds) {
     block(ctx, item, head, "The total review round limit has been reached.");
     return;
   }
@@ -121,11 +134,17 @@ export async function advanceArbiter(
       spec: item.reviewSpec,
       dispositions: item.reviewRounds,
       findings: item.review?.findings,
+      previousRuling: current?.ruling,
+      reviewerConfirmation: current?.confirmation,
     }),
   ].join("\n\n");
   ctx.store.updateItem(item.id, (i) => ({
     ...i,
-    arbitration: { head, state: "running" },
+    arbiterRoundsUsed: used + 1,
+    earlierSessionIds: current?.sessionId
+      ? [...i.earlierSessionIds, current.sessionId]
+      : i.earlierSessionIds,
+    arbitration: { head, state: "running", round: used + 1 },
     note: "Arbiter running",
   }));
   try {
@@ -142,7 +161,7 @@ export async function advanceArbiter(
     }
     ctx.store.updateItem(item.id, (i) => ({
       ...i,
-      arbitration: { head, state: "running", sessionId: result.sessionId },
+      arbitration: { ...i.arbitration, head, state: "running", sessionId: result.sessionId },
     }));
   } catch {
     block(ctx, item, head, "The Arbiter could not complete its turn.");
@@ -191,15 +210,26 @@ async function requestConfirmation(
   }
 }
 
-export function confirmArbiter(ctx: FactoryContext, item: FactoryItem, verdict: ReviewVerdict) {
+export function confirmArbiter(
+  ctx: FactoryContext,
+  item: FactoryItem,
+  verdict: ReviewVerdict,
+  limit = ReviewPolicy.parse({}).arbiterRounds,
+) {
   const arbiter = item.arbitration;
   if (arbiter?.state !== "confirming" || verdict.blockers === "environment") return false;
   const confirmation = `${verdict.verdict}: ${verdict.summary}`;
   const approved = verdict.verdict === "approve";
-  const note = approved ? "Jev pending" : `Arbiter confirmation: ${confirmation}`;
+  const another = verdict.verdict === "request_changes" && (arbiter.round ?? 1) < limit;
+  const state = approved ? "jev_pending" : another ? "queued" : "blocked";
+  const note = approved
+    ? "Jev pending"
+    : another
+      ? "Waiting for another Arbiter round"
+      : `Arbiter confirmation: ${confirmation}`;
   ctx.store.updateItem(item.id, (i) => ({
     ...i,
-    arbitration: { ...arbiter, state: approved ? "jev_pending" : "blocked", confirmation },
+    arbitration: { ...arbiter, state, confirmation },
     review: verdict,
     reviewRounds: [
       ...(i.reviewRounds ?? []),
@@ -213,7 +243,7 @@ export function confirmArbiter(ctx: FactoryContext, item: FactoryItem, verdict: 
     nudges: withVerdictHead(i.nudges, arbiter.head, ctx.now().toISOString()),
     note,
   }));
-  if (!approved) ownerDecision(ctx, item, note);
+  if (state === "blocked") ownerDecision(ctx, item, note);
   return true;
 }
 
@@ -239,7 +269,7 @@ function block(
 ) {
   ctx.store.updateItem(item.id, (i) => ({
     ...i,
-    arbitration: { head, state: "blocked", ruling },
+    arbitration: { ...i.arbitration, head, state: "blocked", ruling },
     note,
   }));
   ownerDecision(ctx, item, note);

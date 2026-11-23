@@ -124,9 +124,7 @@ export const startSession = defineTool({
     );
     assertAutonomy(input.autonomy, autonomyFloor);
     // A tagged role the resolved Team does not set has no pin to start on: refused, as the guard refuses it.
-    // [Arbiter] is a Team role tag CodeDen does not resolve yet: refused like an unset role.
-    const reserved = /^\[Arbiter\]/.test(input.title ?? "");
-    if ((role && !member) || reserved) {
+    if (role && !member) {
       throw new ToolError(
         `TEAM_ROLE_UNSET: this project's Team (with the default Team) sets no ${input.title?.match(/^\[[^\]]+\]/)?.[0]}; set that role in CodeDen`,
       );
