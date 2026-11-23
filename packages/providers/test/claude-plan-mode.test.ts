@@ -7,8 +7,22 @@ import type {
   PermissionResult,
   Query,
 } from "@anthropic-ai/claude-agent-sdk";
-import type { AgentEvent, SessionOptions } from "@codeden/contracts";
+import type { AgentEvent, RunnerCommand, SessionOptions } from "@codeden/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { openDatabase } from "../../../apps/server/src/db/client";
+import { EventStore } from "../../../apps/server/src/events/store";
+import { sessionRoutes } from "../../../apps/server/src/routes/sessions";
+import type { AppServices } from "../../../apps/server/src/services/container";
+import { emptyStartMeta, SessionRepo } from "../../../apps/server/src/services/sessions/repo";
+import {
+  SessionService,
+  type SessionServiceDeps,
+} from "../../../apps/server/src/services/sessions/session-service";
+import { sampleSession } from "../../../apps/server/test/helpers";
+import {
+  planLevelChanges,
+  sessionsKeepingLevel,
+} from "../../../apps/web/src/lib/project-permissions";
 import { KEEP_PLANNING } from "../src/claude/plan-review";
 import { ClaudeSession } from "../src/claude/session";
 
@@ -469,6 +483,67 @@ describe("Claude plan mode", () => {
       }
     },
   );
+
+  it("keeps Claude's native mode locked after applying a project level to an open session", async () => {
+    const sdk = stubSdk();
+    const { session, permission, items } = open(sdk, { autonomy: "supervised", planMode: false });
+    const database = openDatabase(":memory:");
+    try {
+      const repo = new SessionRepo(database.db, new EventStore(database.db));
+      const row = {
+        ...sampleSession,
+        projectId: "p1",
+        provider: "claude",
+        autonomy: "supervised",
+        status: "waiting",
+      } as const;
+      repo.create(row, emptyStartMeta());
+      const sessions = new SessionService({
+        repo,
+        runner: {
+          providers: () => [{ id: "claude", capabilities: { supervised: true } }],
+          request: async (command: RunnerCommand) => {
+            if (command.name !== "session.configure" || !command.autonomy) {
+              throw new Error("Expected an explicit autonomy change");
+            }
+            await session.setAutonomy(command.autonomy);
+            return { revision: command.revision };
+          },
+        },
+      } as unknown as SessionServiceDeps);
+      const app = sessionRoutes({ sessions } as AppServices, "token");
+      const patch = async (autonomy: typeof row.autonomy | "full") => {
+        const response = await app.request("/s1", {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ autonomy }),
+        });
+        expect(response.status).toBe(200);
+        expect(await response.json()).toMatchObject({ autonomy });
+      };
+
+      const pending = permission("Bash", { command: "pwd" }, "before-bulk");
+      await vi.waitFor(() => expect(items("approval_request")).toHaveLength(1));
+      await patch("full");
+
+      const keeping = sessionsKeepingLevel([repo.get(row.id)], row.projectId, "supervised");
+      const [change] = planLevelChanges(keeping, "supervised", []);
+      expect(change).toMatchObject({ from: "full", to: "supervised", raises: false });
+      if (change?.to !== "supervised") throw new Error("Expected the project's permission level");
+      await patch(change.to);
+      expect(sdk.modes.at(-1)).toBe("default");
+      const beforeApproval = sdk.modes.length;
+      await session.respond("r-before-bulk", { kind: "approval", decision: "allow_once" });
+      await expect(pending).resolves.toMatchObject({ behavior: "allow", updatedPermissions: [] });
+      expect(sdk.modes.slice(beforeApproval).every((mode) => mode === "default")).toBe(true);
+
+      await patch("full");
+      expect(sdk.modes.at(-1)).toBe("bypassPermissions");
+      expect(repo.get(row.id).autonomy).toBe("full");
+    } finally {
+      database.close();
+    }
+  });
 
   it.each(["init", "status", "hook"] as const)(
     "warns and corrects native mode drift from %s",
