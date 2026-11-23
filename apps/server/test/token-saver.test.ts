@@ -9,10 +9,20 @@ import { tokenSaverNote } from "../src/services/sessions/token-saver";
 import { deepMerge } from "../src/settings-store";
 import { sampleSession } from "./helpers";
 
-// #602: the token saver note rides on the system prompt, at the session's resolved level.
+// #602: the token saver note rides on the system prompt, at the session's resolved level, on
+// providers whose system prompt holds for the whole conversation (`capabilities.systemPrompt`).
+const providers = [
+  { id: "claude", capabilities: { systemPrompt: true } },
+  { id: "codex", capabilities: { systemPrompt: true } },
+  { id: "opencode", capabilities: {} },
+  { id: "gemini", capabilities: {} },
+  { id: "cursor", capabilities: { systemPrompt: false } },
+];
+const claudeSession = { ...sampleSession, provider: "claude" as const };
+
 function launcher(tokenSaver?: TokenSaverSettings): SessionLauncher {
   return new SessionLauncher({
-    runner: { mcpProxyUrl: () => null, providers: () => [] },
+    runner: { mcpProxyUrl: () => null, providers: () => providers },
     projects: { get: () => null },
     home: "/tmp/codeden-home",
     ...(tokenSaver ? { tokenSaver: () => tokenSaver } : {}),
@@ -22,14 +32,14 @@ function launcher(tokenSaver?: TokenSaverSettings): SessionLauncher {
 describe("token saver note", () => {
   it("is absent when off or not configured", () => {
     expect(tokenSaverNote("off")).toBeNull();
-    const plain = launcher().sessionOptions(sampleSession).systemPrompt;
+    const plain = launcher().sessionOptions(claudeSession).systemPrompt;
     expect(plain).not.toContain("Token saver");
     expect(
-      launcher(Schema.parse({ default: "off" })).sessionOptions(sampleSession).systemPrompt,
+      launcher(Schema.parse({ default: "off" })).sessionOptions(claudeSession).systemPrompt,
     ).toBe(plain);
   });
 
-  it("reaches every kind of session CodeDen starts, on every provider", () => {
+  it("reaches every kind of session CodeDen starts, on providers with a lasting system prompt", () => {
     const lite = launcher(Schema.parse({ default: "lite" }));
     const p = "p1";
     const kinds = [
@@ -42,12 +52,26 @@ describe("token saver note", () => {
       { kind: "automation", role: "agent", startedBy: { kind: "automation" }, projectId: p },
       { kind: "PM hand-off", role: "agent", startedBy: { kind: "orchestrator" }, projectId: p },
     ] as const;
-    // Providers with and without `capabilities.systemPrompt` (Claude Code, Codex, ACP agents).
-    for (const provider of ["claude", "codex", "opencode", "gemini", "cursor", "agy", "fake"]) {
+    for (const provider of ["claude", "codex"]) {
       for (const { kind, ...fields } of kinds) {
         const session = { ...sampleSession, ...fields, provider };
         const prompt = lite.sessionOptions(session).systemPrompt ?? "";
         expect(prompt, `${kind} on ${provider}`).toContain("Token saver is on for this session");
+      }
+    }
+  });
+
+  it("leaves CodeDen's prompt unchanged on providers without a lasting system prompt", () => {
+    const lite = launcher(Schema.parse({ default: "lite" }));
+    // Not declared, declared false, and a provider the runner doesn't report at all.
+    for (const provider of ["opencode", "gemini", "cursor", "fake"]) {
+      for (const role of ["agent", "pm", "orchestrator"] as const) {
+        const session = { ...sampleSession, role, provider };
+        const prompt = lite.sessionOptions(session).systemPrompt;
+        expect(prompt, `${role} on ${provider}`).toBe(
+          launcher().sessionOptions(session).systemPrompt,
+        );
+        expect(prompt).not.toContain("Token saver");
       }
     }
   });
@@ -57,6 +81,7 @@ describe("token saver note", () => {
     const full = tokenSaverNote("full") ?? "";
     const ultra = tokenSaverNote("ultra") ?? "";
     for (const note of [lite, full, ultra]) {
+      expect(note).toContain("Everything above still applies in full");
       expect(note).toContain("Never drop the words not, never, no or only.");
       expect(note).toContain(
         "Use plain full sentences for security warnings, irreversible actions",
@@ -76,10 +101,10 @@ describe("token saver note", () => {
       roles: { pm: "off" },
       projects: { p1: { level: "ultra" } },
     });
-    const inProject = { ...sampleSession, projectId: "p1" };
+    const inProject = { ...claudeSession, projectId: "p1" };
     const prompt = (s = inProject) => launcher(settings).sessionOptions(s).systemPrompt ?? "";
     expect(prompt()).toContain("Token saver is on for this session (ultra).");
-    const elsewhere = { ...sampleSession, projectId: "other" };
+    const elsewhere = { ...claudeSession, projectId: "other" };
     expect(prompt(elsewhere)).toContain("Token saver is on for this session (lite).");
     expect(prompt({ ...elsewhere, role: "pm" })).not.toContain("Token saver");
   });

@@ -393,15 +393,18 @@ export class SessionLauncher {
   }
 
   /**
-   * The CodeDen system prompt, plus the token saver note at the session's level (#602), for every
-   * session and provider. Providers with `capabilities.systemPrompt` keep it on resume and after
-   * compaction; the others get it wherever they take the system prompt (ACP agents: in front of
-   * the first prompt).
+   * The CodeDen system prompt, plus the token saver note at the session's level (#602). The note
+   * goes only to providers with `capabilities.systemPrompt`, where it holds on resume and after
+   * compaction; the others get CodeDen's prompt unchanged.
    */
   private systemPrompt(session: Session, project: Project | null): string {
     const base = codedenSystemPrompt(session, project);
     const settings = this.deps.tokenSaver?.();
     if (!settings) return base;
+    const provider = runnerForSession(this.deps, session.id)
+      .providers()
+      .find((p) => p.id === session.provider);
+    if (!provider?.capabilities.systemPrompt) return base;
     const note = tokenSaverNote(tokenSaverLevel(settings, session.role, session.projectId));
     return note ? `${base}\n\n${note}` : base;
   }
