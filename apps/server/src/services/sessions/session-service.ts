@@ -669,7 +669,7 @@ export class SessionService {
     if (compactionRunning(this.deps.repo, session)) throw compactingRefusal();
     const { outbox } = this.deps;
     const stored = typeof source === "string" ? this.externalize(session, raw) : source.input;
-    const input = this.deps.artifacts.resolveAttachments(stored);
+    const input = this.forRunner(session, stored);
     const delay = capabilities.interruptToolCall
       ? this.deps.settings.get().priorityInterruptMinutes * 60_000
       : undefined;
@@ -1110,7 +1110,7 @@ export class SessionService {
     return { status: "queued" };
   }
 
-  /** Pasted images saved as artifacts: the form CodeDen stores (queued messages). */
+  /** Pasted images and files saved as artifacts: the form CodeDen stores (queued messages). */
   private externalize(session: Session, input: UserInput): UserInput {
     return this.deps.artifacts.externalizeAttachments(input, {
       sessionId: session.id,
@@ -1118,9 +1118,15 @@ export class SessionService {
     });
   }
 
-  /** Input handed to the runner: artifacts resolved to the file paths providers read. */
+  /**
+   * Input handed to the runner: artifacts resolved to the file paths providers read, only the
+   * session's own (and its project's shared ones, from a conflicting start).
+   */
   private forRunner(session: Session, input: UserInput): UserInput {
-    return this.deps.artifacts.resolveAttachments(this.externalize(session, input));
+    return this.deps.artifacts.resolveAttachments(this.externalize(session, input), {
+      sessionId: session.id,
+      projectId: session.projectId,
+    });
   }
 
   private launchInBackground(
