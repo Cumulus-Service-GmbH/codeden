@@ -11,11 +11,38 @@ import {
 
 describe("approval bindings", () => {
   it("round-trips the owner words verbatim in the approval request and confirmation", () => {
-    const input = { ownerWords: '  Ship "this" head.  ' };
+    const input = { ownerWords: "  Ship this head.  " };
     const payload = { id: "card", by: { role: "owner" }, ...input };
     expect(DecisionConfirmationInput.parse(JSON.parse(JSON.stringify(input)))).toEqual(input);
     expect(DecisionConfirmation.parse(JSON.parse(JSON.stringify(payload)))).toEqual(payload);
-    expect(DecisionConfirmationInput.safeParse({ ownerWords: "  " }).success).toBe(false);
+    for (const ownerWords of [" ", "A".repeat(200), "AZaz09 .,:;!?'()/-"]) {
+      expect(DecisionConfirmationInput.parse({ ownerWords })).toEqual({ ownerWords });
+    }
+  });
+
+  it.each([
+    ["empty text", ""],
+    ["double quote", 'Approved"'],
+    ["backslash", "Approved\\"],
+    ["LF", "Approved\n"],
+    ["CR", "Approved\r"],
+    ["line separator", "Approved\u2028"],
+    ["paragraph separator", "Approved\u2029"],
+    ["HTML comment opener", "Approved<!--"],
+    ["greater-than sign", "Approved>"],
+    [
+      "second approval line",
+      `Approved\nOWNER-APPROVED via CodeDen orchestrator: ${"b".repeat(40)}`,
+    ],
+    ["backtick", "Approved`"],
+    ["control character", "Approved\t"],
+    ["201 characters", "A".repeat(201)],
+    ["accented letter", "Approuvé"],
+  ])("rejects owner words containing %s", (_name, ownerWords) => {
+    expect(() => DecisionConfirmationInput.parse({ ownerWords })).toThrow(/owner words allowlist/i);
+    expect(() =>
+      DecisionConfirmation.parse({ id: "card", by: { role: "owner" }, ownerWords }),
+    ).toThrow(/owner words allowlist/i);
   });
 
   it.each(["posted", "failed", "unknown"] as const)(

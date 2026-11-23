@@ -125,7 +125,7 @@ describe("decision approvals", () => {
 });
 
 describe("post_github_approval", () => {
-  const ownerWords = '  Ship "this" head.  ';
+  const ownerWords = "  Ship this head, please! (QA/CI) - thanks.  ";
   const postTime = "2026-11-10T14:23:45.678Z";
 
   function setupMergeApproval() {
@@ -193,6 +193,42 @@ describe("post_github_approval", () => {
       ]);
     } finally {
       vi.useRealTimers();
+      await env.close();
+    }
+  });
+
+  it.each([
+    ["double quote", 'Approved"'],
+    ["backslash", "Approved\\"],
+    ["LF", "Approved\n"],
+    ["CR", "Approved\r"],
+    ["line separator", "Approved\u2028"],
+    ["paragraph separator", "Approved\u2029"],
+    ["HTML comment opener", "Approved<!--"],
+    ["greater-than sign", "Approved>"],
+    [
+      "second approval line",
+      `Approved\nOWNER-APPROVED via CodeDen orchestrator: ${"b".repeat(40)}`,
+    ],
+    ["backtick", "Approved`"],
+    ["control character", "Approved\t"],
+    ["201 characters", "A".repeat(201)],
+    ["accented letter", "Approuvé"],
+  ])("refuses stored owner words containing %s without writing to GitHub", async (_name, words) => {
+    const env = setupMergeApproval();
+    try {
+      env.store.append([
+        {
+          type: "decision.confirmed",
+          sessionId: null,
+          payload: { id: env.card.id, by: { role: "owner" }, ownerWords: words },
+        },
+      ]);
+      const result = await env.post();
+      expect(result.isError).toBe(true);
+      expect(result.text).toMatch(/owner words allowlist/i);
+      expect(env.writes()).toEqual([]);
+    } finally {
       await env.close();
     }
   });
