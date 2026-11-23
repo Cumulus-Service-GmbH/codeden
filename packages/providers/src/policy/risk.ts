@@ -5,20 +5,30 @@ import { listOnlyReads, locationsThrough, ranLists, withFunctions } from "./bloc
 import { codedenCommand, pathsOf } from "./codeden-command";
 import { binName, DISCARD, unwrap } from "./command-words";
 import { copyWrites } from "./copies";
-import { classifyDelete } from "./deletes";
+import { classifyDelete, listedPaths } from "./deletes";
 import { downloadWrites } from "./downloads";
 import { dumpsEnvironment } from "./env-dumps";
 import { type ListOutput, namesOnly } from "./env-names";
 import { classifyGit } from "./git";
-import { inlineCode, inlineCodeCommands, inlineCodeWrites } from "./inline-code";
-import { type InlineScript, inlineScripts } from "./inline-scripts";
+import { inlineCodeWrites } from "./inline-code";
+import { inlineScripts } from "./inline-scripts";
 import { classifyInstall } from "./installs";
 import { itemWrites } from "./item-writes";
 import { MAX_LOCATIONS, moveTo } from "./locations";
-import { isInside, isSecretPath, isWin, resolveAgainst } from "./paths";
+import { isInside, isSecretPath, resolveAgainst } from "./paths";
 import { projectConfigCommand } from "./project-config";
 import { providerLoginCommand } from "./provider-logins";
 import { keptWords } from "./ps-assignments";
+import { dotnetWrites } from "./ps-dotnet";
+import {
+  codeOf,
+  codeScripts,
+  MAX_DEPTH,
+  readings,
+  scriptContext,
+  scriptsOf,
+  tooDeep,
+} from "./ran-scripts";
 import { programDenial } from "./read-only";
 import { registryChange, registryExports } from "./registry";
 import { pipesDownloadIntoInterpreter } from "./remote-scripts";
@@ -26,7 +36,9 @@ import { codedenFolderRisk, folderRisk } from "./run-folder";
 import { secretArgument, toolOutputs } from "./secrets";
 import type { SimpleCommand } from "./shell";
 import { shellReadings } from "./shell-readings";
+import { type Feed, within } from "./stdin-scripts";
 import { classifyRead, classifyWrite, type RiskContext } from "./targets";
+import { UNRESOLVED, unresolvedTarget } from "./variables";
 import { gitWrites, toolWrites } from "./write-tools";
 
 export { classifyFetch, classifyGlob, classifyRead, classifyWrite } from "./targets";
@@ -40,10 +52,7 @@ export { classifyFetch, classifyGlob, classifyRead, classifyWrite } from "./targ
  */
 export type { RiskAssessment, RiskContext };
 
-/** How deep `bash -c "…"` style inline scripts are followed. */
-const MAX_DEPTH = 4;
-
-/** Why a script that isn't all written out asks (`eval "$CMD"`, `iex $x`; `./inline-scripts`). */
+/** Why a script that isn't all written out asks (`eval "$CMD"`, `… | sh`; `./ran-scripts`). */
 const UNKNOWN = "Runs a command that is only known when it runs";
 
 /**
@@ -119,20 +128,25 @@ function firstInList(
   for (const [i, cmd] of list.entries()) {
     if (!cmd.piped) head = i;
     const piped = list[i + 1]?.piped === true;
+    const feed = feedOf(list, i, head);
     for (const here of heres) {
+      const inside = within(here, cmd, feed);
       for (const nested of cmd.nested) {
-        const found = firstInList(nested, here, depth, check, true);
+        const found = firstInList(nested, inside, depth, check, true);
         if (found) return found;
       }
-      for (const ran of ranLists(cmd, here)) {
+      for (const ran of ranLists(cmd, inside)) {
         const found = firstInList(ran.list, ran.ctx, depth, check, feeds || piped);
         if (found) return found;
       }
-      const source = cmd.piped ? list[head] : undefined;
-      for (const script of [...scriptsOf(cmd, depth, source), ...codeScripts(cmd, here, depth)]) {
+      const scripts = [
+        ...scriptsOf(cmd, here, depth, feed),
+        ...codeScripts(cmd, here, depth, feed),
+      ];
+      for (const script of scripts) {
         const into = feeds || piped || script.feeds === true;
-        const there = scriptContext(script, cmd, here);
-        for (const inner of shellReadings(script.text, script.dialect, there)) {
+        const there = scriptContext(script, cmd, inside);
+        for (const inner of readings(script, there)) {
           const found = firstInList(inner, there, depth + 1, check, into);
           if (found) return found;
         }
@@ -147,6 +161,11 @@ function firstInList(
     if (heres.length > MAX_LOCATIONS) return TOO_MANY_LOCATIONS;
   }
   return undefined;
+}
+
+/** The pipe the command at `i` reads: the command at its `head`, and whether others sit between. */
+function feedOf(list: SimpleCommand[], i: number, head: number): Feed {
+  return list[i]?.piped ? { source: list[head], filtered: i - 1 !== head } : {};
 }
 
 /** A script nested deeper than is followed (`MAX_DEPTH`): what it runs isn't read. */
@@ -192,17 +211,18 @@ function classifyList(
   for (const [i, cmd] of list.entries()) {
     if (!cmd.piped) head = i;
     const shown = output === "shown" && list[i + 1]?.piped !== true;
-    const source = cmd.piped ? list[head] : undefined;
-    const at = { namesOnly: names.listings.has(i), shown, source };
+    const at = { namesOnly: names.listings.has(i), shown, ...feedOf(list, i, head) };
     for (const here of heres) {
+      const inside = within(here, cmd, at);
       for (const [k, nested] of cmd.nested.entries()) {
         const into = k === 0 && names.projections.has(i) ? "names" : "feeds";
-        found.push(classifyList(nested, here, depth, into));
+        found.push(classifyList(nested, inside, depth, into));
       }
-      for (const ran of ranLists(cmd, here)) {
+      for (const ran of ranLists(cmd, inside)) {
         found.push(classifyList(ran.list, ran.ctx, depth, shown ? "shown" : "feeds"));
       }
-      for (const one of withKept(cmd)) found.push(classifySimple(one, here, depth, at));
+      const placed = { ...at, inside };
+      for (const one of withKept(cmd)) found.push(classifySimple(one, here, depth, placed));
     }
     heres = locationsThrough(cmd, heres);
     if (heres.length > MAX_LOCATIONS) return mostSevere([...found, TOO_MANY_LOCATIONS]);
@@ -216,52 +236,16 @@ function withKept(cmd: SimpleCommand): SimpleCommand[] {
   return kept ? [cmd, kept] : [cmd];
 }
 
-/** The command lines `cmd` runs (`./inline-scripts`), while they are still followed. */
-function scriptsOf(cmd: SimpleCommand, depth: number, source?: SimpleCommand): InlineScript[] {
-  if (depth >= MAX_DEPTH) return [];
-  const { tokens } = unwrap(cmd.words);
-  return inlineScripts(binName(tokens[0]), tokens.slice(1), cmd, source);
-}
-
-/** True when `cmd` runs a script nested deeper than is followed, so what it runs isn't read. */
-function tooDeep(cmd: SimpleCommand, depth: number, source?: SimpleCommand): boolean {
-  return depth >= MAX_DEPTH && scriptsOf(cmd, 0, source).length > 0;
-}
-
-/**
- * The command lines the code of an interpreter's one-liner may run (`./inline-code`:
- * `python -c "os.system('…')"`), read from its string literals. A guess, so only what they write
- * or delete outside the worktree, and what every level asks about, counts.
- */
-function codeScripts(cmd: SimpleCommand, ctx: RiskContext, depth: number): InlineScript[] {
-  if (depth >= MAX_DEPTH) return [];
-  const { tokens } = unwrap(cmd.words);
-  const dialect = isWin(ctx) ? "auto" : "posix";
-  return inlineCode(binName(tokens[0]), tokens.slice(1))
-    .flatMap(inlineCodeCommands)
-    .map((text) => ({ text, dialect }));
-}
-
-/**
- * Where an inline script of `cmd` runs: where `env -C` moved it (`env -C dir bash -c …`), then in
- * its own folder when it names one (`Start-Process -WorkingDirectory`), in a new process, which
- * starts with a location stack of its own.
- */
-function scriptContext(script: InlineScript, cmd: SimpleCommand, ctx: RiskContext): RiskContext {
-  let fresh: RiskContext = { ...ctx, pushed: undefined };
-  for (const dir of unwrap(cmd.words).chdir) fresh = moveTo(dir, fresh);
-  return script.dir ? moveTo(script.dir, fresh) : fresh;
-}
-
 /**
  * Where a simple command stands in its list. `namesOnly`: it lists the environment but only the
  * names reach the agent (`./env-names`). `shown`: its output reaches the agent, not another command.
- * `source`: when it reads a pipe, the command at the head of that pipeline (`./deletes`).
+ * `source` and `filtered`: the pipe it reads (`Feed`; `./deletes`, `./stdin-scripts`).
  */
-interface Placement {
+interface Placement extends Feed {
   namesOnly: boolean;
   shown: boolean;
-  source?: SimpleCommand;
+  /** The context of what the command runs inside itself, which reads its input (`within`). */
+  inside: RiskContext;
 }
 
 /**
@@ -281,8 +265,10 @@ function classifySimple(
   if (verdict.risky && (verdict.action === "outside_worktree" || asksAtEveryLevel(verdict))) {
     return verdict;
   }
-  const scripts = scriptsOf(cmd, depth, at.source);
-  const gitVars = unwrap(cmd.words).assigns.some((a) => /^GIT_(?:DIR|WORK_TREE)=/.test(a));
+  const { tokens, assigns } = unwrap(cmd.words);
+  const scripts =
+    depth < MAX_DEPTH ? inlineScripts(binName(tokens[0]), tokens.slice(1), cmd, at.source) : [];
+  const gitVars = assigns.some((a) => /^GIT_(?:DIR|WORK_TREE)=/.test(a));
   return (scripts.length > 0 && !gitVars ? undefined : folderRisk(cmd, ctx)) ?? verdict;
 }
 
@@ -307,31 +293,41 @@ function classifyActions(
     found.push(risky("other", "Runs a block that never closes, so what it runs can't be read"));
   }
 
-  // Inline scripts (`bash -c "…"`, `eval "…"`), the commands of cmd's `for` loop and what
-  // Start-Process starts.
+  // Inline scripts (`bash -c "…"`, `eval "…"`), the commands of cmd's `for` loop, what
+  // Start-Process starts, a script read on the input and what another tool runs (`./ran-scripts`).
   const ran: RiskAssessment[] = [];
-  for (const script of scriptsOf(cmd, depth, at.source)) {
+  // What a tool runs on the files it is given comes after the command's own verdict.
+  const late: RiskAssessment[] = [];
+  for (const script of scriptsOf(cmd, ctx, depth, at)) {
     if (script.elevated) found.push(risky("other", "Runs a command with elevated privileges"));
     const output = at.shown && !script.feeds ? "shown" : "feeds";
-    const there = scriptContext(script, cmd, ctx);
-    const lists = shellReadings(script.text, script.dialect, there);
-    for (const list of lists) ran.push(classifyList(list, there, depth + 1, output));
+    const there = scriptContext(script, cmd, { ...ctx, stdin: at.inside.stdin });
+    const lists = readings(script, there);
+    const into = script.commands ? late : ran;
+    for (const list of lists) into.push(classifyList(list, there, depth + 1, output));
     if (script.dynamic && !lists.every(listOnlyReads))
       ran.push(risky("other", `${UNKNOWN} (${bin})`));
   }
-  if (tooDeep(cmd, depth, at.source)) found.push(TOO_DEEP);
-  for (const script of codeScripts(cmd, ctx, depth)) {
+  if (tooDeep(cmd, ctx, depth, at)) found.push(TOO_DEEP);
+  for (const script of codeScripts(cmd, ctx, depth, at)) {
     for (const list of shellReadings(script.text, script.dialect, ctx)) {
       const guess = classifyList(list, ctx, depth + 1, "feeds");
       if (guess.risky && guess.action === "outside_worktree") ran.push(guess);
     }
   }
+  const code = codeOf(cmd, at, ctx);
+  if (code.unknown) ran.push(risky("other", `${UNKNOWN} (${bin})`));
   // A risk that was read comes before one that is only "unknown".
   const unknown = (r: RiskAssessment) => r.risky && r.reason.startsWith(UNKNOWN);
   found.push(...ran.filter((r) => !unknown(r)), ...ran.filter(unknown));
 
+  // A target a variable only names when the command runs counts as outside (`./variables`).
+  const write = (target: string, where: RiskContext): RiskAssessment =>
+    unresolvedTarget(cmd, target, where)
+      ? risky("outside_worktree", `Writes ${target}, ${UNRESOLVED}`)
+      : classifyWrite(target, where);
   for (const target of cmd.writes) {
-    if (!DISCARD.test(target)) found.push(classifyWrite(target, ctx));
+    if (!DISCARD.test(target)) found.push(write(target, ctx));
   }
   // Where `sudo -D dir` or `env -C dir` runs it, its own paths resolve.
   const here = chdir.reduce((at, dir) => moveTo(dir, at), ctx);
@@ -344,8 +340,8 @@ function classifyActions(
     });
     // `git checkout <ref> -- .codeden/project.json` writes CodeDen's project config.
     found.push(verdict.risky ? verdict : (projectConfigCommand(cmd, ctx) ?? SAFE));
-    for (const target of gitWrites(args)) found.push(classifyWrite(target, here));
-    return mostSevere(found);
+    for (const target of gitWrites(args)) found.push(write(target, here));
+    return mostSevere([...found, ...late]);
   }
 
   found.push(
@@ -363,12 +359,23 @@ function classifyActions(
   const items = itemWrites(cmd, ctx, at.source);
   const downloads = downloadWrites(cmd, ctx);
   const written = [...copies.words, ...outputs, ...items.words, ...downloads.words];
-  const targets = [...copies.targets, ...outputs, ...items.targets, ...downloads.targets];
-  for (const target of targets) found.push(classifyWrite(target, ctx));
-  for (const target of toolWrites(bin, args)) found.push(classifyWrite(target, here));
+  const targets = [...outputs, ...items.targets, ...downloads.targets];
+  // A copy's destination is judged as written: into temp, its targets are named after the
+  // files copied, which stay in that folder whatever they are called.
+  const dest = copies.words.find((word) => unresolvedTarget(cmd, word, ctx));
+  if (dest !== undefined) found.push(risky("outside_worktree", `Writes ${dest}, ${UNRESOLVED}`));
+  else for (const target of copies.targets) found.push(classifyWrite(target, ctx));
+  for (const target of targets) found.push(write(target, ctx));
+  for (const target of toolWrites(bin, args)) found.push(write(target, here));
+  // PowerShell's .NET file calls (`[IO.File]::Delete(…)`, `./ps-dotnet`).
+  const dotnet = dotnetWrites(cmd);
+  const handed = dotnet.piped && at.source ? listedPaths(at.source, ctx) : [];
+  for (const target of [...dotnet.targets, ...handed]) found.push(classifyWrite(target, ctx));
+  if (dotnet.unknown) found.push(risky("outside_worktree", `Writes ${UNRESOLVED}`));
+  for (const item of dotnet.reads) found.push(classifyRead(item, ctx));
   // A one-liner's code: the rooted paths it names, when it writes or deletes (`./inline-code`).
-  for (const code of inlineCode(bin, args)) {
-    for (const target of inlineCodeWrites(code)) {
+  for (const text of code.code) {
+    for (const target of inlineCodeWrites(text)) {
       const write = classifyWrite(target, here);
       if (write.risky && write.action !== "file_change") found.push(write);
     }
@@ -386,5 +393,5 @@ function classifyActions(
   }
   // CodeDen's project config: `sed -i`, `git checkout --` and inline code reach it too.
   found.push(projectConfigCommand(cmd, ctx) ?? SAFE);
-  return mostSevere(found);
+  return mostSevere([...found, ...late]);
 }
