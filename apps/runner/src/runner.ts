@@ -402,20 +402,20 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
       // (#615): the new runner may be running the same sessions in the same worktrees.
       const graceMs = superseded ? 0 : (opts.closeGraceMs ?? CLOSE_GRACE_MS);
       let timer: NodeJS.Timeout | undefined;
-      const late = await Promise.race([
+      const closeResult = await Promise.race([
         graceful.then(
-          () => false,
+          () => ({ status: "closed" }) as const,
           (error: unknown) => {
             log(`closing sessions: ${String(error)}`);
-            return false;
+            return { status: "failed", error } as const;
           },
         ),
-        new Promise<boolean>((resolve) => {
-          timer = setTimeout(() => resolve(true), graceMs);
+        new Promise<{ status: "timeout" }>((resolve) => {
+          timer = setTimeout(() => resolve({ status: "timeout" }), graceMs);
         }),
       ]);
       clearTimeout(timer);
-      if (late && !superseded) {
+      if (closeResult.status === "timeout" && !superseded) {
         log(`sessions did not close within ${graceMs} ms; ending their processes`);
       }
       await supervisor.killAll(opts.sweepDescendants ?? false);
@@ -437,6 +437,7 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
         log(`journal: ${String(error)}`);
       }
       log("runner stopped");
+      if (closeResult.status === "failed") throw closeResult.error;
     })();
     return closing;
   }

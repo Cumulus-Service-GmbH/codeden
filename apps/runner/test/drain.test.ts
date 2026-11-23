@@ -21,3 +21,23 @@ it("closes and reports failure when draining rejects", async () => {
     removeDir(home);
   }
 });
+
+it("closes the server connection and reports failure when closing sessions rejects", async () => {
+  const home = tempDir("codeden-close-");
+  const onShutdown = vi.fn();
+  const runner = await startRunner({ home, enableFakeProvider: true, onShutdown });
+  const server = await TestServer.attach(runner);
+  const closeAll = vi
+    .spyOn(SessionHost.prototype, "closeAll")
+    .mockRejectedValueOnce(new Error("close failed"));
+  try {
+    await server.request({ name: "runner.shutdown" });
+    await vi.waitFor(() => expect(onShutdown).toHaveBeenCalledWith(1));
+    await expect(TestServer.connect(runner)).rejects.toThrow("ECONNREFUSED");
+  } finally {
+    closeAll.mockRestore();
+    await server.close();
+    await runner.close().catch(() => undefined);
+    removeDir(home);
+  }
+});
