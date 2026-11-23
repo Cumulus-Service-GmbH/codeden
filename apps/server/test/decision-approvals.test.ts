@@ -4,6 +4,8 @@ import { type Database, openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
 import { defineTool } from "../src/mcp/define";
 import { ToolRegistry } from "../src/mcp/registry";
+import { postGithubApproval } from "../src/mcp/tools/decisions";
+import { inboxRoutes } from "../src/routes/inbox";
 import type { AppServices } from "../src/services/container";
 import { DecisionApprovals } from "../src/services/decision-approvals";
 import { ServiceError } from "../src/services/errors";
@@ -43,14 +45,14 @@ describe("decision approvals", () => {
     await expect(service().confirm(card.id, pm)).rejects.toThrow("owner");
     expect(post).not.toHaveBeenCalled();
     await expect(service().postGithub(card.id, pm)).rejects.toThrow();
-    await service().confirm(card.id, owner);
+    await service().confirm(card.id, owner, undefined, { ownerWords: "Approved" });
     expect(post).not.toHaveBeenCalled();
     const results = await Promise.allSettled([
       service().postGithub(card.id, pm),
       service().postGithub(card.id, pm),
     ]);
     expect(results.map((result) => result.status).sort()).toEqual(["fulfilled", "rejected"]);
-    expect(post).toHaveBeenCalledExactlyOnceWith(target, card.id);
+    expect(post).toHaveBeenCalledExactlyOnceWith(target, card.id, "Approved");
     await expect(service().confirm(card.id, owner)).rejects.toThrow();
     await expect(service().postGithub(card.id, pm)).rejects.toThrow();
   });
@@ -122,94 +124,175 @@ describe("decision approvals", () => {
   });
 });
 
-describe("GitHub approval client", () => {
-  it("checks the live head and posts the owner record, comment and review once", async () => {
+describe("post_github_approval", () => {
+  const ownerWords = '  Ship "this" head.  ';
+  const postTime = "2026-11-10T14:23:45.678Z";
+
+  function setupMergeApproval() {
     const env = createGithubEnv();
+    const pr = env.gh.addPr("approval-card", {}, { headSha: target.headSha });
+    const decisions = new DecisionApprovals(env.store, githubApprovalPort(env.service.client));
+    const services = { decisions } as AppServices;
+    const card = decisions.raise(pm, "project", {
+      kind: "github",
+      target: { ...target, repository: "acme/widgets", pullNumber: pr.number },
+    });
+    const route = inboxRoutes(services);
+    const registry = new ToolRegistry([postGithubApproval], services);
+    const caller = { ...pm, caller: "mcp" as const, signal: new AbortController().signal };
+    return {
+      ...env,
+      card,
+      decisions,
+      pr,
+      approve: (body = {}) =>
+        route.request(`/decision-cards/${card.id}/approve`, {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(body),
+        }),
+      post: () => registry.call("post_github_approval", { cardId: card.id }, caller),
+      writes: () => env.gh.requests.filter(({ method }) => method !== "GET"),
+      results: () =>
+        env.store
+          .listAfter(0)
+          .filter(({ type }) =>
+            ["decision.github_posted", "decision.github_refused"].includes(type),
+          ),
+    };
+  }
+
+  it("posts exactly one byte-exact comment on the author's own PR", async () => {
+    const env = setupMergeApproval();
+    vi.useFakeTimers({ toFake: ["Date"] });
     try {
-      const pr = env.gh.addPr(
-        "approval-card",
-        { author: "contributor" },
-        { headSha: target.headSha },
-      );
-      const githubTarget = { ...target, repository: "acme/widgets", pullNumber: pr.number };
-      const service = new DecisionApprovals(env.store, githubApprovalPort(env.service.client));
-      const card = service.raise(pm, "project", { kind: "github", target: githubTarget });
-      const writes = () => env.gh.requests.filter(({ method }) => method === "POST");
-      await expect(service.postGithub(card.id, pm)).rejects.toThrow();
-      expect(writes()).toEqual([]);
-      await service.confirm(card.id, owner);
-      expect(writes()).toEqual([]);
-      env.gh.touch(pr.number, (issue) => {
-        if (issue.pr) issue.pr.headSha = "b".repeat(40);
+      expect((await env.approve({ ownerWords })).status).toBe(200);
+      vi.setSystemTime(new Date(postTime));
+      const result = await env.post();
+      expect(env.writes()).toMatchObject([
+        {
+          method: "POST",
+          path: `/repos/acme/widgets/issues/${env.pr.number}/comments`,
+          status: 201,
+          body: {
+            body: `OWNER-APPROVED via CodeDen orchestrator: ${target.headSha} ${postTime} "${ownerWords}"`,
+          },
+        },
+      ]);
+      expect(result.isError).toBe(false);
+      expect(JSON.parse(result.text)).toMatchObject({ mode: "comment", outcome: "posted" });
+      expect(env.results()).toMatchObject([
+        {
+          type: "decision.github_posted",
+          payload: { id: env.card.id, mode: "comment", outcome: "posted" },
+        },
+      ]);
+    } finally {
+      vi.useRealTimers();
+      await env.close();
+    }
+  });
+
+  it.each(["moved", "closed"])("refuses a %s PR without any writes", async (state) => {
+    const env = setupMergeApproval();
+    try {
+      expect((await env.approve({ ownerWords })).status).toBe(200);
+      env.gh.touch(env.pr.number, (issue) => {
+        if (state === "closed") issue.state = "closed";
+        else if (issue.pr) issue.pr.headSha = "b".repeat(40);
       });
-      await expect(service.postGithub(card.id, pm)).rejects.toThrow("head moved");
-      expect(writes()).toEqual([]);
-      env.gh.touch(pr.number, (issue) => {
-        if (issue.pr) issue.pr.headSha = target.headSha;
+      await expect(env.decisions.postGithub(env.card.id, pm)).rejects.toMatchObject({
+        code: "stale_approval",
       });
-      await expect(service.postGithub(card.id, pm)).rejects.toThrow();
-      const next = service.raise(pm, "project", { kind: "github", target: githubTarget });
-      await service.confirm(next.id, owner);
-      await service.postGithub(next.id, pm);
+      expect(env.writes()).toEqual([]);
+    } finally {
+      await env.close();
+    }
+  });
+
+  it("records a refusal when a posted card is used again", async () => {
+    const env = setupMergeApproval();
+    try {
+      expect((await env.approve({ ownerWords })).status).toBe(200);
+      await env.post();
       const reopened = new DecisionApprovals(env.store, githubApprovalPort(env.service.client));
-      await expect(reopened.postGithub(next.id, pm)).rejects.toThrow();
-      expect(writes()).toMatchObject([
+      await expect(reopened.postGithub(env.card.id, pm)).rejects.toThrow("unused owner approval");
+      expect(env.results().at(-1)).toMatchObject({
+        type: "decision.github_refused",
+        payload: { id: env.card.id, mode: "comment", outcome: "failed" },
+      });
+      expect(env.writes()).toHaveLength(1);
+    } finally {
+      await env.close();
+    }
+  });
+
+  it("records a 5xx comment outcome as unknown and never posts again", async () => {
+    const env = setupMergeApproval();
+    try {
+      expect((await env.approve({ ownerWords })).status).toBe(200);
+      env.gh.commentError = 503;
+      const result = await env.post();
+      expect(result.isError).toBe(false);
+      expect(JSON.parse(result.text)).toMatchObject({ mode: "comment", outcome: "unknown" });
+      expect((await env.post()).isError).toBe(true);
+      expect(env.results()).toMatchObject([
+        { payload: { id: env.card.id, mode: "comment", outcome: "unknown" } },
+        { type: "decision.github_refused", payload: { id: env.card.id } },
+      ]);
+      expect(env.writes()).toMatchObject([
         {
-          path: `/repos/acme/widgets/issues/${pr.number}/comments`,
-          status: 201,
-          body: {
-            body: `<!-- codeden-owner-approval:v1\n${JSON.stringify({
-              ...githubTarget,
-              decisionId: next.id,
-            })}\n-->`,
-          },
-        },
-        {
-          path: `/repos/acme/widgets/issues/${pr.number}/comments`,
-          status: 201,
-          body: {
-            body: `Approved by the owner in CodeDen. Decision ${next.id}. Merge-verify head: ${target.headSha}.`,
-          },
-        },
-        {
-          path: `/repos/acme/widgets/pulls/${pr.number}/reviews`,
-          status: 200,
-          body: { event: "APPROVE", commit_id: target.headSha },
+          method: "POST",
+          path: `/repos/acme/widgets/issues/${env.pr.number}/comments`,
+          status: 503,
         },
       ]);
     } finally {
       await env.close();
     }
   });
-  it("leaves the owner record and comment when self-review is rejected, without replaying", async () => {
-    const env = createGithubEnv();
+
+  it("leaves the card unused after a definite comment rejection", async () => {
+    const env = setupMergeApproval();
     try {
-      const pr = env.gh.addPr("self-review", {}, { headSha: target.headSha });
-      const service = new DecisionApprovals(env.store, githubApprovalPort(env.service.client));
-      const card = service.raise(pm, "project", {
-        kind: "github",
-        target: { ...target, repository: "acme/widgets", pullNumber: pr.number },
+      expect((await env.approve({ ownerWords })).status).toBe(200);
+      env.gh.commentError = 422;
+      expect(JSON.parse((await env.post()).text)).toMatchObject({
+        mode: "comment",
+        outcome: "failed",
       });
-      await service.confirm(card.id, owner);
-      await expect(service.postGithub(card.id, pm)).rejects.toThrow("own pull request");
-      await expect(service.postGithub(card.id, pm)).rejects.toThrow("unused owner approval");
-      expect(env.gh.requests.filter(({ method }) => method === "POST")).toMatchObject([
-        {
-          path: `/repos/acme/widgets/issues/${pr.number}/comments`,
-          status: 201,
-          body: {
-            body: `<!-- codeden-owner-approval:v1\n${JSON.stringify({
-              ...target,
-              repository: "acme/widgets",
-              pullNumber: pr.number,
-              decisionId: card.id,
-            })}\n-->`,
-          },
-        },
-        { path: `/repos/acme/widgets/issues/${pr.number}/comments`, status: 201 },
-        { path: `/repos/acme/widgets/pulls/${pr.number}/reviews`, status: 422 },
+      env.gh.commentError = null;
+      expect(JSON.parse((await env.post()).text)).toMatchObject({
+        mode: "comment",
+        outcome: "posted",
+      });
+      expect(env.results().map(({ payload }) => payload)).toMatchObject([
+        { id: env.card.id, mode: "comment", outcome: "failed" },
+        { id: env.card.id, mode: "comment", outcome: "posted" },
       ]);
-      expect(env.store.listTypes(["decision.github_posted"])).toEqual([]);
+      expect(env.writes()).toMatchObject([
+        {
+          method: "POST",
+          path: `/repos/acme/widgets/issues/${env.pr.number}/comments`,
+          status: 422,
+        },
+        {
+          method: "POST",
+          path: `/repos/acme/widgets/issues/${env.pr.number}/comments`,
+          status: 201,
+        },
+      ]);
+    } finally {
+      await env.close();
+    }
+  });
+
+  it("refuses a legacy card confirmed without owner words", async () => {
+    const env = setupMergeApproval();
+    try {
+      expect((await env.approve()).status).toBe(200);
+      await expect(env.decisions.postGithub(env.card.id, pm)).rejects.toThrow("owner words");
+      expect(env.writes()).toEqual([]);
     } finally {
       await env.close();
     }

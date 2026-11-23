@@ -28,6 +28,7 @@ export class FakeGithub {
   /** The account each token signs in as (`/user`, GraphQL `viewer`); default `octo`. */
   accounts = new Map<string, string>();
   rateLimited = false;
+  commentError: number | null = null;
   /** Git objects created through the Git Data API. */
   readonly gitData = new FakeGitData();
   private clock = Date.parse("2026-11-01T00:00:00Z");
@@ -204,6 +205,9 @@ export class FakeGithub {
       return ok(this.restIssue(issue));
     }
     m = rest.match(/^\/issues\/(\d+)\/comments$/);
+    if (m && method === "POST" && this.commentError !== null) {
+      return { status: this.commentError, data: { message: "Scripted comment error" } };
+    }
     if (m) {
       const issue = this.issues.get(Number(m[1]));
       if (!issue) return notFound;
