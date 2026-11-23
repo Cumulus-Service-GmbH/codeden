@@ -1,8 +1,10 @@
 import { Link } from "@tanstack/react-router";
-import { Bot, Inbox, PanelLeftOpen, Search } from "lucide-react";
+import { Bot, Inbox, ListTodo, PanelLeftOpen, Search } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
+import { TechDebtBadge } from "@/components/project/tech-debt-badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSnapshot } from "@/lib/queries";
+import { useTechDebtSummaries } from "@/lib/tech-debt-queries";
 import { cn } from "@/lib/utils";
 import { SIDEBAR, useLayoutStore } from "@/stores/layout";
 import { useUiStore } from "@/stores/ui";
@@ -10,6 +12,8 @@ import { Logo } from "../logo";
 import { useIsActive } from "./nav-row";
 import { ProjectTile } from "./project-group";
 import { SidebarFooter } from "./sidebar-footer";
+
+const railDebtBadge = "pointer-events-none absolute h-3.5 min-w-3.5 px-1 text-[9px]";
 
 function RailItem({
   label,
@@ -40,12 +44,16 @@ function RailItem({
 /** Collapsed sidebar: a 56px icon rail with the same destinations. */
 export function SidebarRail({ onExpand }: { onExpand?: () => void } = {}) {
   const { data } = useSnapshot();
+  const { data: techDebt } = useTechDebtSummaries();
+  const openByProject = new Map(techDebt?.map(({ projectId, open }) => [projectId, open]));
+  const openDebt = techDebt?.reduce((total, project) => total + project.open, 0) ?? 0;
   const toggleLayout = useLayoutStore((s) => s.toggleSidebar);
   // On touch tablets the rail stays, and expanding opens the drawer over the page.
   const toggleSidebar = onExpand ?? toggleLayout;
   const openPalette = useUiStore((s) => s.setPaletteOpen);
   const orchestratorActive = useIsActive("/");
   const inboxActive = useIsActive("/inbox");
+  const techDebtActive = useIsActive("/tech-debt");
   const inboxCount = data?.inbox.filter((i) => i.status === "open").length ?? 0;
 
   return (
@@ -82,11 +90,21 @@ export function SidebarRail({ onExpand }: { onExpand?: () => void } = {}) {
             )}
           </Link>
         </RailItem>
+        <RailItem
+          label={openDebt ? `Tech debt · ${openDebt}` : "Tech debt"}
+          active={techDebtActive}
+        >
+          <Link to="/tech-debt" aria-label="Tech debt">
+            <ListTodo className="size-4" />
+            <TechDebtBadge count={openDebt} className={cn(railDebtBadge, "top-1 right-1")} />
+          </Link>
+        </RailItem>
       </div>
       <div className="my-3 h-px w-6 bg-sidebar-border" />
       <div className="flex min-h-0 flex-1 flex-col items-center gap-1 overflow-y-auto scroll-thin">
         {data?.projects.map((p, i) => {
           const waiting = data.sessions.some((s) => s.projectId === p.id && s.status === "waiting");
+          const open = openByProject.get(p.id) ?? 0;
           // Same order as the sidebar; a thin rule ends the pinned group.
           const endsPinned = p.pinned && data.projects[i + 1]?.pinned === false;
           return (
@@ -94,6 +112,7 @@ export function SidebarRail({ onExpand }: { onExpand?: () => void } = {}) {
               <RailItem label={p.pinned ? `${p.name} · pinned` : p.name}>
                 <Link to="/projects/$projectId" params={{ projectId: p.id }} aria-label={p.name}>
                   <ProjectTile project={p} className="size-6 rounded-md text-xs" />
+                  <TechDebtBadge count={open} className={cn(railDebtBadge, "right-0 bottom-0")} />
                   {waiting && (
                     <span className="absolute top-1 right-1 size-2 rounded-full bg-status-waiting ring-2 ring-sidebar" />
                   )}

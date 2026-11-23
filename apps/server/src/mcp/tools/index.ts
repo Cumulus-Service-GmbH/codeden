@@ -35,7 +35,7 @@ import { pmTools } from "./pm";
 import { reportProgress } from "./report-progress";
 import { shareToChat } from "./share-to-chat";
 import { suggestFollowups } from "./suggest-followups";
-import { listTechDebt } from "./tech-debt";
+import { importTechDebt, listTechDebt, recordTechDebt } from "./tech-debt";
 import { wakeupTools } from "./wakeups";
 
 /** Every CodeDen tool, in the order agents see them. Add new tools here (one file each). */
@@ -63,6 +63,8 @@ export const allTools: AnyServerTool[] = [
   browserOpenDevServer,
   generateImage,
   listTechDebt,
+  recordTechDebt,
+  importTechDebt,
   raiseGithubApproval,
   raisePlanApproval,
   confirmPlanApproval,

@@ -15,11 +15,13 @@ export const TechDebtFindingInput = z.object({
   date: Timestamp,
   pr: z.string().trim().min(1).max(500).nullable(),
 });
+/** A LOW review finding before it is stored in the ledger. */
+export type TechDebtFindingInput = z.infer<typeof TechDebtFindingInput>;
 
 /** Local state and the source identity used to synchronize an imported checklist entry. */
 export const TechDebtFinding = TechDebtFindingInput.extend({
   id: Id,
-  source: TechDebtIssue.nullable(),
+  source: z.union([TechDebtIssue, z.literal("backfill")]).nullable(),
   status: z.enum(["open", "in_progress", "fixed", "dismissed"]),
   reason: z.string().nullable(),
   sessionId: Id.nullable(),
@@ -32,6 +34,8 @@ export const TechDebtView = z.object({
   issue: TechDebtIssue.nullable(),
   imported: z.boolean(),
   findings: z.array(TechDebtFinding),
+  importError: z.string().optional(),
+  seeds: z.array(z.string()).default([]),
 });
 export type TechDebtView = z.infer<typeof TechDebtView>;
 
@@ -53,5 +57,32 @@ export const TechDebtAction = z.discriminatedUnion("action", [
 export type TechDebtAction = z.infer<typeof TechDebtAction>;
 
 /** A failed import leaves the local view available and can be retried. */
-export const TechDebtList = TechDebtView.extend({ importError: z.string().optional() });
+export const TechDebtList = TechDebtView;
 export type TechDebtList = z.infer<typeof TechDebtList>;
+
+/** The open LOW count and most recent import error for a project. */
+export const TechDebtSummary = z.object({
+  projectId: Id,
+  open: z.int().nonnegative(),
+  importError: z.string().optional(),
+});
+/** The open LOW count and most recent import error for a project. */
+export type TechDebtSummary = z.infer<typeof TechDebtSummary>;
+
+/** Counts for every active project. */
+export const TechDebtSummaries = z.array(TechDebtSummary);
+
+/** MCP input for recording a LOW review finding with its receipt. */
+export const RecordTechDebtInput = z.strictObject({
+  projectId: Id.optional(),
+  location: TechDebtFindingInput.shape.location,
+  text: TechDebtFindingInput.shape.text,
+  receipt: TechDebtFindingInput.shape.receipt.unwrap(),
+  severity: z.literal("LOW").default("LOW"),
+});
+
+/** MCP input for merging a GitHub tracking issue into a project ledger. */
+export const ImportTechDebtInput = z.strictObject({
+  projectId: Id.optional(),
+  issue: TechDebtIssue,
+});

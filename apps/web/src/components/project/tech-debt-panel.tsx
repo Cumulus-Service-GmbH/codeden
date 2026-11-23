@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useClient } from "@/lib/api";
+import { techDebtSummariesKey } from "@/lib/tech-debt-queries";
 
 const labels: Record<TechDebtFinding["status"], string> = {
   open: "Open",
@@ -24,11 +25,12 @@ export function TechDebtPanel({ projectId }: { projectId: string }) {
   const [error, setError] = useState("");
   const update = useMutation({
     mutationFn: (action: TechDebtAction) => techDebt.act(projectId, action),
-    onSuccess: (view, action) => {
+    onSuccess: async (view, action) => {
       cache.setQueryData(queryKey, view);
       if (action.action === "fix") setSelected([]);
       if (action.action === "dismiss") setDismiss(null);
-      if (action.action === "configure") return cache.invalidateQueries({ queryKey });
+      if (action.action === "configure") await cache.invalidateQueries({ queryKey });
+      await cache.invalidateQueries({ queryKey: techDebtSummariesKey });
     },
   });
   const submit = (value: unknown) => {
@@ -77,7 +79,14 @@ export function TechDebtPanel({ projectId }: { projectId: string }) {
           {view.importError && (
             <div className="flex items-center gap-2">
               <p role="alert">{view.importError}</p>
-              <Button size="sm" variant="outline" onClick={() => void query.refetch()}>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={async () => {
+                  await query.refetch();
+                  await cache.invalidateQueries({ queryKey: techDebtSummariesKey });
+                }}
+              >
                 Retry import
               </Button>
             </div>

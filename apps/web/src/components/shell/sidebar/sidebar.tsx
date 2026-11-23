@@ -5,6 +5,7 @@ import {
   ChartColumnBig,
   FolderPlus,
   Inbox,
+  ListTodo,
   PanelLeftClose,
   Pin,
   Plus,
@@ -13,12 +14,14 @@ import {
 } from "lucide-react";
 import { Hotkey, SectionLabel } from "@/components/common/bits";
 import { StatusDot } from "@/components/common/status-dot";
+import { TechDebtBadge } from "@/components/project/tech-debt-badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { splitPinned } from "@/lib/project-order";
 import { useSnapshot } from "@/lib/queries";
 import { activeRoleSession } from "@/lib/snapshot-reducer";
+import { useTechDebtSummaries } from "@/lib/tech-debt-queries";
 import { cn } from "@/lib/utils";
 import { useLayoutStore } from "@/stores/layout";
 import { useUiStore } from "@/stores/ui";
@@ -73,6 +76,8 @@ function WaitingOnYou({
  */
 export function Sidebar({ width, onClose }: { width: number | string; onClose?: () => void }) {
   const { data } = useSnapshot();
+  const { data: techDebt } = useTechDebtSummaries();
+  const openDebt = techDebt?.reduce((total, project) => total + project.open, 0) ?? 0;
   const toggleSidebar = useLayoutStore((s) => s.toggleSidebar);
   const openPalette = useUiStore((s) => s.setPaletteOpen);
   const openAddProject = useUiStore((s) => s.setAddProjectOpen);
@@ -155,6 +160,11 @@ export function Sidebar({ width, onClose }: { width: number | string; onClose?: 
               {inbox.length}
             </span>
           )}
+        </NavRow>
+        <NavRow href="/tech-debt" link={{ to: "/tech-debt" }}>
+          <ListTodo className="size-4 text-muted-foreground" />
+          <span className="flex-1">Tech debt</span>
+          <TechDebtBadge count={openDebt} />
         </NavRow>
         <NavRow href="/reports" link={{ to: "/reports" }}>
           <ChartColumnBig className="size-4 text-muted-foreground" />

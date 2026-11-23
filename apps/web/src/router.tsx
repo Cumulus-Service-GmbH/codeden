@@ -53,6 +53,7 @@ const SearchPage = lazyRouteComponent(() => import("@/routes/search"), "SearchPa
 const SessionPage = lazyRouteComponent(() => import("@/routes/session"), "SessionPage");
 const SettingsPage = lazyRouteComponent(() => import("@/routes/settings"), "SettingsPage");
 const SetupPage = lazyRouteComponent(() => import("@/routes/setup"), "SetupPage");
+const TechDebtPage = lazyRouteComponent(() => import("@/routes/tech-debt"), "TechDebtPage");
 const VisionPage = lazyRouteComponent(() => import("@/routes/vision"), "VisionPage");
 
 /**
@@ -320,6 +321,7 @@ const routeTree = rootRoute.addChildren([
     createRoute({ getParentRoute: () => shell, path: "/", component: HomePage }),
     inboxRoute,
     reportsRoute,
+    createRoute({ getParentRoute: () => shell, path: "/tech-debt", component: TechDebtPage }),
     searchRoute,
     sessionRoute,
     projectRoute,

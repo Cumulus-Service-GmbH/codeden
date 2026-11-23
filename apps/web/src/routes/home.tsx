@@ -1,8 +1,10 @@
 import { Link } from "@tanstack/react-router";
 import { Bot, FolderPlus, GitPullRequest, ListChecks, ShieldAlert, Sparkles } from "lucide-react";
 import { RoleChat } from "@/components/orchestration/role-chat";
+import { TechDebtBadge } from "@/components/project/tech-debt-badge";
 import { ProjectTile } from "@/components/shell/sidebar/project-group";
 import { useSnapshotData } from "@/lib/queries";
+import { useTechDebtSummaries } from "@/lib/tech-debt-queries";
 import { useComposerStore } from "@/stores/composer";
 import { useUiStore } from "@/stores/ui";
 
@@ -45,6 +47,8 @@ export function SuggestionGrid({
 
 function ProjectsStrip() {
   const projects = useSnapshotData((s) => s.projects, []);
+  const { data: techDebt } = useTechDebtSummaries();
+  const openByProject = new Map(techDebt?.map(({ projectId, open }) => [projectId, open]));
   const setAddProject = useUiStore((s) => s.setAddProjectOpen);
   return (
     <div className="relative mt-6 flex max-w-2xl flex-wrap items-center justify-center gap-1.5">
@@ -56,6 +60,7 @@ function ProjectsStrip() {
           className="inline-flex h-7 items-center gap-1.5 rounded-full border border-border bg-card/60 px-2.5 text-xs text-muted-foreground hover:text-foreground"
         >
           <ProjectTile project={p} /> {p.name}
+          <TechDebtBadge count={openByProject.get(p.id) ?? 0} />
         </Link>
       ))}
       <button

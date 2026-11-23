@@ -1,11 +1,18 @@
-import type { TechDebtView } from "@codeden/contracts";
+import type { Project, TechDebtView } from "@codeden/contracts";
 import type { TechDebtApi } from "../tech-debt-api";
 
-export function mockTechDebtApi(): TechDebtApi {
+export function mockTechDebtApi(projects: () => Project[]): TechDebtApi {
   const views = new Map<string, TechDebtView>();
   const list = (projectId: string): TechDebtView =>
-    views.get(projectId) ?? { projectId, issue: null, imported: false, findings: [] };
+    views.get(projectId) ?? { projectId, issue: null, imported: false, findings: [], seeds: [] };
   return {
+    summaries: async () =>
+      projects()
+        .filter((project) => !project.archivedAt)
+        .map(({ id }) => ({
+          projectId: id,
+          open: list(id).findings.filter((finding) => finding.status === "open").length,
+        })),
     list: async (id) => list(id),
     act: async (id, action) => {
       const view = list(id);
@@ -14,6 +21,13 @@ export function mockTechDebtApi(): TechDebtApi {
           view.issue = action.issue;
           break;
         case "record":
+          if (
+            view.findings.some(
+              ({ location, text }) =>
+                location === action.finding.location && text === action.finding.text,
+            )
+          )
+            break;
           view.findings = [
             ...view.findings,
             {

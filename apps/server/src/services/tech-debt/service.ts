@@ -2,8 +2,11 @@ import {
   type Project,
   TechDebtAction,
   type TechDebtFinding,
+  type TechDebtFindingInput,
+  TechDebtIssue,
   type TechDebtList,
-  type TechDebtView,
+  type TechDebtSummary,
+  TechDebtView,
 } from "@codeden/contracts";
 import { and, eq, inArray } from "drizzle-orm";
 import type { Db } from "../../db/client";
@@ -14,6 +17,31 @@ import { ACTIVE_SESSION_STATUSES } from "../sessions/conflicts";
 import { debtId, issueFindings, syncDebtTick, type TechDebtIssuePort } from "./issue";
 
 type StartFix = (project: Project, findings: TechDebtFinding[]) => Promise<string>;
+
+function mergeFindings(existing: TechDebtFinding[], incoming: TechDebtFinding[]) {
+  const ids = new Set(existing.map((finding) => finding.id));
+  const identity = (finding: TechDebtFinding) => JSON.stringify([finding.location, finding.text]);
+  const entries = new Set(existing.map(identity));
+  const added = incoming.filter((finding) => {
+    const key = identity(finding);
+    if (ids.has(finding.id) || entries.has(key)) return false;
+    ids.add(finding.id);
+    entries.add(key);
+    return true;
+  });
+  return added.length ? [...existing, ...added] : existing;
+}
+
+function recordFinding(input: TechDebtFindingInput, source: "backfill" | null): TechDebtFinding {
+  return {
+    ...input,
+    id: debtId(`${input.location}\n${input.text}`),
+    source,
+    status: "open",
+    sessionId: null,
+    reason: null,
+  };
+}
 
 export class TechDebtService {
   private readonly pending = new Map<string, Promise<unknown>>();
@@ -29,17 +57,96 @@ export class TechDebtService {
     return this.inProject(project, async () => {
       const view = this.get(project.id);
       if (!view.issue || view.imported) return view;
-      let issue: Awaited<ReturnType<TechDebtIssuePort["read"]>>;
-      try {
-        issue = await this.issues.read(view.issue);
-      } catch (error) {
-        return { ...view, importError: errorMessage(error) };
+      return this.mergeIssue(view, view.issue);
+    });
+  }
+
+  importIssue(
+    project: Project,
+    issue: string,
+    { seed, restrictToProject = false }: { seed?: string; restrictToProject?: boolean } = {},
+  ): Promise<TechDebtView> {
+    return this.inProject(project, async () => {
+      const view = this.get(project.id);
+      const target = TechDebtIssue.parse(issue);
+      if (restrictToProject) {
+        const repo =
+          project.kind === "github" ? `${project.github.owner}/${project.github.repo}` : null;
+        const [source] = target.toLowerCase().split("#");
+        if (source !== repo?.toLowerCase() && target.toLowerCase() !== view.issue?.toLowerCase()) {
+          throw badRequest("Use an issue from this project's repository or its tracking issue");
+        }
       }
-      const findings = new Map(view.findings.map((finding) => [finding.id, finding]));
-      for (const finding of issueFindings(view.issue, issue.body, issue.date)) {
-        if (!findings.has(finding.id)) findings.set(finding.id, finding);
-      }
-      return this.save({ ...view, imported: true, findings: [...findings.values()] });
+      if (seed && view.seeds.includes(seed)) return view;
+      return this.mergeIssue(view, target, seed);
+    });
+  }
+
+  backfill(project: Project, seed: string, inputs: TechDebtFindingInput[]): Promise<TechDebtView> {
+    return this.inProject(project, async () => {
+      const view = this.get(project.id);
+      if (view.seeds.includes(seed)) return view;
+      const findings = mergeFindings(
+        view.findings,
+        inputs.map((input) => recordFinding(input, "backfill")),
+      );
+      return this.save({ ...view, findings, seeds: [...view.seeds, seed] });
+    });
+  }
+
+  summaries(projects: Project[]): TechDebtSummary[] {
+    const views = new Map(
+      this.db
+        .select()
+        .from(projectTechDebt)
+        .all()
+        .map((row) => [row.projectId, row.view]),
+    );
+    return projects
+      .filter((project) => !project.archivedAt)
+      .map(({ id: projectId }) => {
+        const view = views.get(projectId);
+        const open = view?.findings.filter((finding) => finding.status === "open").length ?? 0;
+        return {
+          projectId,
+          open,
+          ...(view?.importError === undefined ? {} : { importError: view.importError }),
+        };
+      });
+  }
+
+  private async mergeIssue(
+    view: TechDebtView,
+    issue: string,
+    seed?: string,
+  ): Promise<TechDebtView> {
+    const configured = view.issue ?? issue;
+    let result: Awaited<ReturnType<TechDebtIssuePort["read"]>>;
+    try {
+      result = await this.issues.read(issue);
+    } catch (error) {
+      const importError = errorMessage(error);
+      return importError === view.importError && view.issue === configured
+        ? view
+        : this.save({ ...view, issue: configured, importError });
+    }
+    const findings = mergeFindings(view.findings, issueFindings(issue, result.body, result.date));
+    const imported = view.imported || configured.toLowerCase() === issue.toLowerCase();
+    if (
+      !seed &&
+      view.issue === configured &&
+      view.imported === imported &&
+      view.importError === undefined &&
+      findings === view.findings
+    )
+      return view;
+    const { importError: _importError, ...rest } = view;
+    return this.save({
+      ...rest,
+      issue: configured,
+      imported,
+      findings,
+      seeds: seed ? [...view.seeds, seed] : view.seeds,
     });
   }
 
@@ -48,22 +155,14 @@ export class TechDebtService {
       const action = TechDebtAction.parse(input);
       const view = this.get(project.id);
       switch (action.action) {
-        case "configure":
-          return action.issue === view.issue
-            ? view
-            : this.save({ ...view, issue: action.issue, imported: false });
+        case "configure": {
+          if (action.issue === view.issue) return view;
+          const { importError: _importError, ...rest } = view;
+          return this.save({ ...rest, issue: action.issue, imported: false });
+        }
         case "record": {
-          const id = debtId(JSON.stringify(action.finding));
-          if (view.findings.some((finding) => finding.id === id)) return view;
-          const finding: TechDebtFinding = {
-            ...action.finding,
-            id,
-            source: null,
-            status: "open",
-            sessionId: null,
-            reason: null,
-          };
-          return this.save({ ...view, findings: [...view.findings, finding] });
+          const findings = mergeFindings(view.findings, [recordFinding(action.finding, null)]);
+          return findings === view.findings ? view : this.save({ ...view, findings });
         }
         case "fix": {
           const selected = action.ids.map((id) => this.find(view, id));
@@ -123,9 +222,13 @@ export class TechDebtService {
   }
 
   private get(projectId: string): TechDebtView {
-    return (
-      this.db.select().from(projectTechDebt).where(eq(projectTechDebt.projectId, projectId)).get()
-        ?.view ?? { projectId, issue: null, imported: false, findings: [] }
+    const row = this.db
+      .select()
+      .from(projectTechDebt)
+      .where(eq(projectTechDebt.projectId, projectId))
+      .get();
+    return TechDebtView.parse(
+      row?.view ?? { projectId, issue: null, imported: false, findings: [] },
     );
   }
 

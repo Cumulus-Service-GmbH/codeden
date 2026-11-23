@@ -4,9 +4,11 @@ import { Link } from "@tanstack/react-router";
 import { Archive, Bot, ChevronRight, GripVertical, House, Plus } from "lucide-react";
 import { type CSSProperties, useState } from "react";
 import { StatusDot } from "@/components/common/status-dot";
+import { TechDebtBadge } from "@/components/project/tech-debt-badge";
 import { statusTone } from "@/lib/format";
 import { useSnapshotData } from "@/lib/queries";
 import { activeRoleSession } from "@/lib/snapshot-reducer";
+import { useTechDebtSummaries } from "@/lib/tech-debt-queries";
 import { cn } from "@/lib/utils";
 import { useLayoutStore } from "@/stores/layout";
 import { ArchiveProjectDialog } from "./archive-project-dialog";
@@ -78,6 +80,8 @@ export function ProjectGroup({
   const [archiving, setArchiving] = useState(false);
   const entries = useProjectMenu(project, position, () => setArchiving(true));
   const pm = useSnapshotData((snap) => activeRoleSession(snap, "pm", project.id), undefined);
+  const { data: techDebt } = useTechDebtSummaries();
+  const openDebt = techDebt?.find((summary) => summary.projectId === project.id)?.open ?? 0;
   const agents = sortSessions(sessions.filter((s) => s.role === "agent" && !s.archivedAt));
   // Counted by the server: the snapshot carries only the recently archived sessions.
   const archived = useSnapshotData((s) => s.archivedSessionCounts[project.id] ?? 0, 0);
@@ -125,6 +129,7 @@ export function ProjectGroup({
             />
             <ProjectTile project={project} />
             <span className="truncate font-medium">{project.name}</span>
+            <TechDebtBadge count={openDebt} />
             {!open && (attention || running > 0) && (
               <span className="ml-auto flex items-center gap-1 pr-1">
                 {attention && <span className="size-1.5 rounded-full bg-status-waiting" />}

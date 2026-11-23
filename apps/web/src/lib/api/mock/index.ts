@@ -485,7 +485,7 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
     ...mockProjectApi(world),
     automations: mockAutomationsApi(world),
     factory: mockFactoryApi(world),
-    techDebt: mockTechDebtApi(),
+    techDebt: mockTechDebtApi(() => world.snapshot.projects),
 
     async updateSettings(patch: SettingsPatch) {
       const settings = Settings.parse(deepMerge(world.snapshot.settings, patch));

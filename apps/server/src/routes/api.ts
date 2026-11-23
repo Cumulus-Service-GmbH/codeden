@@ -83,6 +83,7 @@ export function createApi(ctx: ApiContext) {
         c.json(sessionSnapshot(s, c.req.param("id"), c.req.valid("query"))),
       )
       .route("/projects", projectRoutes(s))
+      .get("/tech-debt", (c) => c.json(s.techDebt.summaries(s.projects.list())))
       .route("/execution", executionRoutes(s))
       .route("/projects", projectGithubRoutes(s))
       .route("/projects", projectFactoryRoutes(s))
