@@ -53,7 +53,10 @@ export function TeamWorkers({ sessionId }: { sessionId: string }) {
       run.coordinatorId === sessionId ||
       run.workers.some((worker) => worker.sessionId === sessionId),
   );
-  return runs?.map((run) => (
+  if (!runs?.length) {
+    return <p className="text-xs text-muted-foreground">No Team workers for this session</p>;
+  }
+  return runs.map((run) => (
     <section key={run.id} className="space-y-1 text-xs" aria-label={`${run.teamName} workers`}>
       <h3 className="font-medium">{run.teamName}</h3>
       <ul className="space-y-1">

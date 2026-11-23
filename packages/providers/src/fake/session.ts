@@ -245,7 +245,7 @@ export class FakeSession implements ProviderSession {
         (this.fake.approval || prompt.includes("[approval]")) &&
         this.autonomy !== "full";
       const approved = asks ? await this.approval(turn) : true;
-      if (approved && !readOnly) await this.commandToolCall(turn);
+      if (approved && !readOnly) await this.commandToolCall(turn, prompt.includes("[hold-shell]"));
       if (this.fake.subagent || prompt.includes("[subagent]")) await this.subagent(turn);
       if (this.fake.followups ?? true) {
         await this.step(turn);
@@ -399,7 +399,9 @@ export class FakeSession implements ProviderSession {
     });
   }
 
-  private async commandToolCall(turn: TurnState): Promise<void> {
+  private async commandToolCall(turn: TurnState, holdRequested: boolean): Promise<void> {
+    const hold = this.fake.holdShell;
+    const holding = holdRequested || hold !== undefined;
     const { threadId, turnId } = turn;
     const id = this.nextId("item");
     const base = {
@@ -407,20 +409,19 @@ export class FakeSession implements ProviderSession {
       kind: "tool_call" as const,
       toolKind: "command" as const,
       toolName: "shell",
-      title: this.fake.holdShell ? "Wait" : "Run echo hello",
-      command: this.fake.holdShell ? "sleep 600" : "echo hello",
+      title: holding ? "Wait" : "Run echo hello",
+      command: holding ? "sleep 600" : "echo hello",
       cwd: this.opts.cwd,
     };
     await this.step(turn);
     this.emit({ type: "item.started", threadId, turnId, item: { ...base, status: "in_progress" } });
-    if (this.fake.holdShell) {
-      const hold = this.fake.holdShell;
+    if (holding) {
       const { signal } = turn.abort;
       const result = Promise.withResolvers<boolean>();
       const cancel = () => result.resolve(true);
       this.shell = { threadId, turnId, itemId: id, cancel };
       signal.addEventListener("abort", cancel, { once: true });
-      void hold.then(() => result.resolve(false));
+      void hold?.then(() => result.resolve(false));
       const cancelled = await result.promise;
       signal.removeEventListener("abort", cancel);
       this.shell = undefined;

@@ -1,7 +1,15 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
 
-export type RightTab = "diff" | "files" | "browser" | "terminal" | "github" | "details" | "thread";
+export type RightTab =
+  | "diff"
+  | "files"
+  | "browser"
+  | "terminal"
+  | "github"
+  | "details"
+  | "workers"
+  | "thread";
 
 export const SIDEBAR = { min: 220, max: 420, default: 268, rail: 56 } as const;
 export const RIGHT = { min: 340, max: 900, default: 460 } as const;

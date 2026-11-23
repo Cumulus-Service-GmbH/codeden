@@ -72,6 +72,7 @@ import { retireRoleSession } from "./role-retire";
 import { startWorkspace } from "./start-workspace";
 
 export interface SessionServiceDeps extends RunnerDeps {
+  forceFakeProvider?: boolean;
   repo: SessionRepo;
   admission?: SessionAdmission;
   projects: ProjectService;
@@ -279,6 +280,9 @@ export class SessionService {
     } = {},
   ): Promise<StartSessionResponse> {
     const { repo, projects } = this.deps;
+    if (this.deps.forceFakeProvider && req.provider !== "fake") {
+      req = { ...req, provider: "fake", model: undefined, effort: undefined, chrome: undefined };
+    }
     assertAutonomy(req.autonomy, options.autonomyFloor);
     if (req.autonomy === undefined && options.autonomyFloor) {
       req = { ...req, autonomy: options.autonomyFloor };
@@ -484,6 +488,7 @@ export class SessionService {
    */
   async fork(id: string, req: ForkSessionRequest): Promise<ForkSessionResponse> {
     const { repo, projects } = this.deps;
+    this.assertForcedProvider(repo.get(id));
     await this.sourceProjectChecked(id);
     const plan = await planFork({ repo, projects, runner: this.runnerOf(id) }, id, req);
     const floor = repo.find(id)?.startMeta?.autonomyFloor;
@@ -501,6 +506,9 @@ export class SessionService {
   async handoff(id: string, req: HandoffSessionRequest): Promise<HandoffSessionResponse> {
     const { repo, projects, utility } = this.deps;
     await this.sourceProjectChecked(id);
+    if (this.deps.forceFakeProvider && req.provider !== "fake") {
+      req = { ...req, provider: "fake", model: undefined, effort: undefined };
+    }
     const plan = await planHandoff({ repo, projects, runner: this.runnerOf(id), utility }, id, req);
     const floor = repo.find(id)?.startMeta?.autonomyFloor;
     if (floor) plan.meta.autonomyFloor = floor;
@@ -517,6 +525,9 @@ export class SessionService {
   async review(id: string, req: ReviewSessionRequest): Promise<ReviewSessionResponse> {
     const { repo, projects } = this.deps;
     await this.sourceProjectChecked(id);
+    if (this.deps.forceFakeProvider && req.provider !== "fake") {
+      req = { ...req, provider: "fake", model: undefined, effort: undefined };
+    }
     const plan = await planReview({ repo, projects, runner: this.runnerOf(id) }, id, req);
     this.createAndLaunch(plan.session, plan.meta, plan.start.workspace, undefined, plan.start.fork);
     return { sessionId: plan.session.id };
@@ -559,6 +570,7 @@ export class SessionService {
   ): Promise<SendMessageResponse> {
     const session = this.deps.repo.get(id);
     assertRoleWritable(session);
+    this.assertForcedProvider(session);
     if (NOT_STARTED.has(session.status)) return this.enqueue(id, req.input, from);
     // A turn on its way to the runner counts as running, though there is nothing to steer yet.
     const delivering = this.delivering.has(id);
@@ -638,6 +650,7 @@ export class SessionService {
     source: QueueSender | QueuedMessage = "user",
   ): Promise<"steered" | "queued"> {
     const session = this.deps.repo.get(id);
+    this.assertForcedProvider(session);
     if (!BUSY.has(session.status)) throw conflict("No turn is running", "no_turn");
     const capabilities = this.provider(session.provider, id)?.capabilities;
     if (!capabilities?.steer) {
@@ -722,6 +735,7 @@ export class SessionService {
    */
   async compact(id: string): Promise<CompactSessionResponse> {
     const session = this.deps.repo.get(id);
+    this.assertForcedProvider(session);
     const refusal = compactRefusal(session, this.provider(session.provider, id), {
       delivering: this.delivering.has(id),
       queued: this.deps.outbox.count(id),
@@ -749,7 +763,8 @@ export class SessionService {
 
   /** Answer a question or approval; `by` is who answered a question (the user or the PM). */
   async respond(id: string, req: RespondRequest, by: Answerer = "user"): Promise<void> {
-    this.deps.repo.get(id);
+    const session = this.deps.repo.get(id);
+    this.assertForcedProvider(session);
     // Questions asked through CodeDen's ask_user tool are answered here, not by the provider.
     if (await this.deps.questions.respond(id, req.requestId, req.response, by)) return;
     await this.runnerOf(id)
@@ -989,6 +1004,7 @@ export class SessionService {
 
   /** Hand a turn's input to the runner, resuming the session when it no longer hosts it. */
   private async deliver(session: Session, input: UserInput): Promise<void> {
+    this.assertForcedProvider(session);
     const runner = this.runnerOf(session.id);
     await applyPendingConfig(this.deps.repo, runner, session);
     const previous = session.status;
@@ -1089,7 +1105,17 @@ export class SessionService {
     return runner.providers().find((p) => p.id === id);
   }
 
+  private assertForcedProvider(session: Session): void {
+    if (this.deps.forceFakeProvider && session.provider !== "fake") {
+      throw conflict(
+        "This session requires a real provider, but Fake is forced",
+        "fake_provider_forced",
+      );
+    }
+  }
+
   private resolveProvider(req: StartSessionRequest, projectDefault: string | null): string {
+    if (this.deps.forceFakeProvider) return "fake";
     const available = this.deps.runner.providers().map((p) => p.id);
     const connected = this.deps.runner.isConnected();
     if (req.provider && req.provider !== "auto") {

@@ -22,11 +22,12 @@ import { PrRequestedButton, PushToastPrAction } from "./open-pr-controls";
  * session runs in place in a folder that isn't a git repository; polling stops then, and the
  * next mount (opening the tab again) asks again.
  */
-export function useGitStatus(sessionId: string) {
+export function useGitStatus(sessionId: string, enabled = true) {
   const client = useClient();
   return useQuery({
     queryKey: ["git-status", sessionId],
     queryFn: () => client.gitStatus(sessionId),
+    enabled,
     retry: false,
     refetchInterval: (query) => (isNotGitRepo(query.state.error) ? false : 15_000),
   });

@@ -34,14 +34,24 @@ export function ApprovalCard({
   sessionId,
   compact = false,
   plan,
+  previousPlan,
 }: {
   item: ItemOf<"approval_request">;
   sessionId: string;
   compact?: boolean;
   plan?: string;
+  previousPlan?: string;
 }) {
   if (item.action === "plan") {
-    return <PlanApprovalCard item={item} sessionId={sessionId} compact={compact} plan={plan} />;
+    return (
+      <PlanApprovalCard
+        item={item}
+        sessionId={sessionId}
+        compact={compact}
+        plan={plan}
+        previousPlan={previousPlan}
+      />
+    );
   }
   return <ActionApprovalCard item={item} sessionId={sessionId} compact={compact} />;
 }

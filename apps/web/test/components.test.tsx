@@ -6,13 +6,31 @@ import { ConflictCard } from "@/components/project/conflict-card";
 import { ApprovalCard } from "@/components/thread/cards/approval-card";
 import { QuestionCard } from "@/components/thread/cards/question-card";
 import { SubagentCard } from "@/components/thread/cards/subagent-card";
+import { TimelineRowView } from "@/components/thread/timeline-row";
 import { WorkGroup } from "@/components/thread/work/work-group";
 import { usageKeys } from "@/components/usage/api";
 import { mockUsageApi } from "@/components/usage/mock-data";
 import { createMockClient } from "@/lib/api/mock";
 import { conflicts } from "@/lib/api/mock/fixtures/sessions";
-import type { WorkEntry } from "@/lib/transcript/timeline";
+import { emptyTranscript } from "@/lib/transcript/reducer";
+import { buildTimeline, type WorkEntry } from "@/lib/transcript/timeline";
 import { renderWithClient } from "./utils";
+
+vi.mock("@/components/on-demand", async (importOriginal) => ({
+  ...(await importOriginal<object>()),
+  MultiFileDiff: ({
+    oldFile,
+    newFile,
+  }: {
+    oldFile: { contents: string };
+    newFile: { contents: string };
+  }) => (
+    <>
+      <del>{oldFile.contents}</del>
+      <ins>{newFile.contents}</ins>
+    </>
+  ),
+}));
 
 const approval: ItemOf<"approval_request"> = {
   id: "ap",
@@ -60,6 +78,48 @@ describe("ApprovalCard for a plan", () => {
     title: "Approve the plan and start implementing",
     options: ["allow_once", "deny"],
   };
+
+  it("shows the diff against the previous plan version after a revision", async () => {
+    const client = createMockClient();
+    const respond = vi.spyOn(client, "respond").mockResolvedValue();
+    const state = emptyTranscript("s1");
+    const items: (ItemOf<"plan"> | ItemOf<"approval_request">)[] = [
+      { id: "p1", kind: "plan", status: "completed", text: "Write the first test" },
+      { ...planApproval, id: "a1", status: "declined", decision: "deny" },
+      { id: "p2", kind: "plan", status: "completed", text: "Write two tests" },
+      { ...planApproval, id: "a2", requestId: "req-revised" },
+    ];
+    state.threads.root = {
+      id: "root",
+      parentThreadId: null,
+      parentItemId: null,
+      title: null,
+      agentType: null,
+      itemIds: items.map((item) => item.id),
+      turnIds: ["first", "revision"],
+    };
+    for (const [index, item] of items.entries()) {
+      state.items[item.id] = { item, turnId: index < 2 ? "first" : "revision", threadId: "root" };
+    }
+    renderWithClient(
+      <div>
+        {buildTimeline(state, "root").map((row) => (
+          <TimelineRowView key={row.key} row={row} sessionId="s1" />
+        ))}
+      </div>,
+      client,
+    );
+    const card = screen.getByTestId("plan-approval");
+    expect(card.querySelector("del")?.textContent).toBe("Write the first test");
+    expect(card.querySelector("ins")?.textContent).toBe("Write two tests");
+    fireEvent.click(screen.getByRole("button", { name: "Approve plan" }));
+    await waitFor(() =>
+      expect(respond).toHaveBeenCalledWith("s1", "req-revised", {
+        kind: "approval",
+        decision: "allow_once",
+      }),
+    );
+  });
 
   it("approves the plan", async () => {
     const client = createMockClient();

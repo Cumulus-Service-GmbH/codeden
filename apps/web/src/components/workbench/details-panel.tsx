@@ -15,7 +15,6 @@ import { useTranscriptsStore } from "@/stores/transcripts";
 import { useVoiceStore } from "@/stores/voice";
 import { ChildRuns } from "./child-runs";
 import { LoadedConfig } from "./loaded-config";
-import { TeamWorkers } from "./team-workers";
 
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -212,7 +211,6 @@ export function DetailsPanel({ session }: { session: Session }) {
       <ContextWindow session={session} />
 
       <ChildRuns session={session} />
-      <TeamWorkers sessionId={session.id} />
 
       <LoadedConfig session={session} />
       <div className="flex items-center justify-between gap-3 text-[13px]">

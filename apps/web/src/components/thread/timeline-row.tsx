@@ -109,7 +109,14 @@ export function TimelineRowView({
       const item = row.item;
       switch (item.kind) {
         case "approval_request":
-          return <ApprovalCard item={item} sessionId={sessionId} />;
+          return (
+            <ApprovalCard
+              item={item}
+              sessionId={sessionId}
+              plan={row.plan}
+              previousPlan={row.previousPlan}
+            />
+          );
         case "user_question":
           return <QuestionCard item={item} sessionId={sessionId} />;
         case "subagent":

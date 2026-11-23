@@ -43,6 +43,7 @@ import { tokenSaverNote } from "./token-saver";
 import { setUnanswered, unansweredCode } from "./unanswered-start";
 
 export interface LauncherDeps extends RunnerDeps {
+  forceFakeProvider?: boolean;
   repo: SessionRepo;
   projects: ProjectService;
   inbox: InboxService;
@@ -323,6 +324,13 @@ export class SessionLauncher {
    * carry, rather than failing a session that is working.
    */
   private async open(runner: RunnerPort, session: Session, input: UserInput | undefined) {
+    if (this.deps.forceFakeProvider && session.provider !== "fake") {
+      throw new ServiceError(
+        409,
+        "fake_provider_forced",
+        "This session requires a real provider, but Fake is forced",
+      );
+    }
     const token = runner.mcpProxyUrl()
       ? this.deps.tokens.mint({
           role: session.role,

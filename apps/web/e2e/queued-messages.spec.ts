@@ -124,3 +124,45 @@ test("the orchestrator and PM chats show the tray too", async ({ page }) => {
   await trayInRoleChat(page, `${env("CODEDEN_E2E_URL")}/projects/${project}/pm`, "PM");
   await trayInRoleChat(page, `${env("CODEDEN_E2E_URL")}/`, "Orchestrator");
 });
+
+test("shows the delivery status while a priority message waits on a running shell call in a Fake session", async ({
+  page,
+}) => {
+  const project = await projectId(page);
+  const started = await api<{ status: string; sessionId: string }>(page, "POST", "/sessions", {
+    projectId: project,
+    provider: "fake",
+    purpose: "Hold a scripted shell call",
+    input: { text: "Wait in the shell [hold-shell]" },
+  });
+  expect(started.status).toBe("started");
+  const path = `/sessions/${started.sessionId}`;
+  try {
+    await page.goto(`${env("CODEDEN_E2E_URL")}${path}`);
+    await expect
+      .poll(async () => {
+        const { session } = await api<{ session: { rootThreadId: string | null } }>(
+          page,
+          "GET",
+          path,
+        );
+        if (!session.rootThreadId) return false;
+        const { items } = await api<{ items: { item: { command?: string; status: string } }[] }>(
+          page,
+          "GET",
+          `${path}/threads/${encodeURIComponent(session.rootThreadId)}/items`,
+        );
+        return items.some(
+          ({ item }) => item.command === "sleep 600" && item.status === "in_progress",
+        );
+      })
+      .toBe(true);
+    await composer(page).fill("Priority follow-up");
+    await composer(page).press("Control+Enter");
+    await expect(
+      page.getByRole("status").filter({ hasText: "delivering, waiting for tool call" }),
+    ).toBeVisible();
+  } finally {
+    await api(page, "POST", `${path}/stop`);
+  }
+});

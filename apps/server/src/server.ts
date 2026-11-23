@@ -225,6 +225,8 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
     opts.secrets === "memory"
       ? new MemorySecretStore()
       : (opts.secrets ?? (await createSecretStore(log)));
+  const forceFakeProvider = process.env.CODEDEN_FAKE_PROVIDER === "1";
+  const enableFakeProvider = forceFakeProvider || opts.enableFakeProvider === true;
   const builtin = opts.builtinProviders ?? process.env.CODEDEN_BUILTIN_PROVIDERS !== "0";
   const exec = opts.exec ?? runTool;
   const sandboxes = new SandboxService({
@@ -234,7 +236,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
       opts.executionBackends?.docker ??
       new DockerBackend({ home: paths.home, exec, gitIdentity: () => gitIdentity(exec), log }),
     // Sandboxes run only providers that need no credentials yet: Fake, when the server has it.
-    fake: opts.enableFakeProvider === true,
+    fake: enableFakeProvider,
     connectTimeoutMs: opts.sandboxConnectTimeoutMs,
     log,
   });
@@ -413,9 +415,11 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
 
   if (opts.runner !== false) {
     const args = [
-      ...(opts.enableFakeProvider ? ["--fake"] : []),
-      ...(builtin ? [] : ["--no-builtin"]),
-      ...(opts.openCodeExecutable ? ["--opencode", opts.openCodeExecutable] : []),
+      ...(enableFakeProvider ? ["--fake"] : []),
+      ...(!builtin || forceFakeProvider ? ["--no-builtin"] : []),
+      ...(!forceFakeProvider && opts.openCodeExecutable
+        ? ["--opencode", opts.openCodeExecutable]
+        : []),
     ];
     const launch = opts.runner ?? defaultRunnerLaunch(args) ?? null;
     runner = runners.add({

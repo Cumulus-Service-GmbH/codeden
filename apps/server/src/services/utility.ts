@@ -95,7 +95,7 @@ export interface OneShotPort {
   available(): string[];
 }
 
-export function runnerOneShot(runner: RunnerPort): OneShotPort {
+export function runnerOneShot(runner: RunnerPort, forceFakeProvider = false): OneShotPort {
   return {
     oneShot: async (providerId, req) =>
       (
@@ -104,7 +104,7 @@ export function runnerOneShot(runner: RunnerPort): OneShotPort {
           (req.timeoutMs ?? 60_000) + 5_000,
         )
       ).text,
-    available: () => runner.providers().map((p) => p.id),
+    available: () => (forceFakeProvider ? [] : runner.providers().map((p) => p.id)),
   };
 }
 

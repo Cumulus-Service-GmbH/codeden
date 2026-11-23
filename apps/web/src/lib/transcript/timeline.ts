@@ -18,7 +18,7 @@ export type TimelineRow =
   | { key: string; type: "work"; turnId: string; entries: WorkStep[]; live: boolean }
   /** A hook run that failed or blocked, on a row of its own so it stands out. */
   | { key: string; type: "hook"; item: HookRun }
-  | { key: string; type: "card"; item: Item }
+  | { key: string; type: "card"; item: Item; plan?: string; previousPlan?: string }
   | {
       key: string;
       type: "turn-end";
@@ -100,12 +100,18 @@ export function buildTimeline(state: TranscriptState, threadId: string): Timelin
     });
   };
 
+  let latestPlan: { turnId: string; text: string } | undefined;
+  let previousPlan: string | undefined;
   let currentTurn: string | null = null;
   for (const entry of entries) {
     const { item, turnId } = entry;
     // Follow-ups are no rows, and the server's own suggestions for a turn can arrive after the
     // next turn began, so they must not split that turn in two.
     if (item.kind === "followups") continue;
+    if (item.kind === "plan") {
+      previousPlan = latestPlan?.text;
+      latestPlan = { turnId, text: item.text };
+    }
     if (currentTurn !== null && turnId !== currentTurn) {
       flush();
       lastTurnRows(currentTurn);
@@ -142,7 +148,18 @@ export function buildTimeline(state: TranscriptState, threadId: string): Timelin
         item,
         streaming: item.status === "in_progress",
       });
-    else if (CARD_KINDS.has(item.kind)) rows.push({ key: item.id, type: "card", item });
+    else if (CARD_KINDS.has(item.kind)) {
+      const plan =
+        item.kind === "approval_request" && item.action === "plan" && latestPlan?.turnId === turnId
+          ? latestPlan.text
+          : undefined;
+      rows.push({
+        key: item.id,
+        type: "card",
+        item,
+        ...(plan !== undefined && { plan, previousPlan }),
+      });
+    }
   }
   flush();
   lastTurnRows(currentTurn);

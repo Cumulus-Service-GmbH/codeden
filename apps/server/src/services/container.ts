@@ -238,11 +238,12 @@ export function createServices(opts: ServicesOptions): AppServices {
   const userHome = opts.userHome ?? homedir();
   const runners = opts.runners ?? singleRunner(opts.runner);
   const sandboxes = opts.sandboxes ?? noSandboxes(opts.db, opts.runner);
+  const forceFakeProvider = process.env.CODEDEN_FAKE_PROVIDER === "1";
   const utility =
     opts.utility ??
     new ProviderUtilityService({
       settings: () => opts.settings.get(),
-      oneShot: runnerOneShot(opts.runner),
+      oneShot: runnerOneShot(opts.runner, forceFakeProvider),
     });
   const projects = new ProjectService({
     db: opts.db,
@@ -294,6 +295,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     log: opts.log,
   };
   const launcher = new SessionLauncher({
+    forceFakeProvider,
     repo: sessionRepo,
     projects,
     runner: opts.runner,
@@ -333,6 +335,7 @@ export function createServices(opts: ServicesOptions): AppServices {
       .catch((error: unknown) => opts.log?.(`Checklist decision message failed: ${String(error)}`));
   });
   sessions = new SessionService({
+    forceFakeProvider,
     admission,
     checklist,
     repo: sessionRepo,

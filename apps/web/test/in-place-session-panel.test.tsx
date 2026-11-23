@@ -174,6 +174,35 @@ beforeEach(() => {
 afterEach(() => vi.restoreAllMocks());
 
 describe("the right panel of a session without a worktree (#409)", () => {
+  it("opens the Workers pane from the session workbench", async () => {
+    await renderShell(IN_PLACE.id, inPlaceClient());
+    fireEvent.click(screen.getByRole("button", { name: "Toggle right panel" }));
+    openTab("Workers");
+    expect(screen.getByRole("tab", { name: "Workers", selected: true })).toBeTruthy();
+    expect(screen.getByText("No Team workers for this session")).toBeTruthy();
+  });
+
+  it("skips git status and diff when reopening a stopped session in a non-git project", async () => {
+    useLayoutStore.setState({ rightOpen: true, rightTab: "diff" });
+    const gitStatus = vi.fn(inPlaceClient().gitStatus);
+    const getDiff = vi.fn(inPlaceClient().getDiff);
+    const stopped = { ...IN_PLACE, status: "stopped" as const };
+    const client = clientWith(stopped, { gitStatus, getDiff });
+    const snapshot = await client.getSnapshot();
+    client.getSnapshot = async () => ({
+      ...snapshot,
+      projects: snapshot.projects.map((project) =>
+        project.id === stopped.projectId
+          ? { ...project, path: stopped.cwd, isGitRepo: false }
+          : project,
+      ),
+    });
+    await renderShell(stopped.id, client);
+    await screen.findByText("Not a git repository");
+    expect(gitStatus).not.toHaveBeenCalled();
+    expect(getDiff).not.toHaveBeenCalled();
+  });
+
   it("shows the right-panel toggle for an in-place session", async () => {
     await renderShell(IN_PLACE.id, inPlaceClient());
     expect(screen.getByRole("heading", { name: IN_PLACE.purpose })).toBeTruthy();
