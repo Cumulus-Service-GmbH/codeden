@@ -125,3 +125,28 @@ it("round-trips PM autonomy policy, tool inputs and the audit event", async () =
     changedBy: "pm1",
   });
 });
+
+it("round-trips the owner's autonomy override and its event envelope", async () => {
+  const { EventEnvelope, SessionAutonomyOverridden } = await import("../src");
+  const at = "2026-11-23T10:00:00.000Z";
+  const payload = {
+    actor: "owner",
+    at,
+    sessionId: "s1",
+    previous: "supervised",
+    autonomy: "full",
+  };
+  expect(SessionAutonomyOverridden.parse(JSON.parse(JSON.stringify(payload)))).toEqual(payload);
+  expect(SessionAutonomyOverridden.safeParse({ ...payload, actor: "pm" }).success).toBe(false);
+  const { at: _at, ...withoutTime } = payload;
+  expect(SessionAutonomyOverridden.safeParse(withoutTime).success).toBe(false);
+
+  const envelope = {
+    seq: 1,
+    ts: at,
+    sessionId: "s1",
+    type: "session.autonomy_overridden",
+    payload,
+  };
+  expect(EventEnvelope.parse(JSON.parse(JSON.stringify(envelope)))).toEqual(envelope);
+});
