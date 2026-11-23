@@ -9,6 +9,7 @@ const TERSE = [
 const COUNT: Record<Exclude<TokenSaverLevel, "off">, number> = { lite: 1, full: 2, ultra: 3 };
 
 const FIXED = [
+  "When you launch a provider-native sub-agent, include these token saver rules at the top of its instructions unless its level was explicitly set.",
   "Keep technical terms, code, paths, numbers and error messages exact. Never drop the words not, never, no or only.",
   "Use plain full sentences for security warnings, irreversible actions, ordered steps, questions to the user, and prose written to files, commits, PRs, issues or docs. Files and output with a required format keep that format exactly.",
   "Text that leaves this session, such as PR bodies, issue comments, commit messages and reviewer findings, always uses full sentences, whatever the level.",

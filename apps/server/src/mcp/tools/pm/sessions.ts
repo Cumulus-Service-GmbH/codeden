@@ -142,6 +142,7 @@ export const startSession = defineTool({
       issue,
       startedBy: { kind: "pm", id: sessionId ?? undefined, reportTo: input.reportTo },
       parentSessionId: sessionId ?? undefined,
+      tokenSaver: input.tokenSaver,
       // The brief is the session's first message: no sender line, but the transcript shows
       // it as the PM's.
       input: { text: input.prompt, from: "pm" },

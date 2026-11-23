@@ -32,6 +32,7 @@ const noFollow = it.runIf(Boolean(constants.O_NOFOLLOW));
 noFollow("passes CHILD_RUNS_FILE and lists what the session's tools logged", () => {
   const runs = join(dir, "child-runs");
   const launcher = new SessionLauncher({
+    repo: { find: () => undefined },
     runner: { mcpProxyUrl: () => null },
     home: join(dir, "home"),
     childRunsDir: runs,

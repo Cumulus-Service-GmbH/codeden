@@ -12,6 +12,7 @@ import { sampleSession } from "./helpers";
 // #602: the token saver note rides on the system prompt, at the session's resolved level.
 function launcher(tokenSaver?: TokenSaverSettings): SessionLauncher {
   return new SessionLauncher({
+    repo: { find: () => undefined },
     runner: { mcpProxyUrl: () => null, providers: () => [] },
     projects: { get: () => null },
     home: "/tmp/codeden-home",

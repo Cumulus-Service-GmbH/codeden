@@ -89,6 +89,37 @@ it("the session's own saver level wins over the project and role defaults", () =
   );
 });
 
+it("a child session inherits the parent's token saver level", () => {
+  const parent = { ...sampleSession, id: "parent", projectId: "p1", role: "pm" as const };
+  const child = { ...parent, id: "child", parentSessionId: parent.id, role: "agent" as const };
+  const grandchild = { ...child, id: "grandchild", parentSessionId: child.id };
+  const rows = new Map<
+    string,
+    { session: typeof parent | typeof child; startMeta: { tokenSaver?: string } }
+  >([
+    [parent.id, { session: parent, startMeta: { tokenSaver: "ultra" } }],
+    [child.id, { session: child, startMeta: {} }],
+    [grandchild.id, { session: grandchild, startMeta: {} }],
+  ]);
+  const launcher = new SessionLauncher({
+    runner: { mcpProxyUrl: () => null, providers: () => [] },
+    projects: { get: () => null },
+    home: "/tmp/codeden-home",
+    tokenSaver: () => TokenSaverSettings.parse({ default: "lite", roles: { pm: "full" } }),
+    repo: { find: (id: string) => rows.get(id) },
+  } as unknown as LauncherDeps);
+  const prompt = (session: typeof child) => launcher.sessionOptions(session).systemPrompt;
+  expect(prompt(child)).toContain(tokenSaverNote("ultra"));
+  expect(prompt(grandchild)).toContain(tokenSaverNote("ultra"));
+  rows.set(child.id, { session: child, startMeta: { tokenSaver: "off" } });
+  expect(prompt(child)).not.toContain("## Token saver");
+  expect(prompt(grandchild)).not.toContain("## Token saver");
+  rows.set(parent.id, { session: parent, startMeta: {} });
+  rows.set(child.id, { session: child, startMeta: {} });
+  expect(prompt(grandchild)).toContain(tokenSaverNote("full"));
+  expect(prompt(grandchild)).toContain("When you launch a provider-native sub-agent");
+});
+
 it("fills a matching provider's unset pins, titles from the first message, and uses the default Team only when it's for new projects", () => {
   const sameProvider = withTeamRole(
     StartSessionRequest.parse({

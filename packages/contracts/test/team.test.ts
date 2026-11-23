@@ -110,7 +110,12 @@ it("round-trips PM autonomy policy, tool inputs and the audit event", async () =
     expect(schema.parse(JSON.parse(JSON.stringify(input)))).toEqual(input);
   };
   roundTrip(AutonomyPolicy, { writer: { migration: "supervised" } });
-  roundTrip(PmStartSessionInput, { prompt: "Go", purpose: "migration", autonomy: "supervised" });
+  roundTrip(PmStartSessionInput, {
+    prompt: "Go",
+    purpose: "migration",
+    autonomy: "supervised",
+    tokenSaver: "off",
+  });
   const change = { sessionId: "s1", autonomy: "supervised", reason: "Review each command" };
   roundTrip(SetSessionAutonomyInput, change);
   roundTrip(SessionAutonomyChanged, {

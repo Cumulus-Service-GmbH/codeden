@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ChecklistItem } from "./checklist";
 import { AutonomyLevel, Id, ProviderId, ReasoningEffort } from "./common";
+import { TokenSaverLevel } from "./token-saver";
 import { ConflictDecision, WorkKey } from "./work";
 
 /** Input for the PM tool that opens an agent session. */
@@ -26,6 +27,8 @@ export const PmStartSessionInput = z.object({
   provider: ProviderId.optional(),
   model: z.string().min(1).optional(),
   effort: ReasoningEffort.optional(),
+  /** Overrides the parent session's token saver level. */
+  tokenSaver: TokenSaverLevel.optional(),
   conflict: ConflictDecision.optional(),
   reportTo: z
     .enum(["orchestrator"])
