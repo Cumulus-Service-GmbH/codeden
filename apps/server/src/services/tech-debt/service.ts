@@ -43,6 +43,19 @@ function recordFinding(input: TechDebtFindingInput, source: "backfill" | null): 
   };
 }
 
+function failedIssue(view: TechDebtView) {
+  // Older views stored the error without an issue reference.
+  return view.importErrorIssue ?? (view.importError === undefined ? null : view.issue);
+}
+
+function clearImportError({
+  importError: _error,
+  importErrorIssue: _issue,
+  ...view
+}: TechDebtView) {
+  return view;
+}
+
 export class TechDebtService {
   private readonly pending = new Map<string, Promise<unknown>>();
 
@@ -56,8 +69,8 @@ export class TechDebtService {
   list(project: Project): Promise<TechDebtList> {
     return this.inProject(project, async () => {
       const view = this.get(project.id);
-      if (!view.issue || view.imported) return view;
-      return this.mergeIssue(view, view.issue);
+      const issue = view.importErrorIssue ?? (view.imported ? null : view.issue);
+      return issue ? this.mergeIssue(view, issue) : view;
     });
   }
 
@@ -120,30 +133,24 @@ export class TechDebtService {
     issue: string,
     seed?: string,
   ): Promise<TechDebtView> {
-    const configured = view.issue ?? issue;
+    const target = issue.toLowerCase();
     let result: Awaited<ReturnType<TechDebtIssuePort["read"]>>;
     try {
       result = await this.issues.read(issue);
     } catch (error) {
       const importError = errorMessage(error);
-      return importError === view.importError && view.issue === configured
+      return importError === view.importError && view.importErrorIssue === issue
         ? view
-        : this.save({ ...view, issue: configured, importError });
+        : this.save({ ...view, importError, importErrorIssue: issue });
     }
     const findings = mergeFindings(view.findings, issueFindings(issue, result.body, result.date));
-    const imported = view.imported || configured.toLowerCase() === issue.toLowerCase();
-    if (
-      !seed &&
-      view.issue === configured &&
-      view.imported === imported &&
-      view.importError === undefined &&
-      findings === view.findings
-    )
+    const imported = view.imported || view.issue?.toLowerCase() === target;
+    const clearsError = failedIssue(view)?.toLowerCase() === target;
+    if (!seed && !clearsError && imported === view.imported && findings === view.findings) {
       return view;
-    const { importError: _importError, ...rest } = view;
+    }
     return this.save({
-      ...rest,
-      issue: configured,
+      ...(clearsError ? clearImportError(view) : view),
       imported,
       findings,
       seeds: seed ? [...view.seeds, seed] : view.seeds,
@@ -157,8 +164,16 @@ export class TechDebtService {
       switch (action.action) {
         case "configure": {
           if (action.issue === view.issue) return view;
-          const { importError: _importError, ...rest } = view;
-          return this.save({ ...rest, issue: action.issue, imported: false });
+          const failed = failedIssue(view)?.toLowerCase();
+          const clearsError =
+            failed &&
+            view.issue?.toLowerCase() === failed &&
+            action.issue?.toLowerCase() !== failed;
+          return this.save({
+            ...(clearsError ? clearImportError(view) : view),
+            issue: action.issue,
+            imported: false,
+          });
         }
         case "record": {
           const findings = mergeFindings(view.findings, [recordFinding(action.finding, null)]);

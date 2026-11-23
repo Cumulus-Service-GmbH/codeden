@@ -6,6 +6,7 @@ import type { TechDebtService } from "./service";
 /** Injectable sources for the one-time startup import. */
 export interface SeedOptions {
   issues: { repo: string; issue: string }[];
+  codedenRepos: string[];
   backfill: { files: string[] };
   listFiles: () => { file: string; tree?: string }[];
   readFile: (file: string) => { text: string; date: string } | undefined;
@@ -72,13 +73,23 @@ export async function seedTechDebt(deps: SeedDeps): Promise<void> {
   const projects = deps.projects().filter((project) => !project.archivedAt);
   for (const { repo, issue } of deps.issues) {
     const project = forRepo(projects, repo);
-    if (project) await deps.service.importIssue(project, issue, { seed: `issue:${issue}` });
-    else deps.log(`Tech debt seed skipped: no project for ${repo}`);
+    if (!project) {
+      deps.log(`Tech debt seed skipped: no project for ${repo}`);
+      continue;
+    }
+    try {
+      await deps.service.importIssue(project, issue, { seed: `issue:${issue}` });
+    } catch {
+      deps.log(`Tech debt seed could not import ${issue}`);
+    }
   }
 
-  const codeden = projects.find(
-    (project) => project.kind === "github" && project.github?.repo.toLowerCase() === "codeden",
+  const namedCodeden = projects.filter(
+    (project) => project.kind === "github" && project.github.repo.toLowerCase() === "codeden",
   );
+  const codeden =
+    deps.codedenRepos.map((repo) => forRepo(projects, repo)).find((project) => project) ??
+    (namedCodeden.length === 1 ? namedCodeden[0] : undefined);
   const files = [
     ...deps.backfill.files.map((file) => ({ file, tree: undefined })),
     ...deps.listFiles(),

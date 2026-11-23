@@ -1,7 +1,7 @@
 import { TechDebtAction, type TechDebtFinding } from "@codeden/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -20,6 +20,10 @@ export function TechDebtPanel({ projectId }: { projectId: string }) {
   const cache = useQueryClient();
   const queryKey = ["tech-debt", projectId];
   const query = useQuery({ queryKey, queryFn: () => techDebt.list(projectId) });
+  const { dataUpdatedAt } = query;
+  useEffect(() => {
+    if (dataUpdatedAt) void cache.invalidateQueries({ queryKey: techDebtSummariesKey });
+  }, [cache, dataUpdatedAt]);
   const [selected, setSelected] = useState<string[]>([]);
   const [dismiss, setDismiss] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -30,7 +34,6 @@ export function TechDebtPanel({ projectId }: { projectId: string }) {
       if (action.action === "fix") setSelected([]);
       if (action.action === "dismiss") setDismiss(null);
       if (action.action === "configure") await cache.invalidateQueries({ queryKey });
-      await cache.invalidateQueries({ queryKey: techDebtSummariesKey });
     },
   });
   const submit = (value: unknown) => {
@@ -79,14 +82,7 @@ export function TechDebtPanel({ projectId }: { projectId: string }) {
           {view.importError && (
             <div className="flex items-center gap-2">
               <p role="alert">{view.importError}</p>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={async () => {
-                  await query.refetch();
-                  await cache.invalidateQueries({ queryKey: techDebtSummariesKey });
-                }}
-              >
+              <Button size="sm" variant="outline" onClick={() => void query.refetch()}>
                 Retry import
               </Button>
             </div>

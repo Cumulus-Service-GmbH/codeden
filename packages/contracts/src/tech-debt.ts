@@ -35,6 +35,8 @@ export const TechDebtView = z.object({
   imported: z.boolean(),
   findings: z.array(TechDebtFinding),
   importError: z.string().optional(),
+  /** The issue whose failed read is reported by importError and retried on list. */
+  importErrorIssue: TechDebtIssue.optional(),
   seeds: z.array(z.string()).default([]),
 });
 export type TechDebtView = z.infer<typeof TechDebtView>;

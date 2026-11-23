@@ -265,7 +265,10 @@ describe("project tech debt", () => {
     });
     read.mockRejectedValueOnce(new Error("Issue unavailable"));
     expect(await service.importIssue(project, issue)).toMatchObject({
+      issue: null,
+      imported: false,
       importError: "Issue unavailable",
+      importErrorIssue: issue,
     });
     expect(service.summaries([project, local])).toEqual([
       { projectId: project.id, open: 1, importError: "Issue unavailable" },
@@ -277,19 +280,88 @@ describe("project tech debt", () => {
       body: [low, other, other.replace("[ ]", "[x]").replace(":5", ":6")].join("\n"),
       date,
     });
-    const imported = await service.importIssue(project, issue);
-    expect(imported).toMatchObject({ issue, imported: true });
+    const imported = await service.importIssue(project, "Owner/Repo#246");
+    expect(imported).toMatchObject({ issue: null, imported: false });
     expect(imported.importError).toBeUndefined();
+    expect(imported.importErrorIssue).toBeUndefined();
     expect(imported.findings).toHaveLength(3);
-    expect(imported.findings[1]).toMatchObject({ source: issue, receipt: "r1", date, pr: "#9" });
+    expect(imported.findings[1]).toMatchObject({
+      source: "Owner/Repo#246",
+      receipt: "r1",
+      date,
+      pr: "#9",
+    });
     expect(imported.findings[2]?.status).toBe("fixed");
     expect(await service.importIssue(project, "owner/repo#247")).toMatchObject({
-      issue,
-      imported: true,
+      issue: null,
+      imported: false,
     });
     expect(service.summaries([project, { ...local, archivedAt: date }])).toEqual([
       { projectId: project.id, open: 2 },
     ]);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("keeps a non-tracking import error after importing the tracking issue", async () => {
+    const { service, project, read } = setup();
+    const failed = "owner/repo#247";
+    await service.act(project, { action: "configure", issue });
+    read.mockRejectedValueOnce(new Error("Issue unavailable"));
+    await service.importIssue(project, failed);
+
+    expect(await service.importIssue(project, "Owner/Repo#246")).toMatchObject({
+      issue,
+      imported: true,
+      importError: "Issue unavailable",
+      importErrorIssue: failed,
+    });
+  });
+
+  it("retries the failed non-tracking issue from list after the tracking issue is imported", async () => {
+    const { service, project, read } = setup();
+    const failed = "owner/repo#247";
+    await service.act(project, { action: "configure", issue });
+    await service.list(project);
+    read.mockRejectedValueOnce(new Error("Issue unavailable"));
+    await service.importIssue(project, failed);
+
+    const view = await service.list(project);
+    expect(read.mock.calls).toEqual([[issue], [failed], [failed]]);
+    expect(view).toMatchObject({ issue, imported: true });
+    expect(view.importError).toBeUndefined();
+    expect(view.importErrorIssue).toBeUndefined();
+  });
+
+  it("clears an import error when configure moves the tracking issue away from its source", async () => {
+    const { service, project, read } = setup();
+    const failed = "Owner/Repo#246";
+    await service.act(project, { action: "configure", issue });
+    read.mockRejectedValueOnce(new Error("Issue unavailable"));
+    await service.importIssue(project, failed);
+
+    expect(
+      await service.act(project, { action: "configure", issue: "OWNER/REPO#246" }),
+    ).toMatchObject({
+      importError: "Issue unavailable",
+      importErrorIssue: failed,
+    });
+    const view = await service.act(project, { action: "configure", issue: "owner/repo#247" });
+    expect(view.importError).toBeUndefined();
+    expect(view.importErrorIssue).toBeUndefined();
+  });
+
+  it("dismisses a backfilled finding without writing to the tracking issue", async () => {
+    const { service, project, write } = setup();
+    await service.act(project, { action: "configure", issue });
+    const { findings } = await service.backfill(project, "backfill:review", [
+      { location: "src/local.ts:5", text: "Local.", receipt: null, date, pr: null },
+    ]);
+    const view = await service.act(project, {
+      action: "dismiss",
+      id: findings[0]?.id ?? "",
+      reason: "Superseded.",
+    });
+    expect(view.findings[0]).toMatchObject({ source: "backfill", status: "dismissed" });
     expect(write).not.toHaveBeenCalled();
   });
 

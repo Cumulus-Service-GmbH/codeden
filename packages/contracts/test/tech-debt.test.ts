@@ -40,6 +40,7 @@ describe("project tech debt contracts", () => {
       imported: false,
       seeds: ["backfill:/tmp/review.json"],
       importError: "Unavailable",
+      importErrorIssue: "owner/repo#246",
       findings: [
         {
           id: "f",

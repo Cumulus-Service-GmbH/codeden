@@ -10,7 +10,7 @@ import {
   realpathSync,
   type Stats,
 } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { dirname, join, relative, sep } from "node:path";
 import { promisify } from "node:util";
 import type { SeedOptions } from "./seed";
 
@@ -88,8 +88,10 @@ function readFile(file: string) {
 }
 
 /** The startup issue references and local review locations used by production entry points. */
-export function defaultTechDebtSeed(): SeedOptions {
+export function defaultTechDebtSeed(): SeedOptions | false {
+  if (process.env.CODEDEN_TECH_DEBT_SEED === "0") return false;
   return {
+    codedenRepos: ["leonvanzyl/codeden"],
     issues: [
       {
         repo: "Cumulus-Service-GmbH/foundry-agent-webapp",
@@ -108,6 +110,7 @@ export function defaultTechDebtSeed(): SeedOptions {
       if (!path) return null;
       try {
         const { stdout } = await runGit("git", ["-C", path, "remote", "get-url", "origin"], {
+          env: { ...process.env, GIT_CEILING_DIRECTORIES: dirname(path) },
           timeout: 5000,
           maxBuffer: 8192,
         });
