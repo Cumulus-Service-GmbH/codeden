@@ -1,11 +1,5 @@
 import { CODEDEN_VERSION, DesktopHostMessage, type DesktopServerMessage } from "@codeden/contracts";
-import {
-  defaultTechDebtSeed,
-  ensureHome,
-  ensureInstallToken,
-  resolveHome,
-  startServer,
-} from "@codeden/server";
+import { ensureHome, ensureInstallToken, resolveHome, startServer } from "@codeden/server";
 import { serverLog } from "./log";
 import { IpcDesktopUpdater } from "./update-bridge";
 
@@ -29,7 +23,6 @@ export async function serve(opts: { home?: string; port: number; fake: boolean }
     port: opts.port,
     dataDir: home,
     token,
-    techDebtSeed: defaultTechDebtSeed(),
     enableFakeProvider: opts.fake || process.env.CODEDEN_FAKE_PROVIDER === "1",
     onShutdownRequest: (exitCode) => {
       console.log(`server: shutdown requested through the API (code ${exitCode})`);

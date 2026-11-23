@@ -6,7 +6,6 @@
 import { join } from "node:path";
 import { CODEDEN_VERSION } from "@codeden/contracts";
 import {
-  defaultTechDebtSeed,
   ensureHome,
   ensureInstallToken,
   type RunningServer,
@@ -77,7 +76,6 @@ export async function runCommand(args: string[], parsed: ParsedCli): Promise<num
       port,
       dataDir: home,
       token,
-      techDebtSeed: defaultTechDebtSeed(),
       enableFakeProvider: process.env.CODEDEN_FAKE_PROVIDER === "1",
       onShutdownRequest: (exitCode) => process.exit(exitCode),
       selfUpdate: {

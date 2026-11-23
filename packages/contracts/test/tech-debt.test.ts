@@ -26,19 +26,18 @@ describe("project tech debt contracts", () => {
         payload: { view },
       }).payload,
     ).toEqual({ view });
-    expect(view.seeds).toEqual([]);
     expect(TechDebtIssue.safeParse("repo#246").success).toBe(false);
     expect(TechDebtIssue.safeParse("owner/repo#0").success).toBe(false);
   });
 
-  it("round-trips summaries and backfilled findings with seed state", () => {
+  it("round-trips summaries and reads legacy views without retaining seed state", () => {
     const summaries = [{ projectId: "p", open: 1, importError: "Unavailable" }];
     expect(TechDebtSummaries.parse(JSON.parse(JSON.stringify(summaries)))).toEqual(summaries);
-    const view = {
+    const legacy = {
       projectId: "p",
       issue: null,
       imported: false,
-      seeds: ["backfill:/tmp/review.json"],
+      seeds: ["review-file"],
       importError: "Unavailable",
       importErrorIssue: "owner/repo#246",
       findings: [
@@ -56,7 +55,22 @@ describe("project tech debt contracts", () => {
         },
       ],
     };
-    expect(TechDebtView.parse(JSON.parse(JSON.stringify(view)))).toEqual(view);
+    const { seeds: _seeds, ...view } = legacy;
+    const expected = {
+      ...view,
+      findings: legacy.findings.map((finding) => ({ ...finding, source: null, localOnly: true })),
+    };
+    const parsed = TechDebtView.parse(JSON.parse(JSON.stringify(legacy)));
+    expect(parsed).toEqual(expected);
+    const event = {
+      seq: 1,
+      ts: "2026-11-23T00:00:00.000Z",
+      sessionId: null,
+      type: "tech_debt.updated",
+      payload: { view: legacy },
+    };
+    expect(EventEnvelope.parse(event).payload).toEqual({ view: expected });
+    expect(TechDebtView.parse(JSON.parse(JSON.stringify(parsed)))).toEqual(expected);
   });
 
   it("accepts only LOW records with a file and line, and qualified import issues", () => {

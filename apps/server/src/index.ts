@@ -19,7 +19,6 @@ export {
 export { type AppType, type RunningServer, type StartServerOptions, startServer } from "./server";
 export { FILE_RESET_NOTICES, fileResetMessage } from "./services/file-reset-notice";
 export { checkSetup } from "./services/setup/check-setup";
-export { defaultTechDebtSeed } from "./services/tech-debt/seed-defaults";
 export {
   appDir,
   applyRollback,

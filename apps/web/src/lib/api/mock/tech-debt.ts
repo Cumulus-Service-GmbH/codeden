@@ -4,7 +4,7 @@ import type { TechDebtApi } from "../tech-debt-api";
 export function mockTechDebtApi(projects: () => Project[]): TechDebtApi {
   const views = new Map<string, TechDebtView>();
   const list = (projectId: string): TechDebtView =>
-    views.get(projectId) ?? { projectId, issue: null, imported: false, findings: [], seeds: [] };
+    views.get(projectId) ?? { projectId, issue: null, imported: false, findings: [] };
   return {
     summaries: async () =>
       projects()

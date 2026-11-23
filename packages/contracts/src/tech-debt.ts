@@ -21,23 +21,30 @@ export type TechDebtFindingInput = z.infer<typeof TechDebtFindingInput>;
 /** Local state and the source identity used to synchronize an imported checklist entry. */
 export const TechDebtFinding = TechDebtFindingInput.extend({
   id: Id,
-  source: z.union([TechDebtIssue, z.literal("backfill")]).nullable(),
+  source: TechDebtIssue.nullable(),
+  /** Legacy local findings must never be copied to the tracking issue. */
+  localOnly: z.literal(true).optional(),
   status: z.enum(["open", "in_progress", "fixed", "dismissed"]),
   reason: z.string().nullable(),
   sessionId: Id.nullable(),
 });
 export type TechDebtFinding = z.infer<typeof TechDebtFinding>;
 
+const storedFinding = TechDebtFinding.or(
+  TechDebtFinding.extend({ source: z.literal("backfill") }).transform(
+    (finding): TechDebtFinding => ({ ...finding, source: null, localOnly: true }),
+  ),
+);
+
 /** The project settings and durable findings read by the panel and MCP. */
 export const TechDebtView = z.object({
   projectId: Id,
   issue: TechDebtIssue.nullable(),
   imported: z.boolean(),
-  findings: z.array(TechDebtFinding),
+  findings: z.array(storedFinding),
   importError: z.string().optional(),
   /** The issue whose failed read is reported by importError and retried on list. */
   importErrorIssue: TechDebtIssue.optional(),
-  seeds: z.array(z.string()).default([]),
 });
 export type TechDebtView = z.infer<typeof TechDebtView>;
 

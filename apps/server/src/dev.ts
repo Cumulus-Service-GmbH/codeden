@@ -5,7 +5,6 @@
 import { resolve } from "node:path";
 import { ensureHome } from "./paths";
 import { startServer } from "./server";
-import { defaultTechDebtSeed } from "./services/tech-debt/seed-defaults";
 import { ensureInstallToken } from "./token";
 
 const home = process.env.CODEDEN_HOME ?? resolve(import.meta.dirname, "../../../.codeden-dev");
@@ -17,7 +16,6 @@ const server = await startServer({
   dataDir: home,
   token,
   enableFakeProvider: true,
-  techDebtSeed: defaultTechDebtSeed(),
   allowedOrigins: ["http://localhost:5173", "http://127.0.0.1:5173"],
   log: (m) => console.log(`[codeden] ${m}`),
 });

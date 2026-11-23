@@ -43,7 +43,6 @@ import { SearchBackfill } from "./services/search/backfill";
 import { createSecretStore, MemorySecretStore, type SecretStore } from "./services/secrets";
 import { sessionWorkdir } from "./services/sessions/workdir";
 import type { Locate } from "./services/setup/tool-lookup";
-import { type SeedOptions, seedTechDebt } from "./services/tech-debt/seed";
 import type { UtilityService } from "./services/utility";
 import { SettingsStore } from "./settings-store";
 
@@ -71,8 +70,6 @@ export interface StartServerOptions {
   runnerRequestTimeoutFloorMs?: number;
   /** Load the scripted Fake provider in the runner (development and tests). */
   enableFakeProvider?: boolean;
-  /** Import the configured startup sources when explicitly enabled. */
-  techDebtSeed?: SeedOptions | false;
   /**
    * Load the real Claude Code, Codex and OpenCode adapters in a runner this server starts.
    * Default true, unless `CODEDEN_BUILTIN_PROVIDERS=0` (the server test suite sets it).
@@ -279,14 +276,6 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
   services.lifecycle.start();
   services.orchestration.start();
   services.github.start({ sync: opts.github?.sync ?? process.env.CODEDEN_GITHUB_SYNC !== "0" });
-  if (opts.techDebtSeed) {
-    void seedTechDebt({
-      ...opts.techDebtSeed,
-      service: services.techDebt,
-      projects: () => services.projects.list(),
-      log,
-    }).catch(() => log("Tech debt startup seed failed"));
-  }
   // A folder may have gained a git checkout or a GitHub remote while CodeDen was away.
   services.redetector.start();
   services.usage.start();

@@ -32,11 +32,11 @@ function mergeFindings(existing: TechDebtFinding[], incoming: TechDebtFinding[])
   return added.length ? [...existing, ...added] : existing;
 }
 
-function recordFinding(input: TechDebtFindingInput, source: "backfill" | null): TechDebtFinding {
+function recordFinding(input: TechDebtFindingInput): TechDebtFinding {
   return {
     ...input,
     id: debtId(`${input.location}\n${input.text}`),
-    source,
+    source: null,
     status: "open",
     sessionId: null,
     reason: null,
@@ -77,7 +77,7 @@ export class TechDebtService {
   importIssue(
     project: Project,
     issue: string,
-    { seed, restrictToProject = false }: { seed?: string; restrictToProject?: boolean } = {},
+    { restrictToProject = false }: { restrictToProject?: boolean } = {},
   ): Promise<TechDebtView> {
     return this.inProject(project, async () => {
       const view = this.get(project.id);
@@ -90,20 +90,7 @@ export class TechDebtService {
           throw badRequest("Use an issue from this project's repository or its tracking issue");
         }
       }
-      if (seed && view.seeds.includes(seed)) return view;
-      return this.mergeIssue(view, target, seed);
-    });
-  }
-
-  backfill(project: Project, seed: string, inputs: TechDebtFindingInput[]): Promise<TechDebtView> {
-    return this.inProject(project, async () => {
-      const view = this.get(project.id);
-      if (view.seeds.includes(seed)) return view;
-      const findings = mergeFindings(
-        view.findings,
-        inputs.map((input) => recordFinding(input, "backfill")),
-      );
-      return this.save({ ...view, findings, seeds: [...view.seeds, seed] });
+      return this.mergeIssue(view, target);
     });
   }
 
@@ -128,11 +115,7 @@ export class TechDebtService {
       });
   }
 
-  private async mergeIssue(
-    view: TechDebtView,
-    issue: string,
-    seed?: string,
-  ): Promise<TechDebtView> {
+  private async mergeIssue(view: TechDebtView, issue: string): Promise<TechDebtView> {
     const target = issue.toLowerCase();
     let result: Awaited<ReturnType<TechDebtIssuePort["read"]>>;
     try {
@@ -146,14 +129,13 @@ export class TechDebtService {
     const findings = mergeFindings(view.findings, issueFindings(issue, result.body, result.date));
     const imported = view.imported || view.issue?.toLowerCase() === target;
     const clearsError = failedIssue(view)?.toLowerCase() === target;
-    if (!seed && !clearsError && imported === view.imported && findings === view.findings) {
+    if (!clearsError && imported === view.imported && findings === view.findings) {
       return view;
     }
     return this.save({
       ...(clearsError ? clearImportError(view) : view),
       imported,
       findings,
-      seeds: seed ? [...view.seeds, seed] : view.seeds,
     });
   }
 
@@ -176,7 +158,7 @@ export class TechDebtService {
           });
         }
         case "record": {
-          const findings = mergeFindings(view.findings, [recordFinding(action.finding, null)]);
+          const findings = mergeFindings(view.findings, [recordFinding(action.finding)]);
           return findings === view.findings ? view : this.save({ ...view, findings });
         }
         case "fix": {
@@ -203,7 +185,11 @@ export class TechDebtService {
             throw badRequest("This finding is already closed");
           }
           const issue = view.issue;
-          if (issue && (!finding.source || finding.source.toLowerCase() === issue.toLowerCase())) {
+          if (
+            issue &&
+            !finding.localOnly &&
+            (!finding.source || finding.source.toLowerCase() === issue.toLowerCase())
+          ) {
             await this.serial(`issue:${issue.toLowerCase()}`, () =>
               syncDebtTick(this.issues, issue, finding),
             );

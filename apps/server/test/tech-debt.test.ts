@@ -1,6 +1,8 @@
+import type { Project } from "@codeden/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ServerToolContext } from "../src/mcp/define";
 import { type ToolCaller, ToolRegistry } from "../src/mcp/registry";
-import { listTechDebt } from "../src/mcp/tools/tech-debt";
+import { importTechDebt, listTechDebt, recordTechDebt } from "../src/mcp/tools/tech-debt";
 import { techDebtIssuePort } from "../src/services/tech-debt/issue";
 import { TechDebtService } from "../src/services/tech-debt/service";
 import { createGithubEnv } from "./support/github-env";
@@ -10,6 +12,20 @@ const date = "2026-11-23T00:00:00.000Z";
 const low =
   "- [ ] LOW `src/build.ts:12` — Use the shared helper. | Receipt: review-1 | Date: 2026-11-23 | PR: #42";
 const medium = "- [ ] MEDIUM `src/build.ts:20` — Reproduce the failure.";
+
+function pmContext(project: Project, techDebt: TechDebtService): ServerToolContext<"global"> {
+  return {
+    role: "pm",
+    projectId: project.id,
+    sessionId: "pm",
+    caller: "mcp",
+    signal: new AbortController().signal,
+    services: {
+      techDebt,
+      projects: { get: () => project },
+    } as unknown as ServerToolContext<"global">["services"],
+  };
+}
 
 describe("project tech debt", () => {
   const envs: ReturnType<typeof createGithubEnv>[] = [];
@@ -251,6 +267,54 @@ describe("project tech debt", () => {
     expect(env.store.headSeq()).toBe(seq);
   });
 
+  it("retries an MCP issue import without changing the tracking issue or duplicating findings", async () => {
+    const { env, service, project, read, write } = setup();
+    const target = `${env.gh.owner}/${env.gh.repo}#247`;
+    const context = pmContext(project, service);
+    await service.act(project, { action: "configure", issue });
+    read.mockRejectedValueOnce(new Error("Issue unavailable"));
+
+    await expect(importTechDebt.handler({ issue: target }, context)).resolves.toMatchObject({
+      issue,
+      imported: false,
+      findings: [],
+      importError: "Issue unavailable",
+      importErrorIssue: target,
+    });
+
+    const recovered = await importTechDebt.handler({ issue: target }, context);
+    expect(recovered).toMatchObject({
+      issue,
+      imported: false,
+      findings: [
+        {
+          source: target,
+          location: "src/build.ts:12",
+          text: "Use the shared helper.",
+          receipt: "review-1",
+          date,
+          pr: "#42",
+          status: "open",
+        },
+      ],
+    });
+    expect(recovered).not.toHaveProperty("importError");
+    expect(recovered).not.toHaveProperty("importErrorIssue");
+    expect(await importTechDebt.handler({ issue: target }, context)).toEqual(recovered);
+    expect(read.mock.calls).toEqual([[target], [target], [target]]);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("records the same location and text only once through MCP", async () => {
+    const { service, project } = setup();
+    const context = pmContext(project, service);
+    const finding = { location: "src/file.ts:2", text: "Reuse the helper.", receipt: "r1" };
+    const first = await recordTechDebt.handler(recordTechDebt.input.parse(finding), context);
+    const retry = recordTechDebt.input.parse({ ...finding, receipt: "r2" });
+    expect(await recordTechDebt.handler(retry, context)).toEqual(first);
+    expect(first).toMatchObject({ findings: [finding] });
+  });
+
   it("persists import errors, merges explicit imports, and counts only open findings", async () => {
     const { service, project, local, read, write } = setup();
     await service.act(project, {
@@ -350,18 +414,39 @@ describe("project tech debt", () => {
     expect(view.importErrorIssue).toBeUndefined();
   });
 
-  it("dismisses a backfilled finding without writing to the tracking issue", async () => {
-    const { service, project, write } = setup();
-    await service.act(project, { action: "configure", issue });
-    const { findings } = await service.backfill(project, "backfill:review", [
-      { location: "src/local.ts:5", text: "Local.", receipt: null, date, pr: null },
-    ]);
+  it("keeps a legacy finding local after saving another change and dismissing it", async () => {
+    const { env, service, project, read, write } = setup();
+    const finding = { location: "src/local.ts:5", text: "Local.", receipt: null, date, pr: null };
+    env.db.client.prepare("INSERT INTO project_tech_debt (project_id, view) VALUES (?, ?)").run(
+      project.id,
+      JSON.stringify({
+        projectId: project.id,
+        issue,
+        imported: true,
+        seeds: ["review-file"],
+        findings: [
+          {
+            ...finding,
+            id: "legacy",
+            source: "backfill",
+            status: "open",
+            sessionId: null,
+            reason: null,
+          },
+        ],
+      }),
+    );
+    await service.act(project, {
+      action: "record",
+      finding: { ...finding, location: "src/other.ts:5" },
+    });
     const view = await service.act(project, {
       action: "dismiss",
-      id: findings[0]?.id ?? "",
+      id: "legacy",
       reason: "Superseded.",
     });
-    expect(view.findings[0]).toMatchObject({ source: "backfill", status: "dismissed" });
+    expect(view.findings[0]).toMatchObject({ source: null, status: "dismissed" });
+    expect(read).not.toHaveBeenCalled();
     expect(write).not.toHaveBeenCalled();
   });
 
