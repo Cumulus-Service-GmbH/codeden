@@ -45,7 +45,11 @@ const PendingApprovalKind = z.enum([
 const ApprovalId = Id.max(300);
 const ApprovalChoice = z.enum(["approve", "deny"]);
 
-/** An open approval and the server's decision about whether the orchestrator can answer it. */
+/**
+ * An open approval and the server's decision about whether the orchestrator can answer it.
+ * Delegation is limited to plan-mode tool approvals without a hook, URL, single-use restriction,
+ * Chrome consent or sensitive-text match, and PM plan cards whose steps are all tier 0 or 1.
+ */
 export const PendingApproval = z
   .strictObject({
     id: ApprovalId,

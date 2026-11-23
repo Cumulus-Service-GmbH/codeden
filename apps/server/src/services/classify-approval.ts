@@ -1,4 +1,3 @@
-import { sep } from "node:path";
 import {
   type DecisionCard,
   type ItemOf,
@@ -18,15 +17,8 @@ type Entry = Pick<PendingApproval, "kind"> &
   > &
   ToolContext & {
     requestedBy?: DecisionCard["requestedBy"];
-    resolvedPaths?: ResolvedApprovalPaths | null;
   };
 type Classification = { delegable: true } | { delegable: false; ownerOnly: OwnerOnlyCategory };
-
-export interface ResolvedApprovalPaths {
-  root: string;
-  realRoot: string;
-  targets: { path: string; real: string }[];
-}
 
 // Security rule 3 keeps this list empty.
 export const DELEGABLE_GUARD_SCOPES: readonly string[] = [];
@@ -75,33 +67,8 @@ function ownerScope(scope: string): OwnerOnlyCategory | undefined {
   return undefined;
 }
 
-/** Offset of an already resolved path, using exact casing even on case-insensitive platforms. */
-export function worktreeOffset(root: string, target: string): string | undefined {
-  if (target === root) return "";
-  const prefix = root.endsWith(sep) ? root : root + sep;
-  return target.startsWith(prefix) ? target.slice(prefix.length) : undefined;
-}
-
-function safeTarget(root: string, path: string): boolean {
-  const offset = worktreeOffset(root, path);
-  return (
-    !!offset &&
-    offset.split(sep).every((segment) => {
-      return (
-        !segment.startsWith(".") && segment.replace(/[. ]+$/, "").toLowerCase() !== "opencode.json"
-      );
-    })
-  );
-}
-
-function safeFileChange({ root, realRoot, targets }: ResolvedApprovalPaths): boolean {
-  return (
-    targets.length > 0 &&
-    targets.every(({ path, real }) => safeTarget(root, path) && safeTarget(realRoot, real))
-  );
-}
-
 export function classifyApproval(entry: Entry): Classification {
+  if (entry.kind === "tool_approval" && entry.action === "file_change") return ownerOnly();
   if (entry.hookReason !== undefined) {
     const token = parseCardToken(entry.hookReason);
     if (token?.cls === "delegable" && DELEGABLE_GUARD_SCOPES.includes(token.scope)) {
@@ -124,14 +91,11 @@ export function classifyApproval(entry: Entry): Classification {
 
   if (entry.action === "outside_worktree") return ownerOnly();
   if (entry.action === "secrets") return ownerOnly("secrets");
-  const cleanAction = entry.action === "file_change" || entry.action === "plan";
   const text = `${entry.command ?? ""}\n${JSON.stringify(entry.toolInput ?? null)}\n${entry.paths?.join("\n") ?? ""}`;
   const category = sensitiveText(text);
   if (category) return ownerOnly(category);
   if (
-    !cleanAction ||
-    !entry.resolvedPaths ||
-    (entry.action === "file_change" && !safeFileChange(entry.resolvedPaths)) ||
+    entry.action !== "plan" ||
     entry.hookAsk ||
     text.includes("[codeden-card") ||
     entry.reason?.includes("[codeden-card") ||
