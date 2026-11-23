@@ -48,9 +48,11 @@ export function projectToRow(p: Project): ProjectRow {
     autonomyMode: p.autonomyMode,
     visionPath: p.visionPath,
     factoryLimits: p.factoryLimits,
+    teams: p.teams ?? null,
     killSwitch: p.killSwitch,
     timezone: p.timezone,
     agentCiEnv: p.agentCiEnv,
+    allowUnenforcedProviders: p.allowUnenforcedProviders,
     // Events written before the setting existed carry none: those projects run locally.
     executionBackend: p.execution?.backend ?? "local",
     pinned: p.pinned,
@@ -64,11 +66,12 @@ export function projectToRow(p: Project): ProjectRow {
 }
 
 export function rowToProject(r: ProjectRow): Project {
-  const { github, factoryLimits, remoteWarning, executionBackend, ...rest } = r;
+  const { github, factoryLimits, remoteWarning, executionBackend, teams, ...rest } = r;
   return Project.parse({
     ...rest,
     execution: { backend: executionBackend },
     factoryLimits: factoryLimits ?? undefined,
+    ...(teams ? { teams } : {}),
     ...(r.kind === "github" ? { github } : {}),
     ...(remoteWarning ? { remoteWarning } : {}),
   });

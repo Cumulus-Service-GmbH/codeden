@@ -84,6 +84,7 @@ Where CodeDen looks, in order:
    - OpenCode: `~/.opencode/bin/opencode` (`%USERPROFILE%\.opencode\bin\opencode.exe` on Windows), where its install script puts it; `/opt/homebrew/bin/opencode` and `/usr/local/bin/opencode` on macOS.
    - Cursor CLI: `cursor-agent`, or an `agent` whose version is Cursor's (`2026.10.22-…`): `~/.local/bin/agent`, and `%LOCALAPPDATA%\cursor-agent\agent.cmd` on Windows.
    - Gemini CLI: npm's global folder (on your PATH); `/opt/homebrew/bin/gemini` and `/usr/local/bin/gemini` on macOS.
+   - Antigravity CLI: `~/.local/bin/agy`, where its installer puts it.
    - GitHub CLI: `C:\Program Files\GitHub CLI\gh.exe` on Windows; `/opt/homebrew/bin/gh` and `/usr/local/bin/gh` on macOS.
 
 The first copy that answers `--version` is used for detection, for sessions and for **Sign in**, so a working native install wins over a broken shim earlier on PATH. When the native installer says its folder *"is not in your PATH"*, CodeDen still finds it; add the folder to your PATH if you also want `claude` to work in your own terminals.
@@ -98,6 +99,7 @@ codex login
 opencode auth login
 agent login
 gemini
+agy
 gh auth login
 ```
 
@@ -146,6 +148,12 @@ The project's `.gemini/settings.json` lets some tools run without asking (`tools
 ### A Gemini CLI deny rule doesn't apply in CodeDen
 
 CodeDen repeats your Gemini CLI rules for commands, edits and MCP tools above its own admin policy, so what they deny stays denied (see [Permissions](security.md#permissions)). It reads them when a session starts, from `~/.gemini/policies` (in `$GEMINI_CLI_HOME` when set), the project's `.gemini/policies`, and the tool and MCP server lists of your and the project's `settings.json`. A rule elsewhere isn't repeated: in a Gemini CLI extension, in system settings, or in a folder named by `policyPaths`. Move it to `~/.gemini/policies`. A policy file Gemini CLI can't load (not TOML, or a rule with a field it doesn't accept) is skipped whole, as Gemini CLI skips it. Start a new session after changing your rules.
+
+### The Antigravity CLI asks for an update, or a session says it isn't signed in
+
+CodeDen needs the Antigravity CLI **1.5.12** or newer, whose ACP server takes `--process-per-session` (needed for CodeDen's tools). Run its installer again to update it (in Bash: `curl -fsSL https://antigravity.google/cli/install.sh | bash`; on native Windows, follow [its install instructions](https://antigravity.google/docs/cli)), then press **Re-check**.
+
+CodeDen never signs the Antigravity CLI in: its sessions use the login of an interactive `agy`. If a session fails with "The Antigravity CLI is not signed in", run `agy` once in a terminal (or **Sign in** on the setup checklist), sign in, and start the session again.
 
 ### Gemini CLI asks for an update, or its login can't be confirmed
 

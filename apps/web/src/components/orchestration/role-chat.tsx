@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { useClient } from "@/lib/api";
 import type { OrchestrationRole } from "@/lib/api/feature-apis";
 import { useProject, useSnapshotData } from "@/lib/queries";
+import { activeRoleSession } from "@/lib/snapshot-reducer";
 import { getDraft, useComposerStore } from "@/stores/composer";
 import { ReadOnlyBadge, RoleBadge } from "./role-badge";
 
@@ -28,15 +29,7 @@ export function useRoleSession(
   role: OrchestrationRole,
   projectId: string | null,
 ): Session | undefined {
-  return useSnapshotData((s) => {
-    const ref =
-      role === "orchestrator" ? s.roleSessions?.orchestrator : s.roleSessions?.pms[projectId ?? ""];
-    const byRef = ref ? s.sessions.find((x) => x.id === ref) : undefined;
-    if (byRef) return byRef;
-    return s.sessions
-      .filter((x) => x.role === role && (role === "orchestrator" || x.projectId === projectId))
-      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))[0];
-  }, undefined);
+  return useSnapshotData((s) => activeRoleSession(s, role, projectId), undefined);
 }
 
 /**
@@ -114,7 +107,8 @@ export function RoleChat({
 }) {
   const session = useRoleSession(role, projectId);
   const project = useProject(projectId);
-  if (session) return <ThreadView sessionId={session.id} empty={empty(session.id)} />;
+  if (session)
+    return <ThreadView key={session.id} sessionId={session.id} empty={empty(session.id)} />;
   return (
     <div className="flex min-h-0 flex-1 flex-col" data-testid="role-chat-start">
       <header className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-4">

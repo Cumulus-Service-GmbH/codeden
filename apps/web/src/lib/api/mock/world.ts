@@ -13,6 +13,7 @@ import type {
 import { applyDomainEvent } from "@/lib/snapshot-reducer";
 import { applyAgentEvent, type TranscriptState } from "@/lib/transcript/reducer";
 import { mockArchivedCounts } from "./archived";
+import { checklists } from "./fixtures/checklists";
 import { conflicts, inboxItems, sessions } from "./fixtures/sessions";
 import { checkoutTranscript } from "./fixtures/transcript-checkout";
 import { a11yTranscript, orchestratorTranscript, searchTranscript } from "./fixtures/transcripts-a";
@@ -62,6 +63,7 @@ export class MockWorld {
       scheduled: structuredClone(scheduled),
       runner,
       runners: structuredClone(runners),
+      checklists: structuredClone(checklists),
     };
     const fixtures = [
       orchestratorTranscript,
@@ -163,7 +165,7 @@ export class MockWorld {
           turnId: entry.turnId,
           position: position++,
           item: entry.item,
-          createdAt: now,
+          createdAt: entry.createdAt ?? now,
           updatedAt: now,
         });
       }

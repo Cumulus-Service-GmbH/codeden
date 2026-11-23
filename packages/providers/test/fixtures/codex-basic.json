@@ -7,6 +7,7 @@
  "autonomy": "auto",
  "model": null,
  "capabilities": {
+  "modelVendor": "openai",
   "resume": true,
   "steer": true,
   "interrupt": true,
@@ -24,8 +25,10 @@
   "readOnly": true,
   "vendorHistory": true,
   "compact": true,
+  "enforcesSecurityRules": true,
   "mcpStatus": true,
-  "hookRuns": true
+  "hookRuns": true,
+  "systemPrompt": true
  },
  "preamble": [],
  "turns": [

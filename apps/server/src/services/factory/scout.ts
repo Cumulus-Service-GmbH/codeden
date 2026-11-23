@@ -34,6 +34,7 @@ import { keepScoutReports } from "./scout-merge";
 import { isBusy } from "./sessions";
 import { busySlots, claimSlot, SCOUT_SLOT } from "./slots";
 import { ACTIVE_STAGES, WAITING_STAGES } from "./store";
+import { teamTuning } from "./team-role";
 import { wipOf, wipText } from "./wip";
 
 /**
@@ -120,7 +121,7 @@ export async function advanceScout(
   // At the work-in-progress limit the factory finishes open work before it finds more.
   if (wipOf(ctx, project, loop).holding) return loop;
   // The scout comes last for a free agent: after reviews, fixes, rebases and builds.
-  const agent = scoutAgent(ctx, project, loop.tuning);
+  const agent = scoutAgent(ctx, project, teamTuning(ctx, loop.tuning));
   const { reuse, replaces } = scoutSessionPlan(ctx, loop.scout.sessionId, agent);
   if (!claimSlot(ctx, project, "scout", SCOUT_SLOT, { wake: reuse?.id })) return loop;
   retireScoutSession(ctx, replaces);
@@ -137,6 +138,7 @@ export interface ScoutNowFacts {
   globalKillSwitch: boolean;
   /** Factory sessions in a turn (they hold agent slots). */
   activeSessions: number;
+  globalFree?: number;
   /** Why today's budget is spent (`budgetExceeded`), or null. */
   overBudget: string | null;
   /** Reviews, fixes, rebases and builds waiting for an agent: they get free ones first. */
@@ -168,11 +170,13 @@ export function scoutNowBlocker(
   if (facts.wip?.holding) {
     return `${wipText(facts.wip)}: the scout finds new work once open pull requests merge.`;
   }
-  const free = freeSlots(facts.activeSessions, project.factoryLimits);
-  if (free === 0) {
+  const localFree = freeSlots(facts.activeSessions, project.factoryLimits);
+  if (localFree === 0) {
     const max = project.factoryLimits.maxConcurrentSessions;
     return `No free agent: all ${max} ${max === 1 ? "is" : "are"} working (Agents at once).`;
   }
+  const free = Math.min(localFree, facts.globalFree ?? Infinity);
+  if (free === 0) return "No free agent: all global agent slots are in use or queued.";
   if (free <= (facts.waitingForAgent ?? 0)) {
     return "No free agent: reviews, fixes and builds waiting for one come first.";
   }
@@ -189,6 +193,7 @@ export function scoutNowFacts(
   return {
     globalKillSwitch: ctx.settings.get().factory.killSwitch,
     activeSessions: busySlots(ctx, project.id),
+    globalFree: ctx.admission.free(),
     overBudget: budgetExceeded(spend, project.factoryLimits),
     waitingForAgent: ctx.slots.ahead(project.id, "scout", SCOUT_SLOT),
     wip: wipOf(ctx, project, loop),
@@ -206,7 +211,7 @@ export async function runScoutNow(
 ): Promise<FactoryLoop> {
   const blocked = scoutNowBlocker(project, loop, scoutNowFacts(ctx, project, loop));
   if (blocked) throw conflict(blocked, SCOUT_UNAVAILABLE);
-  const agent = scoutAgent(ctx, project, loop.tuning);
+  const agent = scoutAgent(ctx, project, teamTuning(ctx, loop.tuning));
   const { reuse, replaces } = scoutSessionPlan(ctx, loop.scout.sessionId, agent);
   if (!reuse && "waiting" in agent.choice) {
     const why = agent.choice.waiting.replace(/^Waiting: /, "");
@@ -318,7 +323,7 @@ async function advanceRound(
 
   // Planned area reviewers start as agents free up; the round reviews once one has started.
   if (pending()) {
-    const agent = scoutAgent(ctx, project, loop.tuning);
+    const agent = scoutAgent(ctx, project, teamTuning(ctx, loop.tuning));
     const started = await startPlannedLenses(
       ctx,
       project,

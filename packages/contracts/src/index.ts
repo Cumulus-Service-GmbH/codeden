@@ -1,3 +1,4 @@
+export * from "./admission";
 /**
  * @codeden/contracts: the shared, zod-typed language of CodeDen.
  * Everything that crosses a process or network boundary is defined here first.
@@ -12,9 +13,12 @@ export * from "./api";
 export * from "./automations-api";
 export * from "./automations-sharing";
 export * from "./browser-api";
+export * from "./checklist";
 export * from "./checks";
+export * from "./child-runs";
 export * from "./common";
 export * from "./content-security";
+export * from "./decision-rights";
 export * from "./desktop";
 export * from "./entities/artifact";
 export * from "./entities/automation";
@@ -25,6 +29,7 @@ export * from "./events";
 export * from "./execution";
 export * from "./factory";
 export * from "./factory-api";
+export * from "./factory-control";
 export * from "./factory-cost";
 export * from "./factory-follow-ups";
 export * from "./factory-lessons";
@@ -44,6 +49,7 @@ export * from "./mcp-status";
 export * from "./network";
 export * from "./orchestration";
 export * from "./orchestration-api";
+export * from "./pm-session-tools";
 export * from "./project-config";
 export * from "./projects-api";
 export * from "./provider";
@@ -63,6 +69,10 @@ export * from "./search-text";
 export * from "./session-files";
 export * from "./settings";
 export * from "./slash-commands";
+export * from "./team";
+export * from "./team-run";
+export * from "./tech-debt";
+export * from "./token-saver";
 export * from "./tool-output";
 export * from "./tools";
 export * from "./updates";

@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import {
   type FactoryDigest,
   type FactoryItem,
@@ -74,6 +75,14 @@ describe("factory pipelines with the Fake provider (§10.1)", () => {
   beforeAll(async () => {
     h = await startHarness(
       {
+        runner: {
+          command: process.execPath,
+          args: [
+            "--import",
+            import.meta.resolve("tsx"),
+            fileURLToPath(new URL("./fixtures/factory-runner.ts", import.meta.url)),
+          ],
+        },
         factory: { github: gh, autoTick: false, ciGraceMs: 0 },
         orchestration: { wake: { debounceMs: 60_000, maxWaitMs: 120_000 } },
       },
@@ -193,8 +202,7 @@ describe("factory pipelines with the Fake provider (§10.1)", () => {
     const verifying = await tick();
     expect(verifying.inProgress.find((w) => w.id === itemId)).toMatchObject({ step: "review" });
     const reviewer = item(itemId).reviewerSessionId as string;
-    // Only the Fake provider is available: the review falls back to it, with a note.
-    expect(item(itemId).reviewerNote).toMatch(/same provider/);
+    expect(item(itemId).reviewerProvider).toBe("fake-review");
     await idle(reviewer);
     expect((await approve(reviewer, "Validation message")).recorded).toBe(true);
     await tick();

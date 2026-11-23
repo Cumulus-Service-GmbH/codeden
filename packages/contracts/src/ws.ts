@@ -1,7 +1,8 @@
 import { z } from "zod";
+import { ProjectChecklist } from "./checklist";
 import { ErrorInfo, Id, Timestamp } from "./common";
 import { Automation } from "./entities/automation";
-import { InboxItem } from "./entities/inbox";
+import { InboxItem, type InboxItemKind } from "./entities/inbox";
 import { Project } from "./entities/project";
 import { ItemRecord, Session, Thread, Turn } from "./entities/session";
 import { RawEventEnvelope } from "./events";
@@ -9,6 +10,7 @@ import { RoleSessionsRef } from "./orchestration";
 import { ProviderInfo } from "./provider";
 import { RunnerRecord } from "./runners";
 import { Settings } from "./settings";
+import { TeamRun } from "./team-run";
 import { UpdateStatus } from "./updates";
 import { ScheduledRun } from "./work";
 
@@ -29,6 +31,8 @@ export const RunnerConnectionStatus = z.object({
   version: z.string().nullable(),
   providers: z.array(ProviderInfo),
   lastError: z.string().nullable(),
+  /** False when an attached runner has missed its application-level pong deadline. */
+  responsive: z.boolean().optional(),
 });
 export type RunnerConnectionStatus = z.infer<typeof RunnerConnectionStatus>;
 
@@ -44,6 +48,8 @@ export const Snapshot = z.object({
   generatedAt: Timestamp,
   settings: Settings,
   projects: z.array(Project),
+  checklists: z.array(ProjectChecklist).optional(),
+  teamRuns: z.array(TeamRun).optional(),
   /**
    * Every session that isn't archived, plus the recently archived ones
    * (`SNAPSHOT_ARCHIVED_SESSIONS_DAYS`, at most `SNAPSHOT_ARCHIVED_SESSIONS_MAX`), oldest first.
@@ -85,10 +91,26 @@ export const SessionSnapshot = z.object({
    * (load them with `before`). Always 0 for the whole session.
    */
   earlierTurns: z.int().nonnegative().default(0),
+  /** The owning root turn of a deep link outside the latest page, with its subagent threads. */
+  focused: z
+    .object({
+      threads: z.array(Thread),
+      turns: z.array(Turn),
+      items: z.array(ItemRecord),
+    })
+    .optional(),
 });
 export type SessionSnapshot = z.infer<typeof SessionSnapshot>;
 
 // ---------------------------------------------------------------- client -> server
+
+export const CLIENT_CAPABILITIES = ["inbox.checklist_approval"] as const;
+export const ClientCapability = z.enum(CLIENT_CAPABILITIES);
+
+/** Whether a client can receive an inbox item of this kind. */
+export function inboxKindVisible(kind: InboxItemKind, capabilities: readonly string[]): boolean {
+  return kind !== "checklist_approval" || capabilities.includes("inbox.checklist_approval");
+}
 
 export const ClientSubscribe = z.object({
   type: z.literal("subscribe"),
@@ -96,6 +118,7 @@ export const ClientSubscribe = z.object({
   fromSeq: z.int().nonnegative(),
   /** Restrict to these sessions (plus global events); omitted means everything. */
   sessionIds: z.array(Id).optional(),
+  capabilities: z.array(z.string().max(64)).max(32).optional(),
 });
 
 export const ClientToServerMessage = z.discriminatedUnion("type", [

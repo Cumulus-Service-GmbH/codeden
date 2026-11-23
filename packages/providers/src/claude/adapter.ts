@@ -27,6 +27,8 @@ import { ClaudeSession } from "./session";
 export const CLAUDE_PROVIDER_ID = "claude";
 
 const capabilities: ProviderCapabilities = {
+  chrome: true,
+  modelVendor: "anthropic",
   resume: true,
   steer: true,
   interrupt: true,
@@ -44,11 +46,16 @@ const capabilities: ProviderCapabilities = {
   // CodeDen's policy gates every tool call, so a change applies from the next one.
   liveAutonomy: true,
   readOnly: true,
+  // The guard covers its sessions in a CodeDen worktree (`~/.codeden/wt`) only.
+  enforcesSecurityRules: true,
+  securityRulesWorktreesOnly: true,
   compact: true,
   // `system/init` and `mcpServerStatus()` report each server's state.
   mcpStatus: true,
   // `includeHookEvents`: the settings hooks that ran show as `hook_run` items.
   hookRuns: true,
+  // `--append-system-prompt` is sent on every start and resume and survives compaction.
+  systemPrompt: true,
 };
 
 const EFFORTS: ReasoningEffort[] = ["low", "medium", "high", "xhigh", "max"];

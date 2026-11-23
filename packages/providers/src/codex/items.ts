@@ -93,6 +93,7 @@ function commandItem(item: Extract<ThreadItem, { type: "commandExecution" }>): T
     return {
       ...base,
       toolKind: "file_read",
+      shell: true,
       path: single.path,
       title: `Read ${single.name || single.path}`,
     };
@@ -102,6 +103,7 @@ function commandItem(item: Extract<ThreadItem, { type: "commandExecution" }>): T
     return {
       ...base,
       toolKind: "search",
+      shell: true,
       query,
       ...(single.path ? { path: single.path } : {}),
       title: shorten(single.command, 80),

@@ -4,6 +4,7 @@ import { startWentUnanswered, unansweredStartAt } from "../sessions/unanswered-s
 import { untilText } from "./availability";
 import type { FactoryContext } from "./context";
 import { recheckOf } from "./recheck";
+import { canReviewItem } from "./reviewer-choice";
 import { isBusy, REVIEW_WORK_KEY_PREFIX } from "./sessions";
 import { ACTIVE_STAGES, OWNED_STAGES, WAITING_STAGES } from "./store";
 import { BUILDER_FAILED_REASON } from "./turn-race";
@@ -120,7 +121,12 @@ async function settleOne(
     : undefined;
   // Read again: an earlier late reviewer of the same item may have been adopted just now.
   const current = reviewing ? ctx.store.item(reviewing.id) : undefined;
-  if (current && !s.archivedAt && wantsReviewer(current)) {
+  if (
+    current &&
+    !s.archivedAt &&
+    wantsReviewer(current) &&
+    canReviewItem(ctx, current, s.provider)
+  ) {
     ctx.store.updateItem(current.id, (i) => {
       if (!wantsReviewer(i)) return i;
       // A nudge for a verdict went to an earlier reviewer, not to this one.

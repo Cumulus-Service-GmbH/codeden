@@ -72,6 +72,9 @@ describe("Run scout now (§10.1)", () => {
     expect(blocked({}, {}, { activeSessions: 2 })).toBe(
       "No free agent: all 2 are working (Agents at once).",
     );
+    expect(blocked({}, {}, { globalFree: 0 })).toBe(
+      "No free agent: all global agent slots are in use or queued.",
+    );
     // The free agent goes to work waiting for one; at the WIP limit no round starts.
     expect(blocked({}, {}, { waitingForAgent: 1 })).toBe(
       "No free agent: reviews, fixes and builds waiting for one come first.",

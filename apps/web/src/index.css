@@ -405,11 +405,25 @@
   animation: codeden-check-shake 360ms ease-in-out both;
 }
 
+/* Checklist: an item the latest live update changed lights up briefly. */
+@keyframes codeden-checklist-flash {
+  from {
+    background-color: color-mix(in oklab, var(--primary) 16%, transparent);
+  }
+  to {
+    background-color: transparent;
+  }
+}
+@utility animate-checklist-flash {
+  animation: codeden-checklist-flash 1.6s ease-out both;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .animate-check-breathe,
   .animate-check-pop,
   .animate-check-draw,
   .animate-check-shake,
+  .animate-checklist-flash,
   .text-shine,
   .animate-rise,
   .animate-border-shimmer::before {

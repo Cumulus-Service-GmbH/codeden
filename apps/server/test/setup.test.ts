@@ -382,6 +382,42 @@ describe("SetupService", () => {
     expect(missing.check?.fix?.command).toBe("npm install -g @google/gemini-cli");
   });
 
+  it("checks the Antigravity CLI: its version, with the login left to `agy`", async () => {
+    const run = async (version: string | null) => {
+      const table: Record<string, Partial<ExecResult>> = version
+        ? { "agy --version": { stdout: version } }
+        : {};
+      const status = await service(table).status();
+      return { status, check: status.checks.find((c) => c.id === "antigravity") };
+    };
+
+    const current = await run("1.5.13");
+    expect(current.check).toMatchObject({
+      label: "Antigravity CLI",
+      state: "ok",
+      installed: true,
+      version: "1.5.13",
+      loggedIn: null,
+    });
+    expect(current.check?.fix).toEqual({ kind: "login", command: "/bin/agy" });
+    // An unconfirmed login doesn't make setup ready on its own.
+    expect(current.status.ready).toBe(false);
+
+    const old = await run("1.5.11");
+    expect(old.check).toMatchObject({
+      state: "missing",
+      installed: true,
+      message: "Antigravity CLI 1.5.11 is too old (needs 1.5.12+)",
+    });
+    expect(old.check?.fix?.kind).toBe("upgrade");
+
+    const missing = await run(null);
+    expect(missing.check).toMatchObject({ state: "missing", installed: false });
+    expect(missing.check?.fix?.command).toBe(
+      "curl -fsSL https://antigravity.google/cli/install.sh | bash",
+    );
+  });
+
   it("persists completion in settings and hands out login commands", () => {
     const setup = service({});
     setup.complete();

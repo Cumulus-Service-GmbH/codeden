@@ -75,6 +75,38 @@ beforeEach(() => {
 });
 
 describe("the New session draft", () => {
+  it("starts with Chrome only after selecting the option", async () => {
+    const start = vi.fn<Start>(async () => ({ status: "started", sessionId: "s-new" }));
+    useNewSessionStore.getState().setChoice(PROJECT, { provider: "claude" });
+    const box = await openDraft(clientWith(start));
+    const chrome = await screen.findByRole<HTMLInputElement>("checkbox", {
+      name: "Claude in Chrome",
+    });
+    expect(chrome.checked).toBe(false);
+    fireEvent.click(chrome);
+    fireEvent.change(box, { target: { value: "Check the login page" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() =>
+      expect(start).toHaveBeenCalledWith(expect.objectContaining({ chrome: true })),
+    );
+  });
+
+  it("offers Team and Token saver pickers and sends the selected values", async () => {
+    const start = vi.fn<Start>(async () => ({ status: "started", sessionId: "s-new" }));
+    const box = await openDraft(clientWith(start));
+    fireEvent.keyDown(screen.getByRole("button", { name: "Team role" }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "Writer" }));
+    fireEvent.keyDown(screen.getByRole("button", { name: "Token saver" }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: /Ultra/ }));
+    fireEvent.change(box, { target: { value: "Update the README" } });
+    fireEvent.keyDown(box, { key: "Enter" });
+    await waitFor(() =>
+      expect(start).toHaveBeenCalledWith(
+        expect.objectContaining({ teamRole: "writer", tokenSaver: "ultra" }),
+      ),
+    );
+  });
+
   it("starts the session with the text, a pasted image and the work key, then becomes it", async () => {
     const start = vi.fn<Start>(async () => ({ status: "started", sessionId: "s-new" }));
     useNewSessionStore.getState().setWorkKey(PROJECT, "  issue:9 ");

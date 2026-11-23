@@ -4,6 +4,7 @@ import { type AgentChoice, type AgentWait, builderWanted, chooseAgent } from "./
 import { baseBranchOf, type FactoryContext } from "./context";
 import { revertBlocked, revertedName } from "./revert-blocked";
 import { claimSlot } from "./slots";
+import { teamTuning } from "./team-role";
 
 /**
  * Starting the agent that writes an automatic revert (§10.1, Merge), when the revert couldn't be
@@ -50,7 +51,12 @@ export function revertAgent(
   project: Project,
   loop: FactoryLoop,
 ): AgentChoice | AgentWait {
-  return chooseAgent(ctx, project, builderWanted({ type: "bug" }, loop.tuning), "revert");
+  return chooseAgent(
+    ctx,
+    project,
+    builderWanted({ type: "bug" }, teamTuning(ctx, loop.tuning)),
+    "revert",
+  );
 }
 
 /** A started revert agent: its session and the provider it runs on (null: not known). */
@@ -125,6 +131,7 @@ export async function revertStartFailed(
   const merged = revertedName(ctx, item);
   return revertBlocked(ctx, project, loop, requeued, why, {
     title: `${branch} is red and the revert of ${merged} couldn't start: ${why}`,
+    pauseDetail: `of ${merged} couldn't start: ${why}`,
     body: `CI on ${branch} failed after ${merged} merged, and the agent writing its automatic revert couldn't start (${MAX_REVERT_STARTS} tries): ${why}. The factory loop stays paused: Retry the revert, or fix ${branch} by hand (revert ${merged} yourself) and resume the loop.`,
   });
 }

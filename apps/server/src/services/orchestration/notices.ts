@@ -15,6 +15,7 @@ import type { Db } from "../../db/client";
 import { notices } from "../../db/schema-orchestration";
 import type { EventStore } from "../../events/store";
 import type { SessionRepo } from "../sessions/repo";
+import { capSummary } from "../summary-cap";
 import { clipKeepingEnd } from "./digest";
 
 /** A notice before it is stored (`deliveredAt` is set by delivery). */
@@ -33,6 +34,7 @@ export interface DerivedNotice {
 /** What `deriveNotices` needs to look up while reading events. */
 export interface NoticeLookup {
   session(id: string): Session | undefined;
+  resultSummaryBytes?(projectId: string): number | null;
   /** Text of the final assistant message of a turn. */
   finalMessage(sessionId: string, turnId: string): string | null;
   /** What a turn was for (`Turn.kind`): a compaction finishes no work. Absent: work. */
@@ -114,6 +116,7 @@ export function deriveNotices(events: RawEventEnvelope[], lookup: NoticeLookup):
       // A compaction ("Compact now", between scout rounds) is no news: no notice, no wake.
       if (lookup.turnKind?.(s.id, event.turnId) === "compact") continue;
       const final = lookup.finalMessage(s.id, event.turnId);
+      const summary = s.result?.summary ?? (final ? clipKeepingEnd(final) : null);
       const finished: NoticeDraft = {
         id: `session.finished:${s.id}:${event.turnId}`,
         type: "session.finished",
@@ -123,17 +126,24 @@ export function deriveNotices(events: RawEventEnvelope[], lookup: NoticeLookup):
         title: `Finished: ${s.title ?? s.purpose}`,
         data: {
           ...workRef(s),
-          summary: s.result?.summary ?? (final ? clipKeepingEnd(final) : null),
+          summary,
           outcome: s.result?.outcome ?? null,
         },
       };
-      out.push({ wake: wakesPm(s), notice: finished });
+      const bytes = s.projectId ? (lookup.resultSummaryBytes?.(s.projectId) ?? null) : null;
+      const pmSummary = summary === null ? null : capSummary(summary, bytes);
+      const pmNotice =
+        pmSummary === summary
+          ? finished
+          : { ...finished, data: { ...finished.data, summary: pmSummary } };
+      out.push({ wake: wakesPm(s), notice: pmNotice });
       // Once per `finish` call: a turn without a result is the PM's business only.
       if (reportsToOrchestrator(s) && s.result) {
         out.push(forOrchestrator(finished, `session.finished:orchestrator:${s.id}:${s.result.at}`));
       }
     } else if (e.type === "inbox.created" || e.type === "inbox.updated") {
       const { item } = e.payload as { item: InboxItem };
+      if (item.status === "resolved") continue;
       // A session that fails again updates its open `run_failed` item in place (one item per
       // run): each new failure still reaches the PM, the orchestrator and automations.
       if (e.type === "inbox.updated" && !isRepeatFailure(item)) continue;

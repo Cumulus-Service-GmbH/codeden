@@ -128,6 +128,7 @@ export function createFactoryEnv(
   opts: {
     limits?: Partial<FactoryLimits>;
     providers?: string[];
+    modelVendors?: Record<string, ProviderInfo["capabilities"]["modelVendor"]>;
     /**
      * Where the process clock starts (default `TEST_START`); day-boundary tests start near
      * midnight. A test that already fakes `Date` (`vi.useFakeTimers`) keeps its own clock.
@@ -299,7 +300,20 @@ export function createFactoryEnv(
   const runner = {
     providers: () =>
       env.providers.map(
-        (id) => ({ id, displayName: id, models: env.models[id] ?? [] }) as ProviderInfo,
+        (id) =>
+          ({
+            id,
+            displayName: id,
+            models: env.models[id] ?? [],
+            capabilities: {
+              modelVendor: {
+                claude: "anthropic",
+                codex: "openai",
+                gemini: "google",
+                ...opts.modelVendors,
+              }[id],
+            },
+          }) as ProviderInfo,
       ),
     isConnected: () => true,
     // Provider detection: installed and signed in unless a test says otherwise.
@@ -321,6 +335,7 @@ export function createFactoryEnv(
 
   const build = () =>
     new FactoryService({
+      admission: { free: () => Infinity },
       db: db.db,
       store,
       projects,

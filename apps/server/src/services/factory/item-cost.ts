@@ -6,9 +6,11 @@ import {
   type FactoryItemCost,
   type FactoryLimits,
   hasItemBudget,
+  itemBudgetReached,
   type Session,
 } from "@codeden/contracts";
 import type { FactoryContext } from "./context";
+import { REVIEW_WORK_KEY_PREFIX } from "./sessions";
 
 /**
  * What factory work items cost (§10.1, §12.6): every agent session that worked on an item, from
@@ -102,6 +104,33 @@ export function capSpendOf(turns: LedgerTurn[], since: string | null): CapSpend 
     tokens += tokensOf(t);
   }
   return { usd: round(usd), tokens };
+}
+
+/** Why the independent reviews for this item have used their allowance. */
+export function overReviewBudget(
+  ctx: FactoryContext,
+  projectId: string,
+  item: FactoryItem,
+  budget: FactoryLimits["reviewBudget"],
+): string | null {
+  if (!budget || (budget.usd === undefined && budget.tokens === undefined)) return null;
+  const keys = new Set(
+    [item.id, item.pr?.number, item.rebuiltFrom?.number]
+      .filter((key) => key !== undefined)
+      .map((key) => `${REVIEW_WORK_KEY_PREFIX}${key}`),
+  );
+  const reviewers = new Set(
+    ctx.sessions
+      .list(projectId)
+      .filter((session) => keys.has(session.workKey))
+      .map((session) => session.id),
+  );
+  for (const id of new Set([...item.sessionIds, ...item.earlierSessionIds])) {
+    if (ctx.repo.find(id)?.session.workKey.startsWith(REVIEW_WORK_KEY_PREFIX)) reviewers.add(id);
+  }
+  if (item.reviewerSessionId) reviewers.add(item.reviewerSessionId);
+  const turns = [...turnsBySession(ctx, reviewers).values()].flat();
+  return itemBudgetReached(capSpendOf(turns, item.itemBudgetSince), { itemBudget: budget });
 }
 
 /** An item's cost over its turns, labelled as the usage reports are. */

@@ -3,6 +3,7 @@ import {
   AGENT_ALLOW_LIST_NOTICE,
   type AgentEvent,
   type AutonomyLevel,
+  type ReasoningEffort,
   type RuntimeResponse,
   type SessionOptions,
   type UserInput,
@@ -12,11 +13,12 @@ import { ApprovalBroker } from "../approvals";
 import { AsyncQueue } from "../async-queue";
 import { explicitModel } from "../util/model";
 import { answerPermission } from "./approvals";
-import { acpMcpServers, agentCan, modelsOf, skippedNotice } from "./config";
+import { acpMcpServers, agentCan, findOption, modelsOf, skippedNotice } from "./config";
 import { exitedOutcome, failedPrompt, stopNotice, stopOutcome } from "./errors";
 import { type AcpExtensionHost, type AcpSessionConfig, extensionHost } from "./extensions";
 import { promptBlocks, withInstructions } from "./items";
 import { AcpEventMapper } from "./mapper";
+import { notify } from "./notify";
 import { type AcpPolicy, policyFor, trustedServers } from "./policy";
 import { startAgent } from "./process";
 import type {
@@ -29,7 +31,7 @@ import type {
   AcpSessionSetup,
 } from "./protocol";
 import { type AcpRpc, AcpRpcError, METHOD_NOT_FOUND } from "./rpc";
-import { currentMode, openOrLoad, setMode, setModel } from "./setup";
+import { currentMode, openOrLoad, setConfigValue, setMode, setModel } from "./setup";
 import { AcpSubagents } from "./subagents";
 
 /**
@@ -60,6 +62,13 @@ export class AcpSession implements ProviderSession {
   private interrupted = false;
   private model: string | undefined;
   private nextModel: string | null | undefined;
+  /** The reasoning effort to set (`spec.effort`); undefined leaves the agent's own. */
+  private effort: ReasoningEffort | undefined;
+  private nextEffort: ReasoningEffort | null | undefined;
+  /** The agent's own level for the current model, kept while CodeDen's effort overrides it. */
+  private agentEffort: string | undefined;
+  /** The model the agent reported at `session/new`: what Default goes back to. */
+  private openedModel: string | undefined;
   private instructions: string | undefined;
   private mode: string | undefined;
   private planning: boolean;
@@ -101,11 +110,39 @@ export class AcpSession implements ProviderSession {
     this.planning = opts.planMode && !!config.spec.modes.plan;
     this.policy.planning = this.planning;
     this.model = explicitModel(opts.model);
+    this.effort = opts.effort;
     this.acpSession = opts.resumeToken;
+  }
+
+  /**
+   * Refuse a level the agent can't be held to: `read_only` (`spec.refusesReadOnly`) or
+   * `supervised` (`spec.refusesSupervised`).
+   */
+  private refuseReadOnly(level: AutonomyLevel): void {
+    const { spec } = this.config;
+    if (level === "read_only" && spec.refusesReadOnly) {
+      throw new ProviderSessionError(
+        "unsupported",
+        `${spec.label} can't run read-only: not every edit and command reaches CodeDen`,
+      );
+    }
+    if (level === "supervised" && spec.refusesSupervised) {
+      throw new ProviderSessionError(
+        "unsupported",
+        `${spec.label} can't enforce Supervised: not every edit and command reaches CodeDen`,
+      );
+    }
   }
 
   /** Start the agent and open (or resume) its session. */
   async start(): Promise<void> {
+    if (this.config.spec.unenforcedSecurityRules && !this.opts.allowUnenforcedProviders) {
+      throw new ProviderSessionError(
+        "security_rules_unenforced",
+        `${this.config.spec.label} isn't covered by this machine's security rules, and this project doesn't allow such providers`,
+      );
+    }
+    this.refuseReadOnly(this.opts.autonomy);
     this.events.push({ type: "thread.started", thread: { id: this.mapper.threadId } });
     this.addNotice(this.config.spec.allowListNotice?.(this.opts.cwd), AGENT_ALLOW_LIST_NOTICE);
     await this.ensureAgent();
@@ -117,10 +154,12 @@ export class AcpSession implements ProviderSession {
 
   async configure(change: SessionConfigChange): Promise<void> {
     if (change.model !== undefined) this.nextModel = change.model;
+    if (change.effort !== undefined) this.nextEffort = change.effort;
   }
 
   /** Applies from the next permission request; read-only also switches to the read-only mode. */
   async setAutonomy(level: AutonomyLevel): Promise<void> {
+    this.refuseReadOnly(level);
     this.policy.setAutonomy(level);
     if (!this.planning) await this.applyMode().catch(() => undefined);
   }
@@ -285,6 +324,7 @@ export class AcpSession implements ProviderSession {
       if (this.closed) throw new ProviderSessionError("closed", "Session is closed");
       this.rpc = rpc;
       this.info = info;
+      notify(() => this.config.onInfo?.(info));
       await this.openSession(rpc);
       return rpc;
     } catch (error) {
@@ -316,13 +356,24 @@ export class AcpSession implements ProviderSession {
     if (!opened.resumed) this.instructions = this.opts.systemPrompt?.trim() || undefined;
     this.setup = opened.setup;
     this.mode = currentMode(opened.setup);
-    this.config.onSetup?.(opened.setup, this.info);
+    // A resumed session's setup is its saved one, not a fresh `session/new` snapshot.
+    const source = opened.resumed ? "load" : "session";
+    notify(() => this.config.onSetup?.(opened.setup, this.info, source));
     await this.applyMode();
+    // The agent's own model, put back when the session is switched to Default.
+    this.openedModel = modelsOf(opened.setup)?.current;
     if (this.model) {
-      const setup = this.setup;
-      this.setup = await setModel(rpc, opened.sessionId, setup, this.model).catch(() => setup);
+      // The session must run on the model it was given: a refusal fails the start rather than
+      // leaving it on another model while it reports this one.
+      const before = this.setup;
+      this.applyReply(before, await setModel(rpc, opened.sessionId, before, this.model));
     }
-    const model = this.model ?? modelsOf(opened.setup)?.current;
+    // An effort the agent refuses or doesn't list yet stays pending: the first turn applies it
+    // (and fails if it is refused again) before its prompt runs.
+    if (!(await this.applyEffort(rpc, opened.sessionId, this.effort)) && this.effort) {
+      this.nextEffort ??= this.effort;
+    }
+    const model = this.model ?? this.openedModel;
     this.events.push({
       type: "session.updated",
       resumeToken: opened.sessionId,
@@ -341,21 +392,113 @@ export class AcpSession implements ProviderSession {
           : modes.agent;
     const rpc = this.rpc;
     if (!rpc || !this.acpSession || want === this.mode) return;
-    const next = await setMode(rpc, this.acpSession, this.setup, want);
+    const before = this.setup;
+    const next = await setMode(rpc, this.acpSession, before, want);
     if (!next) return;
-    this.setup = next;
+    this.applyReply(before, next);
     this.mode = want;
   }
 
   private async applyModelChange(rpc: AcpRpc): Promise<void> {
+    // A change stays pending until the agent takes it: a refused one fails the turn (the prompt
+    // never runs on the old settings unannounced) and is tried again on the next. A newer
+    // `configure` while a request runs replaces the pending value and is left for the next turn.
     const next = this.nextModel;
-    if (next === undefined || !this.acpSession) return;
-    this.nextModel = undefined;
-    const model = explicitModel(next);
-    if (!model || model === this.model) return;
-    this.setup = await setModel(rpc, this.acpSession, this.setup, model);
-    this.model = model;
-    this.events.push({ type: "session.updated", model });
+    const nextEffort = this.nextEffort;
+    const sessionId = this.acpSession;
+    if ((next === undefined && nextEffort === undefined) || !sessionId) return;
+    const model = next === undefined ? undefined : explicitModel(next);
+    // Back to Default from a model CodeDen chose: the agent's own model from the start returns.
+    const clearing = next !== undefined && !model && !!this.model;
+    const target = clearing ? this.openedModel : model;
+    // The model the agent runs now (its live options first): a pick of that same model is no
+    // switch.
+    const running = modelsOf(this.setup)?.current ?? this.model ?? this.openedModel;
+    const switching = !!target && target !== running;
+    if (clearing && !target) {
+      // The agent never said which model it started on, so there is none to go back to: it
+      // stays on the chosen one, and the session says so instead of claiming Default.
+      this.events.push({ type: "session.updated", model: this.model });
+    } else if (!switching) {
+      // Already on that model: nothing to send, the choice is just recorded.
+      if (model) this.model = model;
+      else if (clearing) this.model = undefined;
+    }
+    if (target && switching) {
+      const before = this.setup;
+      this.applyReply(before, await setModel(rpc, sessionId, before, target));
+      this.model = model;
+      // A new model brings its own level, so the effort is set again after it.
+      this.agentEffort = undefined;
+      this.events.push({ type: "session.updated", model: target });
+    }
+    if (this.nextModel === next) this.nextModel = undefined;
+    const effort = nextEffort === undefined ? this.effort : (nextEffort ?? undefined);
+    if (nextEffort === undefined && !(switching && effort)) return;
+    let applied: boolean;
+    try {
+      applied = await this.applyEffort(rpc, sessionId, effort, true);
+    } catch (error) {
+      if (this.nextEffort === undefined) this.nextEffort = effort ?? null;
+      throw error;
+    }
+    // An effort the agent doesn't list now fails the turn before its prompt (it would run at
+    // another effort unannounced) and stays pending for the next.
+    if (!applied) {
+      if (this.nextEffort === undefined) this.nextEffort = effort ?? null;
+      // Putting back the agent's own level waits quietly; a chosen effort fails the turn.
+      if (!effort) return;
+      throw new ProviderSessionError(
+        "effort_unavailable",
+        `${this.config.spec.label} doesn't offer that reasoning effort right now; choose another`,
+      );
+    }
+    this.effort = effort;
+    if (this.nextEffort === nextEffort) this.nextEffort = undefined;
+  }
+
+  /**
+   * Set the session's reasoning effort through the agent's option for it (`spec.effort`); with
+   * none, put back the agent's own level if CodeDen changed it. True once the agent runs at it
+   * (set now, or already its level); false when the agent doesn't list the option or a level
+   * for it, or (not `strict`) refused it. A refusal only throws when `strict` (a change during
+   * the session).
+   */
+  private async applyEffort(
+    rpc: AcpRpc,
+    sessionId: string,
+    effort: ReasoningEffort | undefined,
+    strict = false,
+  ): Promise<boolean> {
+    const spec = this.config.spec.effort;
+    if (!spec || spec.fixed?.(this.setup)) return true;
+    const own = this.agentEffort;
+    if (!effort && own === undefined) return true;
+    const option = findOption(this.setup.configOptions, spec.category);
+    if (!option) return false;
+    if (effort && own === undefined) {
+      const current = option.currentValue;
+      if (typeof current === "string") this.agentEffort = current;
+    }
+    let pickable = true;
+    const pick = (listed: readonly string[]) => {
+      const value = effort
+        ? spec.value(effort, listed, this.setup)
+        : own && listed.includes(own)
+          ? own
+          : undefined;
+      pickable = value !== undefined;
+      return value;
+    };
+    const before = this.setup;
+    const applied = setConfigValue(rpc, sessionId, before, spec.category, pick);
+    // Strict: a refusal fails the turn. Otherwise a failure changes nothing.
+    const next = strict ? await applied : await applied.catch(() => undefined);
+    if (!next) return false;
+    this.applyReply(before, next);
+    // The agent's own level is forgotten only once it is back (set now, or already current).
+    if (!effort && pickable) this.agentEffort = undefined;
+    return pickable;
   }
 
   private onAgentMode(mode: string): void {
@@ -368,11 +511,32 @@ export class AcpSession implements ProviderSession {
     }
   }
 
+  /**
+   * Take what a change of model, mode or effort brought into the session's own setup, given the
+   * setup it started from. An option list the agent answered with replaces the live options
+   * (the rest of `next` is the request's starting copy). A reply without one
+   * (`session/set_mode`, `session/set_model`) keeps the live setup, options reported while the
+   * request ran included, and takes only the mode it acknowledged. Nothing is reported: the
+   * adapter's list comes from complete `session/new` snapshots only.
+   */
+  private applyReply(before: AcpSessionSetup, next: AcpSessionSetup): void {
+    if (next.configOptions !== before.configOptions) {
+      this.setup = { ...this.setup, configOptions: next.configOptions };
+      return;
+    }
+    if (next.modes !== before.modes) this.setup = { ...this.setup, modes: next.modes };
+  }
+
+  /**
+   * The agent's options changed (`config_option_update`). Only the options it sent are
+   * reported: the rest of the session's setup (`modes`, `models`) is as old as its
+   * `session/new`, and must not replace what a newer session reported since.
+   */
   private onConfigOptions(options: AcpConfigOption[]): void {
     this.setup = { ...this.setup, configOptions: options };
     const mode = currentMode({ configOptions: options });
     if (mode && mode !== this.mode) this.onAgentMode(mode);
-    this.config.onSetup?.(this.setup, this.info);
+    notify(() => this.config.onSetup?.({ configOptions: options }, this.info, "update"));
   }
 
   /** The host for an extension call from the ACP session `acpSessionId` (the root or a child). */

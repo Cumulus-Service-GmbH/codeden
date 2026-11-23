@@ -1,9 +1,10 @@
 import { existsSync } from "node:fs";
-import type {
-  AgentEvent,
-  RunnerCommandOf,
-  RunnerEvent,
-  RunnerSessionInfo,
+import {
+  type AgentEvent,
+  type RunnerCommandOf,
+  type RunnerEvent,
+  type RunnerSessionInfo,
+  securityRulesCover,
 } from "@codeden/contracts";
 import {
   type ProviderRegistry,
@@ -13,15 +14,19 @@ import {
 import { CommandError } from "./errors";
 import { createCheckpoint, nextCheckpointIndex } from "./git/checkpoints";
 import { cwdMissing, isWorkTree } from "./git/exec";
+import { ActiveTools } from "./priority-steer";
 import { agentSessionOptions } from "./session-env";
 
 export { CommandError };
 
 interface Hosted {
   providerId: string;
+  activeTools: ActiveTools;
+  interruptToolCall: boolean;
   session: ProviderSession;
   state: RunnerSessionInfo["state"];
   rootThreadId: string | undefined;
+  rootTurnId?: string;
   cwd: string;
   checkpoints: boolean;
   /** Serializes checkpoint writes for this session. */
@@ -102,6 +107,28 @@ export class SessionHost {
           (available.length > 0 ? ` (available: ${available.join(", ")})` : ""),
       );
     }
+    // Fail closed: a provider the machine's security rules don't cover (it doesn't declare
+    // `enforcesSecurityRules`) runs only where the session's project allowed such providers.
+    // The orchestrator never takes a project's exception.
+    const caps = adapter.capabilities();
+    const { role } = cmd.options;
+    const covered = securityRulesCover(caps, {
+      role,
+      inCodedenWorktree: cmd.options.inCodedenWorktree,
+    });
+    if (!covered && (!cmd.options.allowUnenforcedProviders || role === "orchestrator")) {
+      throw new CommandError(
+        "security_rules_unenforced",
+        `${adapter.displayName} isn't covered by this machine's security rules, and this session isn't allowed to use such providers`,
+      );
+    }
+    // PMs and the orchestrator are read-only at every level: only on a provider that enforces it.
+    if (role !== "agent" && caps.readOnly !== true) {
+      throw new CommandError(
+        "read_only_unsupported",
+        `${adapter.displayName} can't enforce read-only, so it can't run a ${role === "pm" ? "PM" : "orchestrator"}`,
+      );
+    }
     // A folder that isn't there (a host path sent to a sandbox, a removed worktree) is named as
     // such instead of failing later as a provider's `spawn ENOENT`.
     if (!existsSync(cmd.options.cwd)) throw cwdMissing(cmd.options.cwd);
@@ -128,6 +155,8 @@ export class SessionHost {
       const checkpoints = cmd.checkpoints !== false && (await isWorkTree(cmd.options.cwd));
       hosted = {
         providerId: cmd.providerId,
+        activeTools: new ActiveTools(),
+        interruptToolCall: caps.interruptToolCall === true,
         session: opened,
         state: "idle",
         rootThreadId: undefined,
@@ -171,7 +200,7 @@ export class SessionHost {
     }
   }
 
-  async steer(cmd: RunnerCommandOf<"session.steer">): Promise<void> {
+  async steer(cmd: RunnerCommandOf<"session.steer">) {
     const hosted = this.get(cmd.sessionId);
     const { session } = hosted;
     if (!session.steer) throw new CommandError("unsupported", "This provider cannot steer turns");
@@ -179,7 +208,23 @@ export class SessionHost {
     if (hosted.compactPending || hosted.compactTurnId) {
       throw new CommandError("compacting", COMPACTING);
     }
+    const { rootTurnId } = hosted;
+    if (cmd.expectedTurnId && cmd.expectedTurnId !== rootTurnId) {
+      throw new CommandError("no_turn", "The turn waiting for the priority message has ended");
+    }
+    const shell = cmd.waitForShell && hosted.activeTools.shell();
+    if (shell && rootTurnId) {
+      if (
+        cmd.interrupt?.rootTurnId === rootTurnId &&
+        hosted.interruptToolCall &&
+        hosted.activeTools.canInterrupt(cmd.interrupt)
+      ) {
+        await session.interruptToolCall?.(cmd.interrupt);
+      }
+      return { waitingFor: { ...shell, rootTurnId } };
+    }
     await session.steer(cmd.input);
+    return {};
   }
 
   async interrupt(sessionId: string): Promise<void> {
@@ -393,18 +438,23 @@ export class SessionHost {
   }
 
   private track(sessionId: string, hosted: Hosted, event: AgentEvent): void {
+    hosted.activeTools.track(event);
     if (event.type === "thread.started" && !event.thread.parentThreadId) {
       hosted.rootThreadId = event.thread.id;
     }
     const onRoot = "threadId" in event && event.threadId === hosted.rootThreadId;
     if (!onRoot) return;
-    if (event.type === "turn.started" && hosted.state !== "closing") hosted.state = "running";
+    if (event.type === "turn.started" && hosted.state !== "closing") {
+      hosted.state = "running";
+      hosted.rootTurnId = event.turnId;
+    }
     if (
       event.type === "turn.completed" ||
       event.type === "turn.failed" ||
       event.type === "turn.interrupted"
     ) {
       if (hosted.state !== "closing") hosted.state = "idle";
+      if (hosted.rootTurnId === event.turnId) hosted.rootTurnId = undefined;
       if (hosted.compactTurnId === event.turnId) hosted.compactTurnId = undefined;
       if (hosted.checkpoints) this.checkpoint(sessionId, hosted, event.turnId);
     }

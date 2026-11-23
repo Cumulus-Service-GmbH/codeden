@@ -1,6 +1,7 @@
-import type { McpTokenClaims } from "@codeden/contracts";
+import { type McpTokenClaims, PlanApprovalStep } from "@codeden/contracts";
 import { z } from "zod";
 import type { AppServices } from "../services/container";
+import { tierFor } from "../services/decision-approvals";
 import { errorMessage, ServiceError } from "../services/errors";
 import {
   type AnyServerTool,
@@ -53,7 +54,7 @@ export class ToolRegistry {
   /** Tools visible to a role (and caller, when known), in registration order. */
   forRole(role: McpTokenClaims["role"], caller?: ToolAvailabilityContext): AnyServerTool[] {
     return [...this.byName.values()].filter(
-      (t) => t.roles.includes(role) && (t.isAvailable?.(this.services, caller) ?? true),
+      (t) => t.roles.includes(role) && (t.isAvailable?.(this.services, caller, role) ?? true),
     );
   }
 
@@ -82,7 +83,12 @@ export class ToolRegistry {
     );
   }
 
-  async call(name: string, args: unknown, caller: ToolCaller): Promise<ToolCallResult> {
+  async call(
+    name: string,
+    args: unknown,
+    caller: ToolCaller,
+    plan?: { cardId: string; projectId: string },
+  ): Promise<ToolCallResult> {
     const tool = this.forRole(caller.role, caller).find((t) => t.name === name);
     if (!tool) return { text: `Unknown tool: ${name}`, isError: true };
     const parsed = tool.input.safeParse(args ?? {});
@@ -92,18 +98,55 @@ export class ToolRegistry {
     if (tool.scope === "session" && !caller.sessionId) {
       return { text: `${name} needs a session`, isError: true };
     }
-    if (tool.scope === "project" && !caller.projectId) {
+    const projectId = plan?.projectId ?? caller.projectId;
+    if (tool.scope === "project" && !projectId) {
       return { text: `${name} needs a project`, isError: true };
     }
     try {
-      const output = await tool.handler(parsed.data, {
-        role: caller.role,
-        caller: caller.caller,
-        signal: caller.signal,
-        sessionId: caller.sessionId,
-        projectId: caller.projectId,
-        services: this.services,
-      } as never);
+      let approvedStep: PlanApprovalStep | undefined;
+      const tier = tierFor(name);
+      if (tier !== undefined || plan) {
+        const step = PlanApprovalStep.parse({ action: name, args: args ?? {} });
+        const target = step.args.projectId ?? projectId;
+        if (typeof target !== "string" || (plan && target !== plan.projectId)) {
+          throw new ToolError("The step must target the card's project");
+        }
+        // start_session is visible to agents only when the PM delegated the Team Architect role.
+        const delegatedStart =
+          tier === 0 &&
+          name === "start_session" &&
+          caller.role === "agent" &&
+          target === caller.projectId &&
+          !plan;
+        if (!delegatedStart) {
+          this.services.decisions.authorize(caller, target, step, plan?.cardId);
+        }
+        if (plan) approvedStep = step;
+      }
+      let output: unknown;
+      try {
+        output = await tool.handler(parsed.data, {
+          role: caller.role,
+          caller: caller.caller,
+          signal: caller.signal,
+          sessionId: caller.sessionId,
+          projectId,
+          services: this.services,
+        } as never);
+      } catch (error) {
+        if (plan && approvedStep) {
+          this.services.decisions.recordStepResult(plan.cardId, caller.sessionId, approvedStep, {
+            ok: false,
+            error,
+          });
+        }
+        throw error;
+      }
+      if (plan && approvedStep) {
+        this.services.decisions.recordStepResult(plan.cardId, caller.sessionId, approvedStep, {
+          ok: true,
+        });
+      }
       if (output instanceof ToolOutput) {
         return { text: output.text, isError: false, images: output.images };
       }

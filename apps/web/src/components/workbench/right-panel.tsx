@@ -7,6 +7,7 @@ import {
   Info,
   type LucideIcon,
   SquareTerminal,
+  Users,
   X,
 } from "lucide-react";
 import { DiffPanel, FilesPanel, TerminalView } from "@/components/on-demand";
@@ -18,6 +19,7 @@ import { BrowserPanel } from "./browser-panel";
 import { ChildThreadPanel } from "./child-thread-panel";
 import { DetailsPanel } from "./details-panel";
 import { GitHubPanel } from "./github-panel";
+import { TeamWorkers } from "./team-workers";
 
 const TABS: { id: RightTab; label: string; icon: LucideIcon }[] = [
   { id: "diff", label: "Diff", icon: FileDiff },
@@ -25,10 +27,11 @@ const TABS: { id: RightTab; label: string; icon: LucideIcon }[] = [
   { id: "browser", label: "Browser", icon: Globe },
   { id: "terminal", label: "Terminal", icon: SquareTerminal },
   { id: "github", label: "Issue / PR", icon: GitPullRequest },
+  { id: "workers", label: "Workers", icon: Users },
   { id: "details", label: "Details", icon: Info },
 ];
 
-/** Right panel (§13): diff, files, browser, terminal, issue/PR, details, and subagent threads. */
+/** Right panel (§13): diff, files, browser, terminal, issue/PR, details, workers, and subagent threads. */
 export function RightPanel({ sessionId, width }: { sessionId: string; width: number | string }) {
   const tab = useLayoutStore((s) => s.rightTab);
   const openTab = useLayoutStore((s) => s.openRightTab);
@@ -81,6 +84,11 @@ export function RightPanel({ sessionId, width }: { sessionId: string; width: num
         {active === "browser" && <BrowserPanel sessionId={sessionId} />}
         {active === "terminal" && <TerminalView key={sessionId} sessionId={sessionId} />}
         {active === "github" && <GitHubPanel sessionId={sessionId} />}
+        {active === "workers" && (
+          <div role="tabpanel" aria-label="Workers" className="h-full space-y-3 overflow-auto p-4">
+            <TeamWorkers sessionId={sessionId} />
+          </div>
+        )}
         {active === "details" && session && <DetailsPanel session={session} />}
         {active === "thread" && showChild && (
           <ChildThreadPanel
@@ -115,6 +123,7 @@ function TabButton({
       type="button"
       role="tab"
       aria-selected={active}
+      aria-label={label}
       title={label}
       onClick={onClick}
       className={cn(

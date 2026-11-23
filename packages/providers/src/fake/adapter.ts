@@ -16,6 +16,8 @@ import { FakeSession } from "./session";
 export interface FakeProviderOptions {
   /** Delay between emitted events in ms (0 = yield only). Default 0. */
   delayMs?: number;
+  /** Hold the scripted shell call until this promise resolves or the call is cancelled. */
+  holdShell?: Promise<void>;
   /** Always raise an approval request before the tool call. Also triggered by `[approval]` in the prompt. */
   approval?: boolean;
   /** Always run a subagent child thread. Also triggered by `[subagent]` in the prompt. */
@@ -30,6 +32,7 @@ const capabilities: ProviderCapabilities = {
   resume: true,
   steer: true,
   interrupt: true,
+  interruptToolCall: true,
   approvals: true,
   userQuestions: false,
   subagents: true,
@@ -42,6 +45,8 @@ const capabilities: ProviderCapabilities = {
   skills: false,
   liveAutonomy: true,
   readOnly: true,
+  // Its sessions run under the machine's security rules (the guard or execpolicy).
+  enforcesSecurityRules: true,
   compact: true,
   // Scripted: it needs no sign-in, so a sandbox's runner can host it (`credentialFree`).
   credentialFree: true,

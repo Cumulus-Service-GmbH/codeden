@@ -18,6 +18,19 @@ function roundTrip<T>(schema: { parse: (v: unknown) => T }, value: unknown): T {
 }
 
 describe("runner protocol", () => {
+  it("round-trips an assembler merge pinned to a worker commit", () => {
+    const command = {
+      name: "git.mergeTeamWorker",
+      cwd: "/assembler",
+      assembler: "team/run",
+      workerBranch: "work/run/1-1",
+      head: "a".repeat(40),
+    };
+    roundTrip(RunnerCommand, command);
+    roundTrip(RunnerCommandResults["git.mergeTeamWorker"], { headMoved: true });
+    expect(RunnerCommand.safeParse({ ...command, head: "HEAD" }).success).toBe(false);
+  });
+
   it("round-trips the handshake", () => {
     roundTrip(ServerToRunnerMessage, {
       type: "hello",
@@ -74,6 +87,7 @@ describe("runner protocol", () => {
           id: "codex",
           displayName: "Codex",
           capabilities: {
+            modelVendor: "openai",
             resume: true,
             steer: true,
             interrupt: true,

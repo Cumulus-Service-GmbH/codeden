@@ -11,6 +11,7 @@ import type {
   JsonValue,
   McpServerState,
   ProjectRemoteWarning,
+  ProjectTeams,
   QueueSender,
   SessionChecks,
   SessionResult,
@@ -70,10 +71,14 @@ export const projects = sqliteTable(
     autonomyMode: text("autonomy_mode").notNull().default("assisted"),
     visionPath: text("vision_path").notNull().default(".codeden/VISION.md"),
     factoryLimits: json<FactoryLimits>("factory_limits"),
+    teams: json<ProjectTeams>("teams"),
     killSwitch: integer("kill_switch", { mode: "boolean" }).notNull().default(false),
     timezone: text("timezone"),
     /** Agent sessions run with `CI=true` (§4.2); the migration keeps it on for every project. */
     agentCiEnv: integer("agent_ci_env", { mode: "boolean" }).notNull().default(true),
+    allowUnenforcedProviders: integer("allow_unenforced_providers", { mode: "boolean" })
+      .notNull()
+      .default(false),
     /** Where new agent sessions run (`Project.execution.backend`); `local` for older projects. */
     executionBackend: text("execution_backend", { enum: ["local", "docker"] })
       .notNull()

@@ -50,6 +50,7 @@ export class OpenCodePolicy {
     private readonly ctx: RiskContext,
     /** Read-only sessions (orchestrator, PMs). */
     private readonly readOnly = false,
+    private readonly mcpServers: readonly string[] = [],
   ) {}
 
   get level(): AutonomyLevel {
@@ -86,6 +87,15 @@ export class OpenCodePolicy {
       case "read":
         return this.gate(this.firstRisk(request.resources, classifyRead), undefined, true);
       default:
+        if (
+          this.readOnly &&
+          !this.mcpServers.some((name) => request.action.startsWith(`${name}_`))
+        ) {
+          return {
+            kind: "deny",
+            message: "This session is read-only: use CodeDen's own MCP tools only.",
+          };
+        }
         return {
           kind: "ask",
           action: "tool",

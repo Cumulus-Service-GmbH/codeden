@@ -20,6 +20,7 @@ import { errorMessage } from "../errors";
 import type { TrustedAuthors } from "../github/review-trust";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
+import { isSendBusyError } from "../sessions/admission";
 import { mayHaveStarted } from "../sessions/input-decorator";
 import type { SessionRepo } from "../sessions/repo";
 import type { SessionService } from "../sessions/session-service";
@@ -42,6 +43,7 @@ import {
   formServerOf,
   isRepeatFailure,
   type NoticeDraft,
+  type NoticeLookup,
   NoticeStore,
 } from "./notices";
 import {
@@ -79,6 +81,7 @@ export interface OrchestrationDeps {
   automation?: AutomationPort;
   /** The user's IANA timezone (the usage settings', else the machine's). Default: the machine's. */
   timezone?: () => string;
+  resultSummaryBytes?: NoticeLookup["resultSummaryBytes"];
   /** The factory loop of a project, for the status digest (null outside the factory modes). */
   factoryLoop?: (projectId: string) => ProjectStatus["factory"];
   options?: OrchestrationOptions;
@@ -263,6 +266,12 @@ export class OrchestrationService {
 
   // ---------------------------------------------------------------- messaging
 
+  async startFresh(id: string): Promise<Session> {
+    const session = await this.roles.startFresh(id);
+    if (session.role === "pm") this.asks.retarget(id, session.id);
+    return session;
+  }
+
   /**
    * Send a message to the orchestrator or a project's PM, creating the session if needed.
    * `from` labels the message in the queue tray when it has to wait for a running turn.
@@ -274,7 +283,8 @@ export class OrchestrationService {
     whenBusy: "queue" | "steer" | "reject" = "queue",
     from: QueueSender = "user",
   ): Promise<RoleMessageResponse> {
-    const session = await this.roles.ensure(role, projectId);
+    const ensured = await this.roles.ensure(role, projectId);
+    const session = this.roles.find(role, projectId) ?? ensured;
     const res = await this.deps.sessions.send(session.id, { input, whenBusy }, from);
     return { sessionId: session.id, status: res.status };
   }
@@ -311,7 +321,8 @@ export class OrchestrationService {
     question: string,
     opts: { origin: MessageOrigin; timeoutMs?: number; signal?: AbortSignal },
   ): Promise<(AskOutcome & { pmSessionId: string }) | HeldMessage> {
-    const pm = await this.roles.ensure("pm", projectId);
+    const ensured = await this.roles.ensure("pm", projectId);
+    const pm = this.roles.find("pm", projectId) ?? ensured;
     const forUser = this.loops.humanLed(opts.origin);
     const askId = randomUUID().slice(0, 8);
     const target = { pmSessionId: pm.id, projectId, fromSessionId: opts.origin.sessionId };
@@ -426,6 +437,7 @@ export class OrchestrationService {
         const derived = [
           ...deriveNotices(events, {
             session,
+            resultSummaryBytes: this.deps.resultSummaryBytes,
             finalMessage: (sessionId, turnId) =>
               finalAssistantMessage(this.deps.db, sessionId, turnId),
             turnKind: (sessionId, turnId) => this.deps.repo.turn(sessionId, turnId)?.kind,
@@ -445,13 +457,19 @@ export class OrchestrationService {
     const role: OrchestrationRole = key === "orchestrator" ? "orchestrator" : "pm";
     const projectId = role === "pm" ? key.slice(3) : null;
     if (this.notices.undelivered(role, projectId).length === 0) return "empty";
-    const session = await this.roles.ensure(role, projectId);
+    const ensured = await this.roles.ensure(role, projectId);
+    const session = this.roles.find(role, projectId) ?? ensured;
     if (NOT_READY.has(session.status)) return "busy";
-    await this.deps.sessions.send(
-      session.id,
-      { input: { text: WAKE_TEXT, attachments: [] }, whenBusy: "reject" },
-      "codeden",
-    );
+    try {
+      await this.deps.sessions.send(
+        session.id,
+        { input: { text: WAKE_TEXT, attachments: [] }, whenBusy: "reject" },
+        "codeden",
+      );
+    } catch (error) {
+      if (isSendBusyError(error)) return "busy";
+      throw error;
+    }
     return "sent";
   }
 

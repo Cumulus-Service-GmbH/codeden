@@ -1,5 +1,5 @@
 import { ChevronRight, CircleX, FileDiff, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { duration } from "@/lib/format";
 import type { WorkEntry } from "@/lib/transcript/timeline";
 import { cn } from "@/lib/utils";
@@ -108,6 +108,19 @@ export function ToolRow(props: ToolRowProps) {
   return <ToolRowView key={`${props.sessionId}:${props.entry.id}`} {...props} />;
 }
 
+function LongCommandFlag({ startedAt }: { startedAt: string }) {
+  const deadline = Date.parse(startedAt) + 15 * 60_000;
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => {
+    if (!Number.isFinite(deadline)) return;
+    const remaining = deadline - Date.now();
+    const timer = setTimeout(() => setNow(Date.now()), Math.max(0, remaining));
+    return () => clearTimeout(timer);
+  }, [deadline]);
+  if (!(now >= deadline)) return null;
+  return <span className="text-2xs text-status-waiting">Long command</span>;
+}
+
 function ToolRowView({ sessionId, entry, defaultOpen = false }: ToolRowProps) {
   const [open, setOpen] = useState(defaultOpen);
   const Icon = entryIcon(entry);
@@ -163,6 +176,10 @@ function ToolRowView({ sessionId, entry, defaultOpen = false }: ToolRowProps) {
           </span>
         )}
         <span className="col-start-6 flex items-center gap-1.5 pl-2">
+          {running &&
+            entry.kind === "tool_call" &&
+            entry.toolKind === "command" &&
+            entry.startedAt && <LongCommandFlag startedAt={entry.startedAt} />}
           {ms !== undefined && !running && (
             <span className="text-3xs text-muted-foreground/60 tabular-nums">{duration(ms)}</span>
           )}

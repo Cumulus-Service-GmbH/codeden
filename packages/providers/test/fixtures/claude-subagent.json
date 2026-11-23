@@ -7,6 +7,8 @@
  "autonomy": "auto",
  "model": "haiku",
  "capabilities": {
+  "chrome": true,
+  "modelVendor": "anthropic",
   "resume": true,
   "steer": true,
   "interrupt": true,
@@ -23,8 +25,11 @@
   "liveAutonomy": true,
   "readOnly": true,
   "compact": true,
+  "enforcesSecurityRules": true,
+  "securityRulesWorktreesOnly": true,
   "mcpStatus": true,
-  "hookRuns": true
+  "hookRuns": true,
+  "systemPrompt": true
  },
  "preamble": [],
  "turns": [

@@ -3,10 +3,12 @@ import { useMutation } from "@tanstack/react-query";
 import { Check, ClipboardCheck, ClipboardList, PencilLine } from "lucide-react";
 import { useState } from "react";
 import { toast } from "sonner";
+import { MultiFileDiff } from "@/components/on-demand";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useClient } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { useResolvedTheme } from "@/stores/theme";
 import { Markdown } from "../markdown";
 
 type Answer = { decision: "allow_once" | "deny"; message?: string };
@@ -21,13 +23,16 @@ export function PlanApprovalCard({
   sessionId,
   compact = false,
   plan,
+  previousPlan,
 }: {
   item: ItemOf<"approval_request">;
   sessionId: string;
   compact?: boolean;
   plan?: string;
+  previousPlan?: string;
 }) {
   const client = useClient();
+  const theme = useResolvedTheme();
   /** Feedback being written for "Keep planning"; null while the box is closed. */
   const [feedback, setFeedback] = useState<string | null>(null);
   const decide = useMutation({
@@ -83,6 +88,28 @@ export function PlanApprovalCard({
           <div className="max-h-48 overflow-y-auto rounded-lg border border-border bg-surface px-3 py-2 scroll-thin">
             <Markdown>{plan}</Markdown>
           </div>
+        )}
+        {plan !== undefined && previousPlan !== undefined && (
+          <section aria-label="Changes from previous plan" className="space-y-1">
+            <h3 className="text-xs font-medium">Changes from previous plan</h3>
+            {plan === previousPlan ? (
+              <p className="text-xs text-muted-foreground">No changes to the plan text.</p>
+            ) : (
+              <div className="max-h-64 overflow-auto rounded-lg border border-border scroll-thin">
+                <MultiFileDiff
+                  oldFile={{ name: "Plan.md", contents: previousPlan }}
+                  newFile={{ name: "Plan.md", contents: plan }}
+                  options={{
+                    theme: { dark: "pierre-dark", light: "pierre-light" },
+                    themeType: theme,
+                    diffStyle: "unified",
+                    overflow: "wrap",
+                    disableFileHeader: true,
+                  }}
+                />
+              </div>
+            )}
+          </section>
         )}
         {feedback !== null && (
           <Textarea

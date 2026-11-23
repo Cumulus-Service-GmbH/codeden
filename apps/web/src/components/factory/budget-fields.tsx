@@ -108,6 +108,15 @@ export function BudgetFields({
         usdPlaceholder="No cap"
         tokensPlaceholder="No cap"
       />
+      <BudgetPair
+        label="Per-item review cap"
+        budget={limits.reviewBudget ?? {}}
+        onChange={(reviewBudget) => onChange({ ...limits, reviewBudget })}
+        usdHelp="Optional. Counts independent reviews for the item. Retrying gives reviews a fresh allowance."
+        tokensHelp="Optional, alongside USD."
+        usdPlaceholder="No cap"
+        tokensPlaceholder="No cap"
+      />
     </>
   );
 }

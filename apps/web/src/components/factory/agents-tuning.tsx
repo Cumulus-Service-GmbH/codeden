@@ -1,4 +1,10 @@
-import type { FactoryTuning, ProviderInfo, ReviewerFallback, SetupCheck } from "@codeden/contracts";
+import {
+  type FactoryTuning,
+  type ProviderInfo,
+  type ReviewerFallback,
+  type SetupCheck,
+  teamMember,
+} from "@codeden/contracts";
 import { type ReactNode, useId } from "react";
 import { Field } from "@/components/automations/form-bits";
 import {
@@ -22,15 +28,14 @@ export type AgentsDraft = Pick<
 >;
 
 const FALLBACKS: Array<{ id: ReviewerFallback; label: string }> = [
-  { id: "builder", label: "Review on the builder's provider and model" },
-  { id: "any", label: "Review on any available provider" },
+  { id: "any", label: "Review on another model vendor" },
   { id: "wait", label: "Wait until it is available again" },
 ];
 
 /** What a review does while its chosen provider can't run, by `reviewerFallback`. */
 const REVIEWS_MEANWHILE: Record<ReviewerFallback, string> = {
-  builder: "reviews run on the builder's provider and model",
-  any: "reviews run on any available provider",
+  builder: "reviews wait",
+  any: "reviews run on another model vendor",
   wait: "reviews wait",
 };
 
@@ -48,7 +53,7 @@ export function AgentsTuning({
   value,
   onChange,
 }: {
-  value: AgentsDraft;
+  value: AgentsDraft & Partial<Pick<FactoryTuning, "team">>;
   onChange: (next: AgentsDraft) => void;
 }) {
   const id = useId();
@@ -66,6 +71,7 @@ export function AgentsTuning({
         <AgentPicker
           id={`${id}-b`}
           label="Builder"
+          setByTeam={Boolean(teamMember(value.team, "writer"))}
           provider={value.builderProvider}
           model={value.builderModel}
           meanwhile="builders start on another available provider"
@@ -76,6 +82,7 @@ export function AgentsTuning({
         <AgentPicker
           id={`${id}-d`}
           label="Docs builder"
+          setByTeam={Boolean(teamMember(value.team, "agentsMdWriter"))}
           provider={value.docsBuilderProvider ?? ""}
           model={value.docsBuilderModel}
           autoValue=""
@@ -89,6 +96,7 @@ export function AgentsTuning({
         <AgentPicker
           id={`${id}-r`}
           label="Reviewer"
+          setByTeam={Boolean(teamMember(value.team, "reviewer"))}
           provider={value.reviewerProvider}
           model={value.reviewerModel}
           autoLabel="Automatic (a different provider from the builder)"
@@ -101,12 +109,12 @@ export function AgentsTuning({
       <Field
         label="When the reviewer's provider is unavailable"
         htmlFor={`${id}-fb`}
-        hint="Unavailable means not installed, not signed in, at its usage limit, or failing to start. With no provider available at all, the review waits."
+        hint="Unavailable means not installed, not signed in, at its usage limit, or failing to start. The review requires a provider with a known model vendor different from the author’s."
       >
         <select
           id={`${id}-fb`}
           className={SELECT}
-          value={value.reviewerFallback}
+          value={value.reviewerFallback === "builder" ? "wait" : value.reviewerFallback}
           onChange={(e) =>
             onChange({ ...value, reviewerFallback: e.target.value as ReviewerFallback })
           }
@@ -135,6 +143,9 @@ export function AgentPicker({
   autoLabel,
   hint,
   meanwhile,
+  setByTeam = false,
+  staleModel,
+  modelDescribedBy,
   onChange,
 }: {
   id: string;
@@ -147,7 +158,10 @@ export function AgentPicker({
   autoLabel?: string;
   hint?: string;
   /** What happens while the chosen provider can't run, e.g. "reviews wait". */
-  meanwhile: string;
+  meanwhile?: string;
+  setByTeam?: boolean;
+  staleModel?: boolean;
+  modelDescribedBy?: string;
   onChange: (provider: string, model: string | null) => void;
 }) {
   const providers = useSnapshotData((s) => s.runner.providers, []);
@@ -159,9 +173,10 @@ export function AgentPicker({
         label={`${label} provider`}
         providers={providers}
         checks={checks}
-        value={provider}
+        value={setByTeam ? autoValue : provider}
+        disabled={setByTeam}
         autoValue={autoValue}
-        autoLabel={autoLabel}
+        autoLabel={setByTeam ? "Set by Team" : autoLabel}
         hint={hint}
         meanwhile={meanwhile}
         onChange={(next) => onChange(next, null)}
@@ -171,6 +186,9 @@ export function AgentPicker({
         label={`${label} model`}
         provider={providers.find((p) => p.id === provider)}
         value={model}
+        staleModel={staleModel}
+        describedBy={modelDescribedBy}
+        disabled={setByTeam}
         onChange={(next) => onChange(provider, next)}
       />
     </>
@@ -187,6 +205,7 @@ function ProviderSelect({
   autoLabel = "Automatic",
   hint,
   meanwhile,
+  disabled,
   onChange,
 }: {
   id: string;
@@ -198,7 +217,8 @@ function ProviderSelect({
   autoLabel?: string;
   hint?: string;
   /** What happens while the chosen provider can't run, e.g. "reviews wait". */
-  meanwhile: string;
+  meanwhile?: string;
+  disabled?: boolean;
   onChange: (provider: string) => void;
 }) {
   const chosen = providers.find((p) => p.id === value);
@@ -219,13 +239,19 @@ function ProviderSelect({
             (run <code className="rounded bg-muted px-1 font-mono">{availability.command}</code>)
           </>
         )}
-        . Until it can run, {meanwhile}.
+        .{meanwhile && ` Until it can run, ${meanwhile}.`}
       </span>
     );
   }
   return (
     <Field label={label} htmlFor={id} hint={hint} help={help}>
-      <select id={id} className={SELECT} value={value} onChange={(e) => onChange(e.target.value)}>
+      <select
+        id={id}
+        className={SELECT}
+        value={value}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.value)}
+      >
         <option value={autoValue}>{autoLabel}</option>
         {providers.map((p) => (
           <option key={p.id} value={p.id}>
@@ -243,23 +269,31 @@ function ModelSelect({
   label,
   provider,
   value,
+  disabled,
+  staleModel,
+  describedBy,
   onChange,
 }: {
   id: string;
   label: string;
   provider: ProviderInfo | undefined;
   value: string | null;
+  disabled?: boolean;
+  staleModel?: boolean;
+  describedBy?: string;
   onChange: (model: string | null) => void;
 }) {
   const models = provider?.models ?? [];
-  const known = value === null || models.some((m) => m.id === value);
+  const listedModel =
+    models.find((m) => m.id === value) ?? models.find((m) => m.resolvedId === value);
   return (
     <Field label={label} htmlFor={id}>
       <select
         id={id}
+        aria-describedby={describedBy}
         className={SELECT}
-        value={value ?? ""}
-        disabled={!provider}
+        value={listedModel?.id ?? value ?? ""}
+        disabled={disabled || !provider}
         onChange={(e) => onChange(e.target.value || null)}
       >
         <option value="">{provider ? "Provider default" : "Choose a provider first"}</option>
@@ -268,7 +302,9 @@ function ModelSelect({
             {m.label}
           </option>
         ))}
-        {!known && value && <option value={value}>{value}</option>}
+        {!listedModel && value && (
+          <option value={value}>{staleModel ? `${value} (not listed)` : value}</option>
+        )}
       </select>
     </Field>
   );

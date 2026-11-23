@@ -1,5 +1,6 @@
 import { type Role, ThreadItemsPage, type UserInput } from "@codeden/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { sampleSession } from "./helpers";
 import { type Harness, startHarness, waitUntil } from "./support/harness";
 
 describe("messages from a PM or the orchestrator record their sender", () => {
@@ -7,6 +8,12 @@ describe("messages from a PM or the orchestrator record their sender", () => {
 
   beforeAll(async () => {
     h = await startHarness();
+    // A PM's start is judged by its own session's Team, so the calling PM must exist.
+    // It has no project, so it never stands in for the project's own PM.
+    const session = { ...sampleSession, id: "pm-test", role: "pm" as const };
+    h.server.services.store.append([
+      { type: "session.created", sessionId: session.id, payload: { session } },
+    ]);
   });
   afterAll(async () => {
     await h?.close();

@@ -14,6 +14,7 @@ import type { Exec } from "../exec";
 import type { InboxService } from "../inbox-service";
 import type { NoticeDraft } from "../orchestration/notices";
 import type { ProjectService } from "../projects/project-service";
+import type { SessionAdmission } from "../sessions/admission";
 import type { SessionRepo } from "../sessions/repo";
 import type { RateLimitReading } from "./availability";
 import type { FactoryGithub } from "./github-port";
@@ -32,6 +33,7 @@ export interface FactoryContext {
   sessions: FactorySessions;
   projects: ProjectService;
   repo: SessionRepo;
+  admission: Pick<SessionAdmission, "free">;
   usage: {
     spendSince(
       day: string,

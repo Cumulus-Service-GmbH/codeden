@@ -60,6 +60,7 @@ function project(id: string): Project {
     killSwitch: false,
     timezone: null,
     agentCiEnv: true,
+    allowUnenforcedProviders: false,
     execution: { backend: "local" },
     pinned: false,
     sortOrder: 0,
@@ -135,7 +136,7 @@ describe("GET /api/snapshot", () => {
     expect(ids).toEqual(["s0000", ...recent, "s0501"]);
   });
 
-  it("counts every project's archived agent sessions, the old ones included", async () => {
+  it("counts every project's archived sessions, including old PM conversations", async () => {
     seed([
       session(0, null),
       session(1, HOUR),
@@ -147,7 +148,7 @@ describe("GET /api/snapshot", () => {
       session(7, 30 * DAY, { projectId: null }),
     ]);
 
-    expect((await snapshot()).archivedSessionCounts).toEqual({ p1: 3, p2: 1 });
+    expect((await snapshot()).archivedSessionCounts).toEqual({ p1: 4, p2: 1 });
   });
 });
 
@@ -170,7 +171,7 @@ describe("GET /api/sessions?ids=", () => {
 });
 
 describe("GET /api/projects/:id/sessions/archived", () => {
-  it("pages through a project's archived agent sessions, most recently archived first", async () => {
+  it("pages through a project's archived sessions, including PM conversations", async () => {
     // s0004 and s0005 were archived in the same instant: the id breaks the tie.
     const tie = { archivedAt: iso(2 * HOUR) };
     seed([
@@ -195,7 +196,11 @@ describe("GET /api/projects/:id/sessions/archived", () => {
       cursor = page.nextCursor;
     } while (cursor && pages.length < 10);
 
-    expect(pages).toEqual([["s0002", "s0005"], ["s0004", "s0001"], ["s0003"]]);
+    expect(pages).toEqual([
+      ["s0006", "s0002"],
+      ["s0005", "s0004"],
+      ["s0001", "s0003"],
+    ]);
   });
 
   it("refuses an unknown project and a bad cursor", async () => {

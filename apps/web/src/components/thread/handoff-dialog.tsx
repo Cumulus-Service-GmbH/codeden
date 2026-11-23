@@ -10,9 +10,12 @@ import {
   type Availability,
   lowerFirst,
   type ModelChoice,
+  projectRefusal,
   providerAvailability,
+  UNENFORCED_REASON,
 } from "@/components/composer/model-picker/logic";
 import { ModelPicker } from "@/components/composer/model-picker/model-picker";
+import { supportsSupervised } from "@/components/thread/autonomy";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -24,7 +27,13 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { useRecheckSetup, useSession, useSetupStatus, useSnapshotData } from "@/lib/queries";
+import {
+  useProject,
+  useRecheckSetup,
+  useSession,
+  useSetupStatus,
+  useSnapshotData,
+} from "@/lib/queries";
 import { useHandoffBlocked, useHandoffSession } from "@/lib/session-actions";
 import { useUiStore } from "@/stores/ui";
 
@@ -64,7 +73,13 @@ export function handoffTargetProblem(
 ) {
   if (!target) return null;
   if (availability && !availability.ready) {
+    // A project's refusal isn't a setup problem: its own detail says how to allow it.
+    if (availability.reason === UNENFORCED_REASON && availability.detail)
+      return availability.detail;
     return `${target.displayName} can't start sessions: ${lowerFirst(availability.reason ?? "Not ready")}.`;
+  }
+  if (session.autonomy === "supervised" && !supportsSupervised(target)) {
+    return `${target.displayName} can't enforce Supervised. Change this session's permissions first.`;
   }
   if (session.autonomy === "read_only" && !target.capabilities.readOnly) {
     return `${target.displayName} can't run read-only sessions. Change this session's permissions first.`;
@@ -119,7 +134,11 @@ function HandoffForm({
   const recheck = useRecheckSetup();
   const target = providers.find((p) => p.id === choice.provider);
   const name = target?.displayName ?? choice.provider;
-  const availability = providerAvailability(choice.provider, checks);
+  const project = useProject(session.projectId);
+  // A provider the project refuses (the security rules don't cover it) says why before setup does.
+  const availability =
+    (target ? projectRefusal(target, project) : null) ??
+    providerAvailability(choice.provider, checks);
   const problem = blocked ?? handoffTargetProblem(session, target, availability);
   const submit = () => {
     if (problem || handoff.isPending) return;
@@ -153,6 +172,7 @@ function HandoffForm({
             <ModelPicker
               providers={providers}
               value={choice}
+              project={project ?? null}
               onChange={setPicked}
               disabled={handoff.isPending}
             />
@@ -184,7 +204,7 @@ function HandoffForm({
             {problem}
           </p>
         )}
-        {target && !blocked && !availability.ready && (
+        {target && !blocked && !availability.ready && availability.reason !== UNENFORCED_REASON && (
           <div className="flex items-center justify-between gap-3 text-xs text-muted-foreground">
             <span>
               {availability.command ? (

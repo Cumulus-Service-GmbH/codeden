@@ -14,8 +14,9 @@ import { handleFailure } from "./failures";
 import type { FactoryPr, PrEvidence } from "./github-port";
 import { inheritedCi } from "./inherited-ci";
 import { stopBeforeAgentTurn } from "./item-budget";
+import { overReviewBudget } from "./item-cost";
 import { prDecidedOutside, readyForYou } from "./merge";
-import { escalate, failItem, runAudit } from "./outcomes";
+import { escalate, failItem, markStuck, runAudit } from "./outcomes";
 import { changedPaths, isUiFile, withVisionFile } from "./policy";
 import { joinQueue, leaveQueue } from "./queue";
 import {
@@ -32,6 +33,7 @@ import { adoptAgentPr } from "./rebuild";
 import { recheckCause } from "./recheck";
 import { checkRevert } from "./revert";
 import { ensureReviewer, reviewerStalled } from "./reviewer";
+import { isBusy } from "./sessions";
 import { mayAutoMerge } from "./trust";
 
 /** Audit results per item and head commit (re-run after a restart is fine). */
@@ -185,6 +187,20 @@ export async function advanceVerifying(
     if (review !== "pass") {
       const stopped = await beforeAgentTurn(current);
       if (stopped) return stopped;
+      const over = overReviewBudget(ctx, project.id, current, project.factoryLimits.reviewBudget);
+      if (over) {
+        const reviewer = current.reviewerSessionId
+          ? ctx.repo.find(current.reviewerSessionId)?.session
+          : undefined;
+        if (reviewer && isBusy(reviewer)) await ctx.sessions.stop(reviewer.id);
+        return markStuck(
+          ctx,
+          loop,
+          current,
+          `Review spend cap reached: ${over}`,
+          "Raise the review cap or retry the item to give its reviews a fresh allowance.",
+        );
+      }
     }
     current = await ensureReviewer(ctx, project, loop, current, vision.text, pr);
     return reviewerStalled(ctx, project, loop, current);

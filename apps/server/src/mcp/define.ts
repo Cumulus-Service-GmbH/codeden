@@ -27,7 +27,7 @@ export interface ServerTool<TInput extends z.ZodType = z.ZodType, S extends Tool
    * Hidden when false (e.g. a tool whose engine is not configured, or GitHub tools in a
    * local-only project). `caller` is the token's project and session when known.
    */
-  isAvailable?: (services: AppServices, caller?: ToolAvailabilityContext) => boolean;
+  isAvailable?: (services: AppServices, caller?: ToolAvailabilityContext, role?: Role) => boolean;
   /**
    * Descriptions of top-level input parameters that depend on the server's state when the tools
    * are listed (e.g. which providers are loaded and ready), keyed by parameter name. They replace

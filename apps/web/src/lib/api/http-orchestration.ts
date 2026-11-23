@@ -1,6 +1,8 @@
 import {
   ArchiveSessionResponse,
+  ChildRunList,
   ConflictRecord,
+  DecisionCard,
   GithubConnection,
   GithubIssueDetails,
   GithubIssuesResponse,
@@ -37,6 +39,8 @@ export function httpOrchestrationApi(http: Fetcher): OrchestrationApi {
   return {
     ensure: (role, projectId) =>
       post(rolePath(role, projectId), {}, (v) => RoleSessionResponse.parse(v).session),
+    startFresh: (sessionId) =>
+      post(`/orchestration/sessions/${enc(sessionId)}/start-fresh`, {}, (v) => Session.parse(v)),
     send: (role, projectId, input, whenBusy = "queue") =>
       post(`${rolePath(role, projectId)}/messages`, { input, whenBusy }, (v) =>
         RoleMessageResponse.parse(v),
@@ -53,6 +57,8 @@ export function httpGithubApi(http: Fetcher): GithubApi {
   const { get, post } = http;
   const project = (id: string) => `/projects/${enc(id)}/github`;
   return {
+    decisionCards: () => get("/inbox/decision-cards", (v) => DecisionCard.array().parse(v)),
+    approveDecisionCard: (id) => post(`/inbox/decision-cards/${enc(id)}/approve`, {}, () => {}),
     connection: () => get("/github/connection", (v) => GithubConnection.parse(v)),
     issues: (id, state = "open") =>
       get(`${project(id)}/issues${qs({ state })}`, (v) => GithubIssuesResponse.parse(v)),
@@ -73,7 +79,12 @@ export function httpGithubApi(http: Fetcher): GithubApi {
 
 type SessionAndConflictApi = Pick<
   CodeDenClient,
-  "updateSession" | "archiveSession" | "unarchiveSession" | "listConflicts" | "resolveConflict"
+  | "updateSession"
+  | "listChildRuns"
+  | "archiveSession"
+  | "unarchiveSession"
+  | "listConflicts"
+  | "resolveConflict"
 >;
 
 /** `PATCH /api/sessions/:id` and `/api/conflicts` (§8.4). */
@@ -81,6 +92,8 @@ export function httpSessionConflictApi(http: Fetcher): SessionAndConflictApi {
   return {
     updateSession: (id, patch) =>
       http.call("PATCH", `/sessions/${enc(id)}`, patch, (v) => Session.parse(v)),
+    listChildRuns: (id) =>
+      http.get(`/sessions/${enc(id)}/child-runs`, (v) => ChildRunList.parse(v)),
     archiveSession: (id, opts) =>
       http.post(`/sessions/${enc(id)}/archive`, opts ?? {}, (v) => ArchiveSessionResponse.parse(v)),
     unarchiveSession: (id) =>

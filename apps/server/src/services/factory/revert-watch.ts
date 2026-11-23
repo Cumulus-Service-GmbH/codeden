@@ -2,6 +2,9 @@ import type { FactoryItem, FactoryLoop, Project } from "@codeden/contracts";
 import { baseBranchOf, type FactoryContext, pauseLoop, raiseInbox } from "./context";
 import { regressionInboxId } from "./revert-blocked";
 
+export const revertFailedPausePrefix = (branch: string) =>
+  `CI on ${branch} still fails after the automatic `;
+
 /**
  * CI on the default branch after an automatic revert merged (§10.1, Merge). Only a green run on
  * the revert's merge commit ends the regression by itself (`revertLanded`); until then the loop
@@ -93,7 +96,7 @@ export async function revertStillRed(
     title: `${branch} is still red after ${revert}: CI fails on its merge commit${names}`,
     body: `CI on ${branch} failed after ${mergedName(ctx, item)} merged, and it still fails after the automatic ${revert} merged (${sha.slice(0, 7)}): the revert didn't fix it. The factory loop stays paused: get ${branch} green, then resume the loop; the reverted work then goes back to its builder.`,
   });
-  return pauseLoop(ctx, next, `CI on ${branch} still fails after the automatic ${revert}`, {
+  return pauseLoop(ctx, next, `${revertFailedPausePrefix(branch)}${revert}`, {
     inbox: false,
   });
 }

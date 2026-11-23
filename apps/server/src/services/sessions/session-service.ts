@@ -8,6 +8,7 @@ import type {
   HandoffSessionResponse,
   JsonValue,
   ProviderInfo,
+  QueuedMessage,
   QueueSender,
   RespondRequest,
   ReviewSessionRequest,
@@ -16,6 +17,7 @@ import type {
   SendMessageRequest,
   SendMessageResponse,
   Session,
+  SessionAutonomyChanged,
   SessionDetail,
   StartSessionRequest,
   StartSessionResponse,
@@ -23,11 +25,15 @@ import type {
   UserInput,
   WorkspaceRequest,
 } from "@codeden/contracts";
+import { AT_CAPACITY_CODE, teamRoleOfTitle } from "@codeden/contracts";
 import type { SandboxService } from "../../execution/sandboxes";
 import type { McpTokenStore } from "../../mcp/tokens";
 import type { SettingsStore } from "../../settings-store";
 import type { ArtifactService } from "../artifacts";
+import type { ChecklistService } from "../checklist/checklist-service";
+import { checklistStartItem } from "../checklist/start";
 import { badRequest, conflict, ServiceError } from "../errors";
+import { isFactorySession } from "../factory/starter";
 import type { InboxService } from "../inbox-service";
 import { projectDefaultProvider } from "../projects/project-config";
 import type { ProjectService } from "../projects/project-service";
@@ -40,25 +46,37 @@ import {
   toServiceError,
 } from "../runner-port";
 import type { UtilityService } from "../utility";
+import type { SessionAdmission } from "./admission";
+import { assertAutonomy } from "./autonomy-policy";
 import { freezeChecks, roundAfter, withRound } from "./checks";
 import { compactingRefusal, compactionRunning, compactRefusal, startCompaction } from "./compact";
-import { derivePurpose, deriveWorkKey, findConflicts } from "./conflicts";
+import { derivePurpose, deriveWorkKey, findConflicts, firstPurposeLine } from "./conflicts";
 import { planFork } from "./fork";
 import { planHandoff } from "./handoff";
 import type { InputDecorator } from "./input-decorator";
 import type { LaunchFork, SessionLauncher } from "./launcher";
 import type { Outbox } from "./outbox";
 import { isTransientRunnerError, isTurnRunningError, OutboxHolds } from "./outbox-holds";
-import { planModeUnsupported, readOnlyUnsupported } from "./permissions";
+import {
+  planModeUnsupported,
+  readOnlyUnsupported,
+  securityRulesUnenforced,
+  supervisedUnsupported,
+} from "./permissions";
+import { deliverPriority } from "./priority-delivery";
 import type { Answerer, QuestionBroker } from "./questions";
 import { applyPendingConfig, updateSession } from "./reconfigure";
-import type { SessionRepo, StoredStartMeta } from "./repo";
+import { emptyStartMeta, type SessionRepo, type StoredStartMeta } from "./repo";
 import { planReview } from "./review";
+import { retireRoleSession } from "./role-retire";
 import { startWorkspace } from "./start-workspace";
 
 export interface SessionServiceDeps extends RunnerDeps {
+  forceFakeProvider?: boolean;
   repo: SessionRepo;
+  admission?: SessionAdmission;
   projects: ProjectService;
+  checklist?: Pick<ChecklistService, "get">;
   inbox: InboxService;
   artifacts: ArtifactService;
   settings: SettingsStore;
@@ -89,9 +107,11 @@ export interface CheckRuns {
 }
 
 /** Preferred providers when the choice is `auto` (first ready one wins). */
-const AUTO_ORDER = ["claude", "codex", "opencode", "cursor", "gemini"];
+const AUTO_ORDER = ["claude", "codex", "opencode", "cursor", "gemini", "antigravity"];
 
 const BUSY = new Set(["running", "waiting"]);
+/** Messages from these senders can start a turn without a global session slot. */
+const PRIORITY_SENDERS = new Set<QueueSender>(["user", "pm", "orchestrator"]);
 const NOT_STARTED = new Set(["created", "queued", "starting"]);
 /** Statuses in which the next queued message is delivered. */
 const FLUSHABLE = new Set(["idle", "interrupted", "failed"]);
@@ -116,11 +136,18 @@ export class SessionService {
    * second turn.
    */
   private readonly delivering = new Set<string>();
+  private readonly priorityWaits = new Map<
+    string,
+    { controller: AbortController; pending: number }
+  >();
 
   constructor(private readonly deps: SessionServiceDeps) {
     this.holds = new OutboxHolds({
       retryMs: deps.outboxRetryMs,
-      onRetry: (id) => void this.flushOutbox(id).catch(() => undefined),
+      onRetry: (id) => {
+        this.deps.admission?.scheduleDrain();
+        void this.flushOutbox(id).catch(() => undefined);
+      },
     });
   }
 
@@ -137,9 +164,15 @@ export class SessionService {
    * Model and effort (applied on the next turn), autonomy and plan mode (pushed to the runner)
    * or title.
    */
-  update(id: string, req: UpdateSessionRequest): Promise<Session> {
+  update(
+    id: string,
+    req: UpdateSessionRequest,
+    audit?: Pick<SessionAutonomyChanged, "changedBy" | "reason">,
+  ): Promise<Session> {
+    const session = this.deps.repo.get(id);
+    assertRoleWritable(session);
+    assertAutonomy(req.autonomy, this.deps.repo.find(id)?.startMeta?.autonomyFloor);
     if (req.untilChecksPass !== undefined || req.checkRounds !== undefined) {
-      const session = this.deps.repo.get(id);
       if (session.role !== "agent" || !session.checks?.commands.length) {
         throw badRequest(
           "This session has no project checks: add `checks` to .codeden/project.json and start a new session",
@@ -147,8 +180,10 @@ export class SessionService {
         );
       }
     }
+    if (req.autonomy === "supervised") {
+      this.assertSupervisedSupported(session.provider, req.autonomy, id);
+    }
     if (req.autonomy === "read_only" || req.planMode !== undefined) {
-      const session = this.deps.repo.get(id);
       if (req.autonomy === "read_only") {
         this.assertReadOnlySupported(session.role, session.provider, req.autonomy, id);
       }
@@ -156,7 +191,7 @@ export class SessionService {
         this.assertPlanModeSupported(session.role, session.provider, id);
       }
     }
-    return updateSession(this.deps.repo, this.runnerOf(id), id, req);
+    return updateSession(this.deps.repo, this.runnerOf(id), id, req, audit);
   }
 
   /**
@@ -171,6 +206,42 @@ export class SessionService {
   ) {
     const problem = readOnlyUnsupported(role, level, this.provider(providerId, sessionId));
     if (problem) throw badRequest(problem, "read_only_unsupported");
+  }
+
+  /**
+   * Reject a new session whose provider its project doesn't allow (the machine's security rules
+   * aren't enforced for it and the project hasn't allowed such providers), for every role, or
+   * that would run `supervised` on a provider that can't enforce it.
+   */
+  private assertProviderAllowed(
+    session: Session,
+    workspace: WorkspaceRequest,
+    archived?: Session,
+  ): void {
+    const project = session.projectId ? this.deps.projects.get(session.projectId) : null;
+    // On the runner that hosts the role's conversations (the old one's), not only the home one.
+    const provider = this.provider(session.provider, archived?.id);
+    // Start fresh retires the old conversation with this one's creation: never on a provider
+    // that can't be checked yet (the runner not connected).
+    if (archived && !provider) {
+      throw new ServiceError(
+        503,
+        "runner_unavailable",
+        "The runner isn't connected, so the new conversation's provider can't be checked yet. Try again in a moment.",
+      );
+    }
+    // A worktree session runs in a CodeDen worktree (the runner checks the real folder too).
+    const inWorktree = workspace.mode === "worktree";
+    const unenforced = securityRulesUnenforced(provider, project, session.role, inWorktree);
+    if (unenforced) throw badRequest(unenforced, "security_rules_unenforced");
+    this.assertSupervisedSupported(session.provider, session.autonomy);
+    this.assertReadOnlySupported(session.role, session.provider, session.autonomy);
+  }
+
+  /** Reject `supervised` on a provider that can't enforce it (`capabilities.supervised`). */
+  private assertSupervisedSupported(providerId: string, level: AutonomyLevel, sessionId?: string) {
+    const problem = supervisedUnsupported(level, this.provider(providerId, sessionId));
+    if (problem) throw badRequest(problem, "supervised_unsupported");
   }
 
   /** Reject plan mode for role sessions and on providers without `capabilities.planMode`. */
@@ -191,8 +262,31 @@ export class SessionService {
     };
   }
 
-  async start(req: StartSessionRequest): Promise<StartSessionResponse> {
+  async start(
+    req: StartSessionRequest,
+    options: {
+      confirmChrome?: () => Promise<boolean>;
+      chromeApproved?: true;
+      checklistItemId?: string;
+      /** A role conversation this one replaces ("Start fresh"): archived as this one starts. */
+      replacesRoleId?: string;
+      /**
+       * The caller chose this session's provider or model itself (not filled from the Team): only
+       * then is it the session's own layer of its Team (`sessionTeamMember`).
+       */
+      ownTeamPins?: boolean;
+      autonomyFloor?: AutonomyLevel;
+      teamArchitect?: boolean;
+    } = {},
+  ): Promise<StartSessionResponse> {
     const { repo, projects } = this.deps;
+    if (this.deps.forceFakeProvider && req.provider !== "fake") {
+      req = { ...req, provider: "fake", model: undefined, effort: undefined, chrome: undefined };
+    }
+    assertAutonomy(req.autonomy, options.autonomyFloor);
+    if (req.autonomy === undefined && options.autonomyFloor) {
+      req = { ...req, autonomy: options.autonomyFloor };
+    }
     // The workspace follows `isGitRepo`: read it once the folder has been checked since start.
     if (req.projectId) await this.deps.projectChecks?.current(req.projectId);
     const project = req.projectId ? projects.get(req.projectId) : null;
@@ -200,8 +294,40 @@ export class SessionService {
     if (!project && req.role !== "orchestrator") {
       throw badRequest("projectId is required for this role", "project_required");
     }
+    if (project && req.role === "agent") {
+      const checklist = this.deps.checklist?.get(project.id);
+      if (checklist?.plan) {
+        checklistStartItem(
+          checklist,
+          req.purpose ?? firstPurposeLine(req.input?.text),
+          options.checklistItemId,
+          true,
+        );
+      }
+    }
+    const previous = options.replacesRoleId
+      ? this.roleToArchive(options.replacesRoleId)
+      : undefined;
+    if (previous) req = { ...req, provider: this.deps.settings.get().providers[req.role].provider };
     // Refused before the conflict check: a worktree that can't be made is never queued either.
     const workspace = startWorkspace(req.workspace, project);
+    if (
+      req.role === "agent" &&
+      req.startedBy.kind === "pm" &&
+      teamRoleOfTitle(req.title) === "browserOperator" &&
+      !options.chromeApproved &&
+      this.resolveProvider(req, project ? projectDefaultProvider(project) : null) === "claude"
+    ) {
+      if (!(await options.confirmChrome?.())) return { status: "skipped" };
+      // Recheck the project and conflicts after waiting for the user, with the provider fixed.
+      return this.start(
+        { ...req, provider: "claude" },
+        {
+          ...options,
+          chromeApproved: true,
+        },
+      );
+    }
     const purpose = derivePurpose(req.purpose, req.input?.text);
     const workKey = deriveWorkKey({
       workKey: req.workKey,
@@ -224,6 +350,7 @@ export class SessionService {
           if (target.projectId !== req.projectId) {
             throw badRequest("Can only join a session in the same project", "join_mismatch");
           }
+          assertAutonomy(target.autonomy, options.autonomyFloor);
           if (req.input) {
             await this.send(target.id, { input: req.input, whenBusy: "queue" }, req.startedBy.kind);
           }
@@ -238,24 +365,120 @@ export class SessionService {
       }
     }
 
-    const queued = queuedBehind.length > 0;
-    const session = this.buildSession(req, project, { purpose, workKey, scope, queued });
-    const meta: StoredStartMeta = {
-      workspaceMode: workspace.mode,
-      workspaceFallback: null,
-      forced,
-      queuedBehind,
-      // A pending start keeps its pasted images as artifacts, like a queued message.
-      pending: queued
-        ? { input: req.input && this.externalize(session, req.input), workspace }
-        : null,
-    };
-    repo.create(session, meta);
-    if (queued) {
-      return { status: "queued", sessionId: session.id, behind: queuedBehind };
+    const session = this.buildSession(req, project, {
+      purpose,
+      workKey,
+      scope,
+      queued: queuedBehind.length > 0,
+    });
+    if (
+      req.chrome &&
+      (session.startedBy.kind !== "user" ||
+        session.role !== "agent" ||
+        (project?.execution.backend ?? "local") !== "local" ||
+        !this.provider(session.provider)?.capabilities.chrome)
+    ) {
+      throw badRequest(
+        "Chrome requires a user-started local agent with Chrome support",
+        "chrome_unavailable",
+      );
     }
-    this.launchInBackground(session.id, req.input, workspace);
-    return { status: "started", sessionId: session.id };
+    const queued = this.createAndLaunch(
+      session,
+      {
+        workspaceMode: workspace.mode,
+        workspaceFallback: null,
+        forced,
+        queuedBehind,
+        chromeOptIn: options.chromeApproved,
+        chromeRequested: req.chrome,
+        ...(options.teamArchitect ? { teamArchitect: true } : {}),
+        ...(options.autonomyFloor ? { autonomyFloor: options.autonomyFloor } : {}),
+        ...(options.ownTeamPins ? { ownTeamPins: true as const } : {}),
+        ...(req.tokenSaver ? { tokenSaver: req.tokenSaver } : {}),
+      },
+      workspace,
+      req.input,
+      undefined,
+      previous,
+    );
+    if (previous) {
+      // Archived with the new one's creation: it doesn't run on, even while that one waits.
+      void retireRoleSession(
+        {
+          stop: (id) => this.stop(id, { confirm: true }),
+          revokeTokens: (id) => this.deps.tokens.revokeSession(id),
+        },
+        previous.id,
+      );
+    }
+    return queued
+      ? { status: "queued", sessionId: session.id, behind: queuedBehind }
+      : { status: "started", sessionId: session.id };
+  }
+
+  private roleToArchive(id: string): Session {
+    const session = this.deps.repo.get(id);
+    assertRoleWritable(session);
+    if (BUSY.has(session.status) || NOT_STARTED.has(session.status) || this.delivering.has(id)) {
+      throw conflict("Wait for the current turn to finish", "turn_running");
+    }
+    if (this.deps.repo.hasOpenRequest(id)) {
+      throw conflict("Answer or dismiss the open question first", "question_open");
+    }
+    if (this.deps.outbox.count(id) > 0) {
+      throw conflict("Wait for queued messages to be delivered", "messages_queued");
+    }
+    const now = new Date().toISOString();
+    return {
+      ...session,
+      status: FINISHED.has(session.status) ? session.status : "stopped",
+      endedAt: session.endedAt ?? now,
+      archivedAt: now,
+      updatedAt: now,
+    };
+  }
+
+  private createAndLaunch(
+    session: Session,
+    meta: StoredStartMeta,
+    workspace: WorkspaceRequest,
+    input?: UserInput,
+    fork?: LaunchFork,
+    archived?: Session,
+  ): boolean {
+    const { admission, repo } = this.deps;
+    // Every new session (a start, a fork, a handoff to another provider) passes here.
+    this.assertProviderAllowed(session, workspace, archived);
+    const waitingForConflict = session.status === "queued";
+    const waitingForSlot = !waitingForConflict && !this.reserve(session);
+    try {
+      if (waitingForConflict || waitingForSlot) {
+        repo.create(
+          { ...session, status: "queued" },
+          {
+            ...meta,
+            // A pending start keeps pasted images as artifacts, like a queued message.
+            pending: { workspace, input: input && this.externalize(session, input), fork },
+          },
+          archived,
+        );
+        if (waitingForSlot) admission?.enqueue(session.id);
+        return true;
+      }
+      repo.create(session, { ...meta, pending: null }, archived);
+      this.launchInBackground(session.id, input, workspace, fork);
+      return false;
+    } finally {
+      if (!this.launching.has(session.id)) admission?.release(session.id);
+    }
+  }
+
+  private reserve(session: Session): boolean {
+    return (
+      isFactorySession(session) ||
+      (this.deps.admission?.tryReserve(session.id, session.role) ?? true)
+    );
   }
 
   /**
@@ -265,10 +488,12 @@ export class SessionService {
    */
   async fork(id: string, req: ForkSessionRequest): Promise<ForkSessionResponse> {
     const { repo, projects } = this.deps;
+    this.assertForcedProvider(repo.get(id));
     await this.sourceProjectChecked(id);
     const plan = await planFork({ repo, projects, runner: this.runnerOf(id) }, id, req);
-    repo.create(plan.session, plan.meta);
-    this.launchInBackground(plan.session.id, undefined, plan.start.workspace, plan.start.fork);
+    const floor = repo.find(id)?.startMeta?.autonomyFloor;
+    if (floor) plan.meta.autonomyFloor = floor;
+    this.createAndLaunch(plan.session, plan.meta, plan.start.workspace, undefined, plan.start.fork);
     return { sessionId: plan.session.id };
   }
 
@@ -281,9 +506,13 @@ export class SessionService {
   async handoff(id: string, req: HandoffSessionRequest): Promise<HandoffSessionResponse> {
     const { repo, projects, utility } = this.deps;
     await this.sourceProjectChecked(id);
+    if (this.deps.forceFakeProvider && req.provider !== "fake") {
+      req = { ...req, provider: "fake", model: undefined, effort: undefined };
+    }
     const plan = await planHandoff({ repo, projects, runner: this.runnerOf(id), utility }, id, req);
-    repo.create(plan.session, plan.meta);
-    this.launchInBackground(plan.session.id, undefined, plan.start.workspace, plan.start.fork);
+    const floor = repo.find(id)?.startMeta?.autonomyFloor;
+    if (floor) plan.meta.autonomyFloor = floor;
+    this.createAndLaunch(plan.session, plan.meta, plan.start.workspace, undefined, plan.start.fork);
     return { sessionId: plan.session.id };
   }
 
@@ -296,9 +525,11 @@ export class SessionService {
   async review(id: string, req: ReviewSessionRequest): Promise<ReviewSessionResponse> {
     const { repo, projects } = this.deps;
     await this.sourceProjectChecked(id);
+    if (this.deps.forceFakeProvider && req.provider !== "fake") {
+      req = { ...req, provider: "fake", model: undefined, effort: undefined };
+    }
     const plan = await planReview({ repo, projects, runner: this.runnerOf(id) }, id, req);
-    repo.create(plan.session, plan.meta);
-    this.launchInBackground(plan.session.id, undefined, plan.start.workspace, plan.start.fork);
+    this.createAndLaunch(plan.session, plan.meta, plan.start.workspace, undefined, plan.start.fork);
     return { sessionId: plan.session.id };
   }
 
@@ -310,16 +541,25 @@ export class SessionService {
 
   /** Start a queued session whose blockers finished (called by the queue). */
   startQueued(session: Session): void {
-    const meta = this.deps.repo.find(session.id)?.startMeta;
-    const pending = meta?.pending ?? { workspace: { mode: "worktree" as const } };
-    this.deps.repo.setStartMeta(session.id, (m) => ({
-      ...(m ?? meta ?? fallbackMeta()),
-      pending: null,
-    }));
-    this.deps.repo.update(session.id, (s) =>
-      s.status === "queued" ? { ...s, status: "starting" } : s,
-    );
-    this.launchInBackground(session.id, pending.input, pending.workspace);
+    const { admission, repo } = this.deps;
+    try {
+      const meta = repo.find(session.id)?.startMeta;
+      const pending = meta?.pending ?? { workspace: { mode: "worktree" as const } };
+      admission?.dequeue(session.id);
+      repo.setStartMeta(session.id, (m) => ({
+        ...(m ?? emptyStartMeta()),
+        pending: null,
+      }));
+      repo.update(session.id, (s) => (s.status === "queued" ? { ...s, status: "starting" } : s));
+      this.launchInBackground(
+        session.id,
+        pending.input,
+        meta?.pending?.workspace ?? meta?.forkStart?.workspace ?? pending.workspace,
+        pending.fork ?? meta?.forkStart?.fork,
+      );
+    } finally {
+      if (!this.launching.has(session.id)) admission?.release(session.id);
+    }
   }
 
   /** Send now, steer or queue (`whenBusy`); `from` labels the message if it is queued. */
@@ -329,26 +569,59 @@ export class SessionService {
     from: QueueSender = "user",
   ): Promise<SendMessageResponse> {
     const session = this.deps.repo.get(id);
+    assertRoleWritable(session);
+    this.assertForcedProvider(session);
     if (NOT_STARTED.has(session.status)) return this.enqueue(id, req.input, from);
     // A turn on its way to the runner counts as running, though there is nothing to steer yet.
     const delivering = this.delivering.has(id);
     if (BUSY.has(session.status) || delivering) {
       if (req.whenBusy === "reject") throw conflict("A turn is running", "turn_running");
-      if (req.whenBusy === "steer" && !delivering) {
+      if (
+        !delivering &&
+        (req.whenBusy === "steer" ||
+          (req.whenBusy === "queue" &&
+            session.status === "running" &&
+            (from === "pm" || from === "orchestrator") &&
+            this.provider(session.provider, id)?.capabilities.steer))
+      ) {
         try {
-          await this.steer(id, req.input);
-          return { status: "steered" };
+          if ((await this.steer(id, req.input, from)) === "queued") return { status: "queued" };
         } catch (error) {
-          // A compaction can't be steered: the message goes once it ends.
-          if (runnerErrorCode(error) !== "compacting") throw error;
+          if (runnerErrorCode(error) === "priority_cancelled") throw error;
+          if (
+            req.whenBusy === "steer" &&
+            !["compacting", "no_turn"].includes(runnerErrorCode(error) ?? "")
+          )
+            throw error;
+          const queued = this.enqueue(id, req.input, from);
+          this.flushIfSettled(id);
+          return queued;
         }
+        if (PRIORITY_SENDERS.has(from) && !this.hasOutbox(id)) this.deps.admission?.dequeue(id);
+        return { status: "steered" };
       }
       return this.enqueue(id, req.input, from);
+    }
+    const { admission, repo } = this.deps;
+    const priority = PRIORITY_SENDERS.has(from);
+    if (priority) this.reserve(session);
+    else if (
+      !isFactorySession(session) &&
+      (repo.find(id)?.startMeta?.admission || !this.reserve(session))
+    ) {
+      if (req.whenBusy === "reject" || !this.canWaitForOutbox(session)) {
+        throw conflict("All agent slots are in use", AT_CAPACITY_CODE);
+      }
+      const queued = this.enqueue(id, req.input, from);
+      this.holds.release(id);
+      if (!session.archivedAt) admission?.enqueue(id);
+      return queued;
     }
     // Its place in the queue, should it end up there: ahead of messages that arrive meanwhile.
     const place = this.deps.outbox.reserve();
     try {
       await this.sendNow(session, req.input, from);
+      if (priority && !this.hasOutbox(id)) admission?.dequeue(id);
     } catch (error) {
       // The provider is still running a turn the server had not seen: the message waits for it.
       if (isTurnRunningError(error)) {
@@ -364,29 +637,87 @@ export class SessionService {
       }
       this.holds.hold(id, true);
       return this.enqueue(id, req.input, from, place);
+    } finally {
+      admission?.release(id);
     }
     this.holds.release(id);
     return { status: "sent" };
   }
 
-  async steer(id: string, raw: UserInput): Promise<void> {
+  async steer(
+    id: string,
+    raw: UserInput,
+    source: QueueSender | QueuedMessage = "user",
+  ): Promise<"steered" | "queued"> {
     const session = this.deps.repo.get(id);
+    this.assertForcedProvider(session);
     if (!BUSY.has(session.status)) throw conflict("No turn is running", "no_turn");
-    if (!this.provider(session.provider, id)?.capabilities.steer) {
+    const capabilities = this.provider(session.provider, id)?.capabilities;
+    if (!capabilities?.steer) {
       throw conflict("This provider cannot steer a running turn", "unsupported");
     }
     if (compactionRunning(this.deps.repo, session)) throw compactingRefusal();
-    const input = this.forRunner(session, raw);
-    await this.runnerOf(id)
-      .request({ name: "session.steer", sessionId: id, input })
-      .catch((e) => {
-        throw toServiceError(e);
-      });
+    const { outbox } = this.deps;
+    const stored = typeof source === "string" ? this.externalize(session, raw) : source.input;
+    const input = this.deps.artifacts.resolveAttachments(stored);
+    const delay = capabilities.interruptToolCall
+      ? this.deps.settings.get().priorityInterruptMinutes * 60_000
+      : undefined;
+    let pending: QueuedMessage | undefined;
+    const wait = this.priorityWaits.get(id) ?? { controller: new AbortController(), pending: 0 };
+    wait.pending++;
+    this.priorityWaits.set(id, wait);
+    try {
+      await deliverPriority(
+        async (attempt) => {
+          const result = await this.runnerOf(id).request({
+            name: "session.steer",
+            sessionId: id,
+            input,
+            waitForShell: true,
+            ...attempt,
+          });
+          if (
+            result?.waitingFor &&
+            !pending &&
+            typeof source === "string" &&
+            !wait.controller.signal.aborted
+          ) {
+            pending = outbox.push(id, stored, source);
+            outbox.steering.add(pending.id);
+          }
+          return result;
+        },
+        (wake) => this.deps.repo.onPriorityBoundary(id, wake),
+        delay,
+        wait.controller.signal,
+      );
+      if (pending && outbox.get(id, pending.id)) outbox.remove(pending, "sent");
+      return "steered";
+    } catch (error) {
+      if (
+        (pending && isTransientRunnerError(error)) ||
+        (runnerErrorCode(error) === "priority_suspended" && (pending || typeof source !== "string"))
+      ) {
+        return "queued";
+      }
+      if (pending && outbox.get(id, pending.id)) outbox.remove(pending, "dropped");
+      throw toServiceError(error);
+    } finally {
+      if (pending) outbox.steering.delete(pending.id);
+      // Keep Stop wired to all concurrent priority requests for this session.
+      if (--wait.pending === 0 && this.priorityWaits.get(id) === wait) {
+        this.priorityWaits.delete(id);
+        this.flushIfSettled(id);
+      }
+    }
   }
 
   async interrupt(id: string): Promise<void> {
-    this.deps.repo.get(id);
+    const session = this.deps.repo.get(id);
+    this.cancelPriorityWaits(id);
     this.deps.outbox.clear(id);
+    if (session.status !== "queued") this.deps.admission?.dequeue(id);
     // Between turns, Stop ends the session's check run: no turn is running to interrupt.
     if (await this.checkRuns?.cancel(id, "stopped")) return;
     await this.runnerOf(id)
@@ -404,12 +735,17 @@ export class SessionService {
    */
   async compact(id: string): Promise<CompactSessionResponse> {
     const session = this.deps.repo.get(id);
+    this.assertForcedProvider(session);
     const refusal = compactRefusal(session, this.provider(session.provider, id), {
       delivering: this.delivering.has(id),
       queued: this.deps.outbox.count(id),
       checking: this.checkRuns?.isRunning(id) ?? false,
     });
     if (refusal) throw refusal;
+    const { admission } = this.deps;
+    if (!this.reserve(session)) {
+      throw conflict("All agent slots are in use; try again when one frees", AT_CAPACITY_CODE);
+    }
     this.delivering.add(id);
     try {
       await startCompaction(
@@ -418,6 +754,7 @@ export class SessionService {
       );
     } finally {
       this.delivering.delete(id);
+      admission?.release(id);
       // Messages that arrived meanwhile go once the compaction is over (or didn't start).
       if (this.deps.outbox.count(id) > 0) this.flushIfSettled(id);
     }
@@ -426,7 +763,8 @@ export class SessionService {
 
   /** Answer a question or approval; `by` is who answered a question (the user or the PM). */
   async respond(id: string, req: RespondRequest, by: Answerer = "user"): Promise<void> {
-    this.deps.repo.get(id);
+    const session = this.deps.repo.get(id);
+    this.assertForcedProvider(session);
     // Questions asked through CodeDen's ask_user tool are answered here, not by the provider.
     if (await this.deps.questions.respond(id, req.requestId, req.response, by)) return;
     await this.runnerOf(id)
@@ -451,18 +789,21 @@ export class SessionService {
   /**
    * Stop a session: drop its queued messages, end its provider process, revoke its MCP tokens
    * and dismiss its open questions. A session that already finished (completed, failed) keeps
-   * its status.
+   * its status. `confirm` (retiring an archived role conversation) also fails when the runner
+   * is unreachable, so the caller knows the stop was never confirmed.
    */
-  async stop(id: string): Promise<Session> {
+  async stop(id: string, opts: { confirm?: boolean } = {}): Promise<Session> {
     const session = this.deps.repo.get(id);
+    this.cancelPriorityWaits(id);
     this.deps.outbox.clear(id);
+    this.deps.admission?.dequeue(id);
     this.holds.release(id);
     if (session.status !== "queued" && session.status !== "created") {
       try {
         await this.runnerOf(id).request({ name: "session.stop", sessionId: id }, 15_000);
       } catch (error) {
         const code = runnerErrorCode(error);
-        if (code !== "unknown_session" && code !== "runner_unavailable")
+        if (code !== "unknown_session" && (opts.confirm || code !== "runner_unavailable"))
           throw toServiceError(error);
       }
     }
@@ -475,39 +816,74 @@ export class SessionService {
     );
   }
 
+  canFlushOutbox(session: Session): boolean {
+    return (
+      !this.holds.isHeld(session.id) &&
+      !this.delivering.has(session.id) &&
+      !this.priorityWaits.has(session.id) &&
+      FLUSHABLE.has(session.status)
+    );
+  }
+
+  canWaitForOutbox(session: Session): boolean {
+    return (
+      FLUSHABLE.has(session.status) || BUSY.has(session.status) || NOT_STARTED.has(session.status)
+    );
+  }
+
   /**
    * Send the next queued message once no turn is running (idle, or after a failed or
    * interrupted turn). If delivery fails the message goes back in its place and delivery
    * pauses (`OutboxHolds`); only an error that is not a runner restart fails the session. A
    * turn still running on the runner is no error: the message waits for its end.
    */
-  async flushOutbox(id: string): Promise<void> {
-    if (this.holds.isHeld(id) || this.delivering.has(id)) return;
-    const next = this.deps.outbox.peek(id);
-    if (!next) return;
-    const session = this.deps.repo.get(id);
-    if (!FLUSHABLE.has(session.status)) return;
-    this.deps.outbox.remove(next, "sent");
+  async flushOutbox(id: string, admissionHead = false): Promise<void> {
+    const { admission, repo, outbox } = this.deps;
+    let reserved = admissionHead;
     try {
-      await this.sendNow(session, next.input, next.from);
-    } catch (error) {
-      if (isTurnRunningError(error)) {
-        this.deps.outbox.restore(next);
-        this.flushIfSettled(id);
+      const found = repo.find(id);
+      if (!found || !this.canFlushOutbox(found.session)) return;
+      const { session, startMeta } = found;
+      const next = outbox.peek(id);
+      if (!next || outbox.steering.has(next.id)) return;
+      const priority = PRIORITY_SENDERS.has(next.from);
+      if (!admissionHead) {
+        if (!priority && startMeta?.admission && !session.archivedAt) return;
+        reserved = this.reserve(session);
+        if (!reserved && !priority) {
+          if (!session.archivedAt) admission?.enqueue(id);
+          return;
+        }
+      }
+      try {
+        if (session.archivedAt) admission?.dequeue(id);
+        outbox.remove(next, "sent");
+        await this.sendNow(session, next.input, next.from);
+      } catch (error) {
+        if (isTurnRunningError(error)) {
+          outbox.restore(next);
+          this.flushIfSettled(id);
+          return;
+        }
+        const transient = isTransientRunnerError(error);
+        this.holds.hold(id, transient);
+        outbox.restore(next);
+        if (admissionHead && !transient) admission?.dequeue(id);
+        if (!transient && session.status !== "failed") {
+          this.deps.launcher.fail(id, `send-${Date.now()}`, error);
+        }
         return;
       }
-      const transient = isTransientRunnerError(error);
-      this.holds.hold(id, transient);
-      this.deps.outbox.restore(next);
-      if (!transient && session.status !== "failed") {
-        this.deps.launcher.fail(id, `send-${Date.now()}`, error);
-      }
+      if (priority ? !this.hasOutbox(id) : admissionHead) admission?.dequeue(id);
+    } finally {
+      if (reserved) admission?.release(id);
     }
   }
 
   /** A runner is ready again: retry the paused deliveries of its sessions (§4.2). */
   releaseOutboxes(which?: (sessionId: string) => boolean): void {
     this.holds.releaseAll(which);
+    this.deps.admission?.scheduleDrain();
   }
 
   /** A turn is on its way to the runner for this session (sent, the runner hasn't answered). */
@@ -524,7 +900,18 @@ export class SessionService {
   async continueAfterRestart(id: string, text: string): Promise<void> {
     if (this.delivering.has(id)) return;
     const session = this.deps.repo.get(id);
-    await this.sendNow(session, { text, attachments: [], from: "codeden" }, "codeden");
+    const input: UserInput = { text, attachments: [], from: "codeden" };
+    if (this.deps.repo.find(id)?.startMeta?.admission) return;
+    if (!this.reserve(session)) {
+      this.enqueue(id, input, "codeden");
+      this.deps.admission?.enqueue(id);
+      return;
+    }
+    try {
+      await this.sendNow(session, input, "codeden");
+    } finally {
+      this.deps.admission?.release(id);
+    }
   }
 
   sessionsWithQueuedMessages(): string[] {
@@ -541,9 +928,27 @@ export class SessionService {
    * Returns how many were dropped.
    */
   dropQueued(id: string, from: QueueSender): number {
-    const mine = this.deps.outbox.list(id).filter((m) => m.from === from);
+    const mine = this.deps.outbox
+      .list(id)
+      .filter((m) => m.from === from && !this.deps.outbox.steering.has(m.id));
     for (const m of mine) this.deps.outbox.remove(m, "dropped");
+    if (!this.hasOutbox(id) && this.deps.repo.find(id)?.session.status !== "queued") {
+      this.deps.admission?.dequeue(id);
+    }
     return mine.length;
+  }
+
+  /** Shutdown releases the waiters while leaving their messages in the outbox. */
+  suspendPriorityDelivery(): void {
+    const reason = conflict("Priority delivery paused for shutdown", "priority_suspended");
+    for (const wait of this.priorityWaits.values()) wait.controller.abort(reason);
+    this.priorityWaits.clear();
+  }
+
+  private cancelPriorityWaits(id: string): void {
+    const wait = this.priorityWaits.get(id);
+    this.priorityWaits.delete(id);
+    wait?.controller.abort(conflict("Priority message delivery was stopped", "priority_cancelled"));
   }
 
   // ---------------------------------------------------------------- internals
@@ -599,6 +1004,7 @@ export class SessionService {
 
   /** Hand a turn's input to the runner, resuming the session when it no longer hosts it. */
   private async deliver(session: Session, input: UserInput): Promise<void> {
+    this.assertForcedProvider(session);
     const runner = this.runnerOf(session.id);
     await applyPendingConfig(this.deps.repo, runner, session);
     const previous = session.status;
@@ -670,7 +1076,10 @@ export class SessionService {
     const prepared = input ? this.forRunner(session, input) : undefined;
     const promise = this.deps.launcher
       .launch(id, { input: prepared, workspace, ...(fork ? { fork } : {}) })
-      .finally(() => this.launching.delete(id));
+      .finally(() => {
+        this.launching.delete(id);
+        this.deps.admission?.release(id);
+      });
     this.launching.set(id, promise);
   }
 
@@ -696,7 +1105,17 @@ export class SessionService {
     return runner.providers().find((p) => p.id === id);
   }
 
+  private assertForcedProvider(session: Session): void {
+    if (this.deps.forceFakeProvider && session.provider !== "fake") {
+      throw conflict(
+        "This session requires a real provider, but Fake is forced",
+        "fake_provider_forced",
+      );
+    }
+  }
+
   private resolveProvider(req: StartSessionRequest, projectDefault: string | null): string {
+    if (this.deps.forceFakeProvider) return "fake";
     const available = this.deps.runner.providers().map((p) => p.id);
     const connected = this.deps.runner.isConnected();
     if (req.provider && req.provider !== "auto") {
@@ -795,6 +1214,8 @@ function roleModelDefaults(
   return { model: defaults.model, effort: hasEffort ? defaults.effort : null };
 }
 
-function fallbackMeta(): StoredStartMeta {
-  return { workspaceMode: "worktree", workspaceFallback: null, forced: null, queuedBehind: [] };
+function assertRoleWritable(session: Session): void {
+  if (session.role !== "agent" && session.archivedAt) {
+    throw conflict("This conversation is archived", "role_session_archived");
+  }
 }

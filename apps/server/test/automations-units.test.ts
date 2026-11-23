@@ -3,8 +3,10 @@ import { join } from "node:path";
 import {
   type Automation,
   AutomationGuards,
+  type AutomationRun,
   FactoryLimits,
   type Project,
+  type StartSessionRequest,
   type WorkSummary,
 } from "@codeden/contracts";
 import { describe, expect, it } from "vitest";
@@ -22,7 +24,11 @@ import {
   triggerEvents,
   triggerMatches,
 } from "../src/services/automations/event-triggers";
-import { runStatusForSession } from "../src/services/automations/executor";
+import {
+  AutomationExecutor,
+  type ExecutorDeps,
+  runStatusForSession,
+} from "../src/services/automations/executor";
 import {
   overConcurrencyCap,
   overlapOutcome,
@@ -66,6 +72,81 @@ const automation = (patch: Partial<Automation> = {}): Automation => ({
   createdAt: "2026-11-07T10:00:00.000Z",
   updatedAt: "2026-11-07T10:00:00.000Z",
   ...patch,
+});
+
+describe("automation session titles", () => {
+  it.each([
+    ["manual", false, false],
+    ["manual", true, true],
+    ["cron", false, true],
+  ] as const)(
+    "checks Chrome consent for %s when byPerson is %s",
+    async (triggeredBy, byPerson, expected) => {
+      let chromeApproved = false;
+      const action = {
+        type: "start_session" as const,
+        prompt: "Audit",
+        title: "[Browser Operator] Audit",
+      };
+      const executor = new AutomationExecutor({
+        runs: { countToday: () => 0, activeCount: () => 0, save: (run: AutomationRun) => run },
+        repo: { activeWork: () => [] },
+        sessions: {
+          start: async (_request: StartSessionRequest, options?: { chromeApproved?: true }) => {
+            chromeApproved = options?.chromeApproved === true;
+            return { status: "conflict", existing: [] };
+          },
+        },
+        now: () => new Date("2026-11-07T10:00:00.000Z"),
+      } as unknown as ExecutorDeps);
+      const result = await executor.fire({
+        automation: automation({ action, enabled: triggeredBy !== "manual" }),
+        project: { id: "p1" } as Project,
+        triggeredBy,
+        byPerson,
+        timezone: "UTC",
+        vars: {},
+        autonomy: "auto",
+      });
+      expect(result.status).toBe(triggeredBy === "manual" ? "conflict" : "skipped");
+      expect(chromeApproved).toBe(expected);
+    },
+  );
+
+  it.each([
+    [undefined, "[Browser Operator] Audit", "Audit", "Audit"],
+    ["{{project.name}}", "[Browser Operator]", "[Writer]", "Automation"],
+    ["[{{project.name}}] Check docs", "Audit", "Writer", "Check docs"],
+    ["[Browser Operator] {{project.name}}", "Audit", "Audit", "[Browser Operator] Audit"],
+  ])(
+    "starts with the safe title for template %s and name %s",
+    async (title, name, value, expected) => {
+      let startedTitle: string | undefined;
+      const executor = new AutomationExecutor({
+        runs: { countToday: () => 0, activeCount: () => 0 },
+        repo: { activeWork: () => [] },
+        sessions: {
+          start: async (request: StartSessionRequest) => {
+            startedTitle = request.title;
+            return { status: "conflict", existing: [] };
+          },
+        },
+        now: () => new Date("2026-11-07T10:00:00.000Z"),
+      } as unknown as ExecutorDeps);
+
+      const result = await executor.fire({
+        automation: automation({ name, action: { type: "start_session", prompt: "Audit", title } }),
+        project: { id: "p1" } as Project,
+        triggeredBy: "manual",
+        timezone: "UTC",
+        vars: { "project.name": value },
+        autonomy: "auto",
+      });
+
+      expect(result.status).toBe("conflict");
+      expect(startedTitle).toBe(expected);
+    },
+  );
 });
 
 describe("cron in the project timezone", () => {
@@ -404,6 +485,7 @@ describe("issue intake ownership (§10.1)", () => {
     killSwitch: false,
     timezone: null,
     agentCiEnv: true,
+    allowUnenforcedProviders: false,
     execution: { backend: "local" },
     pinned: false,
     sortOrder: 0,

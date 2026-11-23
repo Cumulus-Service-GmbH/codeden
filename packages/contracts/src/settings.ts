@@ -1,5 +1,7 @@
 import { z } from "zod";
 import { AutonomyLevel, ProviderId, QuietHours, ReasoningEffort } from "./common";
+import { AutonomyPolicy, Team } from "./team";
+import { TokenSaverSettings } from "./token-saver";
 import { UpdateMode } from "./updates";
 import { DictationEngine, WhisperModelId } from "./voice-api";
 
@@ -95,7 +97,24 @@ const CustomModelList = z
  * older files keep working as fields are added.
  */
 export const Settings = z.object({
+  /** Save setup in Factory → Team; when `remembered`, a new project's factory settings start from it. */
+  teamSetup: z
+    .object({
+      remembered: z.boolean().default(false),
+      team: Team.default([]),
+      resultSummaryBytes: z.int().min(256).max(65536).nullable().default(null),
+    })
+    .prefault({}),
   schemaVersion: z.literal(1).default(1),
+  /** Minutes a priority message waits before an eligible shell call can be cancelled. */
+  priorityInterruptMinutes: z.int().min(1).max(60).default(2),
+  /**
+   * Agent sessions starting, running a turn or waiting on the user, across all projects.
+   * Additional sessions queue oldest first. PM and orchestrator sessions are exempt within
+   * one PM per project plus one orchestrator. The factory's per-project "Agents at once"
+   * limit still applies.
+   */
+  limits: z.object({ maxActiveSessions: z.int().min(1).max(64).default(4) }).prefault({}),
   appearance: z
     .object({
       theme: z.enum(["system", "dark", "light"]).default("dark"),
@@ -105,6 +124,7 @@ export const Settings = z.object({
   autonomy: z
     .object({
       default: AutonomyLevel.default("auto"),
+      pmPolicy: AutonomyPolicy.optional(),
     })
     .prefault({}),
   providers: z
@@ -277,6 +297,8 @@ export const Settings = z.object({
       autoRetry: z.boolean().default(true),
     })
     .prefault({}),
+  /** The token saver note in agent system prompts (#602); see `TokenSaverSettings`. */
+  tokenSaver: TokenSaverSettings.prefault({}),
   /** Master switch; individual automations are still off by default (§10). */
   automations: z
     .object({
@@ -340,4 +362,14 @@ export type SettingsPatch = DeepPartial<Settings>;
 /** Default settings. */
 export function defaultSettings(): Settings {
   return Settings.parse({});
+}
+
+/**
+ * The default Team every project's Team falls back to, role by role: the Team setup when it is
+ * set to be used for new projects (`remembered`); otherwise none.
+ */
+export function defaultTeam(settings: {
+  teamSetup: Pick<Settings["teamSetup"], "remembered" | "team">;
+}): Settings["teamSetup"]["team"] {
+  return settings.teamSetup.remembered ? settings.teamSetup.team : [];
 }

@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, Bot } from "lucide-react";
 import { useMemo } from "react";
 import { SessionComposer } from "@/components/composer/composer";
+import { PriorityDeliveryStatus } from "@/components/composer/priority-delivery";
 import { StartComposer, useRoleSession } from "@/components/orchestration/role-chat";
 import { QueuedMessages } from "@/components/thread/queued-messages";
 import { Transcript } from "@/components/thread/transcript";
@@ -55,6 +56,7 @@ function PmThread({ session, projectId }: { session: Session; projectId: string 
         <p className="flex-1 p-3 text-2xs text-muted-foreground">No messages yet.</p>
       )}
       <QueuedMessages session={session} running={running} />
+      <PriorityDeliveryStatus sessionId={session.id} transcript={latest?.transcript} />
       <SessionComposer session={session} running={running} />
     </>
   );

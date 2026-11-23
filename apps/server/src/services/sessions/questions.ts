@@ -10,6 +10,7 @@ import { conflict } from "../errors";
 
 type Answers = Record<string, string[]>;
 type QuestionItem = ItemOf<"user_question">;
+const CONFIRMATION_PREFIX = "confirm-";
 
 /** Who answers a question: the user, or the project manager of the session's project. */
 export type Answerer = "user" | "pm";
@@ -50,25 +51,40 @@ export class QuestionBroker {
     turn: { threadId: string; turnId: string },
     question: Omit<UserQuestion, "id">,
     signal?: AbortSignal,
+    options?: { waitOnly: true },
   ): Promise<AskOutcome> {
+    const waitOnly = options?.waitOnly === true;
+    if (waitOnly && signal?.aborted) return { status: "dismissed" };
     const requestId = randomUUID();
     const item: QuestionItem = {
-      id: `ask-${requestId}`,
+      id: `${waitOnly ? CONFIRMATION_PREFIX : "ask-"}${requestId}`,
       kind: "user_question",
       status: "in_progress",
       requestId,
-      deferred: true,
+      deferred: !waitOnly,
       questions: [{ ...question, id: "q1" }],
     };
-    const outcome = new Promise<AskOutcome>((resolve) => {
-      const timer = setTimeout(() => finish({ status: "pending", requestId }), this.waitMs);
+    const outcome = new Promise<AskOutcome>((resolve, reject) => {
+      const timer = setTimeout(() => onAbort(), this.waitMs);
       const finish = (value: AskOutcome) => {
         clearTimeout(timer);
         signal?.removeEventListener("abort", onAbort);
         this.waiters.delete(requestId);
         resolve(value);
       };
-      const onAbort = () => finish({ status: "pending", requestId });
+      const onAbort = () => {
+        if (!waitOnly) {
+          finish({ status: "pending", requestId });
+          return;
+        }
+        try {
+          this.put(sessionId, turn, { ...item, status: "cancelled" });
+        } catch (error) {
+          reject(error);
+        } finally {
+          finish({ status: "dismissed" });
+        }
+      };
       signal?.addEventListener("abort", onAbort, { once: true });
       this.waiters.set(requestId, finish);
     });
@@ -91,6 +107,15 @@ export class QuestionBroker {
     const item = record.item as QuestionItem;
     if (item.status !== "in_progress")
       throw conflict("The question was already answered", "answered");
+    const waiter = this.waiters.get(requestId);
+    const confirmation = item.id.startsWith(CONFIRMATION_PREFIX);
+    if (confirmation && by !== "user") {
+      throw conflict("Only the user can answer this confirmation", "user_confirmation_required");
+    }
+    if (confirmation && !waiter) {
+      this.put(sessionId, record, { ...item, status: "cancelled" });
+      throw conflict("The confirmation expired", "answered");
+    }
     const answers = response.kind === "answer" ? response.answers : undefined;
     const done: QuestionItem = answers
       ? { ...item, status: "completed", answers, decidedBy: by }
@@ -99,7 +124,6 @@ export class QuestionBroker {
     const outcome: AskOutcome = answers
       ? { status: "answered", answers, text: formatAnswers(item, answers), by }
       : { status: "dismissed" };
-    const waiter = this.waiters.get(requestId);
     if (waiter) waiter(outcome);
     else if (outcome.status === "answered") {
       await this.deps.sendMessage()(
@@ -124,7 +148,10 @@ export class QuestionBroker {
     return rows
       .map(rowToItemRecord)
       .find(
-        (r) => r.item.kind === "user_question" && r.item.requestId === requestId && r.item.deferred,
+        (r) =>
+          r.item.kind === "user_question" &&
+          r.item.requestId === requestId &&
+          (r.item.deferred || r.item.id === `${CONFIRMATION_PREFIX}${requestId}`),
       );
   }
 

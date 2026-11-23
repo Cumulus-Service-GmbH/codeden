@@ -11,8 +11,9 @@ import { ToolRow } from "@/components/thread/work/tool-row";
 import { WorkGroup } from "@/components/thread/work/work-group";
 import type { CodeDenClient } from "@/lib/api";
 import { createMockClient } from "@/lib/api/mock";
+import { applyTranscriptMessage } from "@/lib/transcript/apply-transcript";
 import { applyAgentEvent, emptyTranscript, threadItems } from "@/lib/transcript/reducer";
-import type { WorkEntry } from "@/lib/transcript/timeline";
+import { buildTimeline, type WorkEntry } from "@/lib/transcript/timeline";
 import { renderWithClient } from "./utils";
 
 const T = "t1";
@@ -269,4 +270,49 @@ describe("a loaded output of a running command", () => {
     expect(await screen.findByText("Showing 11 B of 29.3 KB")).toBeTruthy();
     expect(screen.getByText("newer tail")).toBeTruthy();
   });
+});
+
+it("flags a running command after 15 minutes from its transcript timestamp", () => {
+  vi.useFakeTimers();
+  const start = Date.parse("2026-11-23T10:00:00Z");
+  vi.setSystemTime(start + 14 * 60_000);
+  try {
+    const item: WorkEntry = {
+      id: "long",
+      kind: "tool_call",
+      toolKind: "command",
+      status: "in_progress",
+      toolName: "shell",
+      command: "sleep 1000",
+    };
+    const startedAt = new Date(start).toISOString();
+    const transcript = applyTranscriptMessage(emptyTranscript("s1"), {
+      type: "transcript",
+      sessionId: "s1",
+      seq: 1,
+      threads: [],
+      turns: [],
+      items: [
+        {
+          sessionId: "s1",
+          threadId: T,
+          turnId: U,
+          position: 0,
+          item,
+          createdAt: startedAt,
+          updatedAt: startedAt,
+        },
+      ],
+    });
+    const group = buildTimeline(transcript, T)[0];
+    if (group?.type !== "work") throw new Error("Expected a work group");
+    const view = renderWithClient(<WorkGroup sessionId="s1" entries={group.entries} live />);
+    expect(screen.queryByText("Long command")).toBeNull();
+    act(() => vi.advanceTimersByTime(60_000));
+    expect(screen.getByText("Long command")).toBeTruthy();
+    view.rerender(<ToolRow sessionId="s1" entry={{ ...item, status: "completed" }} />);
+    expect(screen.queryByText("Long command")).toBeNull();
+  } finally {
+    vi.useRealTimers();
+  }
 });

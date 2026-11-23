@@ -33,6 +33,7 @@ export const CODEX_PROVIDER_ID = "codex";
  * exists in the protocol but is not wired up. Fork is `thread/fork` (`forkConversation`).
  */
 const capabilities: ProviderCapabilities = {
+  modelVendor: "openai",
   resume: true,
   steer: true,
   interrupt: true,
@@ -49,6 +50,8 @@ const capabilities: ProviderCapabilities = {
   // Approval and sandbox policy are per turn (`turn/start` overrides): changes wait for it.
   liveAutonomy: false,
   readOnly: true,
+  // Its sessions run under the machine's security rules (the guard or execpolicy).
+  enforcesSecurityRules: true,
   // The Codex apps list every thread in the user's Codex home as their recents (`./history`).
   vendorHistory: true,
   // `thread/compact/start` runs a compaction turn on the thread.
@@ -57,6 +60,8 @@ const capabilities: ProviderCapabilities = {
   mcpStatus: true,
   // `hook/started` and `hook/completed` show as `hook_run` items.
   hookRuns: true,
+  // `developerInstructions` goes with `thread/start` and `thread/resume` alike.
+  systemPrompt: true,
 };
 
 const CONFIGURED_MODEL = "The model configured in ~/.codex/config.toml";

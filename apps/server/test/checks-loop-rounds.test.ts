@@ -85,9 +85,10 @@ describe("the checks loop's round count (#412)", () => {
     const id = await atTheCap();
     await c.sessions.send(id, { input: user("Try another way"), whenBusy: "queue" });
     expect(c.env.repo.get(id).checks?.capReached).toBeUndefined();
-    await until(() => rounds().length === 3);
+    // The count starts again, so the loop runs to its cap of 2 once more and stops there.
+    await until(() => rounds().length >= 4 && c.env.repo.get(id).checks?.capReached === true);
     expect(c.card(id, "u4")?.data.round).toBe(0);
-    expect(rounds()).toEqual([1, 2, 1]);
+    expect(rounds()).toEqual([1, 2, 1, 2]);
   });
 
   it("starts the count again when the user switches the loop off and on", async () => {
@@ -97,9 +98,10 @@ describe("the checks loop's round count (#412)", () => {
     expect(c.env.repo.get(id).checks?.round).toBeUndefined();
     // A turn CodeDen starts itself (not a compaction, which runs no checks) runs them again.
     await c.sessions.continueAfterRestart(id, RESTART_CONTINUE_MESSAGE);
-    await until(() => rounds().length === 3);
+    // The count starts again, so the loop runs to its cap of 2 once more and stops there.
+    await until(() => rounds().length >= 4 && c.env.repo.get(id).checks?.capReached === true);
     expect(c.card(id, "u4")?.data.round).toBe(0);
-    expect(rounds()).toEqual([1, 2, 1]);
+    expect(rounds()).toEqual([1, 2, 1, 2]);
   });
 
   it("refuses Compact now while checks run, and keeps their run", async () => {

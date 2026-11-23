@@ -1,9 +1,10 @@
 import type { Session, SessionUsage, Usage, UsageTotals } from "@codeden/contracts";
-import { screen, waitFor } from "@testing-library/react";
+import { screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { mockUsageApi } from "@/components/usage/mock-data";
 import { SessionCostChip } from "@/components/usage/session-cost";
 import { DetailsPanel } from "@/components/workbench/details-panel";
+import { createMockClient } from "@/lib/api/mock";
 import { makeSession } from "@/lib/api/mock/fixtures/helpers";
 import { emptyTranscript } from "@/lib/transcript/reducer";
 import { useTranscriptsStore } from "@/stores/transcripts";
@@ -70,6 +71,37 @@ async function contextWindow(expected: string) {
 function render(over: Partial<Session> = {}) {
   renderWithClient(<DetailsPanel session={session(over)} />, undefined, { withRouter: true });
 }
+
+it("lists child runs for the current session in Details", async () => {
+  const listChildRuns = vi.fn(async () => ({
+    available: true,
+    skipped: 0,
+    runs: [
+      {
+        id: "review-1",
+        role: "Code Reviewer",
+        provider: "codex",
+        model: null,
+        effort: null,
+        status: "succeeded" as const,
+        startedAt: null,
+        endedAt: null,
+        detail: null,
+      },
+    ],
+  }));
+  renderWithClient(
+    <DetailsPanel session={session()} />,
+    { ...createMockClient(), listChildRuns },
+    { withRouter: true },
+  );
+
+  const workers = await screen.findByRole("region", { name: "Workers" });
+  const run = within(workers).getByRole("listitem");
+  expect(within(run).getByText("Code Reviewer")).toBeTruthy();
+  expect(within(run).getByText("Done")).toBeTruthy();
+  expect(listChildRuns).toHaveBeenCalledWith(ID);
+});
 
 const MADE_UP = ["68k", "200k", "$1.84"];
 

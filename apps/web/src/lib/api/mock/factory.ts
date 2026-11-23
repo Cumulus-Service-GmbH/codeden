@@ -216,6 +216,7 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
     ];
   };
   let spotIssues = 0;
+  const teams = new Map<string, Pick<FactoryTuning, "team" | "resultSummaryBytes">>();
   const project = (id: string) => world.snapshot.projects.find((p) => p.id === id);
   const status = (projectId: string): FactoryStatus => {
     const cached = world.factory.get(projectId);
@@ -228,7 +229,10 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
     );
     const toWork = (w: FixtureWorkItem) => work(w, f.limits);
     // Spec approval is on where a spec waits for it.
-    const tuning = FactoryTuning.parse({ specApproval: f.inProgress.some((w) => w.specApproval) });
+    const tuning = FactoryTuning.parse({
+      specApproval: f.inProgress.some((w) => w.specApproval),
+      ...teams.get(projectId),
+    });
     const s = FactoryStatus.parse({
       ...f,
       experimental: isFactoryMode(f.mode),
@@ -412,6 +416,19 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
       if (!p) throw new Error(`No project ${projectId}`);
       const limits = FactoryLimits.parse(req.limits ?? p.factoryLimits);
       const mode = AutonomyMode.parse(req.mode);
+      if (req.tuning?.team !== undefined || req.tuning?.resultSummaryBytes !== undefined) {
+        const { team, resultSummaryBytes } = req.tuning;
+        teams.set(projectId, {
+          team: FactoryTuning.shape.team.parse(
+            team === undefined ? teams.get(projectId)?.team : team,
+          ),
+          resultSummaryBytes: FactoryTuning.shape.resultSummaryBytes.parse(
+            resultSummaryBytes === undefined
+              ? teams.get(projectId)?.resultSummaryBytes
+              : resultSummaryBytes,
+          ),
+        });
+      }
       world.emitDomain({
         type: "project.updated",
         sessionId: null,

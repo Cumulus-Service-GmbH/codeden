@@ -39,6 +39,7 @@ async function addProject(): Promise<string> {
 
 function launcher(): SessionLauncher {
   return new SessionLauncher({
+    repo: { find: () => undefined },
     runner: { mcpProxyUrl: () => null },
     projects,
     home: join(dir, "home"),

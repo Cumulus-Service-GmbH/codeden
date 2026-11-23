@@ -7,11 +7,15 @@ import { ApprovalDecider, ApprovalDecision } from "./items";
  * on the provider id (Principle 5).
  */
 export const ProviderCapabilities = z.object({
+  /** Vendor of the selected model, when known. An absent value cannot authorize review. */
+  modelVendor: z.string().min(1).optional(),
   /** Sessions can be resumed from `resumeToken()`. */
   resume: z.boolean(),
   /** Input can be injected into a running turn. */
   steer: z.boolean(),
   interrupt: z.boolean(),
+  /** Can cancel a specific running shell call while keeping its turn alive. Absence means false. */
+  interruptToolCall: z.boolean().optional(),
   /** Tool approvals can be routed to CodeDen. */
   approvals: z.boolean(),
   /** The agent can ask structured questions. */
@@ -29,6 +33,8 @@ export const ProviderCapabilities = z.object({
   /** Image attachments are accepted as input. */
   images: z.boolean(),
   planMode: z.boolean(),
+  /** Can connect a local session to Chrome with the user’s consent. */
+  chrome: z.boolean().optional(),
   reasoningEffort: z.boolean(),
   /** MCP servers can be injected (required for CodeDen tools). */
   mcp: z.boolean(),
@@ -38,6 +44,32 @@ export const ProviderCapabilities = z.object({
    * a running turn keeps its autonomy and the change applies from the next turn.
    */
   liveAutonomy: z.boolean().optional(),
+  /**
+   * The model list is the one a session reported when it started: a change during a session
+   * (a model switch that lists other models or levels) shows in the picker from the next
+   * session. The model a session is given is always the one it starts with. False or absent:
+   * the list follows the provider's own updates.
+   */
+  modelListAtStart: z.boolean().optional(),
+  /**
+   * The `supervised` level is enforced: every edit and command reaches CodeDen, which asks the
+   * user. False: not every one is sure to (the agent's own settings may let some run), so its
+   * sessions can't use `supervised`. Absent means enforced.
+   */
+  supervised: z.boolean().optional(),
+  /**
+   * The machine's security rules (the guard on Claude Code sessions, Codex's execpolicy) are
+   * enforced for this provider. False: they aren't, so a project refuses it, every role, unless
+   * the project allows such providers (`Project.allowUnenforcedProviders`). Absent means NOT
+   * enforced (fail closed): only a provider whose sessions run under those rules declares true.
+   */
+  enforcesSecurityRules: z.boolean().optional(),
+  /**
+   * With `enforcesSecurityRules`: the rules cover only sessions that run in a CodeDen worktree
+   * (the guard's scope), so an agent session elsewhere (the project folder itself) counts as
+   * not enforced. Read-only roles are held by CodeDen's own read-only policy instead.
+   */
+  securityRulesWorktreesOnly: z.boolean().optional(),
   /**
    * The `read_only` permission level is enforced natively: no file edits, no writing shell
    * commands, no commits or pushes (§11.2). When false (or absent), sessions on this provider
@@ -76,8 +108,30 @@ export const ProviderCapabilities = z.object({
    * of sight.
    */
   hookRuns: z.boolean().optional(),
+  /**
+   * `SessionOptions.systemPrompt` reaches the model when the session starts and again on every
+   * resume, and stays in force after compaction, so notes such as the token saver (#602) hold for
+   * the whole conversation. False or absent: it may apply only to the first start.
+   */
+  systemPrompt: z.boolean().optional(),
 });
 export type ProviderCapabilities = z.infer<typeof ProviderCapabilities>;
+
+/**
+ * Whether the machine's security rules cover a session on a provider: the provider declares them
+ * (`enforcesSecurityRules` true; absent counts as not) and, when they cover worktrees only
+ * (`securityRulesWorktreesOnly`), the session runs in a CodeDen worktree or is a read-only role
+ * (PM, orchestrator), which CodeDen's own read-only policy holds. Shared by the server and the
+ * runner, so both decide alike.
+ */
+export function securityRulesCover(
+  caps: Pick<ProviderCapabilities, "enforcesSecurityRules" | "securityRulesWorktreesOnly">,
+  session: { role: Role; inCodedenWorktree?: boolean },
+): boolean {
+  if (caps.enforcesSecurityRules !== true) return false;
+  if (!caps.securityRulesWorktreesOnly) return true;
+  return session.role !== "agent" || session.inCodedenWorktree === true;
+}
 
 /** A model a provider offers. */
 export const ModelInfo = z.object({
@@ -229,6 +283,12 @@ export const SessionOptions = z.object({
   model: z.string().optional(),
   effort: ReasoningEffort.optional(),
   autonomy: AutonomyLevel,
+  /**
+   * True: start the agent with Claude in Chrome (Claude Code's `--chrome`).
+   * Only Browser Operator sessions on the home runner get it (`SessionLauncher.sessionOptions`).
+   * Absent means CodeDen explicitly starts Claude with `--no-chrome`.
+   */
+  chrome: z.boolean().optional(),
   /** Extra system prompt appended to the provider's own. */
   systemPrompt: z.string().optional(),
   /** Provider session/thread id from a previous `resumeToken()`. */
@@ -249,6 +309,18 @@ export const SessionOptions = z.object({
    * (the session's project turned it off, `Project.agentCiEnv`, §4.2). Absent means true.
    */
   ciEnv: z.boolean().optional(),
+  /**
+   * True: the session's project allows providers for which the machine's security rules aren't
+   * enforced (`Project.allowUnenforcedProviders`). Absent means it doesn't: such a provider
+   * refuses to start the session (fail closed).
+   */
+  allowUnenforcedProviders: z.boolean().optional(),
+  /**
+   * True: the session runs in a CodeDen worktree (its folder is under the home's worktrees
+   * folder), where a provider whose rules cover worktrees only (`securityRulesWorktreesOnly`)
+   * is enforced. Absent means it doesn't.
+   */
+  inCodedenWorktree: z.boolean().optional(),
   /** Extra directories the agent may read/write. */
   additionalDirectories: z.array(z.string()).default([]),
   /**

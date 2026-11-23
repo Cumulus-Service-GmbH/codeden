@@ -6,6 +6,7 @@ import { prGone } from "./pr-gone";
 import { type IntegratorTask, integratorPrompt } from "./prompts-integration";
 import { claimSlot } from "./slots";
 import { FINISHED_STAGES } from "./store";
+import { teamTuning } from "./team-role";
 
 /**
  * A fresh integrator takes over the PR when the session that wrote it is gone (or never started,
@@ -33,7 +34,12 @@ export async function startIntegrator(
     task === "conflicts"
       ? `Merge conflicts with ${base}`
       : "CI never started on its head and its author's session is gone";
-  const agent = chooseAgent(ctx, project, builderWanted(item, loop.tuning), "integration");
+  const agent = chooseAgent(
+    ctx,
+    project,
+    builderWanted(item, teamTuning(ctx, loop.tuning)),
+    "integration",
+  );
   if ("waiting" in agent) {
     if (item.note !== agent.waiting) {
       ctx.store.updateItem(item.id, (i) => ({ ...i, note: agent.waiting }), { touch: false });

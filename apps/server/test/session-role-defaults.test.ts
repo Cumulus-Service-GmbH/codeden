@@ -29,6 +29,8 @@ const caps: ProviderInfo["capabilities"] = {
   reasoningEffort: true,
   mcp: true,
   skills: false,
+  enforcesSecurityRules: true,
+  readOnly: true,
 };
 
 const info = (id: string, reasoningEffort = true): ProviderInfo => ({
@@ -43,7 +45,7 @@ type Start = (over: Partial<StartSessionRequestInit>) => Promise<string>;
 /** A SessionService over a real database, with a scripted runner and the given settings. */
 function withService(
   settings: SettingsInput,
-  run: (start: Start, repo: SessionRepo) => Promise<void>,
+  run: (start: Start, repo: SessionRepo, service: SessionService) => Promise<void>,
 ) {
   return async () => {
     const dir = mkdtempSync(join(tmpdir(), "codeden-role-defaults-"));
@@ -77,13 +79,56 @@ function withService(
         if (res.status !== "started") throw new Error(res.status);
         return res.sessionId;
       };
-      await run(start, repo);
+      await run(start, repo, sessions);
     } finally {
       database.close();
       await removeTree(dir);
     }
   };
 }
+
+describe("PM Browser Operator launch consent", () => {
+  const request = StartSessionRequest.parse({
+    projectId: "p1",
+    title: "[Browser Operator] Open the documentation",
+    purpose: "Open the documentation",
+    startedBy: { kind: "pm" },
+  });
+
+  it.each([true, false])("only dispatches the Claude launch after consent returns %s", (approved) =>
+    withService({}, async (_start, repo, service) => {
+      const confirmChrome = vi.fn(async () => approved);
+      const result = await service.start(request, { confirmChrome });
+      expect(confirmChrome).toHaveBeenCalledOnce();
+      if (!approved) {
+        expect(result.status).toBe("skipped");
+        expect(repo.list({ projectId: "p1" })).toHaveLength(0);
+      } else {
+        if (result.status !== "started") throw new Error(result.status);
+        expect(repo.find(result.sessionId)?.startMeta?.chromeOptIn).toBe(true);
+      }
+    })(),
+  );
+
+  it(
+    "does not allow an unconfirmed PM launch",
+    withService({}, async (_start, repo, service) => {
+      expect(await service.start(request)).toEqual({ status: "skipped" });
+      expect(repo.list({ projectId: "p1" })).toHaveLength(0);
+    }),
+  );
+
+  it(
+    "does not prompt when the resolved provider is not Claude",
+    withService({ providers: { agent: { provider: "codex" } } }, async (_start, repo, service) => {
+      const confirmChrome = vi.fn(async () => true);
+      const result = await service.start(request, { confirmChrome });
+      expect(confirmChrome).not.toHaveBeenCalled();
+      if (result.status !== "started") throw new Error(result.status);
+      expect(repo.find(result.sessionId)?.startMeta?.chromeOptIn).toBeUndefined();
+    }),
+  );
+});
 
 describe("SessionService.start: the role's default model and effort", () => {
   const claudeAgent: SettingsInput = {

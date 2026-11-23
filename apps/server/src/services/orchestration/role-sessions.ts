@@ -11,11 +11,11 @@ export type OrchestrationRole = "orchestrator" | "pm";
 
 /**
  * The long-lived role sessions (§8.1): one orchestrator (cwd `<home>/orchestrator/`) and one
- * PM per project (cwd: the project root, read-only). Created lazily on first use; afterwards
- * the same session is reused and, when the runner no longer hosts it, resumed through its
- * provider resume token. Provider, model and effort come from `settings.providers.<role>`.
+ * PM per project (cwd: the project root, read-only). Created lazily and reused until the user
+ * starts fresh. Provider, model and effort come from `settings.providers.<role>`.
  */
 export class RoleSessions {
+  private readonly replacing = new Map<string, Promise<Session>>();
   private readonly creating = new Map<string, Promise<Session>>();
 
   constructor(
@@ -31,6 +31,7 @@ export class RoleSessions {
       .where(
         and(
           eq(sessions.role, role),
+          isNull(sessions.archivedAt),
           role === "orchestrator"
             ? isNull(sessions.projectId)
             : eq(sessions.projectId, projectId as string),
@@ -57,7 +58,7 @@ export class RoleSessions {
     const rows = this.deps.db
       .select()
       .from(sessions)
-      .where(inArray(sessions.role, ["orchestrator", "pm"]))
+      .where(and(inArray(sessions.role, ["orchestrator", "pm"]), isNull(sessions.archivedAt)))
       .orderBy(sessions.createdAt)
       .all()
       .map(rowToSession);
@@ -82,7 +83,29 @@ export class RoleSessions {
     return pending;
   }
 
-  private async create(role: OrchestrationRole, projectId: string | null): Promise<Session> {
+  async startFresh(id: string): Promise<Session> {
+    const pending = this.replacing.get(id);
+    if (pending) return pending;
+    const { session } = this.deps.sessions.detail(id);
+    if (session.role === "agent" || this.find(session.role, session.projectId)?.id !== id) {
+      throw new ServiceError(
+        409,
+        "role_session_not_current",
+        "Only the current role conversation can start fresh",
+      );
+    }
+    const replacement = this.create(session.role, session.projectId, session).finally(() =>
+      this.replacing.delete(id),
+    );
+    this.replacing.set(id, replacement);
+    return replacement;
+  }
+
+  private async create(
+    role: OrchestrationRole,
+    projectId: string | null,
+    previous?: Session,
+  ): Promise<Session> {
     const project = role === "pm" && projectId ? this.deps.projects.get(projectId) : null;
     if (role === "pm" && !project) {
       throw new ServiceError(400, "project_required", "A PM needs a project");
@@ -92,17 +115,16 @@ export class RoleSessions {
       role,
       workspace: { mode: "repo_root" },
       purpose: project ? `Project manager for ${project.name}` : "Orchestrator",
-      workKey: project ? `pm:${project.slug}` : "orchestrator:main",
+      workKey: previous?.workKey ?? (project ? `pm:${project.slug}` : "orchestrator:main"),
       startedBy: { kind: "user" },
       title: project ? `PM · ${project.name}` : "Orchestrator",
       autonomy: "auto",
     });
-    const result = await this.deps.sessions.start(request);
-    if (result.status !== "started") {
+    const result = await this.deps.sessions.start(request, { replacesRoleId: previous?.id });
+    // Queued for a free slot is a started conversation too: it runs once one opens.
+    if (result.status !== "started" && result.status !== "queued") {
       throw new ServiceError(409, "role_session_conflict", `Could not start the ${role} session`);
     }
-    const session = this.find(role, projectId);
-    if (!session) throw new ServiceError(500, "role_session_missing", "Role session vanished");
-    return session;
+    return this.deps.sessions.detail(result.sessionId).session;
   }
 }

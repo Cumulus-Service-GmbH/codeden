@@ -1,5 +1,13 @@
 import type { HookRunOutcome, ItemStatus } from "./items";
 
+/** Start a PreToolUse hook's ask reason with this marker to offer Allow once and Deny at every permission level. */
+export const HOOK_ASK_MARKER = "[approval-required]";
+
+/** Whether a hook's ask reason starts with the approval marker exactly. */
+export function isMarkedHookAsk(reason: string | undefined): boolean {
+  return reason?.startsWith(HOOK_ASK_MARKER) ?? false;
+}
+
 /**
  * Most characters of a hook run's output kept on its `hook_run` item (§12.4). Hooks print a
  * reason or a little context; anything longer is cut in the middle.

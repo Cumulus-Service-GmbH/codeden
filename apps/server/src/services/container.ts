@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { messageFrom, type Session } from "@codeden/contracts";
+import { defaultTeam, messageFrom, type Session, type Team } from "@codeden/contracts";
 import { createImageEngineRegistry, type ImageEngineRegistry } from "@codeden/providers";
 import type { Db } from "../db/client";
 import type { EventStore } from "../events/store";
@@ -15,12 +15,21 @@ import { reportedCommands } from "./agent-config/slash-commands";
 import { ArtifactService } from "./artifacts";
 import { AutomationService, type AutomationServiceDeps } from "./automations/automation-service";
 import { BrowserService } from "./browser/browser-service";
+import { ChecklistListener } from "./checklist/checklist-listener";
+import { ChecklistService } from "./checklist/checklist-service";
+import { DecisionApprovals } from "./decision-approvals";
 import { type Exec, runTool } from "./exec";
 import { type FactoryOptions, FactoryService } from "./factory/factory-service";
 import { type FactoryGithub, GithubFactoryPort } from "./factory/github-port";
+import {
+  createTeamFileRefresher,
+  TEAM_FILE_STATUSES,
+  type TeamFileDeps,
+} from "./factory/team-file";
 import { FILE_RESET_NOTICES, reportFileReset } from "./file-reset-notice";
 import { ConfigFiles } from "./files/config-files";
 import { createGitBroker, type GitBroker } from "./git-broker";
+import { githubApprovalPort } from "./github/approval-card";
 import { GithubService, type GithubServiceDeps } from "./github/github-service";
 import { projectTrustedAuthors } from "./github/review-trust";
 import { ImageService } from "./images/image-service";
@@ -43,6 +52,7 @@ import {
   singleRunner,
 } from "./runner-port";
 import type { SecretStore } from "./secrets";
+import { SessionAdmission } from "./sessions/admission";
 import { AutoRetry, type AutoRetryDeps } from "./sessions/auto-retry";
 import { ChecksLoop } from "./sessions/checks-loop";
 import { GeneratedImages } from "./sessions/generated-images";
@@ -55,11 +65,16 @@ import { QueueService } from "./sessions/queue";
 import { SessionRecovery } from "./sessions/recovery";
 import { SessionRepo } from "./sessions/repo";
 import { SessionService } from "./sessions/session-service";
+import { type TeamRunIntegrations, wireTeamRuns } from "./sessions/team-run-wiring";
+import type { TeamRuns } from "./sessions/team-runs";
 import { UnwatchedApprovals, type UnwatchedApprovalsDeps } from "./sessions/unwatched-approvals";
 import { WorktreeCleanup, type WorktreeCleanupDeps } from "./sessions/worktree-cleanup";
 import { ClaudeSdkService } from "./setup/claude-sdk";
 import { SetupService } from "./setup/setup-service";
 import { execLocate, type Locate } from "./setup/tool-lookup";
+import { techDebtIssuePort } from "./tech-debt/issue";
+import { TechDebtService } from "./tech-debt/service";
+import { startTechDebtFix } from "./tech-debt/start";
 import { DesktopUpdateService } from "./updates/desktop";
 import { notesSources, updateRegistry } from "./updates/registry";
 import { type SelfUpdateHost, UpdateService, type Updates } from "./updates/service";
@@ -72,6 +87,7 @@ import { WorkbenchService } from "./workbench/workbench-service";
 import { remoteWorkspaceFs, type WorkspaceFs, workspaceFsFor } from "./workspace-fs/workspace-fs";
 
 export interface ServicesOptions {
+  teamRuns?: TeamRunIntegrations;
   db: Db;
   store: EventStore;
   settings: SettingsStore;
@@ -135,6 +151,8 @@ export interface ServicesOptions {
 
 /** Every application service, wired together. Routes and the realtime hub use these. */
 export interface AppServices {
+  teamRuns?: TeamRuns;
+  projectTeam(projectId: string, teamId?: string): Team;
   db: Db;
   store: EventStore;
   settings: SettingsStore;
@@ -148,10 +166,14 @@ export interface AppServices {
   secrets: SecretStore;
   utility: UtilityService;
   projects: ProjectService;
+  checklist: ChecklistService;
+  techDebt: TechDebtService;
+  checklistListener: ChecklistListener;
   /** Re-detects projects' git checkout and GitHub remote (§9): on demand, on start, after turns. */
   redetector: ProjectRedetector;
   sessionRepo: SessionRepo;
   sessions: SessionService;
+  admission: SessionAdmission;
   /** The queued-message tray: list, edit, delete and send-now. */
   queue: QueueService;
   lifecycle: SessionLifecycle;
@@ -185,6 +207,7 @@ export interface AppServices {
   orchestration: OrchestrationService;
   /** GitHub connection, issue/PR sync, PRs and evidence (§9). */
   github: GithubService;
+  decisions: DecisionApprovals;
   /** Usage and cost reports, budgets and rate limits (§12.6). */
   usage: UsageService;
   /** Automations: definitions, scheduler, runs and issue triage (§10). */
@@ -215,11 +238,12 @@ export function createServices(opts: ServicesOptions): AppServices {
   const userHome = opts.userHome ?? homedir();
   const runners = opts.runners ?? singleRunner(opts.runner);
   const sandboxes = opts.sandboxes ?? noSandboxes(opts.db, opts.runner);
+  const forceFakeProvider = process.env.CODEDEN_FAKE_PROVIDER === "1";
   const utility =
     opts.utility ??
     new ProviderUtilityService({
       settings: () => opts.settings.get(),
-      oneShot: runnerOneShot(opts.runner),
+      oneShot: runnerOneShot(opts.runner, forceFakeProvider),
     });
   const projects = new ProjectService({
     db: opts.db,
@@ -250,7 +274,28 @@ export function createServices(opts: ServicesOptions): AppServices {
   const gitBroker =
     opts.gitBroker ??
     createGitBroker({ exec, token: async () => (await github.auth.token())?.value ?? null });
+  // `factory` is created below; sessions start only after the container is built.
+  const projectTeam: AppServices["projectTeam"] = (projectId, teamId) => {
+    const teams = projects.get(projectId).teams;
+    return (
+      teams?.teams.find(({ id }) => id === (teamId ?? teams.defaultTeamId))?.team ??
+      factory.data.loop(projectId)?.tuning.team ??
+      []
+    );
+  };
+  const teamFiles: TeamFileDeps = {
+    home: opts.paths.home,
+    worktreesDir: opts.paths.worktrees,
+    defaults: () => defaultTeam(opts.settings.get()),
+    projectTeam,
+    project: (projectId) => projects.get(projectId),
+    session: (sessionId) => sessionRepo.find(sessionId)?.session,
+    ownTeamPins: (sessionId) => sessionRepo.find(sessionId)?.startMeta?.ownTeamPins === true,
+    liveSessions: (projectId) => sessionRepo.listInStatus(TEAM_FILE_STATUSES, projectId),
+    log: opts.log,
+  };
   const launcher = new SessionLauncher({
+    forceFakeProvider,
     repo: sessionRepo,
     projects,
     runner: opts.runner,
@@ -263,6 +308,10 @@ export function createServices(opts: ServicesOptions): AppServices {
     tokens: mcpTokens,
     git: gitBroker,
     sandboxes,
+    tokenSaver: () => opts.settings.get().tokenSaver,
+
+    teamFiles,
+    childRunsDir: join(opts.paths.home, "child-runs"),
     log: opts.log,
   });
   // Before the session service: a start in a project the start-up check hasn't reached checks it.
@@ -273,7 +322,22 @@ export function createServices(opts: ServicesOptions): AppServices {
     onGithubChanged: (projectId) => github.sync.soon(projectId, { now: true }),
     log: opts.log,
   });
+  const admission = new SessionAdmission(
+    sessionRepo,
+    () => opts.settings.get().limits.maxActiveSessions,
+    () => projects.list().length,
+    () => lifecycle.scheduleDrain(),
+    () => checksLoop.runningIds(),
+  );
+  const checklist = new ChecklistService(opts.db, opts.store, inbox, (projectId, message) => {
+    void orchestration
+      .messagePm(projectId, message, { caller: "ui", sessionId: null })
+      .catch((error: unknown) => opts.log?.(`Checklist decision message failed: ${String(error)}`));
+  });
   sessions = new SessionService({
+    forceFakeProvider,
+    admission,
+    checklist,
     repo: sessionRepo,
     projects,
     runner: opts.runner,
@@ -303,10 +367,12 @@ export function createServices(opts: ServicesOptions): AppServices {
     runnerOf: (id) => runners.forSession(id),
     send: (id, input) => sessions.send(id, { input, whenBusy: "queue" }, "codeden"),
     hasPendingMessage: (id) => sessions.hasOutbox(id) || sessions.isDelivering(id),
+    onRelease: () => admission.scheduleDrain(),
     log: opts.log,
   });
   sessions.setCheckRuns(checksLoop);
   const queue = new QueueService({
+    admission,
     outbox,
     repo: sessionRepo,
     sessions,
@@ -314,6 +380,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     providers: (sessionId) => runners.forSession(sessionId).providers(),
   });
   const lifecycle = new SessionLifecycle({
+    admission,
     db: opts.db,
     store: opts.store,
     repo: sessionRepo,
@@ -395,11 +462,14 @@ export function createServices(opts: ServicesOptions): AppServices {
     timezone: () => usage.timezone(),
     // The factory is created below; the digest asks it at wake time.
     factoryLoop: (projectId) => factory.loopSummary(projectId),
+    resultSummaryBytes: (projectId) =>
+      factory.data.loop(projectId)?.tuning.resultSummaryBytes ?? null,
     options: opts.orchestration,
     log: opts.log,
   });
   const providerHistory = new ProviderHistoryService({ db: opts.db, runner: opts.runner, runners });
   const worktreeCleanup = new WorktreeCleanup({
+    admission,
     repo: sessionRepo,
     projects,
     runner: opts.runner,
@@ -413,6 +483,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     log: opts.log,
   });
   const factory = new FactoryService({
+    admission,
     db: opts.db,
     store: opts.store,
     projects,
@@ -430,6 +501,8 @@ export function createServices(opts: ServicesOptions): AppServices {
     options: opts.factory,
     log: opts.log,
   });
+  // Keep every session's Team file current, so its tools see a Team or model change at once.
+  opts.store.subscribe(createTeamFileRefresher(teamFiles));
   const unwatchedApprovals = new UnwatchedApprovals({
     store: opts.store,
     repo: sessionRepo,
@@ -440,6 +513,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     log: opts.log,
   });
   const services: AppServices = {
+    projectTeam,
     db: opts.db,
     store: opts.store,
     settings: opts.settings,
@@ -450,8 +524,17 @@ export function createServices(opts: ServicesOptions): AppServices {
     secrets: opts.secrets,
     utility,
     projects,
+    techDebt: new TechDebtService(
+      opts.db,
+      opts.store,
+      techDebtIssuePort(github.client),
+      (project, findings) => startTechDebtFix(services.sessions, project, findings),
+    ),
+    checklist,
+    checklistListener: new ChecklistListener(opts.store, sessionRepo, checklist),
     redetector,
     sessionRepo,
+    admission,
     sessions,
     queue,
     lifecycle,
@@ -553,6 +636,7 @@ export function createServices(opts: ServicesOptions): AppServices {
       isRemote: (sessionId) => isRemoteRunner(runners.forSession(sessionId)),
     }),
     github,
+    decisions: new DecisionApprovals(opts.store, githubApprovalPort(github.client)),
     orchestration,
     automations,
     userHome,
@@ -570,6 +654,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     workspaceFs: (session) =>
       workspaceFsFor({ runner: opts.runner, runners, home: opts.paths.home }, session),
   };
+  services.teamRuns = wireTeamRuns(services, exec, opts.teamRuns, opts.log);
   services.tools = new ToolRegistry(allTools, services, opts.log);
   return services;
 }

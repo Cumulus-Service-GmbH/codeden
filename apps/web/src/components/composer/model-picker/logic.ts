@@ -269,13 +269,14 @@ export function providerTabs(
   providers: readonly ProviderInfo[],
   checks: readonly SetupCheck[] | undefined,
   lockedProvider: string | undefined,
-  opts: { favorites?: boolean; handoff?: HandoffState } = {},
+  opts: { favorites?: boolean; handoff?: HandoffState; project?: ProjectRule | null } = {},
 ): PickerTab[] {
   const tabs: PickerTab[] = providers.map((provider) => ({
     kind: "provider" as const,
     id: provider.id,
     provider,
-    availability: providerAvailability(provider.id, checks),
+    availability:
+      projectRefusal(provider, opts.project) ?? providerAvailability(provider.id, checks),
     ...lockedTab(provider, lockedProvider, opts.handoff),
   }));
   return opts.favorites
@@ -424,4 +425,32 @@ export function triggerText(provider: ProviderInfo | undefined, resolved: Resolv
   return provider.models.length <= 1 && !resolved.missing
     ? `${provider.displayName} · ${name}`
     : name;
+}
+
+/** What a project decides about its providers (`Project.allowUnenforcedProviders`). */
+export interface ProjectRule {
+  allowUnenforcedProviders: boolean;
+}
+
+/** The reason a provider the machine's security rules don't cover is refused in a project. */
+export const UNENFORCED_REASON = "Not allowed in this project";
+
+/**
+ * Why `project` refuses `provider`, or null: a provider without enforced security rules
+ * (`capabilities.enforcesSecurityRules` not true; absent counts as not enforced) runs only in a
+ * project that allows such providers. Without a project in view (`undefined`, a global
+ * default) nothing is refused. Read from the capabilities, never the provider id.
+ */
+export function projectRefusal(
+  provider: ProviderInfo,
+  project: ProjectRule | null | undefined,
+): Availability | null {
+  if (provider.capabilities.enforcesSecurityRules === true) return null;
+  if (project === undefined || project?.allowUnenforcedProviders) return null;
+  return {
+    ready: false,
+    reason: UNENFORCED_REASON,
+    detail: `${provider.displayName} isn't covered by this machine's security rules. Turn on "Allow providers without enforced security rules" in the project's settings to use it.`,
+    command: null,
+  };
 }

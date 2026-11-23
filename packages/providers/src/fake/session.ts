@@ -37,6 +37,7 @@ export class FakeSession implements ProviderSession {
   private readonly token: string;
   private counter = 0;
   private turn: TurnState | undefined;
+  private shell?: { threadId: string; turnId: string; itemId: string; cancel: () => void };
   private readonly pending = new Map<string, (response: RuntimeResponse) => void>();
 
   constructor(
@@ -108,6 +109,21 @@ export class FakeSession implements ProviderSession {
       input,
     };
     this.emit({ type: "item.completed", threadId: turn.threadId, turnId: turn.turnId, item });
+  }
+
+  async interruptToolCall(call: {
+    threadId: string;
+    turnId: string;
+    itemId: string;
+  }): Promise<void> {
+    const shell = this.shell;
+    if (
+      shell?.itemId === call.itemId &&
+      shell.turnId === call.turnId &&
+      shell.threadId === call.threadId
+    ) {
+      shell.cancel();
+    }
   }
 
   async interrupt(): Promise<void> {
@@ -229,7 +245,7 @@ export class FakeSession implements ProviderSession {
         (this.fake.approval || prompt.includes("[approval]")) &&
         this.autonomy !== "full";
       const approved = asks ? await this.approval(turn) : true;
-      if (approved && !readOnly) await this.commandToolCall(turn);
+      if (approved && !readOnly) await this.commandToolCall(turn, prompt.includes("[hold-shell]"));
       if (this.fake.subagent || prompt.includes("[subagent]")) await this.subagent(turn);
       if (this.fake.followups ?? true) {
         await this.step(turn);
@@ -383,7 +399,9 @@ export class FakeSession implements ProviderSession {
     });
   }
 
-  private async commandToolCall(turn: TurnState): Promise<void> {
+  private async commandToolCall(turn: TurnState, holdRequested: boolean): Promise<void> {
+    const hold = this.fake.holdShell;
+    const holding = holdRequested || hold !== undefined;
     const { threadId, turnId } = turn;
     const id = this.nextId("item");
     const base = {
@@ -391,12 +409,32 @@ export class FakeSession implements ProviderSession {
       kind: "tool_call" as const,
       toolKind: "command" as const,
       toolName: "shell",
-      title: "Run echo hello",
-      command: "echo hello",
+      title: holding ? "Wait" : "Run echo hello",
+      command: holding ? "sleep 600" : "echo hello",
       cwd: this.opts.cwd,
     };
     await this.step(turn);
     this.emit({ type: "item.started", threadId, turnId, item: { ...base, status: "in_progress" } });
+    if (holding) {
+      const { signal } = turn.abort;
+      const result = Promise.withResolvers<boolean>();
+      const cancel = () => result.resolve(true);
+      this.shell = { threadId, turnId, itemId: id, cancel };
+      signal.addEventListener("abort", cancel, { once: true });
+      void hold?.then(() => result.resolve(false));
+      const cancelled = await result.promise;
+      signal.removeEventListener("abort", cancel);
+      this.shell = undefined;
+      if (signal.aborted) throw new Interrupted();
+      this.emit({
+        type: "item.completed",
+        threadId,
+        turnId,
+        item: { ...base, status: cancelled ? "cancelled" : "completed" },
+      });
+      await this.step(turn);
+      return;
+    }
     await this.step(turn);
     this.emit({
       type: "item.delta",

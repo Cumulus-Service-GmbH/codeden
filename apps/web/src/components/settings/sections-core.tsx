@@ -13,7 +13,9 @@ import { AgentEnvironmentSettings } from "./agent-environment";
 import { CustomModelSettings } from "./custom-models";
 import { ModelVisibilitySettings } from "./model-visibility";
 import { ProviderHistorySettings } from "./provider-history";
+import { ProviderSecuritySettings } from "./provider-security";
 import { Segmented, SettingRow, SettingsSection, useSettings } from "./settings-ui";
+import { TokenSaverSettingsSection } from "./token-saver";
 import { UpdateModeSetting } from "./update-mode";
 
 export function GeneralSettings() {
@@ -63,6 +65,34 @@ export function GeneralSettings() {
         description="What CodeDen does by itself to keep agent sessions going."
       >
         <SettingRow
+          label="Agent sessions across projects"
+          help="How many agent sessions can work at once, across all projects. More wait in a queue and start in order as slots free. Project checks count. Project checks and factory starts can briefly go one or two over. Project managers and the orchestrator are exempt (one per project plus one)."
+        >
+          <NumberField
+            min={1}
+            max={64}
+            aria-label="Agent sessions across projects"
+            value={settings.limits.maxActiveSessions}
+            onChange={(maxActiveSessions) => update({ limits: { maxActiveSessions } })}
+            wrapperClassName="w-20"
+            className="h-8 text-xs"
+          />
+        </SettingRow>
+        <SettingRow
+          label="Priority message wait (minutes)"
+          help="After this wait, a priority message can cancel a simple shell wait on a provider that supports stopping individual calls."
+        >
+          <NumberField
+            min={1}
+            max={60}
+            aria-label="Priority message wait (minutes)"
+            value={settings.priorityInterruptMinutes}
+            onChange={(priorityInterruptMinutes) => update({ priorityInterruptMinutes })}
+            wrapperClassName="w-20"
+            className="h-8 text-xs"
+          />
+        </SettingRow>
+        <SettingRow
           label="Pass on pull request feedback"
           help="In sessions you start, tells the agent when its pull request's checks fail, a reviewer requests changes or it has merge conflicts. Once per commit, up to three times per pull request. The project manager follows up on work it started."
         >
@@ -81,7 +111,9 @@ export function GeneralSettings() {
           />
         </SettingRow>
       </SettingsSection>
+      <TokenSaverSettingsSection />
       <AgentEnvironmentSettings />
+      <ProviderSecuritySettings />
       <SettingsSection title="Background work">
         <SettingRow
           label="Automations"

@@ -1,5 +1,13 @@
-import type { ProviderInfo, QueuedMessage, SendQueuedNowResponse } from "@codeden/contracts";
+import {
+  AT_CAPACITY_CODE,
+  type ProviderInfo,
+  type QueuedMessage,
+  type SendQueuedNowResponse,
+} from "@codeden/contracts";
 import { badRequest, conflict, notFound } from "../errors";
+import { isFactorySession } from "../factory/starter";
+import { runnerErrorCode } from "../runner-port";
+import type { SessionAdmission } from "./admission";
 import { type ArtifactLookup, clientInput } from "./client-items";
 import type { Outbox } from "./outbox";
 import type { SessionRepo } from "./repo";
@@ -8,6 +16,7 @@ import type { SessionService } from "./session-service";
 export interface QueueServiceDeps {
   outbox: Outbox;
   repo: SessionRepo;
+  admission?: SessionAdmission;
   sessions: SessionService;
   artifacts: ArtifactLookup;
   /** The providers loaded by the runner that hosts this session. */
@@ -18,8 +27,7 @@ const BUSY = new Set(["running", "waiting"]);
 
 /**
  * The queued-message tray (`/api/sessions/:id/queue`): list, edit, delete and send-now.
- * Messages are taken from the `Outbox` synchronously, so a request racing delivery either
- * wins or answers 409 `already_sent`; it never acts on a message that is being delivered.
+ * A request racing delivery answers 409 `already_sent` once delivery owns the message.
  */
 export class QueueService {
   constructor(private readonly deps: QueueServiceDeps) {}
@@ -40,33 +48,57 @@ export class QueueService {
 
   delete(sessionId: string, messageId: string): void {
     this.deps.outbox.remove(this.require(sessionId, messageId), "deleted");
+    if (!this.deps.outbox.count(sessionId) && this.deps.repo.get(sessionId).status !== "queued") {
+      this.deps.admission?.dequeue(sessionId);
+    }
   }
 
   /**
    * Steer the running turn with a queued message, ahead of its place. Only a running turn
    * can take it (409 `no_turn` otherwise; the queue sends it next, in order), and only on a
-   * provider that can steer. If the steer fails the message goes back in its place.
+   * provider that can steer. If the steer fails the message keeps its place.
    */
   async sendNow(sessionId: string, messageId: string): Promise<SendQueuedNowResponse> {
     const message = this.require(sessionId, messageId);
     const session = this.deps.repo.get(sessionId);
+    const { admission } = this.deps;
+    if (!isFactorySession(session) && admission && !this.deps.sessions.isDelivering(sessionId)) {
+      if (!admission.tryReserve(sessionId, session.role)) {
+        throw conflict("All agent slots are in use", AT_CAPACITY_CODE);
+      }
+      // Active turns already account for their slot. Give back any temporary reservation
+      // before nudging the normal outbox delivery for an idle session.
+      if (!BUSY.has(session.status)) admission.release(sessionId);
+    }
     if (!BUSY.has(session.status)) {
       // Nudge delivery so an idle session with a waiting queue sends its next message, in order.
       void this.deps.sessions.flushOutbox(sessionId).catch(() => undefined);
       throw conflict("No turn is running: the queue sends this message next", "no_turn");
     }
-    const canSteer = this.deps.providers(sessionId).find((p) => p.id === session.provider)
-      ?.capabilities.steer;
-    if (!canSteer) throw conflict("This provider cannot steer a running turn", "unsupported");
-    // Taken out before anything is awaited: delivery can no longer pick it up.
-    this.deps.outbox.remove(message, "sent");
     try {
-      await this.deps.sessions.steer(sessionId, message.input);
-      return { status: "steered" };
-    } catch (error) {
-      this.deps.outbox.restore(message);
-      void this.deps.sessions.flushOutbox(sessionId).catch(() => undefined);
-      throw error;
+      const canSteer = this.deps.providers(sessionId).find((p) => p.id === session.provider)
+        ?.capabilities.steer;
+      if (!canSteer) throw conflict("This provider cannot steer a running turn", "unsupported");
+      const { outbox } = this.deps;
+      outbox.steering.add(messageId);
+      let retry = false;
+      try {
+        const status = await this.deps.sessions.steer(sessionId, message.input, message);
+        if (status === "queued") return { status };
+        if (outbox.get(sessionId, messageId)) outbox.remove(message, "sent");
+        if (!this.deps.outbox.count(sessionId)) admission?.dequeue(sessionId);
+        return { status: "steered" };
+      } catch (error) {
+        if (runnerErrorCode(error) === "priority_cancelled") throw error;
+        retry = true;
+        if (runnerErrorCode(error) === "no_turn") return { status: "queued" };
+        throw error;
+      } finally {
+        outbox.steering.delete(messageId);
+        if (retry) void this.deps.sessions.flushOutbox(sessionId).catch(() => undefined);
+      }
+    } finally {
+      if (session.archivedAt) admission?.release(sessionId);
     }
   }
 
@@ -74,7 +106,12 @@ export class QueueService {
   private require(sessionId: string, messageId: string): QueuedMessage {
     this.deps.repo.get(sessionId);
     const message = this.deps.outbox.get(sessionId, messageId);
-    if (message) return message;
+    if (message) {
+      if (this.deps.outbox.steering.has(messageId)) {
+        throw conflict("This message is being delivered", "already_sent");
+      }
+      return message;
+    }
     const reason = this.deps.outbox.dequeuedReason(sessionId, messageId);
     if (reason === "sent") throw conflict("This message was already sent", "already_sent");
     if (reason) throw conflict("This message is no longer queued", "no_longer_queued");

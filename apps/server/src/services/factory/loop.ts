@@ -10,6 +10,7 @@ import { builderWanted, chooseAgent } from "./agent-choice";
 import { archiveFinished, sweepFailedSessions } from "./cleanup";
 import { closedIssueOf, settleClosedIssues } from "./closed-issues";
 import { budgetSpend, type FactoryContext, visionOf } from "./context";
+import { stoppedLoop } from "./controls";
 import { advanceDrain } from "./drain";
 import { fileDueFollowUps } from "./follow-ups";
 import { classifyPending, intakeFailedChecks, intakeIssues } from "./intake";
@@ -31,6 +32,7 @@ import { settleSpecInbox } from "./spec-approval";
 import { closeEarlyPrs } from "./spec-early-pr";
 import { settleSpotCheckInbox } from "./spot-checks";
 import { OWNED_STAGES } from "./store";
+import { teamTuning } from "./team-role";
 import { mayAutoMerge } from "./trust";
 import { recoverTurnRaceFailures } from "./turn-race";
 import { advanceVerifying } from "./verify";
@@ -63,26 +65,17 @@ export async function runTick(
   const project = ctx.projects.get(projectId);
   const now = ctx.now();
   let loop = ctx.store.loopOrNew(projectId, now);
-  const killed = project.killSwitch || ctx.settings.get().factory.killSwitch;
+  const killed = () =>
+    ctx.projects.get(projectId).killSwitch || ctx.settings.get().factory.killSwitch;
+  const saveTick = (next: FactoryLoop) => save(ctx, killed() ? stoppedLoop(next) : next, now);
   if (!isFactoryMode(project.autonomyMode) || project.archivedAt) {
     if (loop.state !== "idle" && loop.state !== "stopped") loop = { ...loop, state: "idle" };
     return save(ctx, { ...loop, drain: null }, now);
   }
-  if (killed) return save(ctx, { ...loop, state: "stopped", drain: null }, now);
-  if (loop.state === "stopped") loop = { ...loop, state: "idle" };
-
-  // Day rollover: digest for the day that ended, fresh counters; a budget pause ends.
   const today = localDay(now);
-  if (loop.day !== today) {
-    if (loop.lastDigestDay !== loop.day) {
-      await hooks.digest(project, loop, loop.day);
-      loop = { ...loop, lastDigestDay: loop.day };
-    }
-    loop = { ...loop, day: today, mergesToday: 0 };
-    if (loop.state === "paused" && loop.pausedReason?.startsWith("daily")) {
-      loop = { ...loop, state: "idle", pausedReason: null };
-    }
-  }
+  if (loop.day !== today) loop = await rollDay(project, loop, today, hooks);
+  if (killed()) return saveTick(loop);
+  if (loop.state === "stopped") loop = { ...loop, state: "idle" };
 
   // Who is installed and signed in: detected again in the background every few minutes.
   ctx.sessions.refreshAvailability();
@@ -158,17 +151,18 @@ export async function runTick(
   // The one "N merges to spot-check" item follows the merges set aside and the checks recorded.
   settleSpotCheckInbox(ctx, project);
   // A drain whose work is all done stops the loop here (also while paused).
+  if (killed()) return saveTick(loop);
   if (loop.drain) {
     loop = await advanceDrain(ctx, project, loop);
-    if (loop.state === "stopped") return save(ctx, loop, now);
+    if (!loop.drain) return saveTick(loop);
   }
 
   if (loop.state !== "paused") {
-    const spend = budgetSpend(ctx, projectId, today, project.factoryLimits);
+    const spend = budgetSpend(ctx, projectId, loop.day, project.factoryLimits);
     const over = budgetExceeded(spend, project.factoryLimits);
     if (over) loop = { ...loop, state: "paused", pausedReason: over };
   }
-  if (loop.state === "paused") return save(ctx, loop, now);
+  if (loop.state === "paused") return saveTick(loop);
 
   // While draining nothing new is taken on: no intake, no classification, no scout, and only
   // the drain's own items may claim an agent (a fresh builder after its builder was lost, or a
@@ -191,7 +185,7 @@ export async function runTick(
   if (project.autonomyMode === "dark_factory" && !drained) {
     loop = await advanceScout(ctx, project, loop);
   }
-  return save(ctx, { ...loop, state: deriveState(ctx, projectId, loop) }, now);
+  return saveTick({ ...loop, state: deriveState(ctx, projectId, loop) });
 }
 
 /** One item's step: an error is noted on the item and never stops the tick. */
@@ -319,7 +313,12 @@ async function startBuilder(
   vision: string,
   loop: FactoryLoop,
 ): Promise<boolean> {
-  const choice = chooseAgent(ctx, project, builderWanted(item, loop.tuning), "build");
+  const choice = chooseAgent(
+    ctx,
+    project,
+    builderWanted(item, teamTuning(ctx, loop.tuning)),
+    "build",
+  );
   if ("waiting" in choice) {
     ctx.store.updateItem(item.id, (i) => ({ ...i, note: choice.waiting }));
     return false;
@@ -327,7 +326,14 @@ async function startBuilder(
   const { provider, model } = choice;
   try {
     const lessons = await briefLessons(ctx, item);
-    const res = await ctx.sessions.startBuilder(item, vision, provider, model, lessons);
+    const res = await ctx.sessions.startBuilder(
+      item,
+      vision,
+      provider,
+      model,
+      lessons,
+      choice.effort,
+    );
     if (res.status === "conflict") {
       const other = res.existing.map((w) => w.workKey).join(", ");
       ctx.store.updateItem(item.id, (i) => ({
@@ -353,4 +359,22 @@ async function startBuilder(
     }));
     return false;
   }
+}
+
+async function rollDay(
+  project: Project,
+  loop: FactoryLoop,
+  today: string,
+  hooks: TickHooks,
+): Promise<FactoryLoop> {
+  // Day rollover: digest for the day that ended, fresh counters; a budget pause ends.
+  if (loop.lastDigestDay !== loop.day) {
+    await hooks.digest(project, loop, loop.day);
+    loop = { ...loop, lastDigestDay: loop.day };
+  }
+  loop = { ...loop, day: today, mergesToday: 0 };
+  if (loop.pausedReason?.startsWith("daily")) {
+    loop = { ...loop, state: loop.state === "paused" ? "idle" : loop.state, pausedReason: null };
+  }
+  return loop;
 }

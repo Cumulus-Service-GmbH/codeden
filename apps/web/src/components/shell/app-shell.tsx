@@ -1,5 +1,7 @@
 import { Outlet, useNavigate, useParams, useRouterState } from "@tanstack/react-router";
-import { useEffect } from "react";
+import { useEffect, useSyncExternalStore } from "react";
+import { pinnedChecklistMode } from "@/components/checklist/checklist-progress";
+import { CHECKLIST, ChecklistSidebar } from "@/components/checklist/checklist-sidebar";
 import { useRoleSession } from "@/components/orchestration/role-chat";
 import { AddProjectDialog } from "@/components/setup/add-project-dialog";
 import { HandoffDialog } from "@/components/thread/handoff-dialog";
@@ -33,6 +35,20 @@ export function useCurrentSessionId(): string | undefined {
   return undefined;
 }
 
+function subscribeResize(onChange: () => void): () => void {
+  window.addEventListener("resize", onChange);
+  return () => window.removeEventListener("resize", onChange);
+}
+
+/** The window's width, updated as it resizes. */
+function useWindowWidth(): number {
+  return useSyncExternalStore(
+    subscribeResize,
+    () => window.innerWidth,
+    () => Number.POSITIVE_INFINITY,
+  );
+}
+
 /** Send a fresh install to the first-run checklist (§14) once, from the home route. */
 function useFirstRunRedirect() {
   const { data } = useSnapshot();
@@ -61,6 +77,7 @@ export function AppShell() {
   const inlineSidebar = !viewport.drawerNav;
   const collapsed = viewport.railNav || layout.sidebarCollapsed;
   const panel = sessionId && hasWorkbench ? sessionId : null;
+  const windowWidth = useWindowWidth();
 
   return (
     <div className="flex h-dvh overflow-hidden bg-background text-foreground">
@@ -131,6 +148,17 @@ export function AppShell() {
           <RightPanel sessionId={panel} width={layout.rightWidth} />
         </>
       )}
+
+      <ChecklistSidebar
+        mode={pinnedChecklistMode(
+          windowWidth,
+          {
+            left: inlineSidebar ? (collapsed ? SIDEBAR.rail : layout.sidebarWidth) + 1 : 0,
+            right: panel && !viewport.sheetPanels && layout.rightOpen ? layout.rightWidth + 1 : 0,
+          },
+          { full: CHECKLIST.width, rail: CHECKLIST.rail },
+        )}
+      />
 
       {(viewport.drawerNav || viewport.railNav) && <MobileNavDrawer />}
       <CommandPalette />

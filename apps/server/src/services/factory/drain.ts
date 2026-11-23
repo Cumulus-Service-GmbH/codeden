@@ -167,14 +167,15 @@ export async function advanceDrain(
   ctx: FactoryContext,
   project: Project,
   loop: FactoryLoop,
+  writeKillSwitch = ctx.setKillSwitch,
 ): Promise<FactoryLoop> {
   const drain = loop.drain;
   if (!drain) return loop;
   const { inFlight, itemIds } = drainProgress(ctx, project.id, drain);
   const current = { ...drain, itemIds };
-  if (inFlight.length === 0) return finishDrain(ctx, project, loop, current);
+  if (inFlight.length === 0) return finishDrain(ctx, project, loop, current, writeKillSwitch);
   if (drain.deadline && ctx.now().getTime() >= Date.parse(drain.deadline)) {
-    return drainTimedOut(ctx, project, loop, current, inFlight);
+    return drainTimedOut(ctx, project, loop, current, inFlight, writeKillSwitch);
   }
   return itemIds.length === drain.itemIds.length ? loop : { ...loop, drain: current };
 }
@@ -185,8 +186,9 @@ function finishDrain(
   project: Project,
   loop: FactoryLoop,
   drain: FactoryDrain,
+  writeKillSwitch: FactoryContext["setKillSwitch"],
 ): FactoryLoop {
-  ctx.setKillSwitch(project.id, true);
+  writeKillSwitch(project.id, true);
   const items = drain.itemIds.flatMap((id) => ctx.store.item(id) ?? []);
   const n = items.length;
   const title = `Factory stopped after finishing ${n} item${n === 1 ? "" : "s"}`;
@@ -207,8 +209,9 @@ async function drainTimedOut(
   loop: FactoryLoop,
   drain: FactoryDrain,
   inFlight: FactoryItem[],
+  writeKillSwitch: FactoryContext["setKillSwitch"],
 ): Promise<FactoryLoop> {
-  ctx.setKillSwitch(project.id, true);
+  writeKillSwitch(project.id, true);
   await stopWork(ctx, project.id);
   const n = inFlight.length;
   const title = `Drain time limit reached; stopped with ${n} item${n === 1 ? "" : "s"} still in flight`;

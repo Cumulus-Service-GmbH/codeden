@@ -2,6 +2,7 @@ import type { Project, Session, WorkSummary } from "@codeden/contracts";
 import { and, eq, like } from "drizzle-orm";
 import { sessions } from "../../../db/schema";
 import type { AppServices } from "../../../services/container";
+import { capSummary } from "../../../services/summary-cap";
 import { ToolError } from "../../define";
 
 /** A project by id, as a tool error when it does not exist or is archived. */
@@ -72,7 +73,7 @@ function byPrefix(services: AppServices, prefix: string, projectId: string): str
 }
 
 /** A session as tools report it: enough to identify and judge the work. */
-export function compactSession(s: Session) {
+export function compactSession(s: Session, opts?: { summaryBytes?: number | null }) {
   return {
     id: s.id,
     title: s.title,
@@ -87,7 +88,12 @@ export function compactSession(s: Session) {
     branch: s.branch,
     issue: s.issue?.number ?? null,
     pr: s.pr ? { number: s.pr.number, state: s.pr.state, url: s.pr.url } : null,
-    result: s.result ? { outcome: s.result.outcome, summary: s.result.summary } : null,
+    result: s.result
+      ? {
+          outcome: s.result.outcome,
+          summary: capSummary(s.result.summary, opts?.summaryBytes ?? null),
+        }
+      : null,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
   };

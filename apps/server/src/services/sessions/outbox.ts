@@ -23,11 +23,13 @@ const toMessage = (r: Row): QueuedMessage => ({
  * Stored through `message.queued` / `message.dequeued` / `message.edited` events, so the queue
  * survives server restarts and can be rebuilt from the log.
  *
- * Every method is synchronous. Delivery takes a message out with `remove(…, "sent")` before
- * it awaits anything, so an edit or delete either lands before delivery (and is what gets
- * sent) or finds the message gone; a half-edited message can never be sent.
+ * Normal delivery takes a message out before awaiting anything. Priority delivery reserves
+ * the row in memory while leaving it on disk for recovery.
  */
 export class Outbox {
+  /** Priority deliveries hold their rows on disk but own them exclusively until the steer ends. */
+  readonly steering = new Set<string>();
+
   /** Last `createdAt` handed out (ms), so timestamps strictly increase. */
   private lastAt = 0;
 

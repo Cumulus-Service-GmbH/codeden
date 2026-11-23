@@ -2,7 +2,7 @@ import { createHash, randomBytes, randomUUID } from "node:crypto";
 import type { McpTokenClaims, Role } from "@codeden/contracts";
 import { and, eq, isNull, ne } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { mcpTokens } from "../db/schema";
+import { mcpTokens, sessions } from "../db/schema";
 
 /** Prefix of CodeDen MCP tokens, so they are recognisable (and never confused with others). */
 const PREFIX = "cdm_";
@@ -44,12 +44,14 @@ export class McpTokenStore {
   /** Claims of a live token, or undefined for unknown and revoked tokens. */
   verify(token: string | undefined): McpTokenClaims | undefined {
     if (!token?.startsWith(PREFIX)) return undefined;
-    const row = this.db
-      .select()
+    const result = this.db
+      .select({ token: mcpTokens, archivedAt: sessions.archivedAt })
       .from(mcpTokens)
+      .leftJoin(sessions, eq(sessions.id, mcpTokens.sessionId))
       .where(and(eq(mcpTokens.tokenHash, hash(token)), isNull(mcpTokens.revokedAt)))
       .get();
-    if (!row) return undefined;
+    if (!result || (result.token.role !== "agent" && result.archivedAt)) return undefined;
+    const row = result.token;
     return {
       role: row.role as Role,
       sessionId: row.sessionId,

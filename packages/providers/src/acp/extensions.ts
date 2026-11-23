@@ -1,3 +1,4 @@
+import type { ReasoningEffort } from "@codeden/contracts";
 import type { ApprovalBroker } from "../approvals";
 import type { ResolvedCommand } from "../util/exec";
 import type { AcpToolFacts, AcpToolState } from "./items";
@@ -110,6 +111,37 @@ export interface AcpAgentSpec {
   authGuard?: (exe: ResolvedCommand) => Promise<string | undefined>;
   /** Its mode ids: full tools, planning, and read-only (when it has them). */
   modes: { agent: string; plan?: string; readOnly?: string };
+  /**
+   * The agent can't be held to read-only (no read-only mode, and not every call reaches
+   * CodeDen): its sessions refuse the `read_only` level, at the start and as a change.
+   */
+  refusesReadOnly?: true;
+  /**
+   * The agent can't be held to Supervised (not every edit and command is sure to reach
+   * CodeDen): its sessions refuse the `supervised` level, at the start and as a change.
+   */
+  refusesSupervised?: true;
+  /**
+   * The machine's security rules aren't enforced for this agent: a session starts only when its
+   * project allows such providers (`SessionOptions.allowUnenforcedProviders`), else it refuses.
+   */
+  unenforcedSecurityRules?: true;
+  /**
+   * How CodeDen's reasoning effort reaches the agent, when it can: the config option of
+   * `category` (`thought_level`, say), set with `session/set_config_option` to the value `value`
+   * picks from the ones the session lists, given the session's setup (its current model's own
+   * levels, say). Without it, efforts are ignored.
+   */
+  effort?: {
+    category: string;
+    value: (
+      effort: ReasoningEffort,
+      listed: readonly string[],
+      setup: AcpSessionSetup,
+    ) => string | undefined;
+    /** The session's current model runs at one fixed level: there is no effort to set. */
+    fixed?: (setup: AcpSessionSetup) => boolean;
+  };
   extensions?: AcpExtensions;
   /**
    * The warning for the agent's own allow-list in the worktree, if it has one with rules: what
@@ -122,8 +154,19 @@ export interface AcpAgentSpec {
 export interface AcpSessionConfig {
   executable: ResolvedCommand;
   spec: AcpAgentSpec;
-  /** The agent reported its session setup (models, modes): for the adapter's model list. */
-  onSetup?: (setup: AcpSessionSetup, info: AcpInitializeResult) => void;
+  /**
+   * The agent reported its session setup (models, modes): for the adapter's model list.
+   * `source`: `session` for `session/new`'s whole snapshot, `load` for a resumed session's saved
+   * setup, `update` for the options a
+   * `config_option_update` sent.
+   */
+  onSetup?: (
+    setup: AcpSessionSetup,
+    info: AcpInitializeResult,
+    source: "session" | "load" | "update",
+  ) => void;
+  /** The agent answered `initialize` (its capabilities), reported the moment it arrives. */
+  onInfo?: (info: AcpInitializeResult) => void;
   startTimeoutMs?: number;
   interruptTimeoutMs?: number;
 }

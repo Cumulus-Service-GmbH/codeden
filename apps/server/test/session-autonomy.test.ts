@@ -233,6 +233,7 @@ describe("readOnlyUnsupported", () => {
     reasoningEffort: true,
     mcp: true,
     skills: false,
+    enforcesSecurityRules: true,
   };
   const provider = (readOnly?: boolean): ProviderInfo => ({
     id: "other",
@@ -246,8 +247,11 @@ describe("readOnlyUnsupported", () => {
     expect(readOnlyUnsupported("agent", "read_only", provider(false))).toMatch(/read-only/);
     expect(readOnlyUnsupported("agent", "read_only", provider(true))).toBeNull();
     expect(readOnlyUnsupported("agent", "auto", provider())).toBeNull();
-    // PMs and the orchestrator are read-only on every provider; unknown providers pass.
-    expect(readOnlyUnsupported("pm", "read_only", provider())).toBeNull();
+    // PMs and the orchestrator are read-only at every level: they need a provider that declares
+    // it (absent counts as not enforced). Unknown providers pass; the runner checks at start.
+    expect(readOnlyUnsupported("pm", "auto", provider())).toMatch(/can't run a PM/);
+    expect(readOnlyUnsupported("orchestrator", "auto", provider(false))).toMatch(/orchestrator/);
+    expect(readOnlyUnsupported("pm", "auto", provider(true))).toBeNull();
     expect(readOnlyUnsupported("agent", "read_only", undefined)).toBeNull();
   });
 });

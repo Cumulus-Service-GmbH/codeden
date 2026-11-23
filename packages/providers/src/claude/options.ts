@@ -104,15 +104,15 @@ export interface QueryOptionsInput {
  * which it passes inline (`--mcp-config <json>`), bearer tokens included, on the command line any
  * local process can read (§15).
  */
-function mcpConfigArgs(input: QueryOptionsInput): Pick<Options, "extraArgs"> {
+function mcpConfigArgs(input: QueryOptionsInput): Record<string, string | null> {
   if (input.session.mcpServers.length === 0) return {};
   if (!input.mcpConfigFile) {
     throw new Error("A Claude session's MCP servers must be passed as a private config file");
   }
-  return { extraArgs: { "mcp-config": input.mcpConfigFile } };
+  return { "mcp-config": input.mcpConfigFile };
 }
 
-/** Build the `query()` options for a session (§7.2). */
+/** Build the `query()` options for a session (§7.2). A null value serializes as a flag. */
 export function buildQueryOptions(input: QueryOptionsInput): Options {
   const { session } = input;
   const permissionMode = permissionModeFor(session.autonomy, session.planMode);
@@ -120,6 +120,8 @@ export function buildQueryOptions(input: QueryOptionsInput): Options {
   // plan is approved, which the CLI only accepts when it was launched allowing it.
   const bypass = permissionModeFor(session.autonomy, false) === "bypassPermissions";
   const effort = claudeEffort(session.effort);
+  const extraArgs = mcpConfigArgs(input);
+  if (session.chrome !== undefined) extraArgs[session.chrome ? "chrome" : "no-chrome"] = null;
   return {
     ...executableOptions(input.executable),
     cwd: session.cwd,
@@ -133,9 +135,10 @@ export function buildQueryOptions(input: QueryOptionsInput): Options {
     includeHookEvents: true,
     forwardSubagentText: true,
     ...(input.resume ? { resume: input.resume } : {}),
-    // Read-only sessions (orchestrator, PMs) never get the edit tools (§11.2).
-    ...(session.readOnly ? { disallowedTools: [...EDIT_TOOLS] } : {}),
-    ...mcpConfigArgs(input),
+    // Read-only sessions (orchestrator, PMs) never get the edit tools (§11.2), nor any MCP server
+    // but the ones CodeDen passes: the user's own (an Azure MCP, say) aren't even loaded.
+    ...(session.readOnly ? { disallowedTools: [...EDIT_TOOLS], strictMcpConfig: true } : {}),
+    extraArgs,
     ...trustedMcpTools(session.mcpServers),
     systemPrompt: {
       type: "preset",

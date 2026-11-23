@@ -27,6 +27,7 @@ import {
   RetryInboxResponse,
   ReviewSessionRequest,
   ReviewSessionResponse,
+  RunnerConnectionStatus,
   SESSION_LOOKUP_MAX,
   SendMessageRequest,
   SessionSnapshot,
@@ -228,9 +229,41 @@ describe("api schemas", () => {
     ).toEqual({ tool: "gemini", command: "gemini", args: [] });
   });
 
+  it("round-trips the Antigravity CLI's setup check and sign-in command", () => {
+    expect(SetupToolId.options).toContain("antigravity");
+    const check = roundTrip(SetupCheck, {
+      id: "antigravity",
+      label: "Antigravity CLI",
+      state: "ok",
+      installed: true,
+      version: "1.5.13",
+      executablePath: "/Users/dev/.local/bin/agy",
+      loggedIn: null,
+      authMethod: null,
+      account: null,
+      loginExpiresAt: null,
+      message: "Uses the login from `agy`",
+      fix: null,
+      durationMs: 90,
+    });
+    expect(check.id).toBe("antigravity");
+    // `agy` has no login command: run on its own, it asks how to sign in.
+    expect(
+      roundTrip(LoginCommandResponse, { tool: "antigravity", command: "agy", args: [] }),
+    ).toEqual({ tool: "antigravity", command: "agy", args: [] });
+  });
+
   it("round-trips OpenCode's setup check, sign-in command and provider info", () => {
     expect(SetupToolId.options).toContain("opencode");
-    expect(LoginToolId.options).toEqual(["claude", "codex", "opencode", "cursor", "gemini", "gh"]);
+    expect(LoginToolId.options).toEqual([
+      "claude",
+      "codex",
+      "opencode",
+      "cursor",
+      "gemini",
+      "antigravity",
+      "gh",
+    ]);
     const check = roundTrip(SetupCheck, {
       id: "opencode",
       label: "OpenCode",
@@ -452,6 +485,22 @@ describe("api schemas", () => {
     // A server from before paging sent no count: it was always the whole session.
     expect(roundTrip(SessionSnapshot, snapshot).earlierTurns).toBe(0);
     expect(roundTrip(SessionSnapshot, { ...snapshot, earlierTurns: 12 }).earlierTurns).toBe(12);
+    const focused = { threads: [], turns: [], items: [] };
+    expect(roundTrip(SessionSnapshot, { ...snapshot, focused }).focused).toEqual(focused);
+  });
+
+  it("round-trips an attached runner's responsiveness and accepts older status messages", () => {
+    const status = {
+      state: "connected",
+      runnerId: "r1",
+      version: "0.0.0",
+      providers: [],
+      lastError: null,
+    };
+    expect(roundTrip(RunnerConnectionStatus, status).responsive).toBeUndefined();
+    expect(roundTrip(RunnerConnectionStatus, { ...status, responsive: false }).responsive).toBe(
+      false,
+    );
   });
 
   it("coerces query strings", () => {

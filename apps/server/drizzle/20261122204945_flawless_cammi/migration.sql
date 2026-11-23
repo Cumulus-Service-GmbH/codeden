@@ -1,0 +1,1 @@
+ALTER TABLE `projects` ADD `allow_unenforced_providers` integer DEFAULT false NOT NULL;

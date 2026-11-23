@@ -1,123 +1,121 @@
-import type { FactoryTuning } from "@codeden/contracts";
+import {
+  type FactoryItem,
+  type FactoryTuning,
+  type ReasoningEffort,
+  teamMember,
+} from "@codeden/contracts";
 import { earliestUntil, type Unavailable, unavailableText, untilText } from "./availability";
-
-/**
- * Which provider and model run a review (§10.1, Review). Pure: the caller passes the providers
- * available now and why the others aren't.
- */
-
-/** Providers tried for reviews, in order, when the author's provider is excluded. */
-const REVIEW_ORDER = ["codex", "claude"];
+import type { FactoryContext } from "./context";
 
 export interface ReviewerChoice {
   wait: false;
   provider: string;
-  /** Null: the provider's default model. */
   model: string | null;
-  /** True when the reviewer runs on a different provider from the author. */
+  effort?: ReasoningEffort;
   crossProvider: boolean;
-  /** Why the review doesn't run where the settings ask (fallback, same provider). */
   note: string | null;
 }
 
-/** No provider the settings allow is available: the review waits, with the item note. */
 export interface ReviewerWait {
   wait: true;
   note: string;
 }
 
 export interface ReviewerInput {
-  /** The builder's provider and model (null when not known). */
-  author: { provider: string | null; model: string | null };
-  tuning: Pick<FactoryTuning, "reviewerProvider" | "reviewerModel" | "reviewerFallback">;
-  /** Providers that can take new work now. */
+  author: { provider: string | null };
+  tuning: Pick<FactoryTuning, "reviewerProvider" | "reviewerModel" | "reviewerFallback"> &
+    Partial<Pick<FactoryTuning, "team">>;
   available: readonly string[];
-  /** Providers the runner offers that can't, and why. */
   unavailable: ReadonlyArray<{ provider: string } & Unavailable>;
-  /** A provider's name for notes. */
+  vendor: (provider: string) => string | undefined;
   name?: (id: string) => string;
 }
 
-/**
- * The configured reviewer when it is available. With `auto`, a provider other than the
- * author's (Codex reviews Claude's work and vice versa), and the author's own only when no
- * other provider is installed at all. When the wanted provider is unavailable, the
- * `reviewerFallback` decides: the builder's provider and model, any available provider, or
- * waiting. With nothing available at all, the review waits.
- */
-export function pickReviewer(input: ReviewerInput): ReviewerChoice | ReviewerWait {
-  const { author, tuning, available } = input;
-  const name = input.name ?? ((id: string) => id);
-  if (available.length === 0) {
-    const until = earliestUntil(input.unavailable);
-    return { wait: true, note: `Waiting: no review provider available${untilText(until)}` };
-  }
-  let wanted: string;
-  if (tuning.reviewerProvider !== "auto") {
-    wanted = tuning.reviewerProvider;
-    if (available.includes(wanted)) {
-      return {
-        wait: false,
-        provider: wanted,
-        model: tuning.reviewerModel,
-        crossProvider: wanted !== author.provider,
-        note: null,
-      };
-    }
-  } else {
-    const others = available.filter((p) => p !== author.provider);
-    const preferred = [...REVIEW_ORDER, ...others].find((p) => others.includes(p));
-    if (preferred) {
-      return { wait: false, provider: preferred, model: null, crossProvider: true, note: null };
-    }
-    const blocked = input.unavailable.find((u) => u.provider !== author.provider);
-    if (!blocked) {
-      // Only one provider at all: the review runs on the author's, as it always has.
-      const same =
-        author.provider && available.includes(author.provider) ? author.provider : available[0];
-      return {
-        wait: false,
-        provider: same as string,
-        model: same === author.provider ? author.model : null,
-        crossProvider: false,
-        note: `No provider other than ${name(same as string)} is available; the review ran on the same provider as the author.`,
-      };
-    }
-    wanted = blocked.provider;
-  }
-  const why = input.unavailable.find((u) => u.provider === wanted) ?? {
-    reason: "not available",
-    until: null,
-  };
-  return fallback(input, unavailableText(name(wanted), why), name);
+export function reviewAuthorProvider(ctx: FactoryContext, item: FactoryItem): string | null {
+  const builder = item.builderSessionId ? ctx.repo.find(item.builderSessionId)?.session : undefined;
+  return builder?.provider ?? item.builderProvider;
 }
 
-function fallback(
-  input: ReviewerInput,
-  reason: string,
-  name: (id: string) => string,
-): ReviewerChoice | ReviewerWait {
-  const { author, available } = input;
-  const mode = input.tuning.reviewerFallback;
-  if (mode === "wait") return { wait: true, note: `Waiting: ${reason}` };
-  if (mode === "builder" && author.provider && available.includes(author.provider)) {
+/** Whether the reviewer is independent, or undefined while either vendor is unknown. */
+export function reviewVendorIsDistinct(ctx: FactoryContext, item: FactoryItem, reviewer: string) {
+  const author = reviewAuthorProvider(ctx, item);
+  const vendor = author ? ctx.sessions.modelVendor(author) : undefined;
+  const reviewerVendor = ctx.sessions.modelVendor(reviewer);
+  return vendor && reviewerVendor ? reviewerVendor !== vendor : undefined;
+}
+
+export function canReviewItem(ctx: FactoryContext, item: FactoryItem, reviewer: string): boolean {
+  return reviewVendorIsDistinct(ctx, item, reviewer) === true;
+}
+
+/** A review requires two known, distinct model vendors. */
+export function pickReviewer(input: ReviewerInput): ReviewerChoice | ReviewerWait {
+  const { author, tuning, available, unavailable, vendor } = input;
+  const name = input.name ?? ((id: string) => id);
+  const authorVendor = author.provider ? vendor(author.provider) : undefined;
+  if (!authorVendor) return { wait: true, note: "Waiting: the author's model vendor is unknown." };
+  if (!available.length) {
     return {
-      wait: false,
-      provider: author.provider,
-      model: author.model,
-      crossProvider: false,
-      note: `${reason}; the review ran on the builder's provider (${name(author.provider)}) in a fresh session.`,
+      wait: true,
+      note: `Waiting: no review provider available${untilText(earliestUntil(unavailable))}`,
     };
   }
-  // `any`, or the builder's provider is unavailable too.
-  const other =
-    [...REVIEW_ORDER, ...available].find((p) => available.includes(p) && p !== author.provider) ??
-    (available[0] as string);
-  return {
-    wait: false,
-    provider: other,
-    model: other === author.provider ? author.model : null,
-    crossProvider: other !== author.provider,
-    note: `${reason}; the review ran on ${name(other)}.`,
+  const eligible = (id: string) => {
+    const candidate = vendor(id);
+    return candidate !== undefined && candidate !== authorVendor;
   };
+  const other = available.filter(eligible);
+  const preferred = (providers: readonly string[]) =>
+    providers.find((id) => vendor(id) === "openai") ??
+    providers.find((id) => vendor(id) === "anthropic") ??
+    providers[0];
+  const choose = (
+    provider: string,
+    model: string | null,
+    note: string | null,
+    effort?: ReasoningEffort | null,
+  ): ReviewerChoice => ({
+    wait: false,
+    provider,
+    model,
+    ...(effort ? { effort } : {}),
+    crossProvider: true,
+    note,
+  });
+
+  const primary = teamMember(tuning.team, "reviewer");
+  const wanted = primary?.provider ?? tuning.reviewerProvider;
+  if (wanted === "auto" || !eligible(wanted)) {
+    const provider = preferred(other);
+    const note =
+      wanted === "auto" ? null : `${name(wanted)} has no verified distinct model vendor.`;
+    if (provider) return choose(provider, null, note);
+  } else if (other.includes(wanted)) {
+    return choose(wanted, primary ? primary.model : tuning.reviewerModel, null, primary?.effort);
+  }
+
+  const blocked =
+    wanted === "auto"
+      ? preferred(unavailable.map((item) => item.provider).filter(eligible))
+      : eligible(wanted)
+        ? wanted
+        : undefined;
+  const reason = blocked
+    ? unavailableText(
+        name(blocked),
+        unavailable.find((item) => item.provider === blocked) ?? {
+          reason: "not available",
+          until: null,
+        },
+      )
+    : "no reviewer with a verified distinct model vendor is available.";
+  if (tuning.reviewerFallback === "any") {
+    const fallback = teamMember(tuning.team, "reviewerFallback");
+    if (fallback && other.includes(fallback.provider)) {
+      return choose(fallback.provider, fallback.model, reason, fallback.effort);
+    }
+    const provider = preferred(other);
+    if (provider) return choose(provider, null, reason);
+  }
+  return { wait: true, note: `Waiting: ${reason}` };
 }

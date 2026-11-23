@@ -5,6 +5,7 @@ import { type KeyboardEvent, type ReactNode, useId, useRef, useState } from "rea
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { type SendMode, useClient } from "@/lib/api";
+import { ApiRequestError } from "@/lib/api/http";
 import { useSnapshotData } from "@/lib/queries";
 import { sendToSession } from "@/lib/send-to-session";
 import { matchesCombo, shortcut } from "@/lib/shortcuts";
@@ -17,6 +18,7 @@ import {
   draftInput,
   isSendKey,
 } from "./composer-box";
+import { priorityDeliveryKey } from "./priority-delivery";
 import { SessionOptions } from "./session-options";
 import { SuggestionMenu, suggestionOptionId, suggestionStatus } from "./suggestion-menu";
 import { applyTrigger } from "./trigger";
@@ -226,15 +228,13 @@ export function SessionComposer({
 
   // The input is captured at submit time: `onMutate` clears the draft before `mutationFn` runs.
   const send = useMutation({
+    mutationKey: priorityDeliveryKey(session.id),
     mutationFn: ({ sendMode, input }: { sendMode: SendMode; input: UserInputInit }) =>
       sendToSession(client, session, input, sendMode),
     onMutate: () => clear(session.id),
-    onSuccess: (_d, { sendMode }) => {
-      // Queued messages show in the tray above the composer.
-      if (sendMode === "steer") toast("Sent to the running turn");
-    },
     onError: (e, { input }) => {
-      setText(session.id, input.text);
+      if (!getDraft(useComposerStore.getState(), session.id).text) setText(session.id, input.text);
+      if (e instanceof ApiRequestError && e.code === "priority_cancelled") return;
       toast.error("Message not sent", { description: e.message });
     },
   });

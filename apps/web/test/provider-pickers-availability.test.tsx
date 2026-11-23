@@ -127,10 +127,11 @@ describe("factory builder and reviewer providers and availability (#255)", () =>
 
     fireEvent.change(reviewer, { target: { value: "codex" } });
     expect(screen.getByText(/codex login/)).toBeTruthy();
-    // It says what happens until Codex can run: the fallback chosen below.
-    expect(
-      screen.getByText(/Until it can run, reviews run on the builder's provider/),
-    ).toBeTruthy();
+    expect(screen.getByText(/Until it can run, reviews wait/)).toBeTruthy();
+    fireEvent.change(screen.getByLabelText("When the reviewer's provider is unavailable"), {
+      target: { value: "any" },
+    });
+    expect(screen.getByText(/Until it can run, reviews run on another model vendor/)).toBeTruthy();
     fireEvent.change(screen.getByLabelText("When the reviewer's provider is unavailable"), {
       target: { value: "wait" },
     });

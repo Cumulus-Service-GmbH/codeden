@@ -2,10 +2,14 @@ import { existsSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AgentEvent, ItemOf, SessionOptions } from "@codeden/contracts";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ProviderSession } from "../src/adapter";
 import { OpenCodeAdapter } from "../src/opencode/adapter";
 import { validateEventStream } from "../src/replay/validate";
+
+// These tests start a fake OpenCode server as a real process: room for a busy machine, as for
+// the repo's other process-spawning suites.
+vi.setConfig({ testTimeout: 40_000, hookTimeout: 60_000 });
 
 const fakeOpenCode = {
   kind: "node-script" as const,

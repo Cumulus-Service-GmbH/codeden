@@ -104,6 +104,7 @@ export class OpenCodeSession implements ProviderSession {
         ...(opts.env ? { env: { ...process.env, ...opts.env } } : {}),
       },
       opts.readOnly ?? false,
+      this.toolCtx.mcpServers,
     );
     this.models = new OpenCodeModelChoice(opts.model, opts.effort, config.modelEfforts);
     this.commands = new OpenCodeCommands(opts.cwd, (commands) =>
@@ -272,6 +273,7 @@ export class OpenCodeSession implements ProviderSession {
   private async boot(): Promise<OpenCodeServer> {
     const server = await OpenCodeServer.start(this.config.executable, {
       cwd: this.opts.cwd,
+      readOnly: this.opts.readOnly,
       ...(this.opts.env ? { env: this.opts.env } : {}),
       config: openCodeConfig({
         mcpServers: this.opts.mcpServers,

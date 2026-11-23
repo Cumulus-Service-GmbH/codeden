@@ -17,6 +17,7 @@ import { errorMessage } from "../errors";
 import type { OrchestrationService } from "../orchestration/orchestration-service";
 import { findConflicts } from "../sessions/conflicts";
 import type { SessionRepo } from "../sessions/repo";
+import { BROWSER_OPERATOR_TAG, startsWithLiteralTag, stripLeadingTags } from "../sessions/role-tag";
 import type { SessionService } from "../sessions/session-service";
 import {
   overConcurrencyCap,
@@ -52,6 +53,8 @@ export interface FireRequest {
   issue?: GithubIssue | GitHubIssueRef;
   /** Manual runs: the caller's decision after a `conflict`. */
   conflict?: ConflictDecision;
+  /** Manual runs: whether a person started this run from the UI. */
+  byPerson?: boolean;
   /**
    * The permission level of the session a run starts: the action's, capped at the level a
    * person approved (`runAutonomy`); undefined leaves it to the project's default.
@@ -285,6 +288,14 @@ export class AutomationExecutor {
     if (automation.action.type !== "start_session") throw new Error("not a session action");
     const action = automation.action;
     const prompt = renderTemplate(action.prompt, req.vars);
+    const defaultTitle = stripLeadingTags(automation.name) || "Automation";
+    let title = defaultTitle;
+    if (action.title) {
+      const rendered = renderTemplate(action.title, req.vars);
+      title = startsWithLiteralTag(action.title)
+        ? rendered
+        : stripLeadingTags(rendered) || defaultTitle;
+    }
     const start = StartSessionRequest.parse({
       projectId: project.id,
       role: "agent",
@@ -295,7 +306,7 @@ export class AutomationExecutor {
       purpose: run.purpose,
       workKey: run.workKey,
       startedBy: run.startedBy,
-      title: action.title ? renderTemplate(action.title, req.vars) : automation.name,
+      title,
       issue: req.issue
         ? { number: req.issue.number, url: req.issue.url, title: req.issue.title }
         : undefined,
@@ -306,7 +317,12 @@ export class AutomationExecutor {
       },
       conflict: decision,
     });
-    const res = await this.deps.sessions.start(start);
+    const chromeApproved =
+      (req.triggeredBy !== "manual" || req.byPerson) &&
+      action.title?.trimStart().startsWith(BROWSER_OPERATOR_TAG);
+    const res = await this.deps.sessions.start(start, {
+      ...(chromeApproved ? { chromeApproved: true } : {}),
+    });
     switch (res.status) {
       case "conflict":
         if (req.triggeredBy === "manual" && !decision) {

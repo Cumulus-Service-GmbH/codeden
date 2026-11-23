@@ -3,10 +3,12 @@ import {
   CODEDEN_VERSION,
   type HealthResponse,
   type InboxItem,
+  inboxKindVisible,
   type Session,
   SessionSnapshotQuery,
   type SettingsPatch,
   type Snapshot,
+  SnapshotQuery,
   summarizeActivity,
 } from "@codeden/contracts";
 import { eq, inArray } from "drizzle-orm";
@@ -17,9 +19,11 @@ import type { AppServices } from "../services/container";
 import { badRequest } from "../services/errors";
 import { archivedSessionCounts, snapshotSessions } from "../services/sessions/archived";
 import { sessionSnapshot } from "../services/sessions/snapshot";
+import { listTeamRuns } from "../services/sessions/team-run-projection";
 import { agentConfigRoutes, sessionAgentConfigRoutes } from "./agent-config";
 import { automationRoutes, projectAutomationRoutes } from "./automations";
 import { browserRoutes, sessionBrowserRoutes } from "./browser";
+import { checklistRoutes } from "./checklists";
 import { executionRoutes } from "./execution";
 import { factoryRoutes, projectFactoryRoutes } from "./factory";
 import { githubRoutes, projectGithubRoutes, prRoutes, sessionGithubRoutes } from "./github";
@@ -70,7 +74,9 @@ export function createApi(ctx: ApiContext) {
         };
         return c.json(body);
       })
-      .get("/snapshot", (c) => c.json(buildSnapshot(ctx)))
+      .get("/snapshot", queryOf(SnapshotQuery), (c) =>
+        c.json(buildSnapshot(ctx, c.req.valid("query").capabilities?.split(",") ?? [])),
+      )
       .get("/activity", (c) => c.json(buildActivity(s)))
       // A session's transcript: whole, or its latest root turns a page at a time (`?turns=`).
       .get("/sessions/:id/snapshot", queryOf(SessionSnapshotQuery), (c) =>
@@ -96,6 +102,7 @@ export function createApi(ctx: ApiContext) {
       .route("/sessions", sessionFileRoutes(s))
       .route("/utility", utilityRoutes(s))
       .route("/inbox", inboxRoutes(s))
+      .route("/checklists", checklistRoutes(s))
       .route("/orchestration", orchestrationRoutes(s))
       .route("/conflicts", conflictRoutes(s))
       .route("/automations", automationRoutes(s))
@@ -137,7 +144,7 @@ export function createApi(ctx: ApiContext) {
 
 export type ApiRoutes = ReturnType<typeof createApi>;
 
-function buildSnapshot(ctx: ApiContext): Snapshot {
+function buildSnapshot(ctx: ApiContext, capabilities: readonly string[]): Snapshot {
   const s = ctx.services;
   // Read the head first: anything appended later arrives through the WebSocket.
   const seq = s.store.headSeq();
@@ -147,9 +154,13 @@ function buildSnapshot(ctx: ApiContext): Snapshot {
     generatedAt: new Date().toISOString(),
     settings: s.settings.get(),
     projects: s.projects.list(),
+    checklists: s.checklist.list(),
+    teamRuns: listTeamRuns(s.db),
     sessions: snapshotSessions(s.db),
     archivedSessionCounts: archivedSessionCounts(s.db),
-    inbox: s.inbox.list({ status: "open" }),
+    inbox: s.inbox
+      .list({ status: "open" })
+      .filter(({ kind }) => inboxKindVisible(kind, capabilities)),
     automations: s.db.select().from(automations).all().map(rowToAutomation),
     scheduled: s.orchestration.automation.listScheduledRuns(null, 20),
     roleSessions: s.orchestration.roles.refs(),

@@ -111,12 +111,16 @@ describe("factory policy (§10.1)", () => {
     ]);
   });
 
-  it("picks a reviewer on a different provider from the author, falling back with a note", () => {
+  const vendor = (provider: string) =>
+    ({ claude: "anthropic", codex: "openai", gemini: "google" })[provider];
+
+  it("requires a reviewer on a known vendor distinct from the author", () => {
     const tuning = FactoryTuning.parse({});
     const pick = (author: string | null, available: string[]) =>
       pickReviewer({
-        author: { provider: author, model: null },
+        author: { provider: author },
         tuning,
+        vendor,
         available,
         unavailable: [],
       });
@@ -129,38 +133,32 @@ describe("factory policy (§10.1)", () => {
     });
     expect(pick("codex", ["claude", "codex"])).toMatchObject({ provider: "claude" });
     const same = pick("claude", ["claude"]);
-    expect(same).toMatchObject({ provider: "claude", crossProvider: false });
-    expect(same.note).toMatch(/same provider/);
-    expect(pick(null, ["claude", "codex"])).toMatchObject({ provider: "codex" });
+    expect(same).toMatchObject({ wait: true, note: expect.stringContaining("distinct") });
+    expect(pick(null, ["claude", "codex"])).toMatchObject({ wait: true });
   });
 
   it("falls back from an unavailable reviewer as the settings say", () => {
     const limited = [{ provider: "codex", reason: "at its usage limit", until: null }];
     const pick = (patch: object, available = ["claude"]) =>
       pickReviewer({
-        author: { provider: "claude", model: "claude-opus-5-5" },
+        author: { provider: "claude" },
         tuning: FactoryTuning.parse(patch),
+        vendor,
         available,
         unavailable: limited,
       });
-    // `builder` (the default): the builder's provider and model, with the reason.
-    expect(pick({})).toMatchObject({
-      wait: false,
-      provider: "claude",
-      model: "claude-opus-5-5",
-      note: expect.stringMatching(/codex is at its usage limit; .*builder's provider/),
-    });
+    expect(pick({})).toEqual({ wait: true, note: "Waiting: codex is at its usage limit" });
     expect(pick({ reviewerFallback: "wait" })).toEqual({
       wait: true,
       note: "Waiting: codex is at its usage limit",
     });
     expect(
-      pick({ reviewerProvider: "codex", reviewerFallback: "any" }, ["claude", "opencode"]),
-    ).toMatchObject({ provider: "opencode", model: null, crossProvider: true });
+      pick({ reviewerProvider: "codex", reviewerFallback: "any" }, ["claude", "gemini"]),
+    ).toMatchObject({ provider: "gemini", model: null, crossProvider: true });
     // The configured provider and model, when available.
     expect(
-      pick({ reviewerProvider: "opencode", reviewerModel: "big" }, ["claude", "opencode"]),
-    ).toMatchObject({ provider: "opencode", model: "big", note: null });
+      pick({ reviewerProvider: "gemini", reviewerModel: "big" }, ["claude", "gemini"]),
+    ).toMatchObject({ provider: "gemini", model: "big", note: null });
     // Nothing available: wait until the earliest reset.
     expect(pick({}, [])).toMatchObject({
       wait: true,

@@ -9,39 +9,38 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { ago } from "@/lib/format";
 import { platform } from "@/lib/platform";
 import { useProject, useTranscript } from "@/lib/queries";
-import type { TranscriptState } from "@/lib/transcript/reducer";
+import { buildTimeline } from "@/lib/transcript/timeline";
 import { cn } from "@/lib/utils";
+import { ChecklistInboxCard } from "./checklist-inbox-card";
 import { FactoryInboxCard, factoryInboxKind } from "./factory-inbox";
 import { InboxActions, PrReviewStatus } from "./inbox-actions";
 import { TriageCard } from "./triage-card";
 
-/** The plan a plan approval asks about: the latest plan before it in the same turn. */
-function planBefore(transcript: TranscriptState, itemId: string): string | undefined {
-  const entry = transcript.items[itemId];
-  if (!entry) return undefined;
-  const ids = transcript.threads[entry.threadId]?.itemIds ?? [];
-  for (let i = ids.indexOf(itemId) - 1; i >= 0; i--) {
-    const before = transcript.items[ids[i] ?? ""];
-    if (!before || before.turnId !== entry.turnId) return undefined;
-    if (before.item.kind === "plan") return before.item.text;
-  }
-  return undefined;
-}
-
 /** The mirrored approval or question, answered with the same card as the transcript. */
 function MirroredRequest({ item }: { item: InboxItem }) {
-  // The latest turn, reaching back to the request if it is older.
-  const { transcript } = useTranscript(item.sessionId ?? undefined, {
-    turns: 1,
+  const { transcript, focusedTranscript } = useTranscript(item.sessionId ?? undefined, {
+    turns: 2,
     ...(item.itemId ? { item: item.itemId } : {}),
   });
-  const mirrored = item.itemId ? transcript?.items[item.itemId]?.item : undefined;
+  const source = item.itemId && transcript?.items[item.itemId] ? transcript : focusedTranscript;
+  const mirrored = item.itemId ? source?.items[item.itemId]?.item : undefined;
   if (!item.sessionId) return null;
   if (!transcript) return <Skeleton className="h-24 w-full rounded-xl" />;
   if (mirrored?.kind === "approval_request") {
-    const plan =
-      mirrored.action === "plan" && item.itemId ? planBefore(transcript, item.itemId) : undefined;
-    return <ApprovalCard item={mirrored} sessionId={item.sessionId} compact plan={plan} />;
+    const entry = source?.items[mirrored.id];
+    const row =
+      mirrored.action === "plan" && source && entry
+        ? buildTimeline(source, entry.threadId).find((row) => row.key === mirrored.id)
+        : undefined;
+    return (
+      <ApprovalCard
+        item={mirrored}
+        sessionId={item.sessionId}
+        compact
+        plan={row?.type === "card" ? row.plan : undefined}
+        previousPlan={row?.type === "card" ? row.previousPlan : undefined}
+      />
+    );
   }
   if (mirrored?.kind === "user_question")
     return <QuestionCard item={mirrored} sessionId={item.sessionId} />;
@@ -125,6 +124,8 @@ export function InboxEntry({ item, focused = false }: { item: InboxItem; focused
       </div>
       {mirrors && !resolved ? (
         <MirroredRequest item={item} />
+      ) : item.kind === "checklist_approval" ? (
+        <ChecklistInboxCard item={item} />
       ) : item.kind === "triage" ? (
         <TriageCard item={item} />
       ) : factoryInboxKind(item) ? (

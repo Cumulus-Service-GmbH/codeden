@@ -3,7 +3,7 @@ import type { ItemEntry, TranscriptState, TurnState } from "./reducer";
 import { threadItems } from "./reducer";
 
 /** One work entry inside a work group: a tool call or a reasoning block. */
-export type WorkEntry = ToolCallItem | ItemOf<"reasoning">;
+export type WorkEntry = (ToolCallItem | ItemOf<"reasoning">) & { startedAt?: string };
 
 /** A hook from the user's settings that ran (§12.4). */
 export type HookRun = ItemOf<"hook_run">;
@@ -18,7 +18,7 @@ export type TimelineRow =
   | { key: string; type: "work"; turnId: string; entries: WorkStep[]; live: boolean }
   /** A hook run that failed or blocked, on a row of its own so it stands out. */
   | { key: string; type: "hook"; item: HookRun }
-  | { key: string; type: "card"; item: Item }
+  | { key: string; type: "card"; item: Item; plan?: string; previousPlan?: string }
   | {
       key: string;
       type: "turn-end";
@@ -100,12 +100,18 @@ export function buildTimeline(state: TranscriptState, threadId: string): Timelin
     });
   };
 
+  let latestPlan: { turnId: string; text: string } | undefined;
+  let previousPlan: string | undefined;
   let currentTurn: string | null = null;
   for (const entry of entries) {
     const { item, turnId } = entry;
     // Follow-ups are no rows, and the server's own suggestions for a turn can arrive after the
     // next turn began, so they must not split that turn in two.
     if (item.kind === "followups") continue;
+    if (item.kind === "plan") {
+      previousPlan = latestPlan?.text;
+      latestPlan = { turnId, text: item.text };
+    }
     if (currentTurn !== null && turnId !== currentTurn) {
       flush();
       lastTurnRows(currentTurn);
@@ -122,10 +128,14 @@ export function buildTimeline(state: TranscriptState, threadId: string): Timelin
       continue;
     }
     if (isWork(item)) {
-      if (group && group.turnId === turnId) group.entries.push(item);
+      const step =
+        item.kind === "tool_call" && item.toolKind === "command" && entry.createdAt
+          ? { ...item, startedAt: entry.createdAt }
+          : item;
+      if (group && group.turnId === turnId) group.entries.push(step);
       else {
         flush();
-        group = { turnId, entries: [item], firstId: item.id };
+        group = { turnId, entries: [step], firstId: item.id };
       }
       continue;
     }
@@ -138,7 +148,18 @@ export function buildTimeline(state: TranscriptState, threadId: string): Timelin
         item,
         streaming: item.status === "in_progress",
       });
-    else if (CARD_KINDS.has(item.kind)) rows.push({ key: item.id, type: "card", item });
+    else if (CARD_KINDS.has(item.kind)) {
+      const plan =
+        item.kind === "approval_request" && item.action === "plan" && latestPlan?.turnId === turnId
+          ? latestPlan.text
+          : undefined;
+      rows.push({
+        key: item.id,
+        type: "card",
+        item,
+        ...(plan !== undefined && { plan, previousPlan }),
+      });
+    }
   }
   flush();
   lastTurnRows(currentTurn);

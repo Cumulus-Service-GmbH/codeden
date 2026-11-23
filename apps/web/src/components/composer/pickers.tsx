@@ -2,7 +2,7 @@ import type { AutonomyLevel } from "@codeden/contracts";
 import { Check, ClipboardList } from "lucide-react";
 import { useId } from "react";
 import { useTapTooltip } from "@/components/common/tap-tooltip";
-import { AUTONOMY, AUTONOMY_LEVELS } from "@/components/thread/autonomy";
+import { AUTONOMY, AUTONOMY_LEVELS, levelUnavailableReason } from "@/components/thread/autonomy";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -119,13 +119,16 @@ function PlanUnavailableToggle(unavailable: PlanUnavailable) {
 
 /**
  * Permissions picker (§11.2): Read-only, Supervised, Auto or Full, one plain line each.
- * Read-only is offered only when the provider enforces it (`readOnlySupported`). Provider,
- * model and effort live in `model-picker/`.
+ * Read-only and Supervised are offered only when the provider enforces them
+ * (`readOnlySupported`, `supervisedSupported`); otherwise they show why, naming the provider.
+ * Provider, model and effort live in `model-picker/`.
  */
 export function AutonomyPicker({
   value,
   onChange,
   readOnlySupported = true,
+  supervisedSupported = true,
+  providerName,
   heading = "Permissions for this session",
   disabled,
 }: {
@@ -133,6 +136,10 @@ export function AutonomyPicker({
   onChange: (v: AutonomyLevel) => void;
   /** False when the session's provider cannot enforce Read-only. */
   readOnlySupported?: boolean;
+  /** False when the session's provider cannot enforce Supervised. */
+  supervisedSupported?: boolean;
+  /** The provider's display name, for the reason a level is unavailable. */
+  providerName?: string;
   heading?: string;
   disabled?: boolean;
 }) {
@@ -155,7 +162,12 @@ export function AutonomyPicker({
         <DropdownMenuLabel className="text-2xs">{heading}</DropdownMenuLabel>
         {AUTONOMY_LEVELS.map((level) => {
           const o = AUTONOMY[level];
-          const unavailable = level === "read_only" && !readOnlySupported;
+          const reason = levelUnavailableReason(
+            level,
+            { readOnly: readOnlySupported, supervised: supervisedSupported },
+            providerName,
+          );
+          const unavailable = reason !== null;
           return (
             <DropdownMenuItem
               key={level}
@@ -167,7 +179,7 @@ export function AutonomyPicker({
               <span className="min-w-0 flex-1">
                 <span className="block text-[13px]">{o.label}</span>
                 <span className="block text-2xs text-muted-foreground">
-                  {unavailable ? "This provider can't enforce read-only." : o.description}
+                  {reason ?? o.description}
                 </span>
               </span>
               {level === value && <Check className="mt-0.5 size-3.5" />}

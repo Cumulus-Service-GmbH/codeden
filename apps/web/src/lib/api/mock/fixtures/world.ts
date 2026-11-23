@@ -32,6 +32,7 @@ function project(
     killSwitch: false,
     timezone: null,
     agentCiEnv: true,
+    allowUnenforcedProviders: false,
     execution: { backend: "local" as const },
     pinned: false,
     sortOrder: 0,
@@ -63,6 +64,7 @@ export const projects: Project[] = [
       path: "C:\\Code\\storefront",
       sortOrder: 0,
       autonomyMode: "dark_factory",
+      allowUnenforcedProviders: true,
       factoryLimits: {
         ...limits,
         maxConcurrentSessions: 3,
@@ -272,7 +274,17 @@ export const providers: ProviderInfo[] = [
   {
     id: "claude",
     displayName: "Claude Code",
-    capabilities: { ...caps, liveAutonomy: true, mcpStatus: true, hookRuns: true },
+    capabilities: {
+      ...caps,
+      // As the real adapters declare them (`enforcesSecurityRules`).
+      enforcesSecurityRules: true,
+      chrome: true,
+      securityRulesWorktreesOnly: true,
+      liveAutonomy: true,
+      mcpStatus: true,
+      hookRuns: true,
+      systemPrompt: true,
+    },
     models: [
       {
         id: "opus",
@@ -305,6 +317,8 @@ export const providers: ProviderInfo[] = [
     displayName: "Codex",
     capabilities: {
       ...caps,
+      enforcesSecurityRules: true,
+      systemPrompt: true,
       mcpStatus: true,
       subagents: false,
       userQuestions: false,

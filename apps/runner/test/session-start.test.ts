@@ -97,3 +97,99 @@ describe("session.start", () => {
     });
   });
 });
+
+describe("session.start on a provider the machine's security rules don't cover", () => {
+  /** The Fake provider, declaring nothing about the rules (absent counts as not covered). */
+  function uncovered() {
+    const inner = new FakeProvider();
+    const opened: SessionOptions[] = [];
+    const { enforcesSecurityRules: _drop, ...caps } = inner.capabilities();
+    const adapter: ProviderAdapter = {
+      id: inner.id,
+      displayName: inner.displayName,
+      detect: () => inner.detect(),
+      capabilities: () => caps,
+      models: () => inner.models(),
+      openSession: async (opts) => {
+        opened.push(opts);
+        return inner.openSession(opts);
+      },
+    };
+    return { adapter, opened };
+  }
+
+  it("refuses it (fail closed) unless the session's project allows such providers", async () => {
+    const { adapter, opened } = uncovered();
+    host = new SessionHost(new ProviderRegistry([adapter]), () => {});
+    await expect(
+      host.start({ name: "session.start", sessionId: "s1", providerId: "fake", options }),
+    ).rejects.toMatchObject({ code: "security_rules_unenforced" });
+    expect(opened).toHaveLength(0);
+    await host.start({
+      name: "session.start",
+      sessionId: "s2",
+      providerId: "fake",
+      options: { ...options, sessionId: "s2", allowUnenforcedProviders: true },
+    });
+    expect(opened).toHaveLength(1);
+  });
+});
+
+describe("session.start for the read-only roles", () => {
+  it("never lets the orchestrator take a project's exception, and needs enforced read-only", async () => {
+    const inner = new FakeProvider();
+    const { enforcesSecurityRules: _drop, ...uncovered } = inner.capabilities();
+    const make = (caps: ReturnType<FakeProvider["capabilities"]>): ProviderAdapter => ({
+      id: inner.id,
+      displayName: inner.displayName,
+      detect: () => inner.detect(),
+      capabilities: () => caps,
+      models: () => inner.models(),
+      openSession: (opts) => inner.openSession(opts),
+    });
+    host = new SessionHost(new ProviderRegistry([make(uncovered)]), () => {});
+    await expect(
+      host.start({
+        name: "session.start",
+        sessionId: "o1",
+        providerId: "fake",
+        options: { ...options, role: "orchestrator", allowUnenforcedProviders: true },
+      }),
+    ).rejects.toMatchObject({ code: "security_rules_unenforced" });
+    await host.closeAll();
+    const { readOnly: _ro, ...noReadOnly } = inner.capabilities();
+    host = new SessionHost(new ProviderRegistry([make(noReadOnly)]), () => {});
+    await expect(
+      host.start({
+        name: "session.start",
+        sessionId: "p1",
+        providerId: "fake",
+        options: { ...options, role: "pm" },
+      }),
+    ).rejects.toMatchObject({ code: "read_only_unsupported" });
+  });
+});
+
+describe("session.start on a provider whose rules cover worktrees only", () => {
+  it("refuses an agent session outside a CodeDen worktree unless the project allowed it", async () => {
+    const inner = new FakeProvider();
+    const adapter: ProviderAdapter = {
+      id: inner.id,
+      displayName: inner.displayName,
+      detect: () => inner.detect(),
+      capabilities: () => ({ ...inner.capabilities(), securityRulesWorktreesOnly: true }),
+      models: () => inner.models(),
+      openSession: (opts) => inner.openSession(opts),
+    };
+    host = new SessionHost(new ProviderRegistry([adapter]), () => {});
+    await expect(
+      host.start({ name: "session.start", sessionId: "a1", providerId: "fake", options }),
+    ).rejects.toMatchObject({ code: "security_rules_unenforced" });
+    await host.start({
+      name: "session.start",
+      sessionId: "a2",
+      providerId: "fake",
+      options: { ...options, sessionId: "a2", inCodedenWorktree: true },
+    });
+  });
+});

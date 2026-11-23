@@ -32,6 +32,8 @@ const capabilities = (fork: boolean): ProviderInfo["capabilities"] => ({
   reasoningEffort: true,
   mcp: true,
   skills: true,
+  enforcesSecurityRules: true,
+  readOnly: true,
 });
 
 const PROVIDERS: ProviderInfo[] = [

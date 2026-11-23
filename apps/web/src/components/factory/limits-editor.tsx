@@ -10,6 +10,7 @@ import { BudgetFields } from "./budget-fields";
 import { WIP_HELP } from "./meta";
 import { type ScoutDraft, ScoutTuning } from "./scout-tuning";
 import { SpotCheckField } from "./spot-check-tuning";
+import { TeamEditor } from "./team-editor";
 
 /**
  * The tuning knobs the editor exposes. It saves them as a patch, so the rest (review areas, the
@@ -29,6 +30,8 @@ export type TuningDraft = AgentsDraft &
     | "learnFromReviews"
     | "specApproval"
     | "spotCheckPercent"
+    | "team"
+    | "resultSummaryBytes"
   >;
 
 /** The editable tuning knobs of a saved tuning. */
@@ -44,6 +47,8 @@ export function tuningDraft(t: FactoryTuning): TuningDraft {
     learnFromReviews: t.learnFromReviews,
     specApproval: t.specApproval,
     spotCheckPercent: t.spotCheckPercent,
+    team: t.team,
+    resultSummaryBytes: t.resultSummaryBytes,
     minBacklog: t.minBacklog,
     discoveryIntervalMin: t.discoveryIntervalMin,
     discoveryPerRound: t.discoveryPerRound,
@@ -413,7 +418,10 @@ export function LimitsEditor({
         </div>
       )}
       {tuning && onTuningChange && (
-        <AgentsTuning value={tuning} onChange={(a) => onTuningChange({ ...tuning, ...a })} />
+        <>
+          <AgentsTuning value={tuning} onChange={(a) => onTuningChange({ ...tuning, ...a })} />
+          <TeamEditor tuning={tuning} onChange={onTuningChange} />
+        </>
       )}
     </div>
   );

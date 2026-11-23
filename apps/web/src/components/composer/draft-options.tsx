@@ -1,9 +1,11 @@
 import type { ProjectCheck, ProviderInfo } from "@codeden/contracts";
-import { supportsReadOnly } from "@/components/thread/autonomy";
+import { supportsReadOnly, supportsSupervised } from "@/components/thread/autonomy";
 import { type DraftChoice, pickModel, type ResolvedDraft } from "@/lib/new-session";
 import { ChecksToggle } from "./checks-toggle";
+import type { ProjectRule } from "./model-picker/logic";
 import { ModelPicker } from "./model-picker/model-picker";
 import { AutonomyPicker, PlanToggle } from "./pickers";
+import { SaverPicker, TeamRolePicker } from "./team-saver-pickers";
 import { WorkspacePicker } from "./workspace-picker";
 
 /**
@@ -22,6 +24,7 @@ export function DraftOptions({
   resolved,
   checks,
   projectPath,
+  project,
   onChange,
 }: {
   providers: ProviderInfo[];
@@ -31,6 +34,8 @@ export function DraftOptions({
   resolved: ResolvedDraft;
   /** The project folder, named where the session runs in it. */
   projectPath: string;
+  /** The project the session is for, for the providers it allows. */
+  project?: ProjectRule | null;
   onChange: (next: DraftChoice) => void;
 }) {
   const { provider } = resolved;
@@ -50,6 +55,7 @@ export function DraftOptions({
         providers={providers}
         // The resolved choice, defaults included: what the first send starts.
         value={{ provider: provider.id, model: resolved.model, effort: resolved.effort }}
+        project={project ?? null}
         shortcut
         onChange={(next) => onChange(pickModel(choice, next))}
       />
@@ -57,6 +63,8 @@ export function DraftOptions({
         value={resolved.autonomy}
         heading="Permissions for the new session"
         readOnlySupported={supportsReadOnly(provider)}
+        supervisedSupported={supportsSupervised(provider)}
+        providerName={provider.displayName}
         onChange={(autonomy) => onChange({ ...choice, autonomy })}
       />
       <PlanToggle
@@ -67,6 +75,29 @@ export function DraftOptions({
             : { provider: provider.displayName, wasOn: choice.planMode, canSwitch: true }
         }
         onChange={(planMode) => onChange({ ...choice, planMode })}
+      />
+      {resolved.chromeAvailable && (
+        <label className="flex items-center gap-1 px-2 text-xs">
+          <input
+            type="checkbox"
+            checked={resolved.chrome ?? false}
+            onChange={(event) => onChange({ ...choice, chrome: event.target.checked })}
+          />
+          Claude in Chrome
+        </label>
+      )}
+      <TeamRolePicker
+        value={resolved.teamRole}
+        onChange={(teamRole) => onChange({ ...choice, teamRole })}
+      />
+      {resolved.teamProviderMissing && (
+        <span className="px-2 text-2xs text-destructive">
+          The Team runs this role on {resolved.teamProviderMissing}, which isn't available here
+        </span>
+      )}
+      <SaverPicker
+        value={resolved.tokenSaver}
+        onChange={(tokenSaver) => onChange({ ...choice, tokenSaver })}
       />
       {checks.length > 0 && resolved.autonomy !== "read_only" && (
         <ChecksToggle

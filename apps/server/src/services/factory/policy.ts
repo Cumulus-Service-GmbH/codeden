@@ -22,6 +22,13 @@ export function localDay(at: Date = new Date()): string {
   return `${y}-${m}-${d}`;
 }
 
+const DAILY_BUDGET_REACHED = "daily budget reached";
+const DAILY_TOKEN_BUDGET_REACHED = "daily token budget reached";
+
+export function isBudgetPause(reason: string): boolean {
+  return reason.startsWith(DAILY_BUDGET_REACHED) || reason.startsWith(DAILY_TOKEN_BUDGET_REACHED);
+}
+
 /** Why the daily budget is used up, or null when there is budget left. */
 export function budgetExceeded(
   spend: { usd: number; tokens: number },
@@ -29,10 +36,10 @@ export function budgetExceeded(
 ): string | null {
   const { usd, tokens } = limits.dailyBudget;
   if (usd !== undefined && spend.usd >= usd) {
-    return `daily budget reached ($${spend.usd.toFixed(2)} of $${usd.toFixed(2)})`;
+    return `${DAILY_BUDGET_REACHED} ($${spend.usd.toFixed(2)} of $${usd.toFixed(2)})`;
   }
   if (tokens !== undefined && spend.tokens >= tokens) {
-    return `daily token budget reached (${spend.tokens} of ${tokens})`;
+    return `${DAILY_TOKEN_BUDGET_REACHED} (${spend.tokens} of ${tokens})`;
   }
   return null;
 }

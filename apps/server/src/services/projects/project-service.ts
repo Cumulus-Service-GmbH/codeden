@@ -133,6 +133,7 @@ export class ProjectService {
     const current = this.get(id);
     const next = { ...current, updatedAt: new Date().toISOString() } as Project;
     if (patch.name !== undefined) next.name = patch.name;
+    if (patch.teams !== undefined) next.teams = patch.teams;
     Object.assign(next, defaultAgent(current, patch));
     if (patch.autonomy !== undefined) next.autonomy = patch.autonomy;
     if (patch.timezone !== undefined) next.timezone = patch.timezone;
@@ -141,6 +142,9 @@ export class ProjectService {
     if (patch.pinned !== undefined) next.pinned = patch.pinned;
     // Applies to agent sessions opened from now on; running ones keep the environment they have.
     if (patch.agentCiEnv !== undefined) next.agentCiEnv = patch.agentCiEnv;
+    if (patch.allowUnenforcedProviders !== undefined) {
+      next.allowUnenforcedProviders = patch.allowUnenforcedProviders;
+    }
     // Applies to sessions started from now on; running ones stay where they run.
     if (patch.execution !== undefined) {
       if (patch.execution.backend === "docker" && current.kind !== "github") {
@@ -331,6 +335,7 @@ export class ProjectService {
       killSwitch: false,
       timezone: null,
       agentCiEnv: true,
+      allowUnenforcedProviders: false,
       execution: { backend: "local" as const },
       pinned: false,
       sortOrder: this.nextSortOrder(),

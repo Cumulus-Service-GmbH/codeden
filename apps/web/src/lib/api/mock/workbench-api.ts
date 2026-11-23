@@ -194,6 +194,7 @@ export function workbenchApi(world: MockWorld): WorkbenchApi {
         opencode: "opencode auth login",
         cursor: "agent login",
         gemini: "gemini",
+        antigravity: "agy",
         gh: "gh auth login",
       }[tool];
       const [bin = tool, ...args] = command.split(" ");

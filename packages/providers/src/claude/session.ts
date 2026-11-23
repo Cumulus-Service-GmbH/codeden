@@ -6,16 +6,18 @@ import type {
   Query,
   SDKUserMessage,
 } from "@anthropic-ai/claude-agent-sdk";
-import type {
-  AgentEvent,
-  AutonomyLevel,
-  ItemOf,
-  RuntimeResponse,
-  SessionOptions,
-  UserInput,
+import {
+  type AgentEvent,
+  type AutonomyLevel,
+  HOOK_ASK_MARKER,
+  type ItemOf,
+  isMarkedHookAsk,
+  type RuntimeResponse,
+  type SessionOptions,
+  type UserInput,
 } from "@codeden/contracts";
 import { type ProviderSession, ProviderSessionError, type SessionConfigChange } from "../adapter";
-import { ApprovalBroker } from "../approvals";
+import { type AnswerReview, ApprovalBroker } from "../approvals";
 import { AsyncQueue } from "../async-queue";
 import type { ResolvedCommand } from "../util/exec";
 import { interruptWithDeadline } from "../util/interrupt";
@@ -32,7 +34,7 @@ import { carriesToolResult, planApprovalItem, planDecision, planText } from "./p
 import { PlanUsageReader } from "./plan-usage";
 import { askQuestion } from "./questions";
 import type { ClaudeSdkModule } from "./sdk";
-import { approvalTitle, PLAN_TOOL, QUESTION_TOOL } from "./tools";
+import { approvalTitle, defaultApprovalAction, PLAN_TOOL, QUESTION_TOOL } from "./tools";
 
 /**
  * `Query.interrupt` as the SDK implements it: `cancelQueued` also cancels user messages still
@@ -47,6 +49,37 @@ type InterruptibleQuery = {
 
 /** Claude Code's built-in command that compacts the conversation. */
 const COMPACT_COMMAND = "/compact";
+
+const markedHookReview: AnswerReview = {
+  problem: (response) => {
+    if (response.kind === "cancel") return;
+    if (
+      response.kind === "approval" &&
+      (response.decision === "allow_once" || response.decision === "deny")
+    ) {
+      return;
+    }
+    return "This approval can only be allowed once or denied.";
+  },
+};
+
+/**
+ * Claude in Chrome: only the user may allow it, and only once. The server stamps `decidedBy:
+ * "user"` at the user's own routes, so an approval without it isn't the user's.
+ */
+const singleUseReview: AnswerReview = {
+  problem: (response) =>
+    response.kind === "approval" &&
+    (response.decision === "allow_session" ||
+      (response.decision === "allow_once" && response.decidedBy !== "user"))
+      ? "Claude in Chrome requires a one-time user approval."
+      : undefined,
+};
+
+const markedSingleUseReview: AnswerReview = {
+  problem: (response) =>
+    markedHookReview.problem?.(response) ?? singleUseReview.problem?.(response),
+};
 
 export interface ClaudeSessionConfig {
   executable: ResolvedCommand;
@@ -86,6 +119,10 @@ export class ClaudeSession implements ProviderSession {
   private abort: AbortController | undefined;
   private stderrTail = "";
   private closed = false;
+  private interrupts = 0;
+  // hook_response has no tool_use_id. Match by tool name for the rest of the turn,
+  // so we may ask more often, never less.
+  private readonly markedHookAsks = new Set<string>();
   /** The shell's current directory from the latest PreToolUse hook, for relative paths. */
   private readonly shell: ShellState = {};
   /** Current autonomy: a query restarted after the CLI exits starts with it. */
@@ -134,6 +171,8 @@ export class ClaudeSession implements ProviderSession {
           config.notesRoots ?? claudeNotesDirs({ cwd: opts.cwd, ...claudeHomes(opts.env) }),
       },
       opts.readOnly,
+      // CodeDen's own servers are the trusted ones it passes (`trusted`).
+      opts.mcpServers.flatMap((s) => (s.transport === "http" && s.trusted ? [s.name] : [])),
     );
     this.planMode = opts.planMode;
     this.policy.setPlanning(opts.planMode);
@@ -243,6 +282,7 @@ export class ClaudeSession implements ProviderSession {
    * (or never answers the interrupt at all), the turn is closed as interrupted anyway.
    */
   async interrupt(): Promise<void> {
+    this.interrupts += 1;
     const turnId = this.mapper.turnId;
     if (!turnId) return;
     this.mapper.requestInterrupt();
@@ -255,8 +295,9 @@ export class ClaudeSession implements ProviderSession {
       },
       this.config.interruptTimeoutMs ?? 10_000,
       () => {
-        if (this.mapper.turnId === turnId)
+        if (this.mapper.turnId === turnId) {
           this.mapper.endTurn({ type: "interrupted", reason: "user" });
+        }
       },
     );
   }
@@ -268,6 +309,7 @@ export class ClaudeSession implements ProviderSession {
   async close(): Promise<void> {
     if (this.closed) return;
     this.closed = true;
+    this.markedHookAsks.clear();
     this.mcpStatus.stop();
     this.broker.cancelAll();
     this.mapper.closeAll();
@@ -359,7 +401,13 @@ export class ClaudeSession implements ProviderSession {
       q = this.config.query({
         prompt: prompts,
         options: buildQueryOptions({
-          session: { ...this.opts, autonomy: this.autonomy, planMode: this.planMode },
+          session: {
+            ...this.opts,
+            autonomy: this.autonomy,
+            planMode: this.planMode,
+            // An inherited Chrome default must not enable it for an ineligible session.
+            chrome: this.opts.chrome ?? false,
+          },
           executable: this.config.executable,
           canUseTool: this.canUseTool,
           hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
@@ -411,7 +459,11 @@ export class ClaudeSession implements ProviderSession {
         this.afterMessage(message);
         const type = str(message, "type");
         if (type === "rate_limit_event") this.planUsage.noteEvent(message);
-        if (type === "result") this.reportPlanUsage(q);
+        if (type === "system" && !this.closed) this.noteMarkedHookAsk(message);
+        if (type === "result") {
+          this.markedHookAsks.clear();
+          this.reportPlanUsage(q);
+        }
         // Init lists the servers without errors, often while some still connect.
         if (type === "result" || (type === "system" && str(message, "subtype") === "init")) {
           this.mcpStatus.refresh();
@@ -419,10 +471,12 @@ export class ClaudeSession implements ProviderSession {
       }
     } catch (error) {
       failure = error;
-    }
-    if (this.q === q) {
-      this.q = undefined;
-      this.prompts = undefined;
+    } finally {
+      if (this.q === q) {
+        this.markedHookAsks.clear();
+        this.q = undefined;
+        this.prompts = undefined;
+      }
     }
     if (this.closed) return;
     this.broker.cancelAll();
@@ -443,51 +497,124 @@ export class ClaudeSession implements ProviderSession {
     }
   }
 
+  private noteMarkedHookAsk(message: unknown): void {
+    if (
+      str(message, "subtype") !== "hook_response" ||
+      str(message, "hook_event") !== "PreToolUse" ||
+      str(message, "outcome") !== "success"
+    )
+      return;
+    const prefix = "PreToolUse:";
+    const name = str(message, "hook_name");
+    if (!name?.startsWith(prefix) || name.length === prefix.length) return;
+    const output = (str(message, "stdout") || str(message, "output"))?.trim();
+    if (!output?.startsWith("{")) return;
+    let hookOutput: unknown;
+    try {
+      hookOutput = JSON.parse(output)?.hookSpecificOutput;
+    } catch {
+      return;
+    }
+    if (
+      str(hookOutput, "permissionDecision") === "ask" &&
+      isMarkedHookAsk(str(hookOutput, "permissionDecisionReason"))
+    ) {
+      this.markedHookAsks.add(name.slice(prefix.length));
+    }
+  }
+
   private readonly canUseTool: CanUseTool = async (toolName, input, options) => {
+    const dir = this.shell.dir;
     if (toolName === QUESTION_TOOL) {
       const deps = { broker: this.broker, mapper: this.mapper };
       return askQuestion(deps, input, options.toolUseID, options.signal);
     }
     if (toolName === PLAN_TOOL) return this.reviewPlan(input, options);
-    const denied = this.policy.denial(toolName, input, this.shell.dir);
+    const denied = this.policy.denial(toolName, input, dir);
     if (denied) return { behavior: "deny", message: denied };
-    const gate = this.policy.needsUser(toolName, input, this.shell.dir);
+    const q = this.q;
+    const interrupts = this.interrupts;
+    // Let the pump consume a hook_response read in the same chunk.
+    await new Promise((resolve) => setImmediate(resolve));
+    if (this.closed || this.q !== q || this.interrupts !== interrupts) {
+      return this.toPermissionResult(toolName, input, dir, { kind: "cancel" });
+    }
+
+    const decisionReason = options.decisionReason;
+    const markedReason = isMarkedHookAsk(decisionReason);
+    if (markedReason || this.markedHookAsks.has(toolName)) {
+      const gate = this.policy.gate(toolName, input, dir);
+      const hookReason =
+        (markedReason && decisionReason?.slice(HOOK_ASK_MARKER.length).trimStart()) ||
+        "A hook asked for approval";
+      const reason =
+        gate.ask && gate.reason !== hookReason ? `${gate.reason}. ${hookReason}` : hookReason;
+      const item = this.approvalItem(toolName, input, options, {
+        action: gate.ask ? gate.action : defaultApprovalAction(toolName),
+        cwd: dir ?? this.opts.cwd,
+        reason,
+        options: ["allow_once", "deny"],
+      });
+      const ctx = this.mapper.ctxForTool(options.toolUseID);
+      const review = gate.ask && gate.singleUse ? markedSingleUseReview : markedHookReview;
+      const response = await this.broker.request(ctx, item, options.signal, review);
+      return this.toPermissionResult(toolName, input, dir, response, false);
+    }
+
+    const gate = this.policy.needsUser(toolName, input, dir);
     if (!gate.ask) return { behavior: "allow", updatedInput: input };
     const ctx = this.mapper.ctxForTool(options.toolUseID);
-    const item: ItemOf<"approval_request"> = {
+    const item = this.approvalItem(toolName, input, options, {
+      action: gate.action,
+      cwd: dir ?? this.opts.cwd,
+      reason:
+        decisionReason && decisionReason !== gate.reason
+          ? `${gate.reason}. ${decisionReason}`
+          : gate.reason,
+      options: gate.singleUse ? ["allow_once", "deny"] : ["allow_once", "allow_session", "deny"],
+    });
+    const review = gate.singleUse ? singleUseReview : undefined;
+    const response = await this.broker.request(ctx, item, options.signal, review);
+    return this.toPermissionResult(toolName, input, dir, response);
+  };
+
+  private approvalItem(
+    toolName: string,
+    input: Record<string, unknown>,
+    options: Parameters<CanUseTool>[2],
+    approval: Pick<ItemOf<"approval_request">, "action" | "reason" | "options"> & { cwd: string },
+  ): ItemOf<"approval_request"> {
+    const { cwd, ...details } = approval;
+    return {
       id: `approval-${options.requestId ?? options.toolUseID}`,
       kind: "approval_request",
       status: "in_progress",
       requestId: options.requestId ?? options.toolUseID,
-      action: gate.action,
+      ...details,
       title: approvalTitle(toolName, input),
-      reason:
-        options.decisionReason && options.decisionReason !== gate.reason
-          ? `${gate.reason}. ${options.decisionReason}`
-          : gate.reason,
       toolName,
       toolInput: toJson(input),
       toolCallItemId: options.toolUseID,
-      options: ["allow_once", "allow_session", "deny"],
-      ...(str(input, "command") ? { command: str(input, "command"), cwd: this.opts.cwd } : {}),
+      ...(str(input, "command") ? { command: str(input, "command"), cwd } : {}),
       ...(str(input, "file_path") ? { paths: [str(input, "file_path") as string] } : {}),
     };
-    const response = await this.broker.request(ctx, item, options.signal);
-    return this.toPermissionResult(toolName, input, response);
-  };
+  }
 
   private toPermissionResult(
     toolName: string,
     input: Record<string, unknown>,
+    dir: string | undefined,
     response: RuntimeResponse,
+    allowSession = true,
   ): PermissionResult {
-    if (response.kind === "approval" && response.decision !== "deny") {
-      if (response.decision === "allow_session") {
-        this.policy.allowForSession(toolName, input, this.shell.dir);
-      }
+    if (response.kind === "approval" && response.decision === "allow_once") {
       return { behavior: "allow", updatedInput: input };
     }
-    if (response.kind === "approval") {
+    if (response.kind === "approval" && response.decision === "allow_session" && allowSession) {
+      this.policy.allowForSession(toolName, input, dir);
+      return { behavior: "allow", updatedInput: input };
+    }
+    if (response.kind === "approval" && response.decision === "deny") {
       return { behavior: "deny", message: response.message ?? "The user denied this action." };
     }
     return { behavior: "deny", message: "The request was cancelled.", interrupt: true };

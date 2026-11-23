@@ -18,6 +18,7 @@ import type {
   BrowserTabResponse,
   BrowserTabsResponse,
   BrowserViewportSize,
+  DecisionCard,
   DevServersResponse,
   GithubConnection,
   GithubIssueDetails,
@@ -202,6 +203,8 @@ export type OrchestrationRole = "orchestrator" | "pm";
 export interface OrchestrationApi {
   /** Create the role session if it does not exist yet (the PM needs `projectId`). */
   ensure(role: OrchestrationRole, projectId: string | null): Promise<Session | null>;
+  /** Archive the current role conversation and start an empty one. */
+  startFresh(sessionId: string): Promise<Session>;
   /** Send to the orchestrator or a project's PM; creates the session on first use. */
   send(
     role: OrchestrationRole,
@@ -224,6 +227,8 @@ export type GithubState = GithubListQuery["state"];
 
 /** `/api/github/connection`, `/api/projects/:id/github/*`, `/api/prs/:id`, session GitHub. */
 export interface GithubApi {
+  decisionCards(): Promise<DecisionCard[]>;
+  approveDecisionCard(id: string): Promise<void>;
   connection(): Promise<GithubConnection>;
   issues(projectId: string, state?: GithubState): Promise<GithubIssuesResponse>;
   prs(projectId: string, state?: GithubState): Promise<GithubPrsResponse>;

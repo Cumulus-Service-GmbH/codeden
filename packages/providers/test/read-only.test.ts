@@ -1,3 +1,5 @@
+import { existsSync, statSync } from "node:fs";
+import { join } from "node:path";
 import type { SessionOptions } from "@codeden/contracts";
 import { describe, expect, it } from "vitest";
 import { buildQueryOptions } from "../src/claude/options";
@@ -5,6 +7,9 @@ import { ClaudePolicy } from "../src/claude/permissions";
 import { codexPolicy } from "../src/codex/config";
 import { FakeProvider } from "../src/fake/adapter";
 import type { FakeSession } from "../src/fake/session";
+import { openCodeConfig } from "../src/opencode/config";
+import { OpenCodePolicy } from "../src/opencode/policy";
+import { openCodeServerEnv } from "../src/opencode/server";
 import { readOnlyCommandDenial } from "../src/policy/read-only";
 
 const base: SessionOptions = {
@@ -301,6 +306,86 @@ describe("read-only sessions (orchestrator and PMs, §11.2)", () => {
       abortController: new AbortController(),
     });
     expect(agentOpts.disallowedTools).toBeUndefined();
+  });
+
+  it("lets a read-only role call CodeDen's own MCP tools only, at every level", () => {
+    for (const level of ["auto", "full", "supervised"] as const) {
+      const pm = new ClaudePolicy(level, { cwd: "/repo", extraRoots: [] }, true, ["codeden"]);
+      expect(pm.denial("mcp__azure__storage_account_create", {})).toMatch(/CodeDen's own tools/);
+      expect(pm.denial("mcp__github__create_issue", {})).toMatch(/CodeDen's own tools/);
+      expect(pm.denial("mcp__codeden__start_session", {})).toBeUndefined();
+    }
+    // An agent session is unchanged: its MCP tools follow the usual approvals.
+    const agent = new ClaudePolicy("auto", { cwd: "/repo", extraRoots: [] }, false, ["codeden"]);
+    expect(agent.denial("mcp__azure__storage_account_create", {})).toBeUndefined();
+  });
+
+  it("starts a read-only role with CodeDen's MCP servers only (strict MCP config)", () => {
+    const input = {
+      executable: { kind: "native", path: "/bin/claude" } as never,
+      canUseTool: async () => ({ behavior: "allow" as const, updatedInput: {} }),
+      hooks: {},
+      abortController: new AbortController(),
+    };
+    expect(buildQueryOptions({ ...input, session: base }).strictMcpConfig).toBe(true);
+    const agent = { ...base, role: "agent" as const, readOnly: undefined };
+    expect(buildQueryOptions({ ...input, session: agent }).strictMcpConfig).toBeUndefined();
+  });
+
+  it("starts a read-only role on OpenCode with CodeDen's MCP servers only", () => {
+    const config = openCodeConfig({
+      mcpServers: [{ name: "codeden", transport: "http", url: "http://127.0.0.1:4318/mcp" }],
+    });
+    const env = openCodeServerEnv(
+      {
+        OPENCODE_CONFIG: "/user/opencode.json",
+        OPENCODE_CONFIG_DIR: "/user/opencode",
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          mcp: { servers: { user: { type: "local", command: ["user-tool"] } } },
+        }),
+      },
+      undefined,
+      "test-password",
+      config,
+      base.readOnly,
+    );
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? "")).toEqual(config);
+    expect(env.OPENCODE_CONFIG).toBeUndefined();
+    expect(env.OPENCODE_CONFIG_DIR).not.toBe("/user/opencode");
+    expect(env.OPENCODE_CONFIG_PROJECT_DISABLE).toBe("1");
+  });
+
+  it("preserves the read-only shell home and uses a private OpenCode config directory", () => {
+    for (const userEnv of [
+      {},
+      { HOME: "/user/home" },
+      { HOME: "/user/home", XDG_CONFIG_HOME: "/user/config" },
+    ]) {
+      const env = openCodeServerEnv(userEnv, undefined, "test-password", {}, true);
+      expect(env.HOME).toBe(userEnv.HOME);
+      expect(env.XDG_CONFIG_HOME).toBe(userEnv.XDG_CONFIG_HOME);
+
+      const dir = env.OPENCODE_CONFIG_DIR;
+      expect(dir).toBeTruthy();
+      if (!dir) throw new Error("Missing private OpenCode config directory");
+      const stat = statSync(dir);
+      expect(stat.isDirectory()).toBe(true);
+      if (process.platform !== "win32") expect(stat.mode & 0o077).toBe(0);
+      expect(existsSync(join(dir, "opencode.json"))).toBe(false);
+      expect(existsSync(join(dir, "opencode.jsonc"))).toBe(false);
+    }
+  });
+
+  it("denies a user MCP tool for a read-only role on OpenCode at every level", () => {
+    for (const level of ["auto", "full", "supervised", "read_only"] as const) {
+      const pm = new OpenCodePolicy(level, { cwd: "/repo", extraRoots: [] }, true, ["codeden"]);
+      const request = { id: "permission", sessionID: "pm1", action: "user_tool", resources: [] };
+      expect(pm.decide({ request })).toMatchObject({ kind: "deny" });
+      expect(pm.decide({ request, toolName: "user_tool" })).toMatchObject({ kind: "deny" });
+      expect(pm.decide({ request: { ...request, action: "codeden_start_session" } }).kind).not.toBe(
+        "deny",
+      );
+    }
   });
 
   it("uses Codex's read-only sandbox", () => {

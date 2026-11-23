@@ -16,6 +16,7 @@ import { buildHandoffBrief, handoffTranscript } from "./handoff-brief";
 import { inheritedStarter } from "./origin";
 import { planModeUnsupported, readOnlyUnsupported } from "./permissions";
 import type { SessionRepo, StoredStartMeta } from "./repo";
+import { stripLeadingTags } from "./role-tag";
 import { requireGitRepo } from "./start-workspace";
 
 const BUSY = new Set(["running", "waiting"]);
@@ -81,7 +82,7 @@ export function handoffBlocker(source: Session, turns: number): ServiceError | n
 /** `<source title> (to <provider>)`, kept within the title limit. */
 export function handoffTitle(source: Session, providerName: string): string {
   const suffix = ` (to ${providerName})`;
-  const base = (source.title ?? source.purpose).trim();
+  const base = stripLeadingTags((source.title ?? source.purpose).trim()) || "Session";
   return base.length + suffix.length <= TITLE_MAX
     ? `${base}${suffix}`
     : `${base.slice(0, TITLE_MAX - suffix.length).trimEnd()}${suffix}`;

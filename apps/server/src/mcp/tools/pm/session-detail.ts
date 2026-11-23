@@ -44,8 +44,9 @@ export const getSession = defineTool({
             : {}),
         };
       });
+    const bytes = services.factory.data.loop(projectId)?.tuning.resultSummaryBytes ?? null;
     return {
-      session: compactSession(session),
+      session: compactSession(session, { summaryBytes: bytes }),
       lastMessage:
         last && last.length > MESSAGE_LIMIT ? `…${last.slice(-MESSAGE_LIMIT)}` : (last ?? null),
       waitingOn,

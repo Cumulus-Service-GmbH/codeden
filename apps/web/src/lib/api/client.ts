@@ -1,7 +1,9 @@
 import type {
+  AdmissionStatus,
   ArchivedSessionsPage,
   ArchivedSessionsQueryInit,
   ArchiveSessionResponse,
+  ChildRunList,
   ClaudeSdkStatus,
   CompactSessionResponse,
   ConflictRecord,
@@ -28,6 +30,7 @@ import type {
   LoginToolId,
   Project,
   ProjectCheck,
+  ProjectChecklist,
   ProviderHistoryResponse,
   RefreshModelsResponse,
   RefreshProjectResponse,
@@ -77,6 +80,7 @@ import type {
 } from "./feature-apis";
 import type { AuthApi, NetworkApi } from "./network-api";
 import type { QueueApi } from "./queue-api";
+import type { TechDebtApi } from "./tech-debt-api";
 import type { MentionCandidate, OpenTerminalOptions, TerminalChannel } from "./types";
 import type { UpdatesApi } from "./updates-api";
 
@@ -140,6 +144,10 @@ export interface CodeDenClient {
   onConnectionChange(listener: (state: "connecting" | "open" | "closed") => void): () => void;
 
   // Sessions and turns.
+  sessions: {
+    admission(): Promise<AdmissionStatus>;
+    runNext(id: string): Promise<AdmissionStatus>;
+  };
   getSessionDetail(sessionId: string): Promise<SessionDetail>;
   /**
    * These sessions, archived or not (at most `SESSION_LOOKUP_MAX` ids); ids that don't exist
@@ -147,11 +155,11 @@ export interface CodeDenClient {
    */
   getSessions(sessionIds: readonly string[]): Promise<Session[]>;
   /**
-   * A page of a project's archived agent sessions, most recently archived first. The snapshot
-   * carries only the recent ones (§6).
+   * A page of a project's archived sessions, or the orchestrator's history for a null project.
+   * The snapshot carries only the recent ones (§6).
    */
   listArchivedSessions(
-    projectId: string,
+    projectId: string | null,
     query?: ArchivedSessionsQueryInit,
   ): Promise<ArchivedSessionsPage>;
   /**
@@ -194,6 +202,8 @@ export interface CodeDenClient {
   unarchiveSession(sessionId: string): Promise<Session>;
   /** Change model, effort or title; model and effort apply from the next turn. */
   updateSession(sessionId: string, patch: UpdateSessionRequest): Promise<Session>;
+  /** Worker runs the session's tools logged (review and role scripts), newest first. */
+  listChildRuns(sessionId: string): Promise<ChildRunList>;
   /** Messages waiting behind a running turn: list, edit, delete, send now. */
   readonly queue: QueueApi;
   /** Full-text search over every transcript, archived sessions included (§13). */
@@ -227,6 +237,8 @@ export interface CodeDenClient {
   createProject(input: CreateProjectRequest): Promise<CreateProjectResponse>;
   /** Rename, change defaults, or pin and unpin a project (§13). */
   updateProject(projectId: string, patch: UpdateProjectRequest): Promise<Project>;
+  /** Turn enforcing an approved checklist's plan on PM starts on or off. */
+  setChecklistEnforce(projectId: string, enforce: boolean): Promise<ProjectChecklist>;
   /**
    * Where agent sessions can run (`docs/remote-runners.md` §5), each backend with the reason it
    * can't be used; with `projectId`, also whether that project may use it.
@@ -258,6 +270,7 @@ export interface CodeDenClient {
   readonly automations: AutomationsApi;
   /** Autonomy modes, the vision, the factory panel and kill switches (§10.1, experimental). */
   readonly factory: FactoryApi;
+  readonly techDebt: TechDebtApi;
 
   // Settings.
   updateSettings(patch: SettingsPatch): Promise<Settings>;

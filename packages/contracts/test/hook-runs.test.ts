@@ -4,6 +4,7 @@ import {
   HOOK_OUTPUT_MAX_CHARS,
   HookRunOutcome,
   Item,
+  isMarkedHookAsk,
   ProviderCapabilities,
   searchableText,
   trimHookOutput,
@@ -130,4 +131,15 @@ describe("trimHookOutput", () => {
     expect(output).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
     expect(output).not.toMatch(/(^|[^\ud800-\udbff])[\udc00-\udfff]/);
   });
+});
+
+describe("marked hook asks", () => {
+  it("recognizes an exact marker prefix", () => {
+    expect(isMarkedHookAsk("[approval-required] Review this call")).toBe(true);
+  });
+
+  it.each([undefined, "", "some reason", " [approval-required]", "ask [approval-required]"])(
+    "rejects %j",
+    (reason) => expect(isMarkedHookAsk(reason)).toBe(false),
+  );
 });

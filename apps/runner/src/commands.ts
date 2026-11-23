@@ -179,8 +179,7 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
       await host.send(command);
       return {};
     case "session.steer":
-      await host.steer(command);
-      return {};
+      return host.steer(command);
     case "session.interrupt":
       await host.interrupt(command.sessionId);
       return {};
@@ -237,6 +236,8 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
       return gitOps.diff(command);
     case "git.branches":
       return gitOps.branches(command);
+    case "git.mergeTeamWorker":
+      return gitOps.mergeTeamWorker(command);
     case "git.commit":
       return gitOps.commit(command);
     case "git.push":

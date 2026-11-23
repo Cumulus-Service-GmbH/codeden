@@ -28,15 +28,34 @@ export interface SegmentQueue<T> {
  */
 const SPACELESS =
   "\\p{scx=Han}\\p{scx=Hiragana}\\p{scx=Katakana}\\p{scx=Thai}\\p{scx=Lao}\\p{scx=Khmer}\\p{scx=Myanmar}\\u3000-\\u303f\\uff01-\\uff60";
-const ENDS_SPACELESS = new RegExp(`[${SPACELESS}]$`, "u");
 const STARTS_SPACELESS = new RegExp(`^[${SPACELESS}]`, "u");
+const MARK = /^\p{M}/u;
+
+/** Return the last code point that is not a mark, or "". */
+function lastBase(text: string): string {
+  let end = text.length;
+  while (end > 0) {
+    let start = end - 1;
+    const low = text.charCodeAt(start);
+    const high = text.charCodeAt(start - 1);
+    if (low >= 0xdc00 && low <= 0xdfff && high >= 0xd800 && high <= 0xdbff) {
+      start -= 1;
+    }
+    const point = text.slice(start, end);
+    if (!MARK.test(point)) return point;
+    end = start;
+  }
+  return "";
+}
 
 /**
  * What goes between two pieces of dictated text: nothing where both sides are in a script
  * written without spaces (a pause there is not a word break), a single space otherwise.
  */
 export function separator(before: string, after: string): string {
-  return ENDS_SPACELESS.test(before) && STARTS_SPACELESS.test(after) ? "" : " ";
+  // Skip trailing marks and test the last remaining code point with ^ because a $-anchored u-flag class misses trailing astral characters on V8 14.6 (Node 26).
+  const last = lastBase(before);
+  return STARTS_SPACELESS.test(last) && STARTS_SPACELESS.test(after) ? "" : " ";
 }
 
 /** Join transcribed pieces the way their language is written, skipping empty ones. */

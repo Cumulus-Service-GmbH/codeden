@@ -148,7 +148,11 @@ export function claimSlot(
   key: string,
   opts: { wake?: string; ordered?: boolean } = {},
 ): boolean {
-  const free = freeSlots(busySlots(ctx, project.id), project.factoryLimits);
+  // A factory start racing an interactive start can exceed the global cap by one.
+  const free = Math.min(
+    freeSlots(busySlots(ctx, project.id), project.factoryLimits),
+    ctx.admission.free(),
+  );
   const granted = ctx.slots.claim(project.id, tier, key, free, opts.ordered);
   if (granted && opts.wake) ctx.slots.woke(project.id, opts.wake);
   return granted;
@@ -166,7 +170,10 @@ export function slotsFor(
   key: string,
   except?: string,
 ): number {
-  const free = freeSlots(busySlots(ctx, project.id, except), project.factoryLimits);
+  const free = Math.min(
+    freeSlots(busySlots(ctx, project.id, except), project.factoryLimits),
+    ctx.admission.free(except),
+  );
   return Math.max(0, free - ctx.slots.ahead(project.id, tier, key));
 }
 

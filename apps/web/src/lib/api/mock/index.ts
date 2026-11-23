@@ -15,6 +15,7 @@ import { mockExportSession } from "./export-session";
 import { mockFactoryApi } from "./factory";
 import { startFactoryDemo } from "./factory-demo";
 import { mockFeatureApis } from "./feature-apis";
+import { CHECKLIST_CARD_PREFIX, closedChecklistCard, decideChecklist } from "./fixtures/checklists";
 import { makeSession } from "./fixtures/helpers";
 import { setupChecks } from "./fixtures/ops";
 import { mockInboxBulkApi } from "./inbox-bulk";
@@ -24,6 +25,7 @@ import { mockProjectApi } from "./projects";
 import { MockQueue } from "./queue";
 import { respond } from "./responses";
 import { mockSearch } from "./search";
+import { mockTechDebtApi } from "./tech-debt";
 import { workbenchApi } from "./workbench-api";
 import { MockWorld } from "./world";
 
@@ -96,6 +98,24 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
     onConnectionChange(listener) {
       listener("open");
       return () => {};
+    },
+    sessions: {
+      runNext: async () => {
+        throw new Error("This session is no longer waiting for a slot");
+      },
+      admission: async () => {
+        const active = world.snapshot.sessions.filter(
+          (s) => s.status === "starting" || s.status === "running" || s.status === "waiting",
+        );
+        const control = active.filter((s) => s.role !== "agent").length;
+        const exemption = 1 + world.snapshot.projects.filter((p) => !p.archivedAt).length;
+        return {
+          limit: world.snapshot.settings.limits.maxActiveSessions,
+          active: active.length - Math.min(control, exemption),
+          control,
+          waiting: [],
+        };
+      },
     },
     getSessionDetail: (id) =>
       delay(
@@ -392,6 +412,9 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
         worktree: { status: before.worktreePath ? "removed" : "none", message: null },
       };
     },
+    async listChildRuns() {
+      return delay({ runs: [], skipped: 0, available: true }, 50);
+    },
     async unarchiveSession(sessionId) {
       world.updateSession(sessionId, { archivedAt: null });
       const session = world.snapshot.sessions.find((s) => s.id === sessionId);
@@ -400,6 +423,17 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
     },
 
     async resolveInbox(itemId, resolution) {
+      // A checklist owner card lives on its checklist's pending proposal, not in the inbox list.
+      if (itemId.startsWith(CHECKLIST_CARD_PREFIX)) {
+        const status = resolution.status === "dismissed" ? "dismissed" : "resolved";
+        const now = new Date().toISOString();
+        const before = world.snapshot.checklists?.find((c) => c.pending?.inboxItemId === itemId);
+        if (before) {
+          const checklist = decideChecklist(before, status, now);
+          world.emitDomain({ type: "checklist.updated", sessionId: null, payload: { checklist } });
+        }
+        return closedChecklistCard(itemId, before, status, now);
+      }
       const item = world.snapshot.inbox.find((i) => i.id === itemId);
       if (!item) throw new Error("Inbox item not found");
       const now = new Date().toISOString();
@@ -428,10 +462,20 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
       }
       return client.resolveInbox(itemId, { status: "resolved", note: "retry" });
     },
+    async setChecklistEnforce(projectId, enforce) {
+      const before = world.snapshot.checklists?.find((c) => c.projectId === projectId);
+      if (!before) throw new ApiRequestError(404, "checklist_not_found", "No checklist");
+      if (before.state !== "approved")
+        throw new ApiRequestError(409, "checklist_not_approved", "Approve the checklist first");
+      const checklist = { ...before, enforce };
+      world.emitDomain({ type: "checklist.updated", sessionId: null, payload: { checklist } });
+      return checklist;
+    },
     ...mockInboxBulkApi(world),
     ...mockProjectApi(world),
     automations: mockAutomationsApi(world),
     factory: mockFactoryApi(world),
+    techDebt: mockTechDebtApi(),
 
     async updateSettings(patch: SettingsPatch) {
       const settings = Settings.parse(deepMerge(world.snapshot.settings, patch));

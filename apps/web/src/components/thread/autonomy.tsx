@@ -51,6 +51,24 @@ export function supportsReadOnly(provider: ProviderInfo | undefined): boolean {
   return provider ? provider.capabilities.readOnly === true : true;
 }
 
+/**
+ * Whether a provider can enforce the `supervised` level (`capabilities.supervised` not false):
+ * every edit and command reaches the user. Unknown providers are treated as able to.
+ */
+export function supportsSupervised(provider: ProviderInfo | undefined): boolean {
+  return provider?.capabilities.supervised !== false;
+}
+
+/** Why Read-only is unavailable: the provider (by its display name) can't enforce it. */
+export function readOnlyUnavailableReason(providerName: string | undefined): string {
+  return `${providerName ?? "This provider"} can't enforce read-only.`;
+}
+
+/** Why Supervised is unavailable: the provider can't make every edit and command ask. */
+export function supervisedUnavailableReason(providerName: string | undefined): string {
+  return `${providerName ?? "This provider"} can't enforce Supervised: not every edit and command is sure to ask you.`;
+}
+
 export function AutonomyBadge({ level, className }: { level: AutonomyLevel; className?: string }) {
   const a = AUTONOMY[level];
   return (
@@ -65,4 +83,20 @@ export function AutonomyBadge({ level, className }: { level: AutonomyLevel; clas
       {a.short}
     </span>
   );
+}
+
+/**
+ * Why a permission level is unavailable on the chosen provider, or null: Read-only and
+ * Supervised need a provider that enforces them (its capabilities), named in the reason.
+ */
+export function levelUnavailableReason(
+  level: AutonomyLevel,
+  support: { readOnly: boolean; supervised: boolean },
+  providerName: string | undefined,
+): string | null {
+  if (level === "read_only" && !support.readOnly) return readOnlyUnavailableReason(providerName);
+  if (level === "supervised" && !support.supervised) {
+    return supervisedUnavailableReason(providerName);
+  }
+  return null;
 }

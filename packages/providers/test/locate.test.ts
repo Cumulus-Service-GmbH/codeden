@@ -250,6 +250,9 @@ describe("known install locations", () => {
     expect(knownLocations("codex", { platform: "win32", home: "C:\\Users\\Ada", env: {} })[0]).toBe(
       "C:\\Users\\Ada\\.codex\\packages\\standalone\\current\\bin\\codex.exe",
     );
+    expect(knownLocations("agy", { platform: "darwin", home: "/Users/ada" })).toEqual([
+      "/Users/ada/.local/bin/agy",
+    ]);
     expect(knownLocations("git", { platform: "linux", home: "/home/ada" })).toEqual([]);
   });
 });

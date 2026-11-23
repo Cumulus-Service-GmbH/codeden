@@ -18,6 +18,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { splitPinned } from "@/lib/project-order";
 import { useSnapshot } from "@/lib/queries";
+import { activeRoleSession } from "@/lib/snapshot-reducer";
 import { cn } from "@/lib/utils";
 import { useLayoutStore } from "@/stores/layout";
 import { useUiStore } from "@/stores/ui";
@@ -25,6 +26,7 @@ import { Logo } from "../logo";
 import { NavRow, rowBase } from "./nav-row";
 import { SortableProjectGroup } from "./project-list";
 import { SidebarFooter } from "./sidebar-footer";
+import { SlotMeter } from "./slot-meter";
 
 /** Waiting sessions in a soft amber box; hidden when nothing waits (§11.1). */
 function WaitingOnYou({
@@ -77,7 +79,7 @@ export function Sidebar({ width, onClose }: { width: number | string; onClose?: 
 
   const inbox = data?.inbox.filter((i) => i.status === "open") ?? [];
   const urgent = inbox.some((i) => i.kind === "approval" || i.kind === "question");
-  const orchestrator = data?.sessions.find((s) => s.role === "orchestrator");
+  const orchestrator = data && activeRoleSession(data, "orchestrator", null);
   const waiting = data?.sessions.filter((s) => s.status === "waiting" && s.role === "agent") ?? [];
   const projectName = (id: string | null) => data?.projects.find((p) => p.id === id)?.name ?? "";
   const { pinned, others } = splitPinned(data?.projects ?? []);
@@ -172,6 +174,7 @@ export function Sidebar({ width, onClose }: { width: number | string; onClose?: 
         className="mt-3 min-h-0 flex-1 [&_[data-slot=scroll-area-viewport]>div]:block!"
       >
         <div className="flex min-w-0 flex-col gap-1 px-3 pb-3">
+          <SlotMeter />
           {pinned.length > 0 && (
             <section aria-label="Pinned projects" className="flex flex-col gap-1">
               <div className="flex h-7 items-center gap-1.5 pt-1 pl-2">

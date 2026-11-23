@@ -18,6 +18,9 @@ import { ProjectExecutionBackend } from "./execution";
 import { UserInput } from "./input";
 import { FollowupsItem } from "./items";
 import { BrokenExecutable, ProviderInfo, RuntimeResponse } from "./provider";
+import { TeamRole } from "./team";
+import { ProjectTeams } from "./team-run";
+import { TokenSaverLevel } from "./token-saver";
 import { ConflictDecision, StartedBy, StartWorkResult, WorkKey } from "./work";
 import { SetupStep } from "./workbench";
 import { ClientSubscribe, ClientToServerMessage, ServerToClientMessage } from "./ws";
@@ -89,6 +92,7 @@ export type CreateProjectResponse = z.infer<typeof CreateProjectResponse>;
 
 /** `PATCH /api/projects/:id`. */
 export const UpdateProjectRequest = z.object({
+  teams: ProjectTeams.optional(),
   name: z.string().trim().min(1).max(100).optional(),
   defaultProvider: ProviderId.nullable().optional(),
   /**
@@ -105,6 +109,11 @@ export const UpdateProjectRequest = z.object({
   pinned: z.boolean().optional(),
   /** Run this project's agent sessions with `CI=true`, or not (`Project.agentCiEnv`, §4.2). */
   agentCiEnv: z.boolean().optional(),
+  /**
+   * Allow providers without enforced security rules in this project
+   * (`Project.allowUnenforcedProviders`).
+   */
+  allowUnenforcedProviders: z.boolean().optional(),
   /**
    * Where new agent sessions run (`Project.execution`). `docker` is refused for a project that
    * isn't on GitHub and while Docker isn't available, with the reason.
@@ -177,6 +186,8 @@ export const StartSessionRequest = z.object({
    * plan is approved. Agent sessions on a provider with `capabilities.planMode` only.
    */
   planMode: z.boolean().optional(),
+  /** Explicit user opt-in to connecting this local session to Chrome. */
+  chrome: z.boolean().optional(),
   /**
    * Keep going until checks pass (§9 Project checks): after each turn CodeDen runs the project's
    * checks and sends failures back to the agent. Agent sessions in a project with checks only;
@@ -196,6 +207,13 @@ export const StartSessionRequest = z.object({
     .optional(),
   startedBy: StartedBy.prefault({ kind: "user" }),
   title: z.string().trim().min(1).max(200).optional(),
+  /**
+   * A Team role for the session: its title starts with the role's tag, and an unset provider,
+   * model or effort comes from the resolved Team (the project's Team, then the default Team).
+   */
+  teamRole: TeamRole.optional(),
+  /** This session's token saver level, over the project and role defaults. */
+  tokenSaver: TokenSaverLevel.optional(),
   parentSessionId: Id.optional(),
   issue: GitHubIssueRef.optional(),
   /** First message; the session starts idle when omitted. */
@@ -331,6 +349,8 @@ export const SessionStartMeta = z.object({
   queuedBehind: z.array(Id),
   /** Worktree setup commands (`.codeden/project.json`) and their output, in order. */
   setup: z.array(SetupStep).optional(),
+  /** The token saver level chosen for this session at its start; absent uses the defaults. */
+  tokenSaver: TokenSaverLevel.optional(),
 });
 export type SessionStartMeta = z.infer<typeof SessionStartMeta>;
 
@@ -451,9 +471,8 @@ export const SessionSnapshotQuery = z
     /** With `turns`: the page before this root turn (the turns that started before it). */
     before: Id.optional(),
     /**
-     * With `turns`: reach back far enough to include the root turn that holds this item (in the
-     * root thread, or in a subagent thread under it), so a search hit or link opens at it. An
-     * item the session doesn't have is ignored.
+     * With `turns`: if this item belongs to an older root turn, include that turn and its
+     * subagents as a separate focused page. An item the session doesn't have is ignored.
      */
     item: Id.optional(),
   })
@@ -493,8 +512,11 @@ export type ToolOutputResponse = z.infer<typeof ToolOutputResponse>;
 
 // ---------------------------------------------------------------- inbox
 
+/** `GET /api/snapshot` query with comma-separated client capabilities. */
+export const SnapshotQuery = z.object({ capabilities: z.string().max(512).optional() });
+
 /** `GET /api/inbox` query. Defaults to open items. */
-export const ListInboxQuery = z.object({
+export const ListInboxQuery = SnapshotQuery.extend({
   status: InboxItemStatus.optional(),
   projectId: Id.optional(),
   sessionId: Id.optional(),
@@ -591,7 +613,8 @@ export type InboxCounts = z.infer<typeof InboxCounts>;
 
 /**
  * A first-run check (§14): the agent CLIs (`claude`, `codex`, `opencode`, `cursor`: the Cursor
- * CLI, `agent`; `gemini`: Gemini CLI), then `gh`, `git`, the browser and Node.js.
+ * CLI, `agent`; `gemini`: Gemini CLI; `antigravity`: the Antigravity CLI, `agy`), then `gh`,
+ * `git`, the browser and Node.js.
  */
 export const SetupToolId = z.enum([
   "claude",
@@ -599,6 +622,7 @@ export const SetupToolId = z.enum([
   "opencode",
   "cursor",
   "gemini",
+  "antigravity",
   "gh",
   "git",
   "browser",
@@ -608,9 +632,18 @@ export type SetupToolId = z.infer<typeof SetupToolId>;
 
 /**
  * Setup checks whose sign-in command the UI can run in its embedded terminal (`cursor` runs
- * `agent login`; `gemini` runs `gemini`, which asks how to sign in when it has no login).
+ * `agent login`; `gemini` runs `gemini` and `antigravity` runs `agy`, which each ask how to sign
+ * in when they have no login).
  */
-export const LoginToolId = z.enum(["claude", "codex", "opencode", "cursor", "gemini", "gh"]);
+export const LoginToolId = z.enum([
+  "claude",
+  "codex",
+  "opencode",
+  "cursor",
+  "gemini",
+  "antigravity",
+  "gh",
+]);
 export type LoginToolId = z.infer<typeof LoginToolId>;
 
 /** A command the UI runs in its embedded terminal to fix a check (§14 step 3). */

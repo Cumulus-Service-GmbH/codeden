@@ -1,6 +1,6 @@
 import type { AutonomyLevel } from "@codeden/contracts";
 import { AlertTriangle } from "lucide-react";
-import { AUTONOMY, AUTONOMY_LEVELS } from "@/components/thread/autonomy";
+import { AUTONOMY, AUTONOMY_LEVELS, levelUnavailableReason } from "@/components/thread/autonomy";
 import { cn } from "@/lib/utils";
 
 /**
@@ -13,11 +13,15 @@ export function PermissionsField({
   onChange,
   disabled,
   readOnlySupported = true,
+  supervisedSupported = true,
+  providerName,
 }: {
   value: AutonomyLevel;
   onChange: (v: AutonomyLevel) => void;
   disabled?: boolean;
   readOnlySupported?: boolean;
+  supervisedSupported?: boolean;
+  providerName?: string;
 }) {
   return (
     <div className="space-y-2">
@@ -28,7 +32,12 @@ export function PermissionsField({
       >
         {AUTONOMY_LEVELS.map((level) => {
           const o = AUTONOMY[level];
-          const unavailable = level === "read_only" && !readOnlySupported;
+          const reason = levelUnavailableReason(
+            level,
+            { readOnly: readOnlySupported, supervised: supervisedSupported },
+            providerName,
+          );
+          const unavailable = reason !== null;
           const selected = level === value;
           return (
             <button
@@ -46,7 +55,7 @@ export function PermissionsField({
                 <o.icon className={cn("size-3.5", o.tone)} /> {o.label}
               </span>
               <span className="text-3xs leading-snug text-muted-foreground">
-                {unavailable ? "This provider can't enforce read-only." : o.description}
+                {reason ?? o.description}
               </span>
             </button>
           );

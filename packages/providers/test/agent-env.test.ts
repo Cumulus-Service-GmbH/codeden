@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AcpAgentSpec } from "../src/acp/extensions";
 import { startAgent } from "../src/acp/process";
+import { ANTIGRAVITY_AGENT } from "../src/antigravity/adapter";
 import { claudeEnv } from "../src/claude/options";
 import { startAppServer } from "../src/codex/process";
 import { CURSOR_AGENT } from "../src/cursor/adapter";
@@ -114,6 +115,7 @@ const SPAWN_ENV: Record<string, () => Env | Promise<Env>> = {
   opencode: () => openCodeServerEnv(process.env, SESSION_EXTRAS, "pw", {}),
   cursor: () => acpAgentEnv(CURSOR_AGENT),
   gemini: () => acpAgentEnv(GEMINI_AGENT),
+  antigravity: () => acpAgentEnv(ANTIGRAVITY_AGENT),
 };
 
 describe("agent session environment", () => {

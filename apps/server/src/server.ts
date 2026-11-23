@@ -23,10 +23,11 @@ import { HttpListener } from "./network/listener";
 import { RemoteAccessStore } from "./network/store";
 import { ensureHome, type HomePaths } from "./paths";
 import { BROWSER_LOOPBACK_ONLY_PATHS, mountBrowserSockets } from "./realtime/browser-routes";
-import { WsHub } from "./realtime/hub";
+import { WsCapabilitiesQuery, WsHub } from "./realtime/hub";
 import { TerminalBridge } from "./realtime/terminals";
 import { createApi } from "./routes/api";
 import { findWebDir, mountWeb } from "./routes/static";
+import { queryOf } from "./routes/validate";
 import type { RunnerClient } from "./runner/client";
 import { RunnerHub } from "./runner/hub";
 import {
@@ -88,7 +89,7 @@ export interface StartServerOptions {
   /** Wait for the runner handshake before resolving. Default false. */
   waitForRunner?: boolean;
   /** Called when a client requests shutdown via the API (the CLI exits the process). */
-  onShutdownRequest?: () => void;
+  onShutdownRequest?: (exitCode: number) => void;
   /** Secret storage: the OS keychain by default; `"memory"` for tests. */
   secrets?: SecretStore | "memory";
   /** Utility-model jobs (§7.4); one-shots through the runner's providers by default. */
@@ -130,6 +131,7 @@ export interface StartServerOptions {
   automations?: ServicesOptions["automations"];
   /** Factory loop (§10.1): tick interval, background ticking, a scripted GitHub for tests. */
   factory?: ServicesOptions["factory"];
+  teamRuns?: ServicesOptions["teamRuns"];
   /** Run first-run detection in the background on launch (default true). */
   checkSetupOnStart?: boolean;
   /**
@@ -223,6 +225,8 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
     opts.secrets === "memory"
       ? new MemorySecretStore()
       : (opts.secrets ?? (await createSecretStore(log)));
+  const forceFakeProvider = process.env.CODEDEN_FAKE_PROVIDER === "1";
+  const enableFakeProvider = forceFakeProvider || opts.enableFakeProvider === true;
   const builtin = opts.builtinProviders ?? process.env.CODEDEN_BUILTIN_PROVIDERS !== "0";
   const exec = opts.exec ?? runTool;
   const sandboxes = new SandboxService({
@@ -232,7 +236,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
       opts.executionBackends?.docker ??
       new DockerBackend({ home: paths.home, exec, gitIdentity: () => gitIdentity(exec), log }),
     // Sandboxes run only providers that need no credentials yet: Fake, when the server has it.
-    fake: opts.enableFakeProvider === true,
+    fake: enableFakeProvider,
     connectTimeoutMs: opts.sandboxConnectTimeoutMs,
     log,
   });
@@ -259,6 +263,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
     github: opts.github,
     automations: opts.automations,
     factory: opts.factory,
+    teamRuns: opts.teamRuns,
     selfUpdate: opts.selfUpdate,
     updates: opts.updates,
     worktreeCleanup: opts.worktreeCleanup,
@@ -339,7 +344,12 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
     log,
     shutdown: ({ stopRunner }) => {
       setTimeout(() => {
-        void close({ stopRunner }).then(() => opts.onShutdownRequest?.());
+        void close({ stopRunner })
+          .catch((error: unknown) => {
+            log(`server shutdown failed: ${String(error)}`);
+            return 1;
+          })
+          .then((exitCode) => opts.onShutdownRequest?.(exitCode ?? 0));
       }, 50);
     },
   });
@@ -348,7 +358,8 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
   app.all("/mcp", (c) => mcp(c.req.raw));
   app.get(
     "/ws",
-    upgradeWebSocket(() => hub.handlers()),
+    queryOf(WsCapabilitiesQuery),
+    upgradeWebSocket((c) => hub.handlers(c.req.query("capabilities")?.split(",") ?? [])),
   );
   const terminals = new TerminalBridge({
     runner: services.runner,
@@ -404,9 +415,11 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
 
   if (opts.runner !== false) {
     const args = [
-      ...(opts.enableFakeProvider ? ["--fake"] : []),
-      ...(builtin ? [] : ["--no-builtin"]),
-      ...(opts.openCodeExecutable ? ["--opencode", opts.openCodeExecutable] : []),
+      ...(enableFakeProvider ? ["--fake"] : []),
+      ...(!builtin || forceFakeProvider ? ["--no-builtin"] : []),
+      ...(!forceFakeProvider && opts.openCodeExecutable
+        ? ["--opencode", opts.openCodeExecutable]
+        : []),
     ];
     const launch = opts.runner ?? defaultRunnerLaunch(args) ?? null;
     runner = runners.add({
@@ -429,7 +442,9 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
   async function close(closeOpts: { stopRunner?: boolean } = {}): Promise<void> {
     closing ??= (async () => {
       services.lifecycle.stop();
+      services.sessions.suspendPriorityDelivery();
       services.orchestration.stop();
+      services.checklistListener.stop();
       services.github.stop();
       // Its git checks run in project folders: waited for below, before the database closes.
       const redetectorStopped = services.redetector.stop();

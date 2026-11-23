@@ -8,7 +8,7 @@ From `npx codeden` to your first agent session in a couple of minutes, without t
 |---|---|---|
 | Node.js 24 or newer | `node --version` | CodeDen refuses to start on older versions |
 | git | `git --version` | Set `user.name` and `user.email`: `git config --global user.name "Your Name"` |
-| Claude Code, Codex CLI, OpenCode 2.2+, the Cursor CLI and/or Gemini CLI 0.68+ | `claude --version`, `codex --version`, `opencode --version`, `agent --version`, `gemini --version` | At least one, **signed in** (`claude auth login`, `codex login`, `opencode auth login`, `agent login`, or `gemini` and its sign-in prompt; OpenCode's own free models work without an account) |
+| Claude Code, Codex CLI, OpenCode 2.2+, the Cursor CLI, Gemini CLI 0.68+ and/or the Antigravity CLI 1.5.12+ | `claude --version`, `codex --version`, `opencode --version`, `agent --version`, `gemini --version`, `agy --version` | At least one, **signed in** (`claude auth login`, `codex login`, `opencode auth login`, `agent login`, `gemini` or `agy` and its sign-in prompt; OpenCode's own free models work without an account) |
 | GitHub CLI *(optional)* | `gh auth status` | Needed for issues, PRs, evidence, triage and the factory |
 | Edge or Chrome *(optional)* | | For the browser panel and the agents' browser tools |
 
@@ -44,14 +44,15 @@ The first screen checks, in parallel:
 - **OpenCode:** installed version (2.2 or newer) and the providers it's connected to. With none, only OpenCode's free models are available, and the row suggests `opencode auth login`.
 - **Cursor:** the Cursor CLI's version, that it has the ACP server CodeDen drives (`agent acp`; older builds need `agent update`), and its login (`agent login`).
 - **Gemini CLI:** its version (0.68 or newer) and its login, read from Gemini CLI's own settings and your environment. A Google login kept in your system keychain, or an API key in a `.env` file, can't be confirmed from outside, so it shows as a warning rather than an error.
+- **Antigravity CLI:** its version (1.5.12 or newer). Its sessions use the login of an interactive `agy`, which CodeDen can't see from outside: run `agy` once and sign in before you start a session with it.
 - **GitHub CLI:** installed and signed in.
 - **git:** installed, with your identity set.
 - **Browser:** an installed Edge or Chrome.
 - **Node.js:** version 24 or newer.
 
-Anything that passes is never asked about. Anything missing gets one fix: the install command, or a **Sign in** button that runs the tool's own login (`claude auth login`, `codex login`, `opencode auth login`, `agent login`, `gemini`, `gh auth login`) in a terminal right on the page, so the provider's normal browser login handles it. **Sign in** runs the exact copy CodeDen found, by its full path.
+Anything that passes is never asked about. Anything missing gets one fix: the install command, or a **Sign in** button that runs the tool's own login (`claude auth login`, `codex login`, `opencode auth login`, `agent login`, `gemini`, `agy`, `gh auth login`) in a terminal right on the page, so the provider's normal browser login handles it. **Sign in** runs the exact copy CodeDen found, by its full path.
 
-CodeDen looks for Claude Code, Codex, OpenCode, the Cursor CLI, Gemini CLI and the GitHub CLI on your PATH, then in their installers' own folders, such as `~/.local/bin`, where the native Claude Code installer puts `claude` even when that folder isn't on your PATH. A copy that doesn't run (for example an npm shim left behind after its package was removed) is skipped and shown as **installed but broken**, with its path; see [Troubleshooting](troubleshooting.md#claude-code-codex-or-opencode-is-installed-but-broken). **Re-check** also picks up PATH changes you made after starting CodeDen.
+CodeDen looks for Claude Code, Codex, OpenCode, the Cursor CLI, Gemini CLI, the Antigravity CLI and the GitHub CLI on your PATH, then in their installers' own folders, such as `~/.local/bin`, where the native Claude Code installer puts `claude` even when that folder isn't on your PATH. A copy that doesn't run (for example an npm shim left behind after its package was removed) is skipped and shown as **installed but broken**, with its path; see [Troubleshooting](troubleshooting.md#claude-code-codex-or-opencode-is-installed-but-broken). **Re-check** also picks up PATH changes you made after starting CodeDen.
 
 ![The first-run setup checklist](images/setup.png)
 

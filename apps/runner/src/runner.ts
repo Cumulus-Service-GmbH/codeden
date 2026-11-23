@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, mkdirSync, renameSync, writeFileSync } from "node:fs";
 import type { AddressInfo } from "node:net";
 import { join } from "node:path";
+import { monitorEventLoopDelay } from "node:perf_hooks";
 import {
   CODEDEN_VERSION,
   RUNNER_PROTOCOL_VERSION,
@@ -35,6 +36,7 @@ import { LinkMcpUpstream } from "./mcp/link-upstream";
 import { HttpMcpUpstream, handleMcpRequest, type McpUpstream } from "./mcp/proxy";
 import { ProcessSupervisor } from "./process/supervisor";
 import { TerminalHost } from "./pty/terminal-host";
+import { runnerProfile } from "./runner-profile";
 import { SessionHost } from "./session-host";
 import { CheckRunner } from "./workspace/checks";
 import { WorkspaceFsHost } from "./workspace/fs";
@@ -69,7 +71,7 @@ export interface StartRunnerOptions {
   /** Replace the browser engine (tests); by default one `BrowserManager` per runner. */
   browser?: BrowserManager;
   /** Called after `runner.shutdown` or a drain-and-exit closed everything (the CLI exits). */
-  onShutdown?: () => void;
+  onShutdown?: (exitCode: number) => void;
   /** How streamed deltas are batched before they are journaled (tests lengthen the window). */
   deltaBatching?: DeltaBatcherOptions;
   /** How often the runner checks that its lock file still names it. Default 5 s (tests shorten it). */
@@ -127,7 +129,17 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
     const current = readLock(lockFile);
     return !current || current.token === token;
   };
-  const journal = new Journal(dir, { owned: ownsHome });
+  let attached: ServerConnection | undefined;
+  let stopped = false;
+  const journal = new Journal(dir, {
+    owned: ownsHome,
+    onAppend: (message) => attached?.deliver(message),
+    onAppendError: (error) => {
+      stopped = true;
+      log(`journal: append failed, stopping runner for recovery: ${error.message}`);
+      setImmediate(() => void finish(1));
+    },
+  });
   // Claude Code support is installed on demand into `<home>/deps` in the published package.
   configureClaudeSdk({
     depsDir: join(opts.home, "deps"),
@@ -152,7 +164,6 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   });
 
   const connections = new Set<ServerConnection>();
-  let attached: ServerConnection | undefined;
   let draining = false;
   let drainExit: Promise<void> | undefined;
   let closing: Promise<void> | undefined;
@@ -163,7 +174,6 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   const mcpLink = new LinkMcpUpstream({ channel: () => attached });
   let port = 0;
 
-  let stopped = false;
   /** Another runner took over this home, and its journal with it. */
   let superseded = false;
   const journalEvent = (event: RunnerEvent) => {
@@ -175,8 +185,8 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
       handOver();
       return;
     }
-    const msg = journal.append(event);
-    attached?.deliver(msg);
+    if (event.kind === "agent" && event.event.type === "item.delta") journal.queueDelta(event);
+    else journal.append(event);
   };
   // Every durable event goes through the batcher: streamed deltas wait briefly to be merged,
   // and any other event journals the batches it follows first, so order is kept.
@@ -198,7 +208,15 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   const browserManager = opts.browser ?? new BrowserManager({ stream, log });
   const browser = createBrowserCommandHandlers({ manager: browserManager });
   const files = new WorkspaceFsHost(opts.home);
-  const finish = () => void close().then(() => opts.onShutdown?.());
+  const finish = async (exitCode = 0) => {
+    try {
+      await close();
+    } catch (error) {
+      log(`runner shutdown failed: ${String(error)}`);
+      exitCode = 1;
+    }
+    opts.onShutdown?.(exitCode);
+  };
   /**
    * Another runner took this home over (#588, #615). Its journal files and worktrees are that
    * runner's now: write nothing more to them, not even a save already pending or one an ack from
@@ -235,7 +253,13 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
         emit({ kind: "runner.draining", reason });
       }
       if (exitWhenDrained && !drainExit) {
-        drainExit = host.drain(timeoutMs ?? DEFAULT_DRAIN_TIMEOUT).then(finish);
+        drainExit = host.drain(timeoutMs ?? DEFAULT_DRAIN_TIMEOUT).then(
+          () => finish(),
+          (error: unknown) => {
+            log(`runner drain failed: ${String(error)}`);
+            return finish(1);
+          },
+        );
       }
     },
     configureMcp: ({ url, link }) => {
@@ -244,7 +268,7 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
     },
     mcpResponse: (from, frame) => mcpLink.receive(from, frame),
     shutdown: () => {
-      setTimeout(finish, 50);
+      setTimeout(() => void finish(), 50);
     },
   };
 
@@ -318,6 +342,27 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   writeFileSync(tmp, `${JSON.stringify(lock, null, 2)}\n`, { mode: 0o600 });
   renameSync(tmp, lockFile);
   log(`runner ${journal.runnerId} listening on 127.0.0.1:${port}`);
+  const loopDelay = monitorEventLoopDelay({ resolution: 20 });
+  loopDelay.enable();
+  const profile = runnerProfile(process.env.CODEDEN_RUNNER_PROFILE === "1");
+  const diagnostics = setInterval(() => {
+    const eventLoopMaxMs = Math.round(loopDelay.max / 1e6);
+    loopDelay.reset();
+    const { appendCount, appendMaxMs, journalQueuedBytes } = journal.takeAppendDiagnostics();
+    const { replayMaxMs = 0, socketQueuedBytes = 0 } = attached?.takeDiagnostics() ?? {};
+    if (
+      appendCount ||
+      replayMaxMs ||
+      journalQueuedBytes ||
+      socketQueuedBytes ||
+      eventLoopMaxMs >= 100 ||
+      profile
+    ) {
+      log(
+        `runner diagnostics: eventLoopMaxMs=${eventLoopMaxMs} appendCount=${appendCount} appendMaxMs=${appendMaxMs.toFixed(1)} replayMaxMs=${replayMaxMs.toFixed(1)} journalQueuedBytes=${journalQueuedBytes} socketQueuedBytes=${socketQueuedBytes}${profile ? ` ${profile()}` : ""}`,
+      );
+    }
+  }, 60_000).unref();
   // Ask providers for their models now, so pickers are right before the first session.
   // Spawns provider CLIs, so it runs in the background; it never throws.
   void registry.refreshModels();
@@ -343,6 +388,8 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
       // Stop advertising first so a new server spawns a fresh runner instead of reconnecting.
       clearInterval(lockWatch);
       removeLock();
+      clearInterval(diagnostics);
+      loopDelay.disable();
       stopProviderUpdates();
       const graceful = (async () => {
         await host.closeAll();
@@ -379,13 +426,14 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
         if ("closeAllConnections" in server) server.closeAllConnections();
       });
       process.off("exit", removeLock);
-      deltas.flush();
-      stopped = true;
       try {
+        deltas.flush();
+        stopped = true;
         // Saves nothing once another runner owns the files, also when it took over while this
         // one was closing (its lock was already gone, so the lock check above had stopped).
         journal.close();
       } catch (error) {
+        stopped = true;
         log(`journal: ${String(error)}`);
       }
       log("runner stopped");

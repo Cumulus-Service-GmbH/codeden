@@ -215,9 +215,13 @@ describe("orchestration contracts (§8)", () => {
     const draining: ProjectStatus = {
       ...status,
       project: { ...status.project, mode: "dark_factory" },
-      factory: { loopState: "draining", drainInFlight: 2 },
+      factory: { loopState: "draining", drainInFlight: 2, lastControl: null, halt: null },
     };
     expect(ProjectStatus.parse(JSON.parse(JSON.stringify(draining)))).toEqual(draining);
+    const legacyFactory = { loopState: "draining", drainInFlight: 2 };
+    expect(ProjectStatus.parse({ ...draining, factory: legacyFactory }).factory).toEqual(
+      draining.factory,
+    );
     expect(
       ProjectStatus.safeParse({
         ...draining,
@@ -300,6 +304,21 @@ describe("autonomy changes on a running session (§11.2)", () => {
     });
     // Older runners leave it out: the UI then treats changes as applying from the next turn.
     expect(ProviderCapabilities.parse(caps).liveAutonomy).toBeUndefined();
+    expect(ProviderCapabilities.parse(caps).interruptToolCall).toBeUndefined();
+    expect(
+      ProviderCapabilities.parse(JSON.parse(JSON.stringify({ ...caps, interruptToolCall: true })))
+        .interruptToolCall,
+    ).toBe(true);
+    expect(ProviderCapabilities.parse({ ...caps, modelListAtStart: true })).toEqual({
+      ...caps,
+      modelListAtStart: true,
+    });
+    expect(ProviderCapabilities.parse(caps).modelListAtStart).toBeUndefined();
+    const unenforced = { ...caps, supervised: false, enforcesSecurityRules: false };
+    expect(ProviderCapabilities.parse(unenforced)).toEqual(unenforced);
+    // Absent means enforced: every provider that predates the flags.
+    expect(ProviderCapabilities.parse(caps).supervised).toBeUndefined();
+    expect(ProviderCapabilities.parse(caps).enforcesSecurityRules).toBeUndefined();
   });
 });
 

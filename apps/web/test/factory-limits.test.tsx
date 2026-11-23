@@ -125,3 +125,148 @@ describe("factory settings in the autonomy dialog", () => {
     success.mockRestore();
   });
 });
+
+it("saves Team pins with factory tuning and replaces remembered roles in Save setup", async () => {
+  const client = createMockClient();
+  await client.updateSettings({
+    teamSetup: {
+      remembered: false,
+      team: [{ role: "architect", provider: "claude", model: null, effort: null }],
+      resultSummaryBytes: null,
+    },
+  });
+  const setMode = vi.spyOn(client.factory, "setMode");
+  renderWithClient(<AutonomyDialog project={storefront} open onOpenChange={() => {}} />, client, {
+    withRouter: true,
+  });
+
+  const writer = await screen.findByLabelText("Writer provider", { exact: true });
+  await waitFor(() => expect(writer.querySelector('option[value="codex"]')).toBeTruthy());
+  fireEvent.change(writer, { target: { value: "codex" } });
+  fireEvent.change(screen.getByLabelText("Writer effort"), { target: { value: "high" } });
+  fireEvent.change(screen.getByLabelText("Result summaries for the project manager"), {
+    target: { value: "1024" },
+  });
+  const builder = screen.getByLabelText<HTMLSelectElement>("Builder provider");
+  expect(builder.disabled).toBe(true);
+  expect(builder.selectedOptions[0]?.textContent).toBe("Set by Team");
+
+  const team = [{ role: "writer", provider: "codex", model: null, effort: "high" }];
+  fireEvent.click(screen.getByRole("switch", { name: /Default Team: new projects start from it/ }));
+  fireEvent.click(screen.getByRole("button", { name: "Save setup" }));
+  await screen.findByText("Saved");
+  expect((await client.getSnapshot()).settings.teamSetup).toEqual({
+    remembered: true,
+    team,
+    resultSummaryBytes: 1024,
+  });
+
+  fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+  await waitFor(() =>
+    expect(setMode.mock.calls[0]?.[1].tuning).toMatchObject({
+      team,
+      resultSummaryBytes: 1024,
+    }),
+  );
+  const reloaded = await client.factory.status(storefront.id);
+  expect(reloaded.tuning).toMatchObject({ team, resultSummaryBytes: 1024 });
+});
+
+it("flags stale Team model pins and lets the member follow the provider default", async () => {
+  const client = createMockClient();
+  const status = await client.factory.status(storefront.id);
+  vi.spyOn(client.factory, "status").mockResolvedValue({
+    ...status,
+    tuning: {
+      ...status.tuning,
+      team: [
+        { role: "writer", provider: "codex", model: "retired-model", effort: "high" },
+        { role: "architect", provider: "claude", model: "haiku", effort: null },
+      ],
+    },
+  });
+  renderWithClient(<AutonomyDialog project={storefront} open onOpenChange={() => {}} />, client, {
+    withRouter: true,
+  });
+
+  const warning = await screen.findByText(
+    "retired-model isn't in Codex's current model list. Starts may fail.",
+  );
+  const model = screen.getByLabelText<HTMLSelectElement>("Writer model");
+  expect(model.value).toBe("retired-model");
+  expect(model.getAttribute("aria-describedby")).toBe(warning.id);
+  expect(warning.classList.contains("text-status-waiting")).toBe(true);
+  expect(model.selectedOptions[0]?.textContent).toBe("retired-model (not listed)");
+  expect(screen.getByLabelText<HTMLSelectElement>("Architect model").value).toBe("haiku");
+  expect(screen.getAllByText(/isn't in .* current model list/)).toEqual([warning]);
+
+  fireEvent.click(screen.getByRole("button", { name: "Use the provider's default for Writer" }));
+  expect(model.value).toBe("");
+  expect(model.hasAttribute("aria-describedby")).toBe(false);
+  expect(warning.isConnected).toBe(false);
+
+  fireEvent.click(screen.getByRole("button", { name: "Save setup" }));
+  await screen.findByText("Saved");
+  expect((await client.getSnapshot()).settings.teamSetup.team).toContainEqual({
+    role: "writer",
+    provider: "codex",
+    model: null,
+    effort: "high",
+  });
+});
+
+it.each(["resolved model", "empty model list", "unloaded provider list"] as const)(
+  "keeps a Team pin selected without a warning with a %s",
+  async (scenario) => {
+    const client = createMockClient();
+    const snapshot = await client.getSnapshot();
+    const status = await client.factory.status(storefront.id);
+    const pin = "claude-haiku-5-5";
+    vi.spyOn(client.factory, "status").mockResolvedValue({
+      ...status,
+      tuning: {
+        ...status.tuning,
+        team: [{ role: "writer", provider: "claude", model: pin, effort: null }],
+      },
+    });
+    const getSnapshot = vi.spyOn(client, "getSnapshot");
+    if (scenario === "unloaded provider list") {
+      getSnapshot.mockReturnValue(new Promise(() => {}));
+    } else {
+      getSnapshot.mockResolvedValue({
+        ...snapshot,
+        runner: {
+          ...snapshot.runner,
+          providers: snapshot.runner.providers.map((provider) =>
+            provider.id === "claude"
+              ? {
+                  ...provider,
+                  models:
+                    scenario === "resolved model"
+                      ? [{ id: "haiku", label: "Haiku", resolvedId: pin, efforts: [] }]
+                      : [],
+                }
+              : provider,
+          ),
+        },
+      });
+    }
+    renderWithClient(<AutonomyDialog project={storefront} open onOpenChange={() => {}} />, client, {
+      withRouter: true,
+    });
+
+    const model = await screen.findByLabelText<HTMLSelectElement>("Writer model");
+    const loaded = scenario !== "unloaded provider list";
+    await waitFor(() => expect(model.disabled).toBe(!loaded));
+    expect(screen.queryByText(/isn't in .* current model list/)).toBeNull();
+    if (scenario === "resolved model") {
+      expect(model.selectedOptions[0]?.textContent).toBe("Haiku");
+      expect(Array.from(model.options, (option) => option.textContent)).toEqual([
+        "Provider default",
+        "Haiku",
+      ]);
+    } else {
+      expect(model.value).toBe(pin);
+    }
+  },
+);

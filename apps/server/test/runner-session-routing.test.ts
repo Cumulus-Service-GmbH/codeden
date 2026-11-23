@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import type { ProviderInfo, RunnerCommandName, RunnerCommandOf, Session } from "@codeden/contracts";
-import { ImageEngineRegistry } from "@codeden/providers";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { FakeProvider, ImageEngineRegistry } from "@codeden/providers";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ensureHome } from "../src/paths";
 import { type AppServices, createServices } from "../src/services/container";
 import type { Exec } from "../src/services/exec";
@@ -31,6 +31,8 @@ const capabilities: ProviderInfo["capabilities"] = {
   reasoningEffort: true,
   mcp: true,
   skills: true,
+  enforcesSecurityRules: true,
+  readOnly: true,
 };
 const CLAUDE: ProviderInfo = { id: "claude", displayName: "Claude Code", capabilities, models: [] };
 const PROXY_A = "http://127.0.0.1:41001/mcp";
@@ -79,11 +81,11 @@ function port(tag: string, runnerId: string, providers: ProviderInfo[], proxy: s
   };
 }
 
-beforeEach(() => {
+function setUp(homeProviders: ProviderInfo[] = []) {
   env = createGithubEnv();
   calls = [];
   starts = [];
-  const home = port("A", "r-a", [], PROXY_A);
+  const home = port("A", "r-a", homeProviders, PROXY_A);
   const b = port("B", "r-b", [CLAUDE], PROXY_B);
   const runners: RunnerRouter = {
     home: () => home,
@@ -91,10 +93,11 @@ beforeEach(() => {
     forRunnerId: (runnerId) => (runnerId === "r-b" ? b : home),
   };
   const paths = ensureHome(join(env.dir, "home"));
+  const settings = new SettingsStore(paths.settings);
   services = createServices({
     db: env.db.db,
     store: env.store,
-    settings: new SettingsStore(paths.settings),
+    settings,
     paths,
     runner: home,
     runners,
@@ -103,15 +106,20 @@ beforeEach(() => {
     imageEngines: new ImageEngineRegistry([]),
     userHome: env.dir,
   });
-});
+  return settings;
+}
 
-afterEach(() => env.close());
+afterEach(async () => {
+  vi.unstubAllEnvs();
+  await env.close();
+});
 
 /** A Claude session placed on runner B. */
 const onB = (patch: Partial<Session> = {}): Session =>
   env.addSession({ provider: "claude", resumeToken: "claude-b", runnerId: "r-b", ...patch });
 
 describe("session work on its own runner", () => {
+  beforeEach(() => setUp());
   it("forks a session on B and starts the fork on B, where its provider and checkpoint are", async () => {
     const source = onB();
     const { sessionId } = await services.sessions.fork(source.id, {});
@@ -155,4 +163,47 @@ describe("session work on its own runner", () => {
     const shown = loaded.mcpServers.find((s) => s.provider === "codeden");
     expect(shown?.spec).toMatchObject({ type: "http", url: PROXY_B });
   });
+});
+
+it("forces every session, including the orchestrator, onto the Fake provider when CODEDEN_FAKE_PROVIDER is set", async () => {
+  vi.stubEnv("CODEDEN_FAKE_PROVIDER", "1");
+  const fake = new FakeProvider();
+  const settings = setUp([
+    { id: fake.id, displayName: fake.displayName, capabilities: fake.capabilities(), models: [] },
+    CLAUDE,
+  ]);
+  settings.update({
+    providers: { orchestrator: { provider: CLAUDE.id }, pm: { provider: CLAUDE.id } },
+  });
+  const { roles } = services.orchestration;
+  const orchestrator = await roles.ensure("orchestrator", null);
+  const pm = await roles.ensure("pm", env.localProject.id);
+  const start = async (purpose: string, parentSessionId: string) => {
+    const result = await services.sessions.start({
+      projectId: env.localProject.id,
+      role: "agent",
+      startedBy: { kind: "user" },
+      provider: CLAUDE.id,
+      purpose,
+      parentSessionId,
+      workspace: { mode: "repo_root" },
+    });
+    if (result.status !== "started") throw new Error(`${purpose}: ${result.status}`);
+    return env.repo.get(result.sessionId);
+  };
+  const worker = await start("Implement worker task", pm.id);
+  const child = await start("Verify child task", worker.id);
+  await Promise.all(services.sessions.launching.values());
+  expect([orchestrator, pm, worker, child].map((session) => session.provider)).toEqual([
+    "fake",
+    "fake",
+    "fake",
+    "fake",
+  ]);
+  expect(starts.map((command) => command.name === "session.start" && command.providerId)).toEqual([
+    "fake",
+    "fake",
+    "fake",
+    "fake",
+  ]);
 });

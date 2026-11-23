@@ -58,6 +58,7 @@ export function snapshot(
     scheduled: [],
     runner: { state: "disabled", runnerId: null, version: null, providers: [], lastError: null },
     runners: [],
+    checklists: [],
   };
 }
 

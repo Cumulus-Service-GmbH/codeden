@@ -83,14 +83,19 @@ export function deriveWorkKey(input: {
   return `request:${slugWords(input.purpose)}`;
 }
 
+export function firstPurposeLine(text: string | undefined): string {
+  return (
+    text
+      ?.split("\n")
+      .find((line) => line.trim())
+      ?.trim() ?? ""
+  );
+}
+
 /** One-line purpose from the request: explicit, else the first line of the input. */
 export function derivePurpose(purpose: string | undefined, text: string | undefined): string {
   if (purpose) return purpose;
-  const line =
-    (text ?? "")
-      .split("\n")
-      .find((l) => l.trim())
-      ?.trim() ?? "";
+  const line = firstPurposeLine(text);
   if (!line) return "New session";
   return line.length > 120 ? `${line.slice(0, 117)}...` : line;
 }

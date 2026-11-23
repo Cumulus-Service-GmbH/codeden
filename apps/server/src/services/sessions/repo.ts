@@ -1,4 +1,5 @@
 import {
+  type AutonomyLevel,
   agentEventToNewEvent,
   type Item,
   type ItemOf,
@@ -6,11 +7,13 @@ import {
   type ListSessionsQuery,
   type NewEvent,
   type Session,
+  type SessionAutonomyChanged,
   SessionStartMeta,
   type ThreadItemsPage,
   type ThreadItemsQuery,
   type ToolCallItem,
   type Turn,
+  teamRoleOfTitle,
   type Usage,
   type UserInput,
   type WorkSummary,
@@ -33,12 +36,13 @@ import {
 } from "drizzle-orm";
 import type { Db } from "../../db/client";
 import { rowToItemRecord, rowToSession, rowToTurn } from "../../db/rows";
-import { automationRuns, checkpoints, items, sessions, turns } from "../../db/schema";
+import { automationRuns, checkpoints, inboxItems, items, sessions, turns } from "../../db/schema";
 import { turnsOldestFirst } from "../../db/turn-order";
 import type { EventStore } from "../../events/store";
 import { notFound } from "../errors";
 import { ACTIVE_RUN_STATUSES, ACTIVE_SESSION_STATUSES } from "./conflicts";
 import type { ForkStart } from "./fork";
+import type { LaunchFork } from "./launcher";
 import type { UnansweredStart } from "./unanswered-start";
 
 /** Session ids per query of `modelsOf`, so no query has too many parameters. */
@@ -49,6 +53,7 @@ export type FileEditCall = Extract<ToolCallItem, { toolKind: "file_edit" }>;
 
 /** What a queued session needs to start later (kept with its start metadata). */
 export interface PendingStart {
+  fork?: LaunchFork;
   input?: UserInput;
   workspace: WorkspaceRequest;
 }
@@ -59,7 +64,17 @@ export interface PendingStart {
  * whether their latest turn carries the user's request (`LoopGuard`).
  */
 export type StoredStartMeta = SessionStartMeta & {
+  /** The new Claude agent session was explicitly titled as a Browser Operator. */
+  chromeOptIn?: true;
+  /** The user selected a Chrome setting when starting this session from the composer. */
+  chromeRequested?: boolean;
+  /** Its provider or model was the caller's own choice, not filled from the Team (`ownTeamPins`). */
+  ownTeamPins?: true;
+  autonomyFloor?: AutonomyLevel;
+  /** The PM delegated session starts to this Team Architect. */
+  teamArchitect?: true;
   pending?: PendingStart | null;
+  admission?: { seq: number; since: string } | null;
   prFeedback?: Record<string, { rounds: number; keys: string[] }>;
   /**
    * Whether the turn this role session's last accepted delivery started carries the user's
@@ -96,6 +111,10 @@ export type StoredStartMeta = SessionStartMeta & {
   startUnanswered?: UnansweredStart | null;
 };
 
+export function emptyStartMeta(): StoredStartMeta {
+  return { workspaceMode: "worktree", workspaceFallback: null, forced: null, queuedBehind: [] };
+}
+
 /**
  * A folder as `SessionRepo.inFolder` compares it: forward slashes, no trailing slash, ASCII
  * lower case (what SQLite's `lower()` does).
@@ -113,6 +132,23 @@ export class SessionRepo {
     private readonly db: Db,
     private readonly store: EventStore,
   ) {}
+
+  /** Wake a priority delivery when the runner may have reached a tool boundary. */
+  onPriorityBoundary(id: string, wake: () => void): () => void {
+    return this.store.subscribe((events) => {
+      if (
+        events.some(
+          (event) =>
+            event.type === "runner.disconnected" ||
+            (event.sessionId === id &&
+              (event.type === "agent.item.completed" ||
+                event.type.startsWith("agent.turn.") ||
+                event.type === "session.updated")),
+        )
+      )
+        wake();
+    });
+  }
 
   find(
     id: string,
@@ -132,13 +168,50 @@ export class SessionRepo {
     return found.session;
   }
 
-  /** Insert a new session (and its start metadata) in one transaction. */
-  create(session: Session, startMeta: StoredStartMeta): void {
+  /** Insert a new session, atomically archiving its predecessor during role rotation. */
+  create(session: Session, startMeta: StoredStartMeta, archived?: Session): void {
+    const chromeOptIn =
+      session.role === "agent" &&
+      session.provider === "claude" &&
+      teamRoleOfTitle(session.title ?? undefined) === "browserOperator" &&
+      (session.startedBy.kind === "user" || startMeta.chromeOptIn)
+        ? true
+        : undefined;
     this.store.append(
-      [{ type: "session.created", sessionId: session.id, payload: { session } }],
+      [
+        ...(archived
+          ? [
+              {
+                type: "session.updated" as const,
+                sessionId: archived.id,
+                payload: { session: archived },
+              },
+            ]
+          : []),
+        { type: "session.created", sessionId: session.id, payload: { session } },
+      ],
       (tx) => {
-        tx.update(sessions).set({ startMeta }).where(eq(sessions.id, session.id)).run();
+        tx.update(sessions)
+          .set({ startMeta: { ...startMeta, chromeOptIn } })
+          .where(eq(sessions.id, session.id))
+          .run();
       },
+    );
+  }
+
+  hasOpenRequest(sessionId: string): boolean {
+    return Boolean(
+      this.db
+        .select({ id: inboxItems.id })
+        .from(inboxItems)
+        .where(
+          and(
+            eq(inboxItems.sessionId, sessionId),
+            eq(inboxItems.status, "open"),
+            inArray(inboxItems.kind, ["question", "approval"]),
+          ),
+        )
+        .get(),
     );
   }
 
@@ -146,18 +219,45 @@ export class SessionRepo {
    * Apply `change` to the current row and append `session.updated` when it changed. Synchronous
    * end to end, so there is no read-modify-write race with event ingestion.
    */
-  update(id: string, change: (s: Session) => Session): Session {
+  update(
+    id: string,
+    change: (s: Session) => Session,
+    audit?: Pick<SessionAutonomyChanged, "changedBy" | "reason">,
+  ): Session {
     const current = this.get(id);
     const next = change(current);
     if (next === current) return current;
     const session = { ...next, updatedAt: new Date().toISOString() };
-    this.store.append([{ type: "session.updated", sessionId: id, payload: { session } }]);
+    const events: NewEvent[] = [{ type: "session.updated", sessionId: id, payload: { session } }];
+    if (audit && session.autonomy !== current.autonomy) {
+      events.push({
+        type: "session.autonomy_changed",
+        sessionId: id,
+        payload: { ...audit, previous: current.autonomy, autonomy: session.autonomy },
+      });
+    }
+    this.store.append(events);
     return session;
   }
 
   setStartMeta(id: string, change: (meta: StoredStartMeta | null) => StoredStartMeta): void {
     const meta = change(this.find(id)?.startMeta ?? null);
     this.db.update(sessions).set({ startMeta: meta }).where(eq(sessions.id, id)).run();
+  }
+
+  /** Every session in one of these statuses (all, or one project's), with no page limit. */
+  listInStatus(statuses: readonly Session["status"][], projectId?: string): Session[] {
+    return this.db
+      .select()
+      .from(sessions)
+      .where(
+        and(
+          inArray(sessions.status, [...statuses]),
+          projectId ? eq(sessions.projectId, projectId) : undefined,
+        ),
+      )
+      .all()
+      .map(rowToSession);
   }
 
   /** Public view of the start metadata. */
@@ -271,6 +371,30 @@ export class SessionRepo {
       .orderBy(desc(sessions.createdAt))
       .all()
       .map(rowToSession);
+  }
+
+  /** Uncapped rows that occupy a slot or have a persisted place in the admission queue. */
+  admissionRows() {
+    return this.db
+      .select({
+        id: sessions.id,
+        role: sessions.role,
+        status: sessions.status,
+        meta: sessions.startMeta,
+      })
+      .from(sessions)
+      .where(
+        or(
+          inArray(sessions.status, ["starting", "running", "waiting"]),
+          and(
+            isNull(sessions.archivedAt),
+            inArray(sessions.status, ["queued", "idle", "interrupted", "failed"]),
+            // The JSON predicate is unindexed, so only check rows that can wait for a slot.
+            sql`json_extract(${sessions.startMeta}, '$.admission.seq') is not null`,
+          ),
+        ),
+      )
+      .all();
   }
 
   /** Queued sessions, oldest first. */

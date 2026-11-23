@@ -8,9 +8,10 @@ import {
   type StartSessionResponse,
   type UserInput,
 } from "@codeden/contracts";
-import { errorMessage, ServiceError } from "../errors";
+import { conflict, errorMessage, ServiceError } from "../errors";
 import type { RunnerPort } from "../runner-port";
 import type { SessionRepo } from "../sessions/repo";
+import { stripLeadingTags } from "../sessions/role-tag";
 import type { SessionService } from "../sessions/session-service";
 import type { AgentChoice } from "./agent-choice";
 import type {
@@ -42,11 +43,6 @@ function brief(text: string): UserInput {
   return { text, attachments: [], from: "factory" };
 }
 
-/** A start request's provider and model: a model only when one is chosen. */
-function on(agent: AgentChoice): Pick<StartSessionRequestInit, "provider" | "model"> {
-  return { provider: agent.provider, ...(agent.model ? { model: agent.model } : {}) };
-}
-
 /** Statuses that hold a session slot (`maxConcurrentSessions`). */
 const SLOT_STATUSES = new Set(["created", "queued", "starting", "running", "waiting"]);
 /** Statuses of sessions the kill switch stops. */
@@ -76,6 +72,7 @@ export function neverRanTurn(repo: Pick<SessionRepo, "turnCount">, s: Session): 
 
 export interface FactorySessionsDeps {
   sessions: SessionService;
+  isKilled: (projectId: string) => boolean;
   repo: SessionRepo;
   runner: RunnerPort;
   availability: ProviderAvailability;
@@ -172,9 +169,31 @@ export class FactorySessions {
     return this.runnable(provider, { ignoreFailures: true });
   }
 
+  supportsReasoningEffort(provider: string): boolean {
+    return (
+      this.deps.runner.providers().find((p) => p.id === provider)?.capabilities?.reasoningEffort ===
+      true
+    );
+  }
+
+  /** Include model and effort pins the chosen provider can use. */
+  private on(agent: AgentChoice): Pick<StartSessionRequestInit, "provider" | "model" | "effort"> {
+    return {
+      provider: agent.provider,
+      ...(agent.model ? { model: agent.model } : {}),
+      ...(agent.effort && this.supportsReasoningEffort(agent.provider)
+        ? { effort: agent.effort }
+        : {}),
+    };
+  }
+
   /** The models a provider lists (aliases with the full ids they run), from the runner. */
   models(provider: string): ModelInfo[] {
     return this.deps.runner.providers().find((p) => p.id === provider)?.models ?? [];
+  }
+
+  modelVendor(id: string): string | undefined {
+    return this.deps.runner.providers().find((p) => p.id === id)?.capabilities?.modelVendor;
   }
 
   /** The provider's name for notes ("Codex"), from the runner's provider list. */
@@ -234,7 +253,7 @@ export class FactorySessions {
   startScout(projectId: string, text: string, agent: AgentChoice): Promise<StartSessionResponse> {
     return this.start({
       projectId,
-      ...on(agent),
+      ...this.on(agent),
       purpose: "Factory scout: review the app against the vision and file the work",
       workKey: SCOUT_WORK_KEY,
       scope: { area: "factory-scout" },
@@ -253,7 +272,7 @@ export class FactorySessions {
     const name = area.replace("_", " ");
     return this.start({
       projectId,
-      ...on(agent),
+      ...this.on(agent),
       purpose: `Factory area reviewer: review ${name}`,
       workKey: `${LENS_WORK_KEY_PREFIX}${area}`,
       scope: { area: `factory-lens-${area}` },
@@ -269,15 +288,15 @@ export class FactorySessions {
     model: string | null = null,
     /** The project's lessons for its brief (`lessons.ts`). */
     lessons: BriefLessons = NO_LESSONS,
+    effort?: AgentChoice["effort"],
   ): Promise<StartSessionResponse> {
     const step = item.type ? ` (${item.type})` : "";
     return this.start({
       projectId: item.projectId,
-      provider,
-      ...(model ? { model } : {}),
+      ...this.on({ provider, model, effort }),
       purpose: `Factory${step}: ${item.title}`.slice(0, 300),
       workKey: item.workKey,
-      title: item.title.slice(0, 200),
+      title: stripLeadingTags(item.title).slice(0, 200) || "Factory item",
       issue: item.issue ?? undefined,
       input: brief(builderPrompt(item, vision, lessons)),
     });
@@ -292,7 +311,7 @@ export class FactorySessions {
   startReviewer(
     item: FactoryItem,
     vision: string,
-    reviewer: { provider: string; model: string | null },
+    reviewer: AgentChoice,
     note: string | null,
     /** The PR's head to review in a fresh worktree; null to use the builder's worktree. */
     pr: { headBranch: string; baseBranch: string } | null,
@@ -323,8 +342,7 @@ export class FactorySessions {
     }
     return this.start({
       projectId: item.projectId,
-      provider: reviewer.provider,
-      ...(reviewer.model ? { model: reviewer.model } : {}),
+      ...this.on(reviewer),
       purpose: `Factory review: ${item.title}`.slice(0, 300),
       workKey: `${REVIEW_WORK_KEY_PREFIX}${item.pr?.number ?? item.id}`,
       title: `Review: ${item.title}`.slice(0, 200),
@@ -348,7 +366,7 @@ export class FactorySessions {
   ): Promise<StartSessionResponse> {
     return this.start({
       projectId: item.projectId,
-      ...on(agent),
+      ...this.on(agent),
       purpose: `Factory integration: resolve the conflicts of #${pr.number}`,
       workKey: `factory:integrate:${pr.number}`,
       title: `Integrate #${pr.number}: ${item.title}`.slice(0, 200),
@@ -374,7 +392,7 @@ export class FactorySessions {
   ): Promise<StartSessionResponse> {
     return this.start({
       projectId,
-      ...on(agent),
+      ...this.on(agent),
       purpose: `Factory: revert #${merge.prNumber} after a CI regression`,
       workKey: `factory:revert:${merge.sha.slice(0, 7)}`,
       title: `Revert #${merge.prNumber}`,
@@ -477,7 +495,10 @@ export class FactorySessions {
    * another workspace: in a project folder that isn't a git repository they are refused
    * (`not_a_repo`), never run in the folder in place.
    */
-  private start(req: StartSessionRequestInit): Promise<StartSessionResponse> {
+  private async start(
+    req: StartSessionRequestInit & { projectId: string },
+  ): Promise<StartSessionResponse> {
+    if (this.deps.isKilled(req.projectId)) throw conflict("The factory kill switch is on");
     return this.deps.sessions.start(
       StartSessionRequest.parse({
         role: "agent",

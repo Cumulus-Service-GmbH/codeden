@@ -26,6 +26,8 @@ import {
   modelName,
   openProviderTabs,
   type PickerTab,
+  type ProjectRule,
+  projectRefusal,
   providerAvailability,
   providerTabs,
   resolvedEfforts,
@@ -62,6 +64,11 @@ export interface ModelPickerProps {
   /** Open with the model picker shortcut (one picker per screen should set this). */
   shortcut?: boolean;
   align?: "start" | "end";
+  /**
+   * The project the choice is for: a provider the machine's security rules don't cover shows
+   * as unavailable, with the reason, unless it allows such providers.
+   */
+  project?: ProjectRule | null;
 }
 
 const valueKey = (v: ModelChoice | null) => (v ? `${v.provider}|${v.model}|${v.effort}` : "");
@@ -83,6 +90,7 @@ export function ModelPicker({
   footer,
   shortcut: listen,
   align = "start",
+  project,
 }: ModelPickerProps) {
   const navigate = useNavigate();
   const checks = useSetupStatus({ staleTime: 60_000 }).data?.checks;
@@ -110,6 +118,7 @@ export function ModelPicker({
   const providers = withCustomModels(listed, custom);
   const tabs = providerTabs(providers, checks, lockedProvider, {
     favorites: true,
+    project,
     ...(handoff ? { handoff: { blocked: handoff.blocked, lasting: handoff.lasting } } : {}),
   });
   const openTabs = openProviderTabs(tabs);
@@ -142,7 +151,9 @@ export function ModelPicker({
       : undefined;
 
   const searching = query.trim().length > 0;
-  const searchable = openTabs.map((t) => t.provider);
+  // A provider the project refuses isn't offered in search or Favourites either.
+  const refused = (p: ProviderInfo) => projectRefusal(p, project) !== null;
+  const searchable = openTabs.map((t) => t.provider).filter((p) => !refused(p));
   // Hidden models are left out everywhere unless selected, or revealed on a provider tab.
   const listFor = (q: string, t: PickerTab | undefined, reveal: boolean) =>
     visibleRows(
@@ -203,6 +214,7 @@ export function ModelPicker({
   };
 
   const pick = (row: ModelRow) => {
+    if (refused(row.provider)) return;
     const current = shown ?? { provider: row.provider.id, model: null, effort: null };
     const next = chooseModel(current, row.provider, row.model);
     // Picking the checked row keeps "the default" as the default rather than pinning it.
@@ -262,7 +274,10 @@ export function ModelPicker({
           effort={offerEffort ? effort : null}
           levels={offerEffort ? levels : []}
           placeholder={placeholder}
-          ready={!provider || providerAvailability(provider.id, checks).ready}
+          ready={
+            !provider ||
+            (projectRefusal(provider, project) ?? providerAvailability(provider.id, checks)).ready
+          }
         />
       </PopoverTrigger>
       <PopoverContent

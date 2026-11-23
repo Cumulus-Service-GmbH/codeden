@@ -4,10 +4,13 @@
  * `test/schema-barrel.test.ts` keeps this list complete.
  */
 export * from "./schema-automations";
+export * from "./schema-checklist";
 export * from "./schema-core";
 export * from "./schema-factory";
 export * from "./schema-github";
 export * from "./schema-orchestration";
 export * from "./schema-runners";
 export * from "./schema-search";
+export * from "./schema-team-runs";
+export * from "./schema-tech-debt";
 export * from "./schema-usage";

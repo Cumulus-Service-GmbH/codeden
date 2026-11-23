@@ -6,8 +6,11 @@ import {
   automationRuns,
   automations,
   inboxItems,
+  projectChecklists,
   projects,
+  projectTechDebt,
   sessions,
+  teamRuns,
 } from "../db/schema";
 import { applyFactoryProjection } from "../services/factory/projection";
 import {
@@ -36,6 +39,32 @@ export { applyDelta } from "./reducer/items";
  */
 export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
   switch (e.type) {
+    case "tech_debt.updated": {
+      const { view } = e.payload;
+      tx.insert(projectTechDebt)
+        .values({ projectId: view.projectId, view })
+        .onConflictDoUpdate({ target: projectTechDebt.projectId, set: { view } })
+        .run();
+      return [];
+    }
+    case "team_run.updated": {
+      const { run } = e.payload;
+      tx.insert(teamRuns)
+        .values({ id: run.id, run })
+        .onConflictDoUpdate({ target: teamRuns.id, set: { run } })
+        .run();
+      return [];
+    }
+    case "checklist.updated": {
+      const { checklist } = e.payload;
+      const { projectId, updatedAt } = checklist;
+      const row = { projectId, checklist, updatedAt };
+      tx.insert(projectChecklists)
+        .values(row)
+        .onConflictDoUpdate({ target: projectChecklists.projectId, set: row })
+        .run();
+      return [];
+    }
     case "project.created":
     case "project.updated": {
       const { project } = e.payload;
@@ -138,9 +167,17 @@ export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
     case "runner.disconnected":
       applyRunnerProjection(tx, e);
       return [];
+    case "session.autonomy_changed":
     case "settings.updated":
     case "automation.updated":
     case "runner.draining":
+    case "decision.raised":
+    case "decision.confirmed":
+    case "decision.step_consumed":
+    case "decision.step_result":
+    case "decision.github_claimed":
+    case "decision.github_stale":
+    case "decision.github_posted":
     case "pty.exited":
       return [];
     default: {

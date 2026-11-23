@@ -34,7 +34,7 @@ import {
 } from "@/lib/diff-review";
 import { relatedSessions } from "@/lib/fork-origin";
 import { ageShort } from "@/lib/format";
-import { useSession, useSnapshotData } from "@/lib/queries";
+import { useProject, useSession, useSnapshotData } from "@/lib/queries";
 import { isNotGitRepo } from "@/lib/session-workspace";
 import { cn } from "@/lib/utils";
 import { type ReviewComment, sessionComments, useDiffReviewStore } from "@/stores/diff-review";
@@ -93,6 +93,9 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
   const queryClient = useQueryClient();
   const theme = useResolvedTheme();
   const session = useSession(sessionId);
+  const project = useProject(session?.projectId);
+  const knownNonGit =
+    project?.isGitRepo === false && session?.worktreePath === null && session.cwd === project.path;
   const sessions = useSnapshotData((s) => s.sessions, noSessions);
   // The session it was forked, handed off or reviewed from, by id: it may be archived and out
   // of the snapshot (§6).
@@ -116,11 +119,13 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
   const { data, isLoading, isFetching, error, refetch } = useQuery({
     queryKey: ["diff", sessionId, scope],
     queryFn: () => client.getDiff(sessionId, scope),
+    enabled: !knownNonGit,
     retry: false,
   });
   // A session running in place in a folder without git has no diff, changes or comparison.
   // Its git status and its diff both answer `not_a_repo`, whichever comes first.
-  const notGitRepo = isNotGitRepo(useGitStatus(sessionId).error) || isNotGitRepo(error);
+  const git = useGitStatus(sessionId, !knownNonGit);
+  const notGitRepo = knownNonGit || isNotGitRepo(git.error) || isNotGitRepo(error);
   const restore = useMutation({
     mutationFn: (paths?: string[]) => {
       const target = restoreTarget(scope);

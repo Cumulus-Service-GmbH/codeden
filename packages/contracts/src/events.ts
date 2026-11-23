@@ -13,7 +13,9 @@ import {
   TurnStartedEvent,
   UsageUpdatedEvent,
 } from "./agent-events";
+import { ProjectChecklist } from "./checklist";
 import { Id, Timestamp } from "./common";
+import { DecisionCard, DecisionConfirmation, PlanApprovalStep } from "./decision-rights";
 import { Artifact } from "./entities/artifact";
 import { Automation, AutomationRun } from "./entities/automation";
 import { InboxItem } from "./entities/inbox";
@@ -22,9 +24,12 @@ import { Session } from "./entities/session";
 import { FACTORY_EVENT_PAYLOADS } from "./factory-api";
 import { GITHUB_EVENT_PAYLOADS } from "./github";
 import { ConflictRecord, Notice } from "./orchestration";
+import { SessionAutonomyChanged } from "./pm-session-tools";
 import { PtyId } from "./runner/commands";
 import { RunnerDeletedPayload, RunnerRecordRef, RunnerRegisteredPayload } from "./runners";
 import { Settings } from "./settings";
+import { TeamRun } from "./team-run";
+import { TechDebtView } from "./tech-debt";
 import { Checkpoint, QueuedMessage, SetupStep } from "./workbench";
 
 /**
@@ -75,6 +80,9 @@ export const EventEnvelope = z.discriminatedUnion("type", [
   agentEvent("item.completed", ItemCompletedEvent),
   agentEvent("usage.updated", UsageUpdatedEvent),
   // Domain events.
+  globalEvent("team_run.updated", z.object({ run: TeamRun })),
+  globalEvent("tech_debt.updated", z.object({ view: TechDebtView })),
+  globalEvent("checklist.updated", z.object({ checklist: ProjectChecklist })),
   globalEvent("project.created", z.object({ project: Project })),
   globalEvent("project.updated", z.object({ project: Project })),
   globalEvent("project.archived", z.object({ projectId: Id })),
@@ -86,6 +94,7 @@ export const EventEnvelope = z.discriminatedUnion("type", [
   globalEvent("session.created", z.object({ session: Session })),
   /** Any change to a session row, including status transitions. */
   globalEvent("session.updated", z.object({ session: Session })),
+  globalEvent("session.autonomy_changed", SessionAutonomyChanged),
   globalEvent("inbox.created", z.object({ item: InboxItem })),
   globalEvent("inbox.updated", z.object({ item: InboxItem })),
   globalEvent("automation.saved", z.object({ automation: Automation })),
@@ -159,6 +168,17 @@ export const EventEnvelope = z.discriminatedUnion("type", [
   /** A runner terminal exited. */
   globalEvent("pty.exited", z.object({ ptyId: PtyId, exitCode: z.int().nullable() })),
   // GitHub sync (§9); `sessionId` is the PR's linked session when there is one.
+  globalEvent("decision.raised", DecisionCard),
+  globalEvent("decision.confirmed", DecisionConfirmation),
+  globalEvent("decision.step_consumed", z.object({ id: Id, step: PlanApprovalStep })),
+  /** The outcome of a handler after its approved step was consumed. */
+  globalEvent(
+    "decision.step_result",
+    z.object({ id: Id, step: PlanApprovalStep, ok: z.boolean(), error: z.string().optional() }),
+  ),
+  globalEvent("decision.github_claimed", z.object({ id: Id })),
+  globalEvent("decision.github_stale", z.object({ id: Id })),
+  globalEvent("decision.github_posted", z.object({ id: Id })),
   globalEvent("github.synced", GITHUB_EVENT_PAYLOADS["github.synced"]),
   globalEvent("issue.opened", GITHUB_EVENT_PAYLOADS["issue.opened"]),
   globalEvent("issue.labeled", GITHUB_EVENT_PAYLOADS["issue.labeled"]),

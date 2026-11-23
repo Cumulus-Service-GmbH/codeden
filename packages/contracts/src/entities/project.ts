@@ -17,7 +17,11 @@ export const ProjectRemoteWarning = z.object({
 });
 export type ProjectRemoteWarning = z.infer<typeof ProjectRemoteWarning>;
 
+import { ProjectTeams } from "../team-run";
+
 const projectBase = {
+  /** Named Teams and their default. Older projects inherit their existing Team setup. */
+  teams: ProjectTeams.optional(),
   id: Id,
   name: z.string().min(1),
   /** Short, filesystem-safe name used in worktree paths (`wt/<slug>/...`). */
@@ -65,6 +69,13 @@ const projectBase = {
    * before the setting existed still parse.
    */
   agentCiEnv: z.boolean().default(true),
+  /**
+   * Allow providers for which the machine's security rules aren't enforced
+   * (`capabilities.enforcesSecurityRules` false) in this project's sessions, every role. Off by
+   * default, which refuses them (fail closed): only the owner turns it on, per project. Defaults
+   * to false so events written before the setting existed still parse.
+   */
+  allowUnenforcedProviders: z.boolean().default(false),
   /**
    * Where the project's new agent sessions run (`docs/remote-runners.md` §5): `local` worktrees
    * (the default) or, experimentally, a Docker container per session. Only GitHub projects can

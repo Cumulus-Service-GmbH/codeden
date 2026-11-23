@@ -47,6 +47,7 @@ export function LiveEffects() {
       const snap = queryClient.getQueryData<Snapshot>(snapshotKey);
       if (!snap) return;
       const item = env.payload.item;
+      if (item.status !== "open") return;
       const settings = snap.settings.notifications;
       const background = settings.browser && !platform.isFocused();
       if (isBlockingKind(item)) {

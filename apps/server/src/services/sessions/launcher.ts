@@ -1,10 +1,15 @@
 import { existsSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import {
+  CHILD_RUNS_FILE_ENV,
   type McpServerConfig,
   type Project,
   type Session,
   SessionOptions,
+  TEAM_FILE_ENV,
+  type TokenSaverSettings,
+  teamRoleOfTitle,
+  tokenSaverLevel,
   type UserInput,
   type WorkspaceRequest,
 } from "@codeden/contracts";
@@ -13,6 +18,7 @@ import { codedenSystemPrompt, MCP_SERVER_NAME } from "../../mcp/prompt";
 import type { McpTokenStore } from "../../mcp/tokens";
 import type { ArtifactService } from "../artifacts";
 import { errorMessage, ServiceError } from "../errors";
+import { type TeamFileDeps, writeTeamFile } from "../factory/team-file";
 import type { GitBroker } from "../git-broker";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
@@ -24,6 +30,7 @@ import {
   runnerForSession,
   runnerUnavailable,
 } from "../runner-port";
+import { childRunsFile } from "./child-runs";
 import { type PreparedWorkspace, prepareCloneWorkspace } from "./clone-workspace";
 import { slugWords } from "./conflicts";
 import type { ForkStart } from "./fork";
@@ -32,9 +39,11 @@ import { ownBranch } from "./own-branch";
 import type { SessionRepo } from "./repo";
 import { withSetupNote } from "./setup-failure";
 import { seenSetups, settleSetup } from "./setup-gate";
+import { tokenSaverNote } from "./token-saver";
 import { setUnanswered, unansweredCode } from "./unanswered-start";
 
 export interface LauncherDeps extends RunnerDeps {
+  forceFakeProvider?: boolean;
   repo: SessionRepo;
   projects: ProjectService;
   inbox: InboxService;
@@ -61,6 +70,24 @@ export interface LauncherDeps extends RunnerDeps {
   git?: GitBroker;
   /** Sandboxes for projects whose sessions run in containers (`docs/remote-runners.md` §8). */
   sandboxes?: Pick<SandboxService, "wants" | "place" | "release">;
+  /** The token saver settings (`Settings.tokenSaver`, #602); absent means off. */
+  tokenSaver?: () => TokenSaverSettings;
+  /** What sessions on this disk resolve their Team from; they get it as `TEAM_FILE`. */
+  teamFiles?: TeamFileDeps;
+  /** Where sessions on this disk log the worker runs their tools start (`CHILD_RUNS_FILE`). */
+  childRunsDir?: string;
+}
+
+/** Whether this session starts Claude in Chrome on the home runner. */
+function startsWithChrome(session: Session, repo: SessionRepo): boolean {
+  if (session.role !== "agent") return false;
+  const meta = repo.find(session.id)?.startMeta;
+  return (
+    meta?.chromeRequested ??
+    (session.provider === "claude" &&
+      teamRoleOfTitle(session.title ?? undefined) === "browserOperator" &&
+      meta?.chromeOptIn === true)
+  );
 }
 
 /**
@@ -297,6 +324,13 @@ export class SessionLauncher {
    * carry, rather than failing a session that is working.
    */
   private async open(runner: RunnerPort, session: Session, input: UserInput | undefined) {
+    if (this.deps.forceFakeProvider && session.provider !== "fake") {
+      throw new ServiceError(
+        409,
+        "fake_provider_forced",
+        "This session requires a real provider, but Fake is forced",
+      );
+    }
     const token = runner.mcpProxyUrl()
       ? this.deps.tokens.mint({
           role: session.role,
@@ -306,13 +340,21 @@ export class SessionLauncher {
       : null;
     this.markVendorHistory(runner, session);
     const turnsBefore = this.deps.repo.turnCount(session.id);
+    let options: SessionOptions;
+    try {
+      options = this.sessionOptions(session, token);
+    } catch (error) {
+      // Nothing reached the runner (e.g. the Team file could not be written): retire the token.
+      if (token) this.deps.tokens.revoke(token);
+      throw error;
+    }
     try {
       const result = await runner.request(
         {
           name: "session.start",
           sessionId: session.id,
           providerId: session.provider,
-          options: this.sessionOptions(session, token),
+          options,
           input,
         },
         START_TIMEOUT_MS,
@@ -354,7 +396,9 @@ export class SessionLauncher {
    */
   sessionOptions(session: Session, mcpToken: string | null = null): SessionOptions {
     const project = this.projectOf(session);
-    const proxyUrl = runnerForSession(this.deps, session.id).mcpProxyUrl();
+    const runner = runnerForSession(this.deps, session.id);
+    const proxyUrl = runner.mcpProxyUrl();
+    const home = runner === (this.deps.runners?.home() ?? this.deps.runner);
     const mcpServers: McpServerConfig[] = [];
     if (proxyUrl && mcpToken) {
       mcpServers.push({
@@ -375,16 +419,74 @@ export class SessionLauncher {
       autonomy: session.autonomy,
       planMode: session.planMode ?? false,
       resumeToken: session.resumeToken ?? undefined,
-      systemPrompt: codedenSystemPrompt(session, project),
+      systemPrompt: this.systemPrompt(session, project),
       // The orchestrator and PMs never write project code (§11.2). Agent sessions at the
       // `read_only` level carry it in `autonomy`, so it can change live.
       readOnly: session.role !== "agent",
+      // Where the machine's security rules cover worktrees only (the guard): is this one?
+      ...(this.deps.worktreesDir && session.cwd && isInside(session.cwd, this.deps.worktreesDir)
+        ? { inCodedenWorktree: true }
+        : {}),
       codedenHome: this.deps.home,
       artifactsDir: this.deps.artifacts?.sessionDir(session.id),
       mcpServers,
       ...(ownBranch(session) ? { ownBranch: ownBranch(session) } : {}),
       ...(project?.agentCiEnv === false ? { ciEnv: false } : {}),
+      ...(project?.allowUnenforcedProviders ? { allowUnenforcedProviders: true } : {}),
+      ...(home ? { env: { ...this.teamEnv(session), ...this.childRunsEnv(session) } } : {}),
+      ...(home && startsWithChrome(session, this.deps.repo) ? { chrome: true } : {}),
     });
+  }
+
+  /**
+   * `TEAM_FILE` for a session in a project with a Team. The Team is written to its file first,
+   * so a start or resume always sees the current Team; the container rewrites it on every change.
+   */
+  private teamEnv(session: Session): Record<string, string> {
+    if (!session.projectId || !this.deps.teamFiles) return {};
+    // Every project session gets the path, even before any Team is set, so a Team set later
+    // reaches it. A failed write (or an unreadable project) fails the start: never run without it.
+    return { [TEAM_FILE_ENV]: writeTeamFile(this.deps.teamFiles, session) };
+  }
+
+  /** `CHILD_RUNS_FILE`: where the session's tools log the worker runs they start (its folder made first). */
+  private childRunsEnv(session: Session): Record<string, string> {
+    if (!this.deps.childRunsDir) return {};
+    // Worker logging is optional: a folder that cannot be made is logged and the session starts without it.
+    try {
+      mkdirSync(this.deps.childRunsDir, { recursive: true, mode: 0o700 });
+      return { [CHILD_RUNS_FILE_ENV]: childRunsFile(this.deps.childRunsDir, session.id) };
+    } catch (error) {
+      this.deps.log?.(`session ${session.id}: no worker log: ${errorMessage(error)}`);
+      return {};
+    }
+  }
+
+  /**
+   * The CodeDen system prompt, plus the token saver note at the session's level (#602), for every
+   * session and provider. Providers with `capabilities.systemPrompt` keep it on resume and after
+   * compaction; the others get it wherever they take the system prompt (ACP agents: in front of
+   * the first prompt).
+   */
+  private systemPrompt(session: Session, project: Project | null): string {
+    const base = [
+      codedenSystemPrompt(session, project),
+      "Run long waits in the background and check their progress between short steps to keep the turn responsive to new messages.",
+    ].join("\n\n");
+    const settings = this.deps.tokenSaver?.();
+    if (!settings) return base;
+    const ancestors = new Set<string>();
+    let source = session;
+    let chosen = this.deps.repo?.find(source.id)?.startMeta?.tokenSaver;
+    while (chosen === undefined && source.parentSessionId && !ancestors.has(source.id)) {
+      ancestors.add(source.id);
+      const parent = this.deps.repo?.find(source.parentSessionId);
+      if (!parent || parent.session.projectId !== session.projectId) break;
+      source = parent.session;
+      chosen = parent.startMeta?.tokenSaver;
+    }
+    const note = tokenSaverNote(chosen ?? tokenSaverLevel(settings, source.role, source.projectId));
+    return note ? `${base}\n\n${note}` : base;
   }
 
   /** A fork's workspace plan while its worktree doesn't exist yet (`ForkStart`). */
@@ -536,4 +638,10 @@ function plain(cwd: string): PreparedWorkspace {
 
 function defaultMeta(workspace: WorkspaceRequest) {
   return { workspaceMode: workspace.mode, workspaceFallback: null, forced: null, queuedBehind: [] };
+}
+
+/** Whether `path` is `dir` or inside it, after resolving both. */
+function isInside(path: string, dir: string): boolean {
+  const rel = relative(resolve(dir), resolve(path));
+  return rel === "" || (!rel.startsWith("..") && !isAbsolute(rel));
 }

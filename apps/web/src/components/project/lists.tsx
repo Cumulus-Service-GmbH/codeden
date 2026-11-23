@@ -31,10 +31,10 @@ const emptyBox =
   "rounded-xl border border-dashed border-border px-4 py-6 text-center text-xs text-muted-foreground";
 
 /**
- * A project's archived agent sessions, most recently archived first, paged from the server
- * (the snapshot carries only the recent ones).
+ * Archived sessions, most recently archived first. A null project lists the orchestrator's
+ * archived conversations.
  */
-export function ArchivedSessionsList({ projectId }: { projectId: string }) {
+export function ArchivedSessionsList({ projectId }: { projectId: string | null }) {
   const { data, error, isPending, hasNextPage, isFetchingNextPage, fetchNextPage } =
     useArchivedSessions(projectId);
   const sessions = data?.pages.flatMap((p) => p.sessions) ?? [];
@@ -43,11 +43,7 @@ export function ArchivedSessionsList({ projectId }: { projectId: string }) {
     return <p className={emptyBox}>Couldn't load the archived sessions: {error.message}</p>;
   }
   if (sessions.length === 0) {
-    return (
-      <p className={emptyBox}>
-        No archived sessions. Archive one from its menu to tidy the sidebar.
-      </p>
-    );
+    return <p className={emptyBox}>No archived sessions.</p>;
   }
   return (
     <>
@@ -69,7 +65,7 @@ export function ArchivedSessionsList({ projectId }: { projectId: string }) {
   );
 }
 
-/** A project's agent sessions; archived ones get an Unarchive action. */
+/** Archived agent sessions get an Unarchive action. */
 export function SessionsList({ sessions }: { sessions: Session[] }) {
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
@@ -101,7 +97,7 @@ export function SessionsList({ sessions }: { sessions: Session[] }) {
           <span className="flex items-center gap-1.5 text-2xs text-muted-foreground">
             <ProviderMark provider={s.provider} /> {startedBy[s.startedBy.kind]}
           </span>
-          {s.archivedAt ? (
+          {s.archivedAt && s.role === "agent" ? (
             <UnarchiveButton session={s} />
           ) : (
             <span className="w-11 text-right text-2xs text-muted-foreground tabular-nums">
