@@ -51,6 +51,12 @@ function httpError(error: unknown): HttpErrorLike | null {
   return null;
 }
 
+/** A 4xx HTTP response establishes rejection, except when it reports a timeout. */
+export function isDefiniteGithubRejection(error: unknown): boolean {
+  const http = httpError(error);
+  return !!http?.response && http.status >= 400 && http.status < 500 && http.status !== 408;
+}
+
 const silentLog = { debug: () => {}, info: () => {}, warn: () => {}, error: () => {} };
 
 /**
@@ -88,6 +94,18 @@ export class GithubClient {
         }
         throw toGithubError(retryError);
       }
+    }
+  }
+
+  /** Send a write once, preserving the original HTTP status for outcome classification. */
+  async runOnce<T>(fn: (octokit: Octokit) => Promise<T>): Promise<T> {
+    const token = await this.deps.auth.token();
+    if (!token) throw new GithubNotConnectedError(this.deps.auth.lastReason() ?? undefined);
+    try {
+      return await fn(this.octokit(token));
+    } catch (error) {
+      if (httpError(error)?.status === 401) this.deps.auth.invalidate(token);
+      throw error;
     }
   }
 

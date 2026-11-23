@@ -1,6 +1,6 @@
-import { type GitHubApprovalTarget, MergeVerifyOwnerApproval } from "@codeden/contracts";
+import type { GitHubApprovalTarget, GitHubCommentOutcome } from "@codeden/contracts";
 import { ServiceError } from "../errors";
-import type { GithubClient } from "./client";
+import { type GithubClient, isDefiniteGithubRejection } from "./client";
 
 function repository(target: GitHubApprovalTarget) {
   const slash = target.repository.indexOf("/");
@@ -32,39 +32,39 @@ export function githubApprovalPort(client: GithubClient) {
         );
       }
     },
-    async post(target: GitHubApprovalTarget, cardId: string) {
+    async post(
+      target: GitHubApprovalTarget,
+      cardId: string,
+      ownerWords?: string,
+    ): Promise<GitHubCommentOutcome> {
       const repo = repository(target);
-      const decision = `Approved by the owner in CodeDen. Decision ${cardId}.`;
-      await client.run(async (octokit) => {
-        if (target.kind === "merge_verify") {
-          const record = MergeVerifyOwnerApproval.parse({ ...target, decisionId: cardId });
-          await octokit.rest.issues.createComment({
-            ...repo,
-            issue_number: target.pullNumber,
-            body: `<!-- codeden-owner-approval:v1\n${JSON.stringify(record)}\n-->`,
-          });
-          await octokit.rest.issues.createComment({
-            ...repo,
-            issue_number: target.pullNumber,
-            body: `${decision} Merge-verify head: ${target.headSha}.`,
-          });
-          await octokit.rest.pulls.createReview({
-            ...repo,
-            pull_number: target.pullNumber,
-            commit_id: target.headSha,
-            event: "APPROVE",
-            body: decision,
-          });
-        } else {
-          await octokit.rest.actions.reviewPendingDeploymentsForRun({
+      if (target.kind === "merge_verify") {
+        if (!ownerWords?.trim())
+          throw new ServiceError(403, "decision_refused", "Missing owner words");
+        try {
+          await client.runOnce((octokit) =>
+            octokit.rest.issues.createComment({
+              ...repo,
+              issue_number: target.pullNumber,
+              body: `OWNER-APPROVED via CodeDen orchestrator: ${target.headSha} ${new Date().toISOString()} "${ownerWords}"`,
+              request: { redirect: "error", signal: AbortSignal.timeout(30_000) },
+            }),
+          );
+        } catch (error) {
+          return isDefiniteGithubRejection(error) ? "failed" : "unknown";
+        }
+      } else {
+        await client.run((octokit) =>
+          octokit.rest.actions.reviewPendingDeploymentsForRun({
             ...repo,
             run_id: target.runId,
             environment_ids: target.environmentIds,
             state: "approved",
-            comment: decision,
-          });
-        }
-      });
+            comment: `Approved by the owner in CodeDen. Decision ${cardId}.`,
+          }),
+        );
+      }
+      return "posted";
     },
   };
 }

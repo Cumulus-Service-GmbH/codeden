@@ -34,14 +34,21 @@ it("shows a GitHub approval card in the inbox", async () => {
 
   fireEvent.click(await screen.findByRole("button", { name: /^Needs an answer/ }));
   const cards = within(await screen.findByRole("region", { name: "Approval cards" }));
-  expect(cards.getByRole("heading", { name: "Approve pull request review" })).toBeTruthy();
+  expect(cards.getByRole("heading", { name: "Approve pull request" })).toBeTruthy();
   expect(cards.getByText("acme/widgets")).toBeTruthy();
   expect(cards.getByText("Pull request #10")).toBeTruthy();
   expect(cards.getByText(headSha)).toBeTruthy();
   expect(approve).not.toHaveBeenCalled();
 
-  fireEvent.click(cards.getByRole("button", { name: "Approve" }));
-  await waitFor(() => expect(approve).toHaveBeenCalledExactlyOnceWith(card.id));
+  const button = cards.getByRole<HTMLButtonElement>("button", { name: "Approve" });
+  expect(button.disabled).toBe(true);
+  const ownerWords = '  Ship "this" head.  ';
+  fireEvent.change(cards.getByRole("textbox", { name: "Approval message for the pull request" }), {
+    target: { value: ownerWords },
+  });
+  expect(button.disabled).toBe(false);
+  fireEvent.click(button);
+  await waitFor(() => expect(approve).toHaveBeenCalledExactlyOnceWith(card.id, { ownerWords }));
 });
 
 it("shows a GitHub approval card in the checklist sidebar", async () => {
@@ -54,7 +61,7 @@ it("shows a GitHub approval card in the checklist sidebar", async () => {
 
   const sidebar = within(await screen.findByTestId("checklist-sidebar"));
   const cards = within(await sidebar.findByRole("region", { name: "Approval cards" }));
-  expect(cards.getByRole("heading", { name: "Approve pull request review" })).toBeTruthy();
+  expect(cards.getByRole("heading", { name: "Approve pull request" })).toBeTruthy();
   expect(cards.getByText("acme/widgets")).toBeTruthy();
   expect(cards.getByText("Pull request #10")).toBeTruthy();
   expect(cards.getByText(headSha)).toBeTruthy();

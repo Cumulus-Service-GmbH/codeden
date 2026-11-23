@@ -2,9 +2,12 @@ import { randomUUID } from "node:crypto";
 import {
   DecisionCard,
   DecisionConfirmation,
+  type DecisionConfirmationInput,
   type DecisionRequest,
   decisionTiers,
   type GitHubApprovalTarget,
+  type GitHubCommentOutcome,
+  type GitHubCommentResult,
   type NewEvent,
   type PlanApprovalStep,
   redactSecrets,
@@ -22,7 +25,11 @@ interface Actor {
 
 interface GithubApprovalPort {
   check(target: GitHubApprovalTarget): Promise<void>;
-  post(target: GitHubApprovalTarget, cardId: string): Promise<void>;
+  post(
+    target: GitHubApprovalTarget,
+    cardId: string,
+    ownerWords?: string,
+  ): Promise<GitHubCommentOutcome>;
 }
 
 function refuse(message: string): never {
@@ -69,7 +76,13 @@ export class DecisionApprovals {
   private cards() {
     const cards = new Map<
       string,
-      { card: DecisionCard; confirmed: boolean; claimed: boolean; step: number }
+      {
+        card: DecisionCard;
+        confirmed: boolean;
+        claimed: boolean;
+        step: number;
+        ownerWords?: string;
+      }
     >();
     for (const event of this.store.listTypes([
       "decision.raised",
@@ -77,19 +90,28 @@ export class DecisionApprovals {
       "decision.denied",
       "decision.step_consumed",
       "decision.github_claimed",
+      "decision.github_post_result",
       "decision.github_stale",
     ])) {
       if (event.type === "decision.raised") {
         const card = DecisionCard.parse(event.payload);
         cards.set(card.id, { card, confirmed: false, claimed: false, step: 0 });
       } else if (event.type === "decision.confirmed") {
-        const state = cards.get(DecisionConfirmation.parse(event.payload).id);
-        if (state) state.confirmed = true;
+        const { id, by, ownerWords } = DecisionConfirmation.parse(event.payload);
+        const state = cards.get(id);
+        if (state) {
+          state.confirmed = true;
+          if (by.role === "owner") state.ownerWords = ownerWords;
+        }
       } else if (event.type === "decision.github_stale" || event.type === "decision.denied") {
         cards.delete((event.payload as { id: string }).id);
       } else if (event.type === "decision.github_claimed") {
         const state = cards.get((event.payload as { id: string }).id);
         if (state) state.claimed = true;
+      } else if (event.type === "decision.github_post_result") {
+        const { id, outcome } = event.payload as { id: string; outcome: GitHubCommentOutcome };
+        const state = cards.get(id);
+        if (state && outcome === "failed") state.claimed = false;
       } else if (event.type === "decision.step_consumed") {
         const state = cards.get((event.payload as { id: string }).id);
         if (state) state.step++;
@@ -141,6 +163,7 @@ export class DecisionApprovals {
     id: string,
     actor: Actor,
     record?: (reader: ProjectionReader) => NewEvent[],
+    input?: DecisionConfirmationInput,
   ): Promise<void> {
     const state = this.cards().get(id);
     if (!state || state.confirmed) refuse("Approval card is unavailable or already used");
@@ -149,11 +172,21 @@ export class DecisionApprovals {
     if (card.request.kind === "github") {
       await this.checkGithub(id, card.request.target);
     }
+    const ownerWords =
+      by.role === "owner" &&
+      card.request.kind === "github" &&
+      card.request.target.kind === "merge_verify"
+        ? input?.ownerWords
+        : undefined;
     this.store.appendFrom((reader) => {
       const current = this.cards().get(id);
       if (!current || current.confirmed) refuse("Approval card is unavailable or already used");
       return [
-        { type: "decision.confirmed", sessionId: null, payload: { id, by } },
+        {
+          type: "decision.confirmed",
+          sessionId: null,
+          payload: { id, by, ...(ownerWords === undefined ? {} : { ownerWords }) },
+        },
         ...(record?.(reader) ?? []),
       ];
     });
@@ -199,29 +232,58 @@ export class DecisionApprovals {
     });
   }
 
-  async postGithub(id: string, actor: Actor): Promise<void> {
+  async postGithub(id: string, actor: Actor): Promise<GitHubCommentResult | undefined> {
     const state = this.cards().get(id);
     if (
       actor.role !== "pm" ||
       !actor.sessionId ||
       !state?.confirmed ||
-      state.claimed ||
       state.card.projectId !== actor.projectId ||
       state.card.request.kind !== "github"
     ) {
       refuse("An unused owner approval for this project's GitHub gate is required");
     }
     const { target } = state.card.request;
+    const { sessionId } = actor;
+    const comment = target.kind === "merge_verify";
+    const refuseUsed = () => {
+      if (comment) {
+        this.store.append([
+          {
+            type: "decision.github_refused",
+            sessionId,
+            payload: { id, mode: "comment", outcome: "failed" },
+          },
+        ]);
+      }
+      refuse("An unused owner approval for this project's GitHub gate is required");
+    };
+    if (state.claimed) refuseUsed();
+    if (comment && !state.ownerWords?.trim()) refuse("The card has no recorded owner words");
     await this.checkGithub(id, target);
-    this.store.appendFrom(() => {
+    // The claim stays used if the process stops before recording the outcome.
+    const claim = this.store.appendFrom(() => {
       const current = this.cards().get(id);
-      if (!current || current.claimed) refuse("Approval card is unavailable or already used");
-      return [{ type: "decision.github_claimed", sessionId: actor.sessionId, payload: { id } }];
+      if (!current) refuse("Approval card is unavailable");
+      return current.claimed
+        ? []
+        : [{ type: "decision.github_claimed", sessionId, payload: { id } }];
     });
-    await this.github.post(target, id);
+    if (!claim.length) refuseUsed();
+    const outcome = await this.github.post(target, id, state.ownerWords);
+    if (!comment) {
+      this.store.append([{ type: "decision.github_posted", sessionId, payload: { id } }]);
+      return;
+    }
+    const result = { mode: "comment", outcome } as const;
     this.store.append([
-      { type: "decision.github_posted", sessionId: actor.sessionId, payload: { id } },
+      {
+        type: outcome === "posted" ? "decision.github_posted" : "decision.github_post_result",
+        sessionId,
+        payload: { id, ...result },
+      },
     ]);
+    return result;
   }
 
   private async checkGithub(id: string, target: GitHubApprovalTarget): Promise<void> {

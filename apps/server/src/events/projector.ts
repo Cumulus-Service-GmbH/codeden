@@ -181,6 +181,8 @@ export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
     case "decision.github_claimed":
     case "decision.github_stale":
     case "decision.github_posted":
+    case "decision.github_post_result":
+    case "decision.github_refused":
     case "pty.exited":
       return [];
     default: {

@@ -1,4 +1,5 @@
 import {
+  DecisionConfirmationInput,
   DismissInboxRequest,
   type InboxCounts,
   inboxKindVisible,
@@ -38,12 +39,13 @@ export function inboxRoutes(s: AppServices) {
       return c.json(counts);
     })
     .get("/decision-cards", (c) => c.json(s.decisions.pending()))
-    .post("/decision-cards/:id/approve", async (c) => {
-      await s.decisions.confirm(c.req.param("id"), {
-        role: "owner",
-        projectId: null,
-        sessionId: null,
-      });
+    .post("/decision-cards/:id/approve", jsonBody(DecisionConfirmationInput), async (c) => {
+      await s.decisions.confirm(
+        c.req.param("id"),
+        { role: "owner", projectId: null, sessionId: null },
+        undefined,
+        c.req.valid("json"),
+      );
       return c.json({ approved: true });
     })
     .post("/dismiss", jsonBody(DismissInboxRequest), (c) => {

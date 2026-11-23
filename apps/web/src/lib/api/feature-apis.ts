@@ -19,6 +19,7 @@ import type {
   BrowserTabsResponse,
   BrowserViewportSize,
   DecisionCard,
+  DecisionConfirmationInput,
   DevServersResponse,
   GithubConnection,
   GithubIssueDetails,
@@ -228,7 +229,7 @@ export type GithubState = GithubListQuery["state"];
 /** `/api/github/connection`, `/api/projects/:id/github/*`, `/api/prs/:id`, session GitHub. */
 export interface GithubApi {
   decisionCards(): Promise<DecisionCard[]>;
-  approveDecisionCard(id: string): Promise<void>;
+  approveDecisionCard(id: string, input?: DecisionConfirmationInput): Promise<void>;
   connection(): Promise<GithubConnection>;
   issues(projectId: string, state?: GithubState): Promise<GithubIssuesResponse>;
   prs(projectId: string, state?: GithubState): Promise<GithubPrsResponse>;

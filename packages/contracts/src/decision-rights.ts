@@ -72,7 +72,25 @@ export const DecisionCard = z.strictObject({
 });
 export type DecisionCard = z.infer<typeof DecisionCard>;
 
-export const DecisionConfirmation = z.strictObject({
+/** The owner's text is published verbatim with a merge verification approval. */
+export const DecisionConfirmationInput = z.strictObject({
+  ownerWords: z
+    .string()
+    .refine((words) => words.trim().length > 0)
+    .optional(),
+});
+export type DecisionConfirmationInput = z.infer<typeof DecisionConfirmationInput>;
+
+/** The result of attempting to publish the owner approval comment. */
+export const GitHubCommentOutcome = z.enum(["posted", "failed", "unknown"]);
+export type GitHubCommentOutcome = z.infer<typeof GitHubCommentOutcome>;
+export const GitHubCommentResult = z.strictObject({
+  mode: z.literal("comment"),
+  outcome: GitHubCommentOutcome,
+});
+export type GitHubCommentResult = z.infer<typeof GitHubCommentResult>;
+
+export const DecisionConfirmation = DecisionConfirmationInput.extend({
   id: Id,
   by: z.discriminatedUnion("role", [
     z.strictObject({ role: z.literal("owner") }),

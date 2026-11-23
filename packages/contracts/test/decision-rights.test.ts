@@ -1,7 +1,39 @@
 import { describe, expect, it } from "vitest";
-import { GitHubApprovalTarget, MergeVerifyOwnerApproval, PlanApprovalSteps } from "../src";
+import {
+  DecisionConfirmation,
+  DecisionConfirmationInput,
+  EventEnvelope,
+  GitHubApprovalTarget,
+  GitHubCommentResult,
+  MergeVerifyOwnerApproval,
+  PlanApprovalSteps,
+} from "../src";
 
 describe("approval bindings", () => {
+  it("round-trips the owner words verbatim in the approval request and confirmation", () => {
+    const input = { ownerWords: '  Ship "this" head.  ' };
+    const payload = { id: "card", by: { role: "owner" }, ...input };
+    expect(DecisionConfirmationInput.parse(JSON.parse(JSON.stringify(input)))).toEqual(input);
+    expect(DecisionConfirmation.parse(JSON.parse(JSON.stringify(payload)))).toEqual(payload);
+    expect(DecisionConfirmationInput.safeParse({ ownerWords: "  " }).success).toBe(false);
+  });
+
+  it.each(["posted", "failed", "unknown"] as const)(
+    "round-trips a %s comment outcome",
+    (outcome) => {
+      const result = { mode: "comment", outcome };
+      const event = {
+        type: outcome === "posted" ? "decision.github_posted" : "decision.github_post_result",
+        payload: { id: "card", ...result },
+        sessionId: "pm",
+        seq: 1,
+        ts: "2026-11-10T14:23:45.678Z",
+      };
+      expect(GitHubCommentResult.parse(JSON.parse(JSON.stringify(result)))).toEqual(result);
+      expect(EventEnvelope.parse(JSON.parse(JSON.stringify(event)))).toEqual(event);
+    },
+  );
+
   it("round-trips an owner decision bound to an exact PR head", () => {
     const record = {
       kind: "merge_verify",

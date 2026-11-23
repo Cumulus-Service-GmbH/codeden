@@ -32,7 +32,7 @@ function setup() {
   databases.push(db);
   const store = new EventStore(db.db);
   const check = vi.fn(async () => {});
-  const post = vi.fn(async () => {});
+  const post = vi.fn(async () => "posted" as const);
   const service = () => new DecisionApprovals(store, { check, post });
   return { service, check, post, store };
 }
@@ -157,7 +157,11 @@ describe("post_github_approval", () => {
         env.store
           .listAfter(0)
           .filter(({ type }) =>
-            ["decision.github_posted", "decision.github_refused"].includes(type),
+            [
+              "decision.github_posted",
+              "decision.github_post_result",
+              "decision.github_refused",
+            ].includes(type),
           ),
     };
   }

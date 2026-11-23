@@ -1,6 +1,8 @@
 import type { DecisionCard } from "@codeden/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { useClient } from "@/lib/api";
 
 import { decisionCardsKey, useSnapshot } from "@/lib/queries";
@@ -8,8 +10,12 @@ import { decisionCardsKey, useSnapshot } from "@/lib/queries";
 function DecisionCardRow({ card }: { card: DecisionCard }) {
   const client = useClient();
   const queries = useQueryClient();
+  const ownerWordsId = useId();
+  const [ownerWords, setOwnerWords] = useState("");
+  const mergeVerify = card.request.kind === "github" && card.request.target.kind === "merge_verify";
   const approval = useMutation({
-    mutationFn: () => client.github.approveDecisionCard(card.id),
+    mutationFn: () =>
+      client.github.approveDecisionCard(card.id, mergeVerify ? { ownerWords } : undefined),
     onSuccess: () => queries.invalidateQueries({ queryKey: decisionCardsKey }),
   });
   const { data: snapshot } = useSnapshot();
@@ -25,7 +31,7 @@ function DecisionCardRow({ card }: { card: DecisionCard }) {
     <article className="space-y-2 rounded-md border border-border bg-card p-3 text-sm">
       <h3 className="font-medium">
         {target?.kind === "merge_verify"
-          ? "Approve pull request review"
+          ? "Approve pull request"
           : target?.kind === "environment_release"
             ? "Approve environment release"
             : "Approve plan"}
@@ -56,12 +62,26 @@ function DecisionCardRow({ card }: { card: DecisionCard }) {
           ))}
         </ol>
       )}
+      {mergeVerify && (
+        <label htmlFor={ownerWordsId} className="block space-y-1">
+          <span>Approval message for the pull request</span>
+          <Textarea
+            id={ownerWordsId}
+            value={ownerWords}
+            onChange={(event) => setOwnerWords(event.target.value)}
+          />
+        </label>
+      )}
       {approval.error && (
         <p role="alert" className="text-xs text-destructive">
           {approval.error.message}
         </p>
       )}
-      <Button size="sm" disabled={approval.isPending} onClick={() => approval.mutate()}>
+      <Button
+        size="sm"
+        disabled={approval.isPending || (mergeVerify && !ownerWords.trim())}
+        onClick={() => approval.mutate()}
+      >
         {approval.isPending ? "Recording approval…" : "Approve"}
       </Button>
     </article>

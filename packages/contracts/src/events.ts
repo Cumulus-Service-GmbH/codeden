@@ -18,6 +18,7 @@ import { Id, Timestamp } from "./common";
 import {
   DecisionCard,
   DecisionConfirmation,
+  GitHubCommentResult,
   OrchestratorDecisionDenial,
   PlanApprovalStep,
 } from "./decision-rights";
@@ -188,7 +189,12 @@ export const EventEnvelope = z.discriminatedUnion("type", [
   ),
   globalEvent("decision.github_claimed", z.object({ id: Id })),
   globalEvent("decision.github_stale", z.object({ id: Id })),
-  globalEvent("decision.github_posted", z.object({ id: Id })),
+  globalEvent(
+    "decision.github_posted",
+    z.union([GitHubCommentResult.extend({ id: Id }), z.strictObject({ id: Id })]),
+  ),
+  globalEvent("decision.github_post_result", GitHubCommentResult.extend({ id: Id })),
+  globalEvent("decision.github_refused", GitHubCommentResult.extend({ id: Id })),
   globalEvent("github.synced", GITHUB_EVENT_PAYLOADS["github.synced"]),
   globalEvent("issue.opened", GITHUB_EVENT_PAYLOADS["issue.opened"]),
   globalEvent("issue.labeled", GITHUB_EVENT_PAYLOADS["issue.labeled"]),

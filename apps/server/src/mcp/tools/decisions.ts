@@ -87,7 +87,10 @@ export const postGithubApproval = defineTool({
   scope: "project",
   input: z.strictObject({ cardId: Id }),
   handler: async ({ cardId }, { services, role, sessionId, projectId }) => {
-    await services.decisions.postGithub(cardId, { role, sessionId, projectId });
-    return { posted: true };
+    return (
+      (await services.decisions.postGithub(cardId, { role, sessionId, projectId })) ?? {
+        posted: true,
+      }
+    );
   },
 });
