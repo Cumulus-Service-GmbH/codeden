@@ -286,7 +286,8 @@ describe("Journal acks", () => {
     const dir = join(home, "runner");
     const journal = new Journal(dir);
     const count = 2000;
-    for (let i = 0; i < count; i++) journal.append(textDelta(`token ${i} `));
+    for (let i = 0; i < count; i++) journal.queueDelta(textDelta(`token ${i} `));
+    journal.flushDeltas();
     const appended = io.bytes;
     resetIo();
 
