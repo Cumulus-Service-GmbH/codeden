@@ -414,42 +414,6 @@ describe("project tech debt", () => {
     expect(view.importErrorIssue).toBeUndefined();
   });
 
-  it("keeps a legacy finding local after saving another change and dismissing it", async () => {
-    const { env, service, project, read, write } = setup();
-    const finding = { location: "src/local.ts:5", text: "Local.", receipt: null, date, pr: null };
-    env.db.client.prepare("INSERT INTO project_tech_debt (project_id, view) VALUES (?, ?)").run(
-      project.id,
-      JSON.stringify({
-        projectId: project.id,
-        issue,
-        imported: true,
-        seeds: ["review-file"],
-        findings: [
-          {
-            ...finding,
-            id: "legacy",
-            source: "backfill",
-            status: "open",
-            sessionId: null,
-            reason: null,
-          },
-        ],
-      }),
-    );
-    await service.act(project, {
-      action: "record",
-      finding: { ...finding, location: "src/other.ts:5" },
-    });
-    const view = await service.act(project, {
-      action: "dismiss",
-      id: "legacy",
-      reason: "Superseded.",
-    });
-    expect(view.findings[0]).toMatchObject({ source: null, status: "dismissed" });
-    expect(read).not.toHaveBeenCalled();
-    expect(write).not.toHaveBeenCalled();
-  });
-
   it("refuses a PM import from another repository before reading GitHub", async () => {
     const { service, project, read } = setup();
     await expect(

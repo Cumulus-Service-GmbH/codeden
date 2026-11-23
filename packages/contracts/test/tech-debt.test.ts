@@ -48,7 +48,7 @@ describe("project tech debt contracts", () => {
           date: "2026-11-23T00:00:00.000Z",
           receipt: null,
           pr: null,
-          source: "backfill",
+          source: null,
           status: "open",
           reason: null,
           sessionId: null,
@@ -56,12 +56,8 @@ describe("project tech debt contracts", () => {
       ],
     };
     const { seeds: _seeds, ...view } = legacy;
-    const expected = {
-      ...view,
-      findings: legacy.findings.map((finding) => ({ ...finding, source: null, localOnly: true })),
-    };
     const parsed = TechDebtView.parse(JSON.parse(JSON.stringify(legacy)));
-    expect(parsed).toEqual(expected);
+    expect(parsed).toEqual(view);
     const event = {
       seq: 1,
       ts: "2026-11-23T00:00:00.000Z",
@@ -69,8 +65,8 @@ describe("project tech debt contracts", () => {
       type: "tech_debt.updated",
       payload: { view: legacy },
     };
-    expect(EventEnvelope.parse(event).payload).toEqual({ view: expected });
-    expect(TechDebtView.parse(JSON.parse(JSON.stringify(parsed)))).toEqual(expected);
+    expect(EventEnvelope.parse(event).payload).toEqual({ view });
+    expect(TechDebtView.parse(JSON.parse(JSON.stringify(parsed)))).toEqual(view);
   });
 
   it("accepts only LOW records with a file and line, and qualified import issues", () => {

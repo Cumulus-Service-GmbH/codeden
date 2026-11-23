@@ -185,11 +185,7 @@ export class TechDebtService {
             throw badRequest("This finding is already closed");
           }
           const issue = view.issue;
-          if (
-            issue &&
-            !finding.localOnly &&
-            (!finding.source || finding.source.toLowerCase() === issue.toLowerCase())
-          ) {
+          if (issue && (!finding.source || finding.source.toLowerCase() === issue.toLowerCase())) {
             await this.serial(`issue:${issue.toLowerCase()}`, () =>
               syncDebtTick(this.issues, issue, finding),
             );
