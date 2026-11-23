@@ -73,11 +73,15 @@ export const DecisionCard = z.strictObject({
 export type DecisionCard = z.infer<typeof DecisionCard>;
 
 /** The owner's text is published verbatim with a merge verification approval. */
+export const OwnerApprovalWords = z
+  .string()
+  .regex(
+    /^[A-Za-z0-9 .,:;!?'()/-]{1,200}$/,
+    "Owner words must match the owner words allowlist (1–200 ASCII letters, digits, spaces or .,:;!?'()/-)",
+  );
+
 export const DecisionConfirmationInput = z.strictObject({
-  ownerWords: z
-    .string()
-    .refine((words) => words.trim().length > 0)
-    .optional(),
+  ownerWords: OwnerApprovalWords.optional(),
 });
 export type DecisionConfirmationInput = z.infer<typeof DecisionConfirmationInput>;
 

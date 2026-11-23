@@ -12,6 +12,7 @@ import {
   type PlanApprovalStep,
   redactSecrets,
 } from "@codeden/contracts";
+import { z } from "zod";
 import type { ProjectionReader } from "../events/reducer/types";
 import type { EventStore } from "../events/store";
 import { errorMessage, ServiceError } from "./errors";
@@ -22,6 +23,11 @@ interface Actor {
   projectId: string | null;
   sessionId: string | null;
 }
+
+// Read legacy owner words verbatim so the GitHub posting boundary can validate them.
+const StoredDecisionConfirmation = DecisionConfirmation.extend({
+  ownerWords: z.string().optional(),
+});
 
 interface GithubApprovalPort {
   check(target: GitHubApprovalTarget): Promise<void>;
@@ -97,7 +103,7 @@ export class DecisionApprovals {
         const card = DecisionCard.parse(event.payload);
         cards.set(card.id, { card, confirmed: false, claimed: false, step: 0 });
       } else if (event.type === "decision.confirmed") {
-        const { id, by, ownerWords } = DecisionConfirmation.parse(event.payload);
+        const { id, by, ownerWords } = StoredDecisionConfirmation.parse(event.payload);
         const state = cards.get(id);
         if (state) {
           state.confirmed = true;
@@ -259,7 +265,7 @@ export class DecisionApprovals {
       refuse("An unused owner approval for this project's GitHub gate is required");
     };
     if (state.claimed) refuseUsed();
-    if (comment && !state.ownerWords?.trim()) refuse("The card has no recorded owner words");
+    if (comment && state.ownerWords === undefined) refuse("The card has no recorded owner words");
     await this.checkGithub(id, target);
     // The claim stays used if the process stops before recording the outcome.
     const claim = this.store.appendFrom(() => {

@@ -1,4 +1,8 @@
-import type { GitHubApprovalTarget, GitHubCommentOutcome } from "@codeden/contracts";
+import {
+  type GitHubApprovalTarget,
+  type GitHubCommentOutcome,
+  OwnerApprovalWords,
+} from "@codeden/contracts";
 import { ServiceError } from "../errors";
 import { type GithubClient, isDefiniteGithubRejection } from "./client";
 
@@ -39,8 +43,16 @@ export function githubApprovalPort(client: GithubClient) {
     ): Promise<GitHubCommentOutcome> {
       const repo = repository(target);
       if (target.kind === "merge_verify") {
-        if (!ownerWords?.trim())
+        if (ownerWords === undefined)
           throw new ServiceError(403, "decision_refused", "Missing owner words");
+        const words = OwnerApprovalWords.safeParse(ownerWords);
+        if (!words.success) {
+          throw new ServiceError(
+            403,
+            "decision_refused",
+            words.error.issues[0]?.message ?? "Owner words must match the owner words allowlist",
+          );
+        }
         try {
           await client.runOnce((octokit) =>
             octokit.rest.issues.createComment({
