@@ -161,6 +161,26 @@ it("flushes a count-bounded stream batch and yields before appending its remaind
   journal.close();
 });
 
+it("discards a deferred batch if the journal changes owners before the flush", async () => {
+  const dir = join(home, "deferred-takeover");
+  let owned = true;
+  const onAppend = vi.fn();
+  const journal = new Journal(dir, { owned: () => owned, onAppend });
+  journal.append(draining("existing"));
+  const file = join(dir, "journal.jsonl");
+  const existing = readFileSync(file, "utf8");
+  onAppend.mockClear();
+
+  journal.queueDelta(textDelta("queued by the previous runner"));
+  owned = false;
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  journal.close();
+
+  expect(readFileSync(file, "utf8")).toBe(existing);
+  expect(journal.lastSeq).toBe(1);
+  expect(onAppend).not.toHaveBeenCalled();
+});
+
 const THREAD = "t-root";
 const TURN = "turn-1";
 const ITEM = "msg-1";

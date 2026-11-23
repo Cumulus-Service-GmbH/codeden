@@ -38,6 +38,11 @@ export interface JournalOptions {
   compactBytes?: number;
   /** While acks flow, persist (state, then compaction when due) at most this often. Default 250 ms. */
   persistMs?: number;
+  /**
+   * False once another runner owns these files (its lock names another runner, #615). Checked
+   * before every save, including the one at `close`: the journal then stops writing for good.
+   */
+  owned?: () => boolean;
   /** Publish each record only after its append succeeds. */
   onAppend?: (message: RunnerEventMessage) => void;
   /** Called once when a failed append requires recovery from disk. */
@@ -55,7 +60,8 @@ export interface JournalOptions {
  * ack costs no more than its append did. State always goes first, so `lastSeq` outlives the
  * events a compaction drops. `close` persists and compacts at once. After a crash the journal
  * may still hold events the server already acked; the server's `resume` acks them again and
- * they are not replayed.
+ * they are not replayed. Once another runner owns the files (`handOver`, or `owned` false before
+ * a save), this journal writes nothing more to them.
  */
 export class Journal {
   private readonly file: string;
@@ -63,6 +69,9 @@ export class Journal {
   private readonly compactEntries: number;
   private readonly compactBytes: number;
   private readonly persistMs: number;
+  private readonly owned: () => boolean;
+  /** Another runner took the files over: nothing is written to them any more. */
+  private handedOver = false;
   private state: JournalState;
   /** Every event in `journal.jsonl`, oldest first; those before `head` are acked. */
   private entries: Entry[] = [];
@@ -88,6 +97,7 @@ export class Journal {
     this.compactEntries = opts.compactEntries ?? 1000;
     this.compactBytes = opts.compactBytes ?? 1024 * 1024;
     this.persistMs = opts.persistMs ?? 250;
+    this.owned = opts.owned ?? (() => true);
     this.state = this.loadState();
     const { entries, torn } = this.loadEntries();
     this.entries = entries;
@@ -140,6 +150,7 @@ export class Journal {
 
   /** Coalesce streamed deltas from this event-loop turn into a bounded append. */
   queueDelta(event: RunnerEvent): void {
+    if (this.handedOver) return;
     if (this.appendError) throw this.appendError;
     const entry = this.prepare(event);
     if (
@@ -148,6 +159,7 @@ export class Journal {
     ) {
       this.flushDeltas();
     }
+    if (this.handedOver) return;
     if (entry.bytes > STREAM_BATCH_BYTES) {
       this.write([entry]);
       return;
@@ -187,6 +199,8 @@ export class Journal {
   }
 
   private write(batch: PendingEntry[]): void {
+    if (!this.handedOver && !this.owned()) this.handOver();
+    if (this.handedOver) return;
     const startedAt = performance.now();
     try {
       appendFileSync(this.file, batch.map((entry) => entry.line).join(""));
@@ -210,6 +224,7 @@ export class Journal {
 
   /** Acknowledge everything with `seq <= seq` (cumulative ack). */
   ack(seq: number): void {
+    if (this.handedOver) return;
     const upTo = Math.min(seq, this.state.lastSeq);
     if (upTo <= this.state.ackedSeq) return;
     this.state.ackedSeq = upTo;
@@ -231,6 +246,20 @@ export class Journal {
   close(): void {
     this.flushDeltas();
     this.persist(true);
+  }
+
+  /**
+   * Another runner owns `journal.jsonl` and `state.json` now (#615): cancel a pending save and
+   * never write to them again. Acks are ignored and `close` saves nothing.
+   */
+  handOver(): void {
+    this.handedOver = true;
+    if (this.flushTimer) clearImmediate(this.flushTimer);
+    this.flushTimer = undefined;
+    this.pending = [];
+    this.pendingBytes = 0;
+    if (this.persistTimer) clearTimeout(this.persistTimer);
+    this.persistTimer = undefined;
   }
 
   private advanceHead(ackedSeq: number): void {
@@ -268,6 +297,8 @@ export class Journal {
   private persist(all: boolean): void {
     if (this.persistTimer) clearTimeout(this.persistTimer);
     this.persistTimer = undefined;
+    if (!this.handedOver && !this.owned()) this.handOver();
+    if (this.handedOver) return;
     if (this.appendError) throw this.appendError;
     this.writeState(this.state);
     if (all ? this.head > 0 : this.compactDue()) this.compact();
