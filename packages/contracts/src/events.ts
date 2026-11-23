@@ -15,7 +15,12 @@ import {
 } from "./agent-events";
 import { ProjectChecklist } from "./checklist";
 import { Id, Timestamp } from "./common";
-import { DecisionCard, DecisionConfirmation, PlanApprovalStep } from "./decision-rights";
+import {
+  DecisionCard,
+  DecisionConfirmation,
+  OrchestratorDecisionDenial,
+  PlanApprovalStep,
+} from "./decision-rights";
 import { Artifact } from "./entities/artifact";
 import { Automation, AutomationRun } from "./entities/automation";
 import { InboxItem } from "./entities/inbox";
@@ -24,6 +29,7 @@ import { Session } from "./entities/session";
 import { FACTORY_EVENT_PAYLOADS } from "./factory-api";
 import { GITHUB_EVENT_PAYLOADS } from "./github";
 import { ConflictRecord, Notice } from "./orchestration";
+import { OrchestratorApprovalDecision } from "./orchestrator-approvals";
 import { SessionAutonomyChanged, SessionAutonomyOverridden } from "./pm-session-tools";
 import { PtyId } from "./runner/commands";
 import { RunnerDeletedPayload, RunnerRecordRef, RunnerRegisteredPayload } from "./runners";
@@ -172,6 +178,8 @@ export const EventEnvelope = z.discriminatedUnion("type", [
   // GitHub sync (§9); `sessionId` is the PR's linked session when there is one.
   globalEvent("decision.raised", DecisionCard),
   globalEvent("decision.confirmed", DecisionConfirmation),
+  globalEvent("decision.denied", OrchestratorDecisionDenial),
+  globalEvent("approval.decided_by_orchestrator", OrchestratorApprovalDecision),
   globalEvent("decision.step_consumed", z.object({ id: Id, step: PlanApprovalStep })),
   /** The outcome of a handler after its approved step was consumed. */
   globalEvent(

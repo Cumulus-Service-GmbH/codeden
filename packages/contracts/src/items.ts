@@ -190,9 +190,9 @@ export type ApprovalDecision = z.infer<typeof ApprovalDecision>;
 
 /**
  * Who decided an approval: the user, CodeDen's policy (an action the permission level allows,
- * or a denial in a session nobody is watching), or a PM.
+ * or a denial in a session nobody is watching), a PM, or the orchestrator.
  */
-export const ApprovalDecider = z.enum(["user", "policy", "pm"]);
+export const ApprovalDecider = z.enum(["user", "policy", "pm", "orchestrator"]);
 export type ApprovalDecider = z.infer<typeof ApprovalDecider>;
 
 /**
@@ -226,6 +226,13 @@ export const ApprovalRequestItem = z.object({
   title: z.string(),
   /** Why this was flagged as risky. */
   reason: z.string().optional(),
+  /** The marked hook ask text after HOOK_ASK_MARKER, verbatim. Only the provider adapter
+   * sets it. Guard cards are always owner-only. */
+  hookReason: z.string().optional(),
+  /** The provider saw a hook ask without marked reason text. */
+  hookAsk: z.literal(true).optional(),
+  /** The provider requires one-time approval by the owner. */
+  singleUse: z.literal(true).optional(),
   command: z.string().optional(),
   cwd: z.string().optional(),
   paths: z.array(z.string()).optional(),

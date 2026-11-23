@@ -77,5 +77,12 @@ export const DecisionConfirmation = z.strictObject({
   by: z.discriminatedUnion("role", [
     z.strictObject({ role: z.literal("owner") }),
     z.strictObject({ role: z.literal("pm"), sessionId: Id }),
+    z.strictObject({ role: z.literal("orchestrator"), sessionId: Id }),
   ]),
+});
+
+/** A PM plan card declined by the orchestrator. */
+export const OrchestratorDecisionDenial = z.strictObject({
+  id: Id,
+  by: z.strictObject({ role: z.literal("orchestrator"), sessionId: Id }),
 });

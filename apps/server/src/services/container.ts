@@ -41,6 +41,7 @@ import {
   OrchestrationService,
 } from "./orchestration/orchestration-service";
 import type { AutomationPort, GithubPort } from "./orchestration/ports";
+import { OrchestratorApprovals } from "./orchestrator-approvals";
 import { ProjectService } from "./projects/project-service";
 import { ProjectRedetector } from "./projects/redetector";
 import { ProviderHistoryService } from "./providers/history";
@@ -209,6 +210,7 @@ export interface AppServices {
   /** GitHub connection, issue/PR sync, PRs and evidence (§9). */
   github: GithubService;
   decisions: DecisionApprovals;
+  orchestratorApprovals: OrchestratorApprovals;
   /** Usage and cost reports, budgets and rate limits (§12.6). */
   usage: UsageService;
   /** Automations: definitions, scheduler, runs and issue triage (§10). */
@@ -524,6 +526,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     ...opts.unwatchedApprovals,
     log: opts.log,
   });
+  const decisions = new DecisionApprovals(opts.store, githubApprovalPort(github.client));
   const services: AppServices = {
     projectTeam,
     db: opts.db,
@@ -648,7 +651,14 @@ export function createServices(opts: ServicesOptions): AppServices {
       isRemote: (sessionId) => isRemoteRunner(runners.forSession(sessionId)),
     }),
     github,
-    decisions: new DecisionApprovals(opts.store, githubApprovalPort(github.client)),
+    decisions,
+    orchestratorApprovals: new OrchestratorApprovals(
+      inbox,
+      sessionRepo,
+      decisions,
+      sessions,
+      opts.store,
+    ),
     orchestration,
     automations,
     userHome,

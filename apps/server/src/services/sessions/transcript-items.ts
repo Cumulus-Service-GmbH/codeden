@@ -64,6 +64,7 @@ const DECIDERS: Readonly<Record<ApprovalDecider, string>> = {
   user: "the user",
   policy: "CodeDen's permission policy",
   pm: "the project manager",
+  orchestrator: "the orchestrator",
 };
 
 /** A list item whose continuation lines are indented under its first. */

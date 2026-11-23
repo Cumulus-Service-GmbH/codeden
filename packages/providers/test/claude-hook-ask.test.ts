@@ -144,6 +144,7 @@ describe("Claude settings hooks that require approval", () => {
       const card = await run.card();
       expect(card.options).toEqual(once);
       expect(card.reason).toMatch(/Review this call$/);
+      expect(card.hookReason).toBe(" Review this call");
       expect(card.reason).not.toContain("[approval-required]");
       await run.answer(card, "allow_once");
       await expect(first).resolves.toEqual({ behavior: "allow", updatedInput: input });
@@ -169,6 +170,7 @@ describe("Claude settings hooks that require approval", () => {
     const unmarkedCall = run.permission("Bash", echo);
     const next = await run.card(2);
     expect(next.options).toEqual(ordinary);
+    expect(next.hookReason).toBeUndefined();
     await run.answer(next, "deny");
     await expect(unmarkedCall).resolves.toMatchObject({ behavior: "deny" });
   });

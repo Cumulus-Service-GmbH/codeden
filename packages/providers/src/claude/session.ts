@@ -544,15 +544,18 @@ export class ClaudeSession implements ProviderSession {
     const markedReason = isMarkedHookAsk(decisionReason);
     if (markedReason || this.markedHookAsks.has(toolName)) {
       const gate = this.policy.gate(toolName, input, dir);
-      const hookReason =
-        (markedReason && decisionReason?.slice(HOOK_ASK_MARKER.length).trimStart()) ||
-        "A hook asked for approval";
+      const hookReason = markedReason
+        ? decisionReason?.slice(HOOK_ASK_MARKER.length).replace(/^ /, "")
+        : undefined;
+      const hookDisplay = hookReason?.trimStart() || "A hook asked for approval";
       const reason =
-        gate.ask && gate.reason !== hookReason ? `${gate.reason}. ${hookReason}` : hookReason;
+        gate.ask && gate.reason !== hookDisplay ? `${gate.reason}. ${hookDisplay}` : hookDisplay;
       const item = this.approvalItem(toolName, input, options, {
         action: gate.ask ? gate.action : defaultApprovalAction(toolName),
         cwd: dir ?? this.opts.cwd,
         reason,
+        ...(hookReason === undefined ? { hookAsk: true } : { hookReason }),
+        ...(gate.ask && gate.singleUse ? { singleUse: true } : {}),
         options: ["allow_once", "deny"],
       });
       const ctx = this.mapper.ctxForTool(options.toolUseID);
@@ -571,6 +574,8 @@ export class ClaudeSession implements ProviderSession {
         decisionReason && decisionReason !== gate.reason
           ? `${gate.reason}. ${decisionReason}`
           : gate.reason,
+      ...(gate.singleUse ? { singleUse: true } : {}),
+      ...(decisionReason && decisionReason !== gate.reason ? { hookAsk: true } : {}),
       options: gate.singleUse ? ["allow_once", "deny"] : ["allow_once", "allow_session", "deny"],
     });
     const review = gate.singleUse ? singleUseReview : undefined;
@@ -582,7 +587,10 @@ export class ClaudeSession implements ProviderSession {
     toolName: string,
     input: Record<string, unknown>,
     options: Parameters<CanUseTool>[2],
-    approval: Pick<ItemOf<"approval_request">, "action" | "reason" | "options"> & { cwd: string },
+    approval: Pick<
+      ItemOf<"approval_request">,
+      "action" | "reason" | "hookReason" | "hookAsk" | "singleUse" | "options"
+    > & { cwd: string },
   ): ItemOf<"approval_request"> {
     const { cwd, ...details } = approval;
     return {
