@@ -278,7 +278,7 @@ export function wireTeamRuns(
       save: (run) => saveTeamRun(store, run),
       hasWorkerSession: (id) => {
         const status = sessionRepo.find(id)?.session.status;
-        return status !== undefined && !["failed", "stopped", "completed"].includes(status);
+        return status === "starting" || status === "running" || status === "waiting";
       },
       prepareAssembler: async (run, coordinatorId) => {
         const project = services.projects.get(run.projectId);

@@ -579,6 +579,52 @@ it("returns a product refusal to the reviewer once, then raises an owner decisio
   expect(merge).not.toHaveBeenCalled();
 });
 
+it.each(["idle", "interrupted"] as const)(
+  "pauses a restored writing worker whose session is %s",
+  async (status) => {
+    const env = createGithubEnv();
+    try {
+      const { runs } = setup((run) => saveTeamRun(env.store, run));
+      const run = await runs.start(env.localProject.id, { checklistId: "approved" });
+      const worker = run.workers[0];
+      expect(worker).toMatchObject({ step: "writing", status: "running" });
+      if (!worker?.sessionId) throw new Error("Missing writing session");
+      env.addSession({ id: worker.sessionId, projectId: run.projectId, status });
+      const paths = ensureHome(join(env.dir, "home"));
+      createServices({
+        db: env.db.db,
+        store: env.store,
+        paths,
+        settings: new SettingsStore(paths.settings),
+        runner: {
+          isConnected: () => false,
+          runnerId: () => null,
+          providers: () => [],
+          mcpProxyUrl: () => null,
+          waitForConnection: async () => false,
+          request: async () => {
+            throw new Error("Runner is unavailable");
+          },
+        },
+        secrets: env.secrets,
+        imageEngines: new ImageEngineRegistry([]),
+        userHome: env.dir,
+      });
+
+      const [restored] = listTeamRuns(env.db.db);
+      const reason = "Team run interrupted by server restart";
+      expect(restored).toMatchObject({ status: "waiting", notice: reason });
+      expect(restored?.workers[0]).toMatchObject({
+        status: "waiting",
+        checkpoint: { blocker: reason },
+      });
+      expect(restored?.workers[0]).not.toHaveProperty("reconciling");
+    } finally {
+      await env.close();
+    }
+  },
+);
+
 it("reviews a worker whose original session completes after the server restarts", async () => {
   const { runs } = setup();
   const run = await runs.start("project", { checklistId: "approved" });
