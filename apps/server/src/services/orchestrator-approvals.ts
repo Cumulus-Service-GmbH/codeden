@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { lstatSync, realpathSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, parse, resolve } from "node:path";
 import {
   type DecideApprovalInput,
   type DecideApprovalOutput,
@@ -13,7 +15,7 @@ import {
 } from "@codeden/contracts";
 import type { ProjectionReader } from "../events/reducer/types";
 import type { EventStore } from "../events/store";
-import { classifyApproval } from "./classify-approval";
+import { classifyApproval, type ResolvedApprovalPaths, worktreeOffset } from "./classify-approval";
 import type { DecisionApprovals } from "./decision-approvals";
 import { conflict, forbidden, notFound } from "./errors";
 import { closedItem, type InboxService } from "./inbox-service";
@@ -29,6 +31,84 @@ interface Entry {
   approval: PendingApproval;
   request?: { sessionId: string; requestId: string };
   cardId?: string;
+}
+
+function approvalTargets({ paths, toolInput }: ItemOf<"approval_request">): Set<string> {
+  const targets = new Set(paths);
+  if (toolInput && typeof toolInput === "object" && !Array.isArray(toolInput)) {
+    for (const key of ["file_path", "path", "notebook_path"]) {
+      const value = toolInput[key];
+      if (typeof value === "string") targets.add(value);
+    }
+  }
+  return targets;
+}
+
+function ambiguousPath(path: string): boolean {
+  const segments = path.slice(parse(path).root.length).split(/[/\\]/);
+  return (
+    segments.includes("..") ||
+    (process.platform === "win32" &&
+      (/^[a-z]:(?![/\\])/i.test(path) ||
+        segments.some(
+          (segment) => segment.includes(":") || (segment !== "." && /[. ]$/.test(segment)),
+        )))
+  );
+}
+
+function realTarget(root: string, path: string): string | null {
+  const missing: string[] = [];
+  for (let current = path; ; current = dirname(current)) {
+    // lstat keeps dangling links visible. Only a missing entry allows walking up.
+    const info = lstatSync(current, { throwIfNoEntry: false });
+    if (info) {
+      const real = realpathSync.native(current);
+      if (missing.length && !lstatSync(real).isDirectory()) return null;
+      return join(real, ...missing.reverse());
+    }
+    if (current === root) return null;
+    missing.push(basename(current));
+  }
+}
+
+function resolveApprovalPaths(
+  item: ItemOf<"approval_request">,
+  worktree: string | null | undefined,
+): ResolvedApprovalPaths | null {
+  if (!worktree || !isAbsolute(worktree)) return null;
+  const root = resolve(worktree);
+  try {
+    const realRoot = realpathSync.native(root);
+    if (!lstatSync(realRoot).isDirectory()) return null;
+    const bases = [root];
+    if (item.cwd !== undefined) {
+      if (!isAbsolute(item.cwd) || ambiguousPath(item.cwd)) return null;
+      const cwd = resolve(item.cwd);
+      if (worktreeOffset(root, cwd) === undefined) return null;
+      const realCwd = realpathSync.native(cwd);
+      if (worktreeOffset(realRoot, realCwd) === undefined || !lstatSync(realCwd).isDirectory())
+        return null;
+      // A provider may interpret a relative target from its working directory.
+      if (cwd !== root) bases.push(cwd);
+    }
+
+    const targets: ResolvedApprovalPaths["targets"] = [];
+    if (item.action === "file_change") {
+      for (const requested of approvalTargets(item)) {
+        if (!requested || /^~(?:[/\\]|$)/.test(requested) || ambiguousPath(requested)) return null;
+        for (const base of isAbsolute(requested) ? [root] : bases) {
+          const path = resolve(base, requested);
+          if (!worktreeOffset(root, path)) return null;
+          const real = realTarget(root, path);
+          if (real === null) return null;
+          targets.push({ path, real });
+        }
+      }
+    }
+    return { root, realRoot, targets };
+  } catch {
+    return null;
+  }
 }
 
 function redactText(text: string | undefined): string | undefined {
@@ -149,7 +229,7 @@ export class OrchestratorApprovals {
     for (let steps = 0; steps < 20; steps++) {
       if (!sessionId || sessionId === orchestratorSessionId) return false;
       const found = this.repo.find(sessionId);
-      if (!found) return false;
+      if (!found || found.session.role === "orchestrator") return false;
       sessionId = found.session.parentSessionId;
       if (!sessionId) return true;
     }
@@ -224,13 +304,17 @@ export class OrchestratorApprovals {
     ) {
       return { approval: { ...this.context(inbox), kind, ...classifyApproval({ kind }) } };
     }
+    const resolvedPaths =
+      item.action === "file_change" || item.action === "plan"
+        ? resolveApprovalPaths(item, this.repo.find(sessionId)?.session.worktreePath)
+        : null;
     return {
       request: { sessionId, requestId },
       approval: {
         ...this.context(inbox),
         kind,
         ...this.toolDetails(item),
-        ...classifyApproval({ ...item, kind }),
+        ...classifyApproval({ ...item, kind, resolvedPaths }),
       },
     };
   }

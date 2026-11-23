@@ -1,4 +1,4 @@
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { sep } from "node:path";
 import {
   type DecisionCard,
   type ItemOf,
@@ -13,11 +13,20 @@ type Entry = Pick<PendingApproval, "kind"> &
   Partial<
     Pick<
       PendingApproval,
-      "action" | "command" | "cwd" | "hookReason" | "reason" | "toolInput" | "toolName" | "steps"
+      "action" | "command" | "hookReason" | "reason" | "toolInput" | "toolName" | "steps"
     >
   > &
-  ToolContext & { requestedBy?: DecisionCard["requestedBy"] };
+  ToolContext & {
+    requestedBy?: DecisionCard["requestedBy"];
+    resolvedPaths?: ResolvedApprovalPaths | null;
+  };
 type Classification = { delegable: true } | { delegable: false; ownerOnly: OwnerOnlyCategory };
+
+export interface ResolvedApprovalPaths {
+  root: string;
+  realRoot: string;
+  targets: { path: string; real: string }[];
+}
 
 // Security rule 3 keeps this list empty.
 export const DELEGABLE_GUARD_SCOPES: readonly string[] = [];
@@ -66,32 +75,29 @@ function ownerScope(scope: string): OwnerOnlyCategory | undefined {
   return undefined;
 }
 
-const restrictedSegment =
-  /^(?:\.git|\.claude|\.codex|\.ssh|\.azure|\.kube|\.aws|\.gnupg|\.config|\.env.*|\.npmrc|\.netrc|\.pgpass|\.zshrc|\.bashrc|\.profile|\.zprofile|\.bash_profile)$/is;
+/** Offset of an already resolved path, using exact casing even on case-insensitive platforms. */
+export function worktreeOffset(root: string, target: string): string | undefined {
+  if (target === root) return "";
+  const prefix = root.endsWith(sep) ? root : root + sep;
+  return target.startsWith(prefix) ? target.slice(prefix.length) : undefined;
+}
 
-function safeFileChange({ cwd, paths, toolInput }: Entry): boolean {
-  if (!cwd || !isAbsolute(cwd)) return false;
-  const targets = [...(paths ?? [])];
-  if (toolInput && typeof toolInput === "object" && !Array.isArray(toolInput)) {
-    for (const key of ["file_path", "path", "notebook_path"]) {
-      const value = toolInput[key];
-      if (typeof value === "string") targets.push(value);
-    }
-  }
+function safeTarget(root: string, path: string): boolean {
+  const offset = worktreeOffset(root, path);
   return (
-    targets.length > 0 &&
-    targets.every((path) => {
-      if (!path || /^~(?:[/\\]|$)/.test(path)) return false;
-      const target = resolve(cwd, path);
-      const offset = relative(cwd, target);
+    !!offset &&
+    offset.split(sep).every((segment) => {
       return (
-        offset !== "" &&
-        offset !== ".." &&
-        !offset.startsWith(`..${sep}`) &&
-        !isAbsolute(offset) &&
-        !`${path}/${target}`.split(/[/\\]/).some((segment) => restrictedSegment.test(segment))
+        !segment.startsWith(".") && segment.replace(/[. ]+$/, "").toLowerCase() !== "opencode.json"
       );
     })
+  );
+}
+
+function safeFileChange({ root, realRoot, targets }: ResolvedApprovalPaths): boolean {
+  return (
+    targets.length > 0 &&
+    targets.every(({ path, real }) => safeTarget(root, path) && safeTarget(realRoot, real))
   );
 }
 
@@ -124,7 +130,8 @@ export function classifyApproval(entry: Entry): Classification {
   if (category) return ownerOnly(category);
   if (
     !cleanAction ||
-    (entry.action === "file_change" && !safeFileChange(entry)) ||
+    !entry.resolvedPaths ||
+    (entry.action === "file_change" && !safeFileChange(entry.resolvedPaths)) ||
     entry.hookAsk ||
     text.includes("[codeden-card") ||
     entry.reason?.includes("[codeden-card") ||
