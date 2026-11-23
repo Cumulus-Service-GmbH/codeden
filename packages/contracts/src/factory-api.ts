@@ -30,7 +30,7 @@ import {
   SpotCheck,
   SpotCheckPercent,
 } from "./factory-spot-checks";
-import { Team } from "./team";
+import { AutonomyPolicy, Team } from "./team";
 
 /**
  * The factory loop of software-factory and dark-factory projects (§10.1): work items, merge
@@ -329,8 +329,8 @@ export const LEGACY_SIZE_LIMITS = { maxChangedLines: 800, maxChangedFiles: 40 } 
 /**
  * What a review does when the provider chosen for it is unavailable (not installed, not signed
  * in, at its usage limit, or it just failed to run):
- * - `builder`: review on the builder's provider and model, in a fresh session;
- * - `any`: review on any available provider;
+ * - `builder`: legacy value handled as `wait`;
+ * - `any`: review on another available model vendor;
  * - `wait`: wait until the chosen provider is available again.
  * With no provider available at all, every choice waits.
  */
@@ -340,6 +340,7 @@ export type ReviewerFallback = z.infer<typeof ReviewerFallback>;
 /** Knobs of the loop beyond the required limits; all have safe defaults. */
 export const FactoryTuning = z.object({
   team: Team.default([]),
+  autonomyPolicy: AutonomyPolicy.default({}),
   /** UTF-8 byte cap for PM-facing summaries. Null leaves them uncapped. */
   resultSummaryBytes: z.int().min(256).max(65536).nullable().default(null),
   /**

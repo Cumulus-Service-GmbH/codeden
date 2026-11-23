@@ -1,4 +1,9 @@
-import type { AutonomyLevel, Session, UpdateSessionRequest } from "@codeden/contracts";
+import type {
+  AutonomyLevel,
+  Session,
+  SessionAutonomyChanged,
+  UpdateSessionRequest,
+} from "@codeden/contracts";
 import { type RunnerPort, runnerErrorCode } from "../runner-port";
 import { withLoopSetting } from "./checks";
 import type { SessionRepo, StoredStartMeta } from "./repo";
@@ -54,22 +59,27 @@ export async function updateSession(
   runner: RunnerPort,
   id: string,
   req: UpdateSessionRequest,
+  audit?: Pick<SessionAutonomyChanged, "changedBy" | "reason">,
 ): Promise<Session> {
   const change: PendingConfig = {};
   if (req.model !== undefined) change.model = req.model;
   if (req.effort !== undefined) change.effort = req.effort;
-  const session = repo.update(id, (s) => ({
-    ...s,
-    ...(change.model !== undefined ? { model: change.model } : {}),
-    ...(change.effort !== undefined ? { effort: change.effort } : {}),
-    ...(req.autonomy !== undefined ? { autonomy: req.autonomy } : {}),
-    ...(req.planMode !== undefined ? { planMode: req.planMode } : {}),
-    // The loop setting only: the frozen commands never change (§9 Project checks).
-    ...((req.untilChecksPass !== undefined || req.checkRounds !== undefined) && s.checks
-      ? { checks: withLoopSetting(s.checks, req) }
-      : {}),
-    ...(req.title !== undefined ? { title: req.title } : {}),
-  }));
+  const session = repo.update(
+    id,
+    (s) => ({
+      ...s,
+      ...(change.model !== undefined ? { model: change.model } : {}),
+      ...(change.effort !== undefined ? { effort: change.effort } : {}),
+      ...(req.autonomy !== undefined ? { autonomy: req.autonomy } : {}),
+      ...(req.planMode !== undefined ? { planMode: req.planMode } : {}),
+      // The loop setting only: the frozen commands never change (§9 Project checks).
+      ...((req.untilChecksPass !== undefined || req.checkRounds !== undefined) && s.checks
+        ? { checks: withLoopSetting(s.checks, req) }
+        : {}),
+      ...(req.title !== undefined ? { title: req.title } : {}),
+    }),
+    audit,
+  );
   if (Object.keys(change).length > 0) setPending(repo, id, change);
   const live: LiveConfig = {};
   if (req.autonomy !== undefined) live.autonomy = session.autonomy;

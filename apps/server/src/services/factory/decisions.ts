@@ -23,6 +23,7 @@ import { ownershipAfterRetry } from "./rebuild";
 import { approveRecheck, recheckOf, recheckSentFor, withoutRecheck } from "./recheck";
 import { resumeReview } from "./rereview";
 import { environmentBlocked, environmentOnly, withoutStrikes } from "./review-environment";
+import { reviewVendorIsDistinct } from "./reviewer-choice";
 
 /**
  * Decisions on work items (§10.1): letting an untrusted issue in, correcting a type, retrying
@@ -239,6 +240,15 @@ export function submitReview(
     ? ctx.store.items(session.projectId).find((i) => i.reviewerSessionId === session.id)
     : undefined;
   if (!item) throw badRequest("You are not reviewing a factory pull request", "not_a_reviewer");
+  const distinctVendor = reviewVendorIsDistinct(ctx, item, session.provider);
+  if (!distinctVendor) {
+    throw badRequest(
+      distinctVendor === undefined
+        ? "The reviewer's or author's model vendor is unknown. Try again when both are available."
+        : "A review requires a verified distinct model vendor.",
+      "review_model_vendor",
+    );
+  }
   // Security concerns block the merge, so an approval listing one contradicts itself (#339).
   // Refused before anything is kept, lessons included: the reviewer submits again.
   if (verdict.verdict === "approve" && verdict.security.concerns.length > 0) {

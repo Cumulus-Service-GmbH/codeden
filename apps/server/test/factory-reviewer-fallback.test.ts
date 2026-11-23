@@ -33,18 +33,13 @@ async function build(tuning: FactoryTuningPatch = {}, before: () => void = () =>
   return created.id;
 }
 
-const reviewerSession = (id: string) => env.repo.get(item(id).reviewerSessionId as string);
-
 describe("factory reviewer availability and fallback", () => {
-  it("reviews Claude's work on Claude, with a note, while Codex is at its usage limit", async () => {
+  it("waits with a note while the distinct reviewer is at its usage limit", async () => {
     env = createFactoryEnv();
     const id = await build({}, () => env.rateLimits.push(limited("codex", inHours(30))));
     expect(item(id).builderProvider).toBe("claude");
-    expect(item(id).reviewerProvider).toBe("claude");
-    expect(item(id).reviewerNote).toMatch(
-      /^codex is at its usage limit until \w{3} \d{2}:\d{2}; the review ran on the builder's provider/,
-    );
-    expect(reviewerSession(id).provider).toBe("claude");
+    expect(item(id).reviewerSessionId).toBeNull();
+    expect(item(id).note).toMatch(/^Waiting: codex is at its usage limit until/);
   });
 
   it("skips a Codex that isn't signed in", async () => {
@@ -52,13 +47,13 @@ describe("factory reviewer availability and fallback", () => {
     env.detected.codex = { loggedIn: false };
     const id = await build();
     expect(env.detections).toBeGreaterThan(0);
-    expect(item(id).reviewerProvider).toBe("claude");
-    expect(item(id).reviewerNote).toMatch(/^codex is not signed in; /);
+    expect(item(id).reviewerSessionId).toBeNull();
+    expect(item(id).note).toMatch(/^Waiting: codex is not signed in/);
   });
 
-  it("restarts a reviewer that hit its usage limit on Claude, without failing the item", async () => {
-    env = createFactoryEnv();
-    const id = await build();
+  it("restarts a reviewer that hit its usage limit on a different vendor, without failing the item", async () => {
+    env = createFactoryEnv({ providers: ["claude", "codex", "gemini"] });
+    const id = await build({ reviewerFallback: "any" });
     const first = item(id).reviewerSessionId as string;
     expect(item(id).reviewerProvider).toBe("codex");
     // The Codex reviewer's turn fails on the weekly limit.
@@ -82,8 +77,7 @@ describe("factory reviewer availability and fallback", () => {
     const current = item(id);
     expect(current.stage).toBe("verifying");
     expect(current.reviewerSessionId).not.toBe(first);
-    expect(current.reviewerProvider).toBe("claude");
-    expect(current.reviewerNote).toMatch(/codex is (at its usage limit|failing to run reviews)/);
+    expect(current.reviewerProvider).toBe("gemini");
     // Neither a revise round nor the reviewer's restarts were used.
     expect(current.attempts).toBe(0);
     expect(current.nudges.reviewer_failed_1).toBeUndefined();
@@ -100,14 +94,14 @@ describe("factory reviewer availability and fallback", () => {
     const id = await build({
       builderProvider: "codex",
       builderModel: "gpt-5.5",
-      reviewerProvider: "codex",
-      reviewerModel: "gpt-5.5-mini",
+      reviewerProvider: "claude",
+      reviewerModel: "claude-opus-5-5",
     });
     const builderStart = env.starts.find((s) => s.workKey === "issue:3");
     expect(builderStart).toMatchObject({ provider: "codex", model: "gpt-5.5" });
     const reviewer = env.starts.at(-1);
     expect(reviewer?.workKey).toMatch(/^factory:review:/);
-    expect(reviewer).toMatchObject({ provider: "codex", model: "gpt-5.5-mini" });
+    expect(reviewer).toMatchObject({ provider: "claude", model: "claude-opus-5-5" });
     expect(item(id).reviewerNote).toBeNull();
   });
 

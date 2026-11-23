@@ -140,7 +140,7 @@ describe("a replacement reviewer after its predecessor was nudged (#247)", () =>
   });
 
   it("is nudged itself when the nudged reviewer's provider hit its usage limit", async () => {
-    env = createFactoryEnv();
+    env = createFactoryEnv({ providers: ["claude", "codex", "gemini"] });
     const { id, first } = await reviewing();
     await endsTurnAndIsNudged(first);
     hitsUsageLimit(first);

@@ -19,7 +19,10 @@ const settle = () => new Promise((r) => setImmediate(r));
 
 /** A feature under review: Claude built it, Codex is at its weekly limit. */
 async function underReview(): Promise<string> {
-  env = createFactoryEnv({ providers: ["claude", "codex", "opencode"] });
+  env = createFactoryEnv({
+    providers: ["claude", "codex", "opencode", "gemini"],
+    modelVendors: { opencode: "openai" },
+  });
   enable("software_factory");
   const created = backlogItem();
   await tick();
@@ -66,7 +69,7 @@ describe("factory reviewer on a provider whose sign-in expired", () => {
     await tick();
     const current = item(id);
     expect(current.reviewerSessionId).not.toBe(first);
-    // A provider failure, not a dead reviewer: OpenCode is skipped, the review moves to Claude,
+    // A provider failure, not a dead reviewer: OpenCode is skipped, the review moves to Gemini,
     // and neither a reviewer restart nor a revise round is used.
     expect({
       note,
@@ -78,7 +81,7 @@ describe("factory reviewer on a provider whose sign-in expired", () => {
     }).toEqual({
       note: expect.stringMatching(/^The reviewer stopped: opencode is not signed in/),
       stage: "verifying",
-      reviewerProvider: "claude",
+      reviewerProvider: "gemini",
       skipsOpenCode: true,
       reviewerFailed: null,
       attempts: 0,
@@ -90,16 +93,16 @@ describe("factory reviewer on a provider whose sign-in expired", () => {
     openCodeTurnFails(item(id).reviewerSessionId as string, "Request failed: 401");
     await tick();
     await tick();
-    expect(item(id).reviewerProvider).toBe("claude");
+    expect(item(id).reviewerProvider).toBe("gemini");
 
-    // The Claude reviewer dies for another reason: its replacement still avoids OpenCode.
+    // The Gemini reviewer dies for another reason: its replacement still avoids OpenCode.
     await env.setStatus(item(id).reviewerSessionId as string, "failed");
     await tick();
     await tick();
     expect(item(id).nudges.reviewer_failed_1).toBeDefined();
-    expect(item(id).reviewerProvider).toBe("claude");
+    expect(item(id).reviewerProvider).toBe("gemini");
 
-    // An expired login doesn't fix itself on a timer: well past the half hour, still Claude.
+    // An expired login doesn't fix itself on a timer: well past the half hour, still Gemini.
     later(31 * 60_000);
     await tick();
     await settle();
@@ -107,7 +110,7 @@ describe("factory reviewer on a provider whose sign-in expired", () => {
     await tick();
     await tick();
     expect(item(id).nudges.reviewer_failed_2).toBeDefined();
-    expect(item(id).reviewerProvider).toBe("claude");
+    expect(item(id).reviewerProvider).toBe("gemini");
 
     // Detection reports a different login (the user signed in again): OpenCode is tried again.
     env.detected.opencode = { account: "openai" };

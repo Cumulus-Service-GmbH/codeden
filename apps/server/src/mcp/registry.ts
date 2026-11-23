@@ -53,7 +53,7 @@ export class ToolRegistry {
   /** Tools visible to a role (and caller, when known), in registration order. */
   forRole(role: McpTokenClaims["role"], caller?: ToolAvailabilityContext): AnyServerTool[] {
     return [...this.byName.values()].filter(
-      (t) => t.roles.includes(role) && (t.isAvailable?.(this.services, caller) ?? true),
+      (t) => t.roles.includes(role) && (t.isAvailable?.(this.services, caller, role) ?? true),
     );
   }
 

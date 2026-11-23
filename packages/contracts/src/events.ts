@@ -23,6 +23,7 @@ import { Session } from "./entities/session";
 import { FACTORY_EVENT_PAYLOADS } from "./factory-api";
 import { GITHUB_EVENT_PAYLOADS } from "./github";
 import { ConflictRecord, Notice } from "./orchestration";
+import { SessionAutonomyChanged } from "./pm-session-tools";
 import { PtyId } from "./runner/commands";
 import { RunnerDeletedPayload, RunnerRecordRef, RunnerRegisteredPayload } from "./runners";
 import { Settings } from "./settings";
@@ -90,6 +91,7 @@ export const EventEnvelope = z.discriminatedUnion("type", [
   globalEvent("session.created", z.object({ session: Session })),
   /** Any change to a session row, including status transitions. */
   globalEvent("session.updated", z.object({ session: Session })),
+  globalEvent("session.autonomy_changed", SessionAutonomyChanged),
   globalEvent("inbox.created", z.object({ item: InboxItem })),
   globalEvent("inbox.updated", z.object({ item: InboxItem })),
   globalEvent("automation.saved", z.object({ automation: Automation })),

@@ -318,8 +318,9 @@ function pinPlan(text?: string) {
 it("refuses a factory start outside the pinned plan", async () => {
   const factory = new FactorySessions({
     sessions: sessionService(),
+    isKilled: () => false,
     repo: env.repo,
-  } as FactorySessionsDeps);
+  } as unknown as FactorySessionsDeps);
   const launch = () =>
     factory.startScout(env.project.id, "Find work", { provider: "auto", model: null });
   const first = await launch();

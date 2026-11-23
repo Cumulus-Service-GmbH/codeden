@@ -250,6 +250,7 @@ describe("SessionLauncher.sessionOptions", () => {
   it("starts and resumes a session in plan mode only while it is planning", () => {
     const launcher = new SessionLauncher({
       runner: { mcpProxyUrl: () => null },
+      repo: { find: () => undefined },
       // No project: the system prompt is written without one.
       projects: {
         get: () => {
@@ -266,6 +267,7 @@ describe("SessionLauncher.sessionOptions", () => {
     const home = join(tmpdir(), "codeden-home");
     const launcher = new SessionLauncher({
       runner: { mcpProxyUrl: () => null },
+      repo: { find: () => undefined },
       projects: { get: () => sampleProjectGone() },
       home,
     } as unknown as LauncherDeps);
@@ -275,6 +277,7 @@ describe("SessionLauncher.sessionOptions", () => {
     const paths = homePaths(home);
     const withArtifacts = new SessionLauncher({
       runner: { mcpProxyUrl: () => null },
+      repo: { find: () => undefined },
       projects: { get: () => sampleProjectGone() },
       home,
       artifacts: new ArtifactService(undefined as never, undefined as never, paths.artifacts),

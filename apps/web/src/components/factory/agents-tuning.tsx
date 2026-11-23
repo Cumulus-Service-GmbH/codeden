@@ -28,15 +28,14 @@ export type AgentsDraft = Pick<
 >;
 
 const FALLBACKS: Array<{ id: ReviewerFallback; label: string }> = [
-  { id: "builder", label: "Review on the builder's provider and model" },
-  { id: "any", label: "Review on any available provider" },
+  { id: "any", label: "Review on another model vendor" },
   { id: "wait", label: "Wait until it is available again" },
 ];
 
 /** What a review does while its chosen provider can't run, by `reviewerFallback`. */
 const REVIEWS_MEANWHILE: Record<ReviewerFallback, string> = {
-  builder: "reviews run on the builder's provider and model",
-  any: "reviews run on any available provider",
+  builder: "reviews wait",
+  any: "reviews run on another model vendor",
   wait: "reviews wait",
 };
 
@@ -110,12 +109,12 @@ export function AgentsTuning({
       <Field
         label="When the reviewer's provider is unavailable"
         htmlFor={`${id}-fb`}
-        hint="Unavailable means not installed, not signed in, at its usage limit, or failing to start. With no provider available at all, the review waits."
+        hint="Unavailable means not installed, not signed in, at its usage limit, or failing to start. The review requires a provider with a known model vendor different from the author’s."
       >
         <select
           id={`${id}-fb`}
           className={SELECT}
-          value={value.reviewerFallback}
+          value={value.reviewerFallback === "builder" ? "wait" : value.reviewerFallback}
           onChange={(e) =>
             onChange({ ...value, reviewerFallback: e.target.value as ReviewerFallback })
           }

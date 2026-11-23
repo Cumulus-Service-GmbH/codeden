@@ -168,6 +168,10 @@ export class FactorySessions {
     return this.deps.runner.providers().find((p) => p.id === provider)?.models ?? [];
   }
 
+  modelVendor(id: string): string | undefined {
+    return this.deps.runner.providers().find((p) => p.id === id)?.capabilities?.modelVendor;
+  }
+
   /** The provider's name for notes ("Codex"), from the runner's provider list. */
   displayName(id: string): string {
     return this.deps.runner.providers().find((p) => p.id === id)?.displayName ?? id;

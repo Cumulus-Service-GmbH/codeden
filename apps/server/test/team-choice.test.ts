@@ -33,12 +33,16 @@ beforeEach(() => {
 });
 afterEach(() => env.close());
 
-function reviewer(tuning: FactoryTuning, available = ["codex", "claude"]) {
+const vendor = (provider: string) =>
+  ({ claude: "anthropic", claudeAlias: "anthropic", codex: "openai", gemini: "google" })[provider];
+
+function reviewer(tuning: FactoryTuning, available = ["codex", "claude"], author = "codex") {
   return pickReviewer({
     tuning,
     available,
     unavailable: [],
-    author: { provider: "codex", model: "author" },
+    vendor,
+    author: { provider: author },
   });
 }
 
@@ -50,7 +54,7 @@ it("keeps legacy choices with an empty team", () => {
     provider: "codex",
     model: "scout",
   });
-  const review = reviewer(tuning);
+  const review = reviewer(tuning, undefined, "claude");
   expect(review).toMatchObject({ provider: "codex", model: "review" });
   expect(review).not.toHaveProperty("effort");
 });
@@ -78,11 +82,7 @@ it("uses the Team choices and replaces a scout with a different pinned effort", 
   ).toBe(true);
   expect(reviewer(tuning)).toMatchObject({ provider: "claude", model: "reviewer", effort: "high" });
   const fallback = reviewer(tuning, ["codex"]);
-  expect(fallback).toMatchObject({
-    provider: "codex",
-    model: "author",
-  });
-  expect(fallback).not.toHaveProperty("effort");
+  expect(fallback).toMatchObject({ wait: true });
 });
 
 it("drops a pinned model and effort when its provider is unavailable", async () => {
@@ -161,14 +161,30 @@ it("keeps a project's wait policy and never claims a cross-provider review for a
     tuning: FactoryTuning.parse({ ...legacy, reviewerFallback: "any", team }),
     available: ["codex", "gemini"],
     unavailable: [],
-    author: { provider: null, model: null },
+    vendor,
+    author: { provider: null },
   });
-  expect(unknownAuthor).toMatchObject({ wait: false, crossProvider: false });
-  expect(unknownAuthor).not.toMatchObject({ model: "f" });
-  // A project that falls back to the builder keeps that over the Team's fallback.
+  expect(unknownAuthor).toMatchObject({ wait: true, note: expect.stringContaining("unknown") });
   const builder = FactoryTuning.parse({ ...legacy, reviewerFallback: "builder", team });
-  expect(reviewer(builder, ["codex", "gemini"])).toMatchObject({
-    provider: "codex",
-    crossProvider: false,
+  expect(reviewer(builder, ["codex", "gemini"])).toMatchObject({ wait: true });
+});
+
+it("routes a Claude author to Codex even when the Team primary shares its vendor", () => {
+  const input = {
+    author: { provider: "claude" },
+    tuning: {
+      team: Team.parse([{ role: "reviewer", provider: "claude", model: "opus", effort: "high" }]),
+      reviewerProvider: "auto" as const,
+      reviewerModel: null,
+      reviewerFallback: "wait" as const,
+    },
+    available: ["claude", "codex"],
+    unavailable: [],
+    vendor,
+  };
+  expect(pickReviewer(input)).toMatchObject({ wait: false, provider: "codex" });
+  expect(pickReviewer({ ...input, available: ["claudeAlias"] })).toMatchObject({ wait: true });
+  expect(pickReviewer({ ...input, author: { provider: "unknown" } })).toMatchObject({
+    wait: true,
   });
 });

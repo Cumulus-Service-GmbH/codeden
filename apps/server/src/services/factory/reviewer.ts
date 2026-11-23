@@ -29,7 +29,13 @@ import {
   withoutRecheckRequest,
 } from "./recheck";
 import { CLEAN_REVIEW, environmentStrikes, replaceBlockedReviewer } from "./review-environment";
-import { pickReviewer, type ReviewerChoice, type ReviewerWait } from "./reviewer-choice";
+import {
+  pickReviewer,
+  type ReviewerChoice,
+  type ReviewerWait,
+  reviewAuthorProvider,
+  reviewVendorIsDistinct,
+} from "./reviewer-choice";
 import { isBusy } from "./sessions";
 import { claimSlot, reviewTier } from "./slots";
 import { teamTuning } from "./team-role";
@@ -75,16 +81,13 @@ function chooseReviewer(
   item: FactoryItem,
 ): ReviewerChoice | ReviewerWait {
   const skipped = skippedProviders(item, ctx.now());
-  const builder = item.builderSessionId ? ctx.repo.find(item.builderSessionId)?.session : undefined;
   return pickReviewer({
-    author: {
-      provider: item.builderProvider ?? builder?.provider ?? null,
-      model: builder?.model ?? null,
-    },
+    author: { provider: reviewAuthorProvider(ctx, item) },
     tuning: teamTuning(ctx, loop.tuning),
     available: ctx.sessions.providers().filter((p) => !skipped.some((s) => s.provider === p)),
     unavailable: [...ctx.sessions.unavailable(), ...skipped],
     name: (id) => ctx.sessions.displayName(id),
+    vendor: (id) => ctx.sessions.modelVendor(id),
   });
 }
 
@@ -168,6 +171,18 @@ export async function ensureReviewer(
   pr: FactoryPr,
 ): Promise<FactoryItem> {
   const old = recheckOf(item);
+  if (item.reviewerSessionId && (!item.review || old)) {
+    const reviewer = ctx.repo.find(item.reviewerSessionId)?.session;
+    if (!reviewer || reviewVendorIsDistinct(ctx, item, reviewer.provider) === false) {
+      if (reviewer && isBusy(reviewer)) await ctx.sessions.stop(reviewer.id);
+      item = ctx.store.updateItem(item.id, (i) => ({
+        ...i,
+        ...letGoReviewer(i),
+        reviewerProvider: null,
+        nudges: withoutRecheckRequest(i.nudges),
+      }));
+    }
+  }
   if (item.review && old) return requestRecheck(ctx, project, loop, item, vision, pr, old);
   if (item.review) return item;
   if (item.reviewerSessionId) {

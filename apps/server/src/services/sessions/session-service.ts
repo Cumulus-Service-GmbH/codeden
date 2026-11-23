@@ -17,6 +17,7 @@ import type {
   SendMessageRequest,
   SendMessageResponse,
   Session,
+  SessionAutonomyChanged,
   SessionDetail,
   StartSessionRequest,
   StartSessionResponse,
@@ -24,7 +25,7 @@ import type {
   UserInput,
   WorkspaceRequest,
 } from "@codeden/contracts";
-import { AT_CAPACITY_CODE } from "@codeden/contracts";
+import { AT_CAPACITY_CODE, teamRoleOfTitle } from "@codeden/contracts";
 import type { SandboxService } from "../../execution/sandboxes";
 import type { McpTokenStore } from "../../mcp/tokens";
 import type { SettingsStore } from "../../settings-store";
@@ -46,6 +47,7 @@ import {
 } from "../runner-port";
 import type { UtilityService } from "../utility";
 import type { SessionAdmission } from "./admission";
+import { assertAutonomy } from "./autonomy-policy";
 import { freezeChecks, roundAfter, withRound } from "./checks";
 import { compactingRefusal, compactionRunning, compactRefusal, startCompaction } from "./compact";
 import { derivePurpose, deriveWorkKey, findConflicts, firstPurposeLine } from "./conflicts";
@@ -67,7 +69,6 @@ import { applyPendingConfig, updateSession } from "./reconfigure";
 import { emptyStartMeta, type SessionRepo, type StoredStartMeta } from "./repo";
 import { planReview } from "./review";
 import { retireRoleSession } from "./role-retire";
-import { BROWSER_OPERATOR_TAG } from "./role-tag";
 import { startWorkspace } from "./start-workspace";
 
 export interface SessionServiceDeps extends RunnerDeps {
@@ -162,9 +163,14 @@ export class SessionService {
    * Model and effort (applied on the next turn), autonomy and plan mode (pushed to the runner)
    * or title.
    */
-  update(id: string, req: UpdateSessionRequest): Promise<Session> {
+  update(
+    id: string,
+    req: UpdateSessionRequest,
+    audit?: Pick<SessionAutonomyChanged, "changedBy" | "reason">,
+  ): Promise<Session> {
     const session = this.deps.repo.get(id);
     assertRoleWritable(session);
+    assertAutonomy(req.autonomy, this.deps.repo.find(id)?.startMeta?.autonomyFloor);
     if (req.untilChecksPass !== undefined || req.checkRounds !== undefined) {
       if (session.role !== "agent" || !session.checks?.commands.length) {
         throw badRequest(
@@ -184,7 +190,7 @@ export class SessionService {
         this.assertPlanModeSupported(session.role, session.provider, id);
       }
     }
-    return updateSession(this.deps.repo, this.runnerOf(id), id, req);
+    return updateSession(this.deps.repo, this.runnerOf(id), id, req, audit);
   }
 
   /**
@@ -268,9 +274,15 @@ export class SessionService {
        * then is it the session's own layer of its Team (`sessionTeamMember`).
        */
       ownTeamPins?: boolean;
+      autonomyFloor?: AutonomyLevel;
+      teamArchitect?: boolean;
     } = {},
   ): Promise<StartSessionResponse> {
     const { repo, projects } = this.deps;
+    assertAutonomy(req.autonomy, options.autonomyFloor);
+    if (req.autonomy === undefined && options.autonomyFloor) {
+      req = { ...req, autonomy: options.autonomyFloor };
+    }
     // The workspace follows `isGitRepo`: read it once the folder has been checked since start.
     if (req.projectId) await this.deps.projectChecks?.current(req.projectId);
     const project = req.projectId ? projects.get(req.projectId) : null;
@@ -298,7 +310,7 @@ export class SessionService {
     if (
       req.role === "agent" &&
       req.startedBy.kind === "pm" &&
-      req.title?.startsWith(BROWSER_OPERATOR_TAG) &&
+      teamRoleOfTitle(req.title) === "browserOperator" &&
       !options.chromeApproved &&
       this.resolveProvider(req, project ? projectDefaultProvider(project) : null) === "claude"
     ) {
@@ -334,6 +346,7 @@ export class SessionService {
           if (target.projectId !== req.projectId) {
             throw badRequest("Can only join a session in the same project", "join_mismatch");
           }
+          assertAutonomy(target.autonomy, options.autonomyFloor);
           if (req.input) {
             await this.send(target.id, { input: req.input, whenBusy: "queue" }, req.startedBy.kind);
           }
@@ -375,6 +388,8 @@ export class SessionService {
         queuedBehind,
         chromeOptIn: options.chromeApproved,
         chromeRequested: req.chrome,
+        ...(options.teamArchitect ? { teamArchitect: true } : {}),
+        ...(options.autonomyFloor ? { autonomyFloor: options.autonomyFloor } : {}),
         ...(options.ownTeamPins ? { ownTeamPins: true as const } : {}),
         ...(req.tokenSaver ? { tokenSaver: req.tokenSaver } : {}),
       },
@@ -471,6 +486,8 @@ export class SessionService {
     const { repo, projects } = this.deps;
     await this.sourceProjectChecked(id);
     const plan = await planFork({ repo, projects, runner: this.runnerOf(id) }, id, req);
+    const floor = repo.find(id)?.startMeta?.autonomyFloor;
+    if (floor) plan.meta.autonomyFloor = floor;
     this.createAndLaunch(plan.session, plan.meta, plan.start.workspace, undefined, plan.start.fork);
     return { sessionId: plan.session.id };
   }
@@ -485,6 +502,8 @@ export class SessionService {
     const { repo, projects, utility } = this.deps;
     await this.sourceProjectChecked(id);
     const plan = await planHandoff({ repo, projects, runner: this.runnerOf(id), utility }, id, req);
+    const floor = repo.find(id)?.startMeta?.autonomyFloor;
+    if (floor) plan.meta.autonomyFloor = floor;
     this.createAndLaunch(plan.session, plan.meta, plan.start.workspace, undefined, plan.start.fork);
     return { sessionId: plan.session.id };
   }

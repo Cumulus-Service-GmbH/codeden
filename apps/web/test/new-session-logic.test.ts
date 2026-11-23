@@ -420,3 +420,12 @@ describe("New session draft persistence", () => {
     expect(useNewSessionStore.getState().drafts).toEqual({});
   });
 });
+
+it("clears the missing Team provider warning after an available override is selected", () => {
+  const team = [{ role: "writer" as const, provider: "gone", model: null, effort: null }];
+  const draft = choice({ teamRole: "writer" });
+  expect(resolveDraftChoice(draft, defaults({ team })).teamProviderMissing).toBe("gone");
+  const overridden = resolveDraftChoice({ ...draft, provider: "planner" }, defaults({ team }));
+  expect(overridden.provider?.id).toBe("planner");
+  expect(overridden.teamProviderMissing).toBeNull();
+});

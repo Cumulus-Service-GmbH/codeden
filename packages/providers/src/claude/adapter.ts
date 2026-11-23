@@ -28,6 +28,7 @@ export const CLAUDE_PROVIDER_ID = "claude";
 
 const capabilities: ProviderCapabilities = {
   chrome: true,
+  modelVendor: "anthropic",
   resume: true,
   steer: true,
   interrupt: true,

@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ProviderId, ReasoningEffort } from "./common";
+import { AutonomyLevel, ProviderId, ReasoningEffort } from "./common";
 
 /** The roles a project can configure for factory and PM-started work. */
 export const TeamRole = z.enum([
@@ -15,6 +15,13 @@ export const TeamRole = z.enum([
   "browserOperator",
 ]);
 export type TeamRole = z.infer<typeof TeamRole>;
+
+/** Minimum supervision by Team role and purpose. "agent" covers untagged sessions. */
+export const AutonomyPolicy = z.partialRecord(
+  TeamRole.or(z.literal("agent")),
+  z.record(z.string().trim().min(1).max(300), AutonomyLevel),
+);
+export type AutonomyPolicy = z.infer<typeof AutonomyPolicy>;
 
 /** A role's provider and optional pins. Null means the model or effort is unpinned. */
 export const TeamMember = z.object({

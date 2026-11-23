@@ -7,6 +7,7 @@
  "autonomy": "auto",
  "model": null,
  "capabilities": {
+  "modelVendor": "openai",
   "resume": true,
   "steer": true,
   "interrupt": true,

@@ -8,6 +8,7 @@ import {
   SessionOptions,
   TEAM_FILE_ENV,
   type TokenSaverSettings,
+  teamRoleOfTitle,
   tokenSaverLevel,
   type UserInput,
   type WorkspaceRequest,
@@ -36,7 +37,6 @@ import type { ForkStart } from "./fork";
 import { withHandoffBrief } from "./handoff";
 import { ownBranch } from "./own-branch";
 import type { SessionRepo } from "./repo";
-import { BROWSER_OPERATOR_TAG } from "./role-tag";
 import { withSetupNote } from "./setup-failure";
 import { seenSetups, settleSetup } from "./setup-gate";
 import { tokenSaverNote } from "./token-saver";
@@ -84,7 +84,7 @@ function startsWithChrome(session: Session, repo: SessionRepo): boolean {
   return (
     meta?.chromeRequested ??
     (session.provider === "claude" &&
-      (session.title ?? "").startsWith(BROWSER_OPERATOR_TAG) &&
+      teamRoleOfTitle(session.title ?? undefined) === "browserOperator" &&
       meta?.chromeOptIn === true)
   );
 }

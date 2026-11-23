@@ -182,7 +182,8 @@ export function resolveDraftChoice(choice: DraftChoice, defaults: DraftDefaults)
     workspace: project?.isGitRepo === false ? "repo_root" : "worktree",
     teamRole: choice.teamRole ?? null,
     pinsFromTeam: Boolean(choice.teamRole) && choice.provider === null,
-    teamProviderMissing: found && !known(found.provider) ? found.provider : null,
+    teamProviderMissing:
+      found && !known(choice.provider) && !known(found.provider) ? found.provider : null,
     tokenSaver: choice.tokenSaver ?? null,
   };
 }
