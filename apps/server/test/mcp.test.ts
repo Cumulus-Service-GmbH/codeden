@@ -111,6 +111,8 @@ describe("CodeDen MCP endpoint", () => {
       "ask_user",
       "share_to_chat",
       "list_tech_debt",
+      "record_tech_debt",
+      "import_tech_debt",
       "raise_github_approval",
       "raise_plan_approval",
       "confirm_plan_approval",

@@ -225,6 +225,87 @@ describe("project tech debt", () => {
     expect(JSON.parse(selected.text)).toMatchObject({ projectId: project.id });
   });
 
+  it("deduplicates trimmed location and text independently of receipt and date", async () => {
+    const { env, service, project } = setup();
+    const finding = {
+      location: "src/file.ts:2",
+      text: "Reuse the helper.",
+      receipt: "r1",
+      date,
+      pr: null,
+    };
+    const first = await service.act(project, { action: "record", finding });
+    const seq = env.store.headSeq();
+    const duplicate = await service.act(project, {
+      action: "record",
+      finding: {
+        ...finding,
+        location: " src/file.ts:2 ",
+        text: " Reuse the helper. ",
+        receipt: "r2",
+        date: "2026-11-24T00:00:00.000Z",
+      },
+    });
+    expect(first.findings).toHaveLength(1);
+    expect(duplicate).toEqual(first);
+    expect(env.store.headSeq()).toBe(seq);
+  });
+
+  it("persists import errors, merges explicit imports, and counts only open findings", async () => {
+    const { service, project, local, read, write } = setup();
+    await service.act(project, {
+      action: "record",
+      finding: {
+        location: "src/build.ts:12",
+        text: "Use the shared helper.",
+        receipt: null,
+        date,
+        pr: null,
+      },
+    });
+    read.mockRejectedValueOnce(new Error("Issue unavailable"));
+    expect(await service.importIssue(project, issue)).toMatchObject({
+      importError: "Issue unavailable",
+    });
+    expect(service.summaries([project, local])).toEqual([
+      { projectId: project.id, open: 1, importError: "Issue unavailable" },
+      { projectId: local.id, open: 0 },
+    ]);
+    const other =
+      "- [ ] LOW `src/other.ts:5` — Reuse it. | receipt: r1 | date: 2026-11-23 | pr: #9";
+    read.mockResolvedValueOnce({
+      body: [low, other, other.replace("[ ]", "[x]").replace(":5", ":6")].join("\n"),
+      date,
+    });
+    const imported = await service.importIssue(project, issue);
+    expect(imported).toMatchObject({ issue, imported: true });
+    expect(imported.importError).toBeUndefined();
+    expect(imported.findings).toHaveLength(3);
+    expect(imported.findings[1]).toMatchObject({ source: issue, receipt: "r1", date, pr: "#9" });
+    expect(imported.findings[2]?.status).toBe("fixed");
+    expect(await service.importIssue(project, "owner/repo#247")).toMatchObject({
+      issue,
+      imported: true,
+    });
+    expect(service.summaries([project, { ...local, archivedAt: date }])).toEqual([
+      { projectId: project.id, open: 2 },
+    ]);
+    expect(write).not.toHaveBeenCalled();
+  });
+
+  it("refuses a PM import from another repository before reading GitHub", async () => {
+    const { service, project, read } = setup();
+    await expect(
+      service.importIssue(project, "another/private#246", { restrictToProject: true }),
+    ).rejects.toThrow("Use an issue from this project's repository or its tracking issue");
+    expect(read).not.toHaveBeenCalled();
+    await service.act(project, { action: "configure", issue });
+    expect(await service.importIssue(project, issue, { restrictToProject: true })).toMatchObject({
+      issue,
+      imported: true,
+    });
+  });
+
   it("retains local records during an import failure and retries the import", async () => {
     const { service, project, read } = setup();
     await service.act(project, {
