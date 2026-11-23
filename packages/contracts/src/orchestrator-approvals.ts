@@ -47,8 +47,10 @@ const ApprovalChoice = z.enum(["approve", "deny"]);
 
 /**
  * An open approval and the server's decision about whether the orchestrator can answer it.
- * Delegation is limited to plan-mode tool approvals without a hook, URL, single-use restriction,
- * Chrome consent or sensitive-text match, and PM plan cards whose steps are all tier 0 or 1.
+ * A delegable plan-mode tool approval has no command or listed paths. Its tool input is absent
+ * or a plain object with only the optional `plan` key. Hook, URL, single-use, Chrome consent,
+ * and sensitive-text restrictions also apply. PM plan cards are delegable only when every step
+ * is tier 0 or 1.
  */
 export const PendingApproval = z
   .strictObject({

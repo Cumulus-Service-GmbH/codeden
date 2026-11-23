@@ -67,8 +67,17 @@ function ownerScope(scope: string): OwnerOnlyCategory | undefined {
   return undefined;
 }
 
+function isPlanOnlyInput(input: Entry["toolInput"]): boolean {
+  if (input === undefined) return true;
+  if (input === null || typeof input !== "object") return false;
+  const prototype = Object.getPrototypeOf(input);
+  return (
+    (prototype === Object.prototype || prototype === null) &&
+    Reflect.ownKeys(input).every((key) => key === "plan")
+  );
+}
+
 export function classifyApproval(entry: Entry): Classification {
-  if (entry.kind === "tool_approval" && entry.action === "file_change") return ownerOnly();
   if (entry.hookReason !== undefined) {
     const token = parseCardToken(entry.hookReason);
     if (token?.cls === "delegable" && DELEGABLE_GUARD_SCOPES.includes(token.scope)) {
@@ -96,6 +105,9 @@ export function classifyApproval(entry: Entry): Classification {
   if (category) return ownerOnly(category);
   if (
     entry.action !== "plan" ||
+    entry.command !== undefined ||
+    (entry.paths?.length ?? 0) > 0 ||
+    !isPlanOnlyInput(entry.toolInput) ||
     entry.hookAsk ||
     text.includes("[codeden-card") ||
     entry.reason?.includes("[codeden-card") ||
