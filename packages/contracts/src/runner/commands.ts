@@ -88,6 +88,8 @@ export const RunnerCommand = z.discriminatedUnion("name", [
   /** One tool-less utility-model call (§7.4) through a provider's `utilityModel()`. */
   z.object({
     name: z.literal("provider.oneShot"),
+    /** Require the provider's explicitly tool-free lane. */
+    requireToolFree: z.boolean().optional(),
     providerId: ProviderId,
     prompt: z.string().min(1),
     system: z.string().optional(),

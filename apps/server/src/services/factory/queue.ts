@@ -5,6 +5,7 @@ import {
   type Project,
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
+import { jevPasses } from "../review-jev";
 import { approvalCovers } from "./approval";
 import { CONFLICTS_DETAIL } from "./checks";
 import type { FactoryContext } from "./context";
@@ -101,7 +102,13 @@ export function mergeQueue(ctx: FactoryContext, project: Project): FactoryItem[]
   if (!isFactoryMode(project.autonomyMode)) return [];
   return ctx.store
     .items(project.id, ["verifying"])
-    .filter((i) => i.pr && i.nudges[MERGE_QUEUED] && mayAutoMerge(i, project.factoryLimits))
+    .filter(
+      (i) =>
+        (!i.arbitration || i.arbitration.state === "jev_pending") &&
+        i.pr &&
+        i.nudges[MERGE_QUEUED] &&
+        mayAutoMerge(i, project.factoryLimits),
+    )
     .sort(compare);
 }
 
@@ -176,6 +183,7 @@ export async function act(
   }
   const sha = pr.headSha;
   if (!sha || sha !== trackedHead(item)) return nothing;
+  if (ctx.jevScript !== null && !jevPasses(item.jev, sha)) return nothing;
   if (pr.mergeable === "unknown") {
     note(ctx, item, SETTLING_NOTE);
     return { did: "unsettled", loop };

@@ -270,3 +270,21 @@ it.each(["resolved model", "empty model list", "unloaded provider list"] as cons
     }
   },
 );
+
+it("the Arbiter rounds field defaults to 1 and refuses less than 1", async () => {
+  const client = createMockClient();
+  const setMode = vi.spyOn(client.factory, "setMode");
+  renderWithClient(<AutonomyDialog project={storefront} open onOpenChange={() => {}} />, client, {
+    withRouter: true,
+  });
+  const rounds = (await screen.findByLabelText("Arbiter rounds")) as HTMLInputElement;
+  expect(rounds.value).toBe("1");
+  fireEvent.change(rounds, { target: { value: "0" } });
+  fireEvent.blur(rounds);
+  expect(rounds.value).toBe("1");
+  fireEvent.change(rounds, { target: { value: "3" } });
+  fireEvent.blur(rounds);
+  fireEvent.click(screen.getByRole("button", { name: "Save settings" }));
+  await waitFor(() => expect(setMode).toHaveBeenCalled());
+  expect(setMode.mock.calls[0]?.[1].tuning?.reviewPolicy?.arbiterRounds).toBe(3);
+});

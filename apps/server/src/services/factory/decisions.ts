@@ -10,10 +10,13 @@ import {
   stoppedRetry,
 } from "@codeden/contracts";
 import { badRequest, conflict, notFound } from "../errors";
+import { applyReviewFindingPolicy } from "../review-controls";
 import { reviewedHead, verdictHead, withVerdictHead } from "./approval";
+import { confirmArbiter } from "./arbiter";
 import { sessionsToArchive } from "./cleanup";
 import type { FactoryContext } from "./context";
 import { announceType } from "./intake";
+import { jevWriterResponse, submitJevReview } from "./jev";
 import type { KeptLessons } from "./lessons";
 import { closeInboxFor } from "./merge";
 import { ownedPr } from "./pr-status";
@@ -106,6 +109,11 @@ export async function setType(
     type: req.type,
     classification,
     investigation: null,
+    reviewSpec: undefined,
+    reviewRounds: undefined,
+    arbitration: undefined,
+    jev: undefined,
+    jevReviewHead: undefined,
     specApproval: null,
     note: null,
   }));
@@ -156,6 +164,11 @@ export function retry(
     stage: i.type ? "backlog" : "candidate",
     // From the first step: a fresh analysis, and a fresh approval of its spec when that is on.
     investigation: null,
+    reviewSpec: undefined,
+    reviewRounds: undefined,
+    arbitration: undefined,
+    jev: undefined,
+    jevReviewHead: undefined,
     specApproval: null,
     attempts: 0,
     // A retry is a call to spend more: the per-item cap counts afresh (its cost still shows all).
@@ -255,7 +268,36 @@ export function submitReview(
   if (verdict.verdict === "approve" && verdict.security.concerns.length > 0) {
     throw badRequest(APPROVE_WITH_CONCERNS, "approve_with_concerns");
   }
-  return { ...settleVerdict(ctx, item, verdict), item };
+  const lowPolicy = ctx.projects.get(item.projectId).factoryLimits.lowFindings;
+  const files = item.pr && ctx.prFiles.get(item.projectId, item.pr.number);
+  const settled = applyReviewFindingPolicy(verdict, item.reviewSpec, lowPolicy, files ?? []);
+  if (item.jevReviewHead) {
+    const recorded = submitJevReview(ctx, item, settled);
+    return {
+      recorded,
+      item,
+      message: recorded ? "Response recorded. Jev pending." : "Jev response refused for this head.",
+    };
+  }
+  const arbiterLimit = ctx.store.loop(item.projectId)?.tuning.reviewPolicy?.arbiterRounds;
+  if (confirmArbiter(ctx, item, settled, arbiterLimit)) {
+    const state = ctx.store.item(item.id)?.arbitration?.state;
+    const next =
+      state === "jev_pending"
+        ? "Jev pending."
+        : state === "queued"
+          ? "Another Arbiter round is queued."
+          : "Owner decision needed.";
+    return { recorded: true, item, message: `Confirmation recorded. ${next}` };
+  }
+  if (item.arbitration) {
+    return {
+      recorded: false,
+      item,
+      message: "This review is waiting on arbitration or an owner decision.",
+    };
+  }
+  return { ...settleVerdict(ctx, item, settled), item };
 }
 
 /** The reviewer's answer, with what became of its lessons (`keepLessons`). */
@@ -315,13 +357,30 @@ function settleVerdict(
   const at = ctx.now().toISOString();
   ctx.store.updateItem(item.id, (i) => {
     const { rereview_sent: _s, reviewer: _r, ...rest } = withoutStrikes(i.nudges);
-    const keep = recheck && verdict.verdict === "approve" && i.review;
+    const keep = recheck && verdict.verdict === "approve" ? i.review : null;
     const nudges = keep ? approveRecheck(rest, at) : withoutRecheck(rest);
     // The head it covers: the one the reviewer was asked about, never a newer one that came
     // while it worked (`approval.ts`); a re-check's approval, the head it re-checked. Only that
     // head merges on an approval, and a stopped item whose PR moves past it is reviewed again.
     const covers = keep ? recheckSentFor(i) || verdictHead(i) : reviewedHead(i);
-    return { ...i, review: keep ? i.review : verdict, nudges: withVerdictHead(nudges, covers, at) };
+    const prior = i.reviewRounds ?? [];
+    const dispositions = [
+      `Verdict: ${verdict.verdict}. ${verdict.summary}`,
+      ...(verdict.findings ?? []).map((f) => `Fix ${f.severity} at ${f.location}: ${f.summary}`),
+      ...(verdict.techDebt ?? []).map((f) => `Defer ${f.severity} at ${f.location}: ${f.summary}`),
+    ];
+    return {
+      ...i,
+      review: keep ? { ...keep, jevEvidence: verdict.jevEvidence } : verdict,
+      reviewRounds:
+        covers && !prior.some((round) => round.head === covers)
+          ? [
+              ...prior,
+              { head: covers, dispositions, verdict, writerResponse: jevWriterResponse(ctx, i) },
+            ]
+          : prior,
+      nudges: withVerdictHead(nudges, covers, at),
+    };
   });
   return {
     recorded: true,

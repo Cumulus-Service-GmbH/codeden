@@ -98,6 +98,7 @@ import { answerProviderQuestion, recordDecision, unattendedSession } from "./una
 import { readVision, writeVision } from "./vision";
 
 export interface FactoryOptions {
+  jevScript?: string | null;
   /** Interval of the background tick (default 30 s). */
   tickMs?: number;
   /** Run the loop in the background (default true; tests drive `tick` by hand). */
@@ -125,6 +126,7 @@ export interface FactoryServiceDeps {
   notify: (draft: NoticeDraft, wake?: boolean) => void;
   settings: SettingsStore;
   exec: Exec;
+  reviewDataDir: string;
   github: FactoryGithub;
   /** The utility model, for the "Identify type" step (keywords decide without it). */
   complete?: (job: string, system: string, prompt: string) => Promise<string | null>;
@@ -213,6 +215,8 @@ export class FactoryService {
       notify: deps.notify,
       settings: deps.settings,
       exec: deps.exec,
+      reviewDataDir: deps.reviewDataDir,
+      jevScript: deps.options?.jevScript ?? null,
       complete: deps.complete ?? (async () => null),
       archiveSessions: (ids) => this.archiver.push(ids),
       slots: new SlotBoard(),

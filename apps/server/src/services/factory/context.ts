@@ -52,6 +52,8 @@ export interface FactoryContext {
   notify: (draft: NoticeDraft, wake?: boolean) => void;
   settings: SettingsStore;
   exec: Exec;
+  reviewDataDir: string;
+  jevScript: string | null;
   /** One call to the utility model (the "Identify type" step); null when none answered. */
   complete: (job: string, system: string, prompt: string) => Promise<string | null>;
   /**

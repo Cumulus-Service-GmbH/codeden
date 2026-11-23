@@ -538,6 +538,19 @@ const ITEM_DEFAULTS = {
 
 /** An item as read from the projection, with the fields newer versions added. */
 export function withItemDefaults(item: FactoryItem): FactoryItem {
+  const arbitration = item.arbitration;
+  if (
+    arbitration &&
+    arbitration.round === undefined &&
+    (arbitration.state !== "blocked" || arbitration.sessionId || arbitration.ruling)
+  ) {
+    return {
+      ...ITEM_DEFAULTS,
+      ...item,
+      arbiterRoundsUsed: item.arbiterRoundsUsed ?? 1,
+      arbitration: { ...arbitration, round: item.arbiterRoundsUsed ?? 1 },
+    };
+  }
   return { ...ITEM_DEFAULTS, ...item };
 }
 
@@ -549,7 +562,12 @@ export function withItemDefaults(item: FactoryItem): FactoryItem {
 function trackedSessions(next: FactoryItem, before?: FactoryItem): string[] {
   const ids = new Set([...(before?.sessionIds ?? []), ...(next.sessionIds ?? [])]);
   for (const i of before ? [before, next] : [next]) {
-    for (const id of [i.builderSessionId, i.reviewerSessionId, ...(i.earlierSessionIds ?? [])]) {
+    for (const id of [
+      i.builderSessionId,
+      i.reviewerSessionId,
+      i.arbitration?.sessionId,
+      ...(i.earlierSessionIds ?? []),
+    ]) {
       if (id) ids.add(id);
     }
   }

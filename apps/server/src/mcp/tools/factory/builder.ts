@@ -4,9 +4,11 @@ import {
   FactoryReproductionReport,
   LESSONS_PER_VERDICT,
   REVIEW_SUMMARY_MAX,
+  ReviewFinding,
   ReviewVerdictSubmission,
   truncateReviewSummary,
 } from "@codeden/contracts";
+import { JEV_EVIDENCE_BRIEF } from "../../../services/factory/jev";
 import { defineTool } from "../../define";
 import { asTool, forSession } from "./shared";
 
@@ -50,7 +52,7 @@ const SUMMARY_MAX = REVIEW_SUMMARY_MAX.toLocaleString("en-US");
  */
 export const factorySubmitReview = defineTool({
   name: "factory_submit_review",
-  description: `Submit your review verdict for the factory pull request you were asked to review: \`approve\`, \`request_changes\` (it goes back to the author for a revision) or \`reject\`, a specific summary (up to ${SUMMARY_MAX} characters are stored; a longer one is cut), one entry per acceptance criterion (met or not), whether it fits the vision, whether its tests are adequate (or none are needed), any security concerns (they block the merge, so never with \`approve\`), and \`followUps\`: non-blocking items that can wait for their own issue (tracked as issues once it merges; they never hold it up or go back to the author). Optionally add up to ${LESSONS_PER_VERDICT} \`lessons\`: general rules for this repository that later builders and reviewers should know, not findings about this change alone. CI on the PR's head is the authority for the full test suite: request changes only for a cause in the pull request; if only your local environment kept you from verifying it, set \`blockers: "environment"\` and you get the CI result instead. Submit one verdict; if the call is rejected for invalid input, fix what the error names and call it again.`,
+  description: `Submit your review verdict for the factory pull request you were asked to review: \`approve\`, \`request_changes\` (it goes back to the author for a revision) or \`reject\`, a specific summary (up to ${SUMMARY_MAX} characters are stored; a longer one is cut), one entry per acceptance criterion (met or not), whether it fits the vision, whether its tests are adequate (or none are needed), any security concerns (they block the merge, so never with \`approve\`), and \`followUps\`: non-blocking items that can wait for their own issue (tracked as issues once it merges; they never hold it up or go back to the author). Optionally add up to ${LESSONS_PER_VERDICT} \`lessons\`: general rules for this repository that later builders and reviewers should know, not findings about this change alone. CI on the PR's head is the authority for the full test suite: request changes only for a cause in the pull request; if only your local environment kept you from verifying it, set \`blockers: "environment"\` and you get the CI result instead. Submit one verdict; if the call is rejected for invalid input, fix what the error names and call it again. ${JEV_EVIDENCE_BRIEF}`,
   roles: ["agent"],
   scope: "session",
   alwaysLoad: true,
@@ -64,6 +66,9 @@ export const factorySubmitReview = defineTool({
       ...input,
       summary: truncateReviewSummary(input.summary),
       lessons: cleanLessons(input.lessons),
+      ...(input.findings
+        ? { findings: input.findings.map((finding) => ReviewFinding.parse(finding)) }
+        : {}),
     };
     const res = await asTool(() =>
       services.factory.submitReview(services.sessionRepo.get(sessionId), verdict),

@@ -201,6 +201,7 @@ export const PipelineStep = z.enum([
   "analyze",
   "implement",
   "review",
+  "arbiter",
   "merge",
   "done",
   "stopped",
@@ -214,6 +215,7 @@ export interface PipelineStepInput {
   investigation: Investigation | null;
   checks: Array<{ state: string }>;
   review: { verdict: string } | null;
+  arbitration?: { state: string };
   /** The spec's approval; a feature waiting on it is still at Analyze. */
   specApproval?: { state: string } | null;
 }
@@ -241,6 +243,7 @@ export function pipelineStep(item: PipelineStepInput): PipelineStep {
       if (specHeld(item)) return "analyze";
       return "implement";
     case "verifying":
+      if (item.arbitration) return "arbiter";
       return checksPassed(item) ? "merge" : "review";
     case "watching":
     case "escalated":

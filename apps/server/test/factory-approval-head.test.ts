@@ -1,8 +1,10 @@
+import { createHash } from "node:crypto";
 import { ReviewVerdict } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
-import { settleApproval, verdictHead } from "../src/services/factory/approval";
-import { recheckOf } from "../src/services/factory/recheck";
+import { reviewedHead, settleApproval, verdictHead } from "../src/services/factory/approval";
+import { recheckOf, recheckSentFor } from "../src/services/factory/recheck";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
+import { installDoneFixture, jevEvidence, sha } from "./support/factory-jev-fixture";
 import { APPROVE, factorySteps } from "./support/factory-steps";
 import type { FakePr } from "./support/fake-factory-github";
 
@@ -15,7 +17,23 @@ import type { FakePr } from "./support/fake-factory-github";
 
 let env: FactoryEnv;
 afterEach(() => env?.close());
-const { item, tick, lastMessageTo, enable, verifying, review } = factorySteps(() => env);
+const {
+  item,
+  tick,
+  lastMessageTo,
+  enable,
+  verifying,
+  review: submitReview,
+} = factorySteps(() => env);
+
+const review = async (id: string, verdict: Parameters<typeof submitReview>[1] = APPROVE) => {
+  const current = item(id);
+  const head = current.jevReviewHead ?? recheckSentFor(current) ?? reviewedHead(current);
+  if (!head) throw new Error("The reviewer was not assigned a head.");
+  const result = await submitReview(id, { ...verdict, jevEvidence: jevEvidence(head) });
+  if (current.reviewerSessionId) await env.setStatus(current.reviewerSessionId, "idle");
+  return result;
+};
 
 const reviewCheck = (id: string) => item(id).checks.find((c) => c.name === "review");
 
@@ -62,37 +80,126 @@ describe("settleApproval", () => {
 describe("an approval covers one head commit", () => {
   it("doesn't merge a commit pushed after the approval until a re-review approves it", async () => {
     env = createFactoryEnv();
+    installDoneFixture(env);
     await enable();
     const { id, pr } = await verifying("pending");
-    review(id);
+    await review(id);
     await tick();
     expect(env.gh.merges).toEqual([]);
     const approved = pr.headSha as string;
 
     // B: a code change pushed after the approval, CI green on it.
-    push(pr, "pushedB");
+    push(pr, sha("pushedB"));
     await tick();
     expect(env.gh.merges).toEqual([]);
     expect(reviewCheck(id)?.state).toBe("pending");
-    expect(item(id).note ?? "").toContain(`${approved.slice(0, 7)} → pushedB`);
+    expect(item(id).note ?? "").toContain(
+      `${approved.slice(0, 7)} → ${sha("pushedB").slice(0, 7)}`,
+    );
     await tick();
     expect(env.gh.merges).toEqual([]);
 
     // The re-review approves B: now it merges.
     const reviewer = item(id).reviewerSessionId as string;
-    expect(lastMessageTo(reviewer)).toContain("pushedB");
-    review(id, { ...APPROVE, summary: "The new commits are fine" });
+    expect(lastMessageTo(reviewer)).toContain(sha("pushedB"));
+    await review(id, { ...APPROVE, summary: "The new commits are fine" });
     await tick();
     expect(env.gh.merges.map((m) => m.number)).toEqual([pr.ref.number]);
+  });
+
+  it("re-checks a changed PR after the second review round approves it", async () => {
+    env = createFactoryEnv({ limits: { mergePolicy: "strict" } });
+    installDoneFixture(env);
+    await enable();
+    const { id, pr } = await verifying("pending");
+    const previous = pr.headSha as string;
+    push(pr, sha("roundB"));
+    await tick();
+    await review(id);
+    env.factory.data.updateItem(id, (i) => ({
+      ...i,
+      reviewRounds: [
+        { head: previous, dispositions: ["Request changes"] },
+        { head: sha("roundB"), dispositions: ["Approve"] },
+      ],
+    }));
+
+    push(pr, sha("roundC"));
+    await tick();
+
+    expect(lastMessageTo(item(id).reviewerSessionId as string)).toContain(sha("roundC"));
+    expect(env.gh.merges).toEqual([]);
+  });
+
+  it.each(["src/new.ts:3", "./src/new.ts:12-18", "src/new.ts#L12-L18"])(
+    "keeps a blocking finding on a newly changed file at %s",
+    async (location) => {
+      env = createFactoryEnv();
+      installDoneFixture(env);
+      await enable();
+      const { id, pr } = await verifying("pending");
+      expect(item(id).reviewSpec?.scope).not.toContain("src/new.ts");
+      env.gh.push(pr, sha("roundB"), ["src/new.ts"]);
+      await tick();
+
+      const finding = {
+        location,
+        summary: "Empty input crashes.",
+        severity: "HIGH" as const,
+        failure_scenario: "An empty input reaches the renderer.",
+        repro: "Open the page with an empty input.",
+      };
+      await review(id, { ...APPROVE, verdict: "request_changes", findings: [finding] });
+
+      expect(item(id).review).toMatchObject({ verdict: "request_changes", findings: [finding] });
+    },
+  );
+
+  it("pins the acceptance spec end to end: out-of-spec findings go to tech debt and unreadable locations stay in scope and blocking", async () => {
+    env = createFactoryEnv();
+    await enable();
+    const { id } = await verifying("pending");
+    const { reviewSpec } = item(id);
+    expect(reviewSpec).toEqual({
+      planSha: createHash("sha256")
+        .update(JSON.stringify(["A counter", ["Counter increments"]]))
+        .digest("hex"),
+      scope: ["src/counter.ts", "test/counter.test.ts"],
+      security: false,
+    });
+
+    const blocking = {
+      location: "src/counter.ts (line 12)",
+      severity: "HIGH" as const,
+      summary: "The counter crashes on reset.",
+      failure_scenario: "Resetting an empty counter throws.",
+      repro: "Start with an empty counter and select Reset.",
+    };
+    const debt = {
+      location: "src/export.ts:8",
+      severity: "HIGH" as const,
+      summary: "Exporting empty results loses the header.",
+      failure_scenario: "An empty result set produces a blank export.",
+      repro: "Export an empty result set and check for the header.",
+    };
+    await submitReview(id, { ...APPROVE, verdict: "request_changes", findings: [debt, blocking] });
+
+    expect(item(id).reviewSpec).toEqual(reviewSpec);
+    expect(item(id).review).toMatchObject({
+      verdict: "request_changes",
+      findings: [blocking],
+      techDebt: [debt],
+    });
   });
 
   it("keeps the approval when the merge queue only brings the PR up to date with main", async () => {
     // Under the strict policy the queue brings a PR that is behind up to date (update-branch).
     env = createFactoryEnv({ limits: { mergePolicy: "strict" } });
+    installDoneFixture(env);
     await enable();
     const { id, pr } = await verifying("pending");
     env.gh.pushMain(["src/counter.ts"]);
-    review(id);
+    await review(id);
     await tick();
     pr.checks = "success";
     await tick();
@@ -102,71 +209,82 @@ describe("an approval covers one head commit", () => {
     expect(env.gh.merges).toEqual([]);
     pr.checks = "success";
     await tick();
+    expect(item(id).jevReviewHead).toBe(pr.headSha);
+    await review(id);
+    await tick();
     expect(env.gh.merges.map((m) => m.number)).toEqual([pr.ref.number]);
     expect(env.messages.some((m) => /range-diff|re-review/i.test(m.text))).toBe(false);
   });
 
   it("keeps the approval on a rebase that brought only main in (the same change)", async () => {
     env = createFactoryEnv();
+    installDoneFixture(env);
     await enable();
     const { id, pr } = await verifying("pending");
-    review(id);
+    await review(id);
     await tick();
-    env.gh.rebase(pr, "rebasedSame", "success");
+    env.gh.rebase(pr, sha("rebasedSame"), "success");
+    await tick();
+    expect(verdictHead(item(id))).toBe(pr.headSha);
+    expect(item(id).jevReviewHead).toBe(pr.headSha);
+    await review(id);
     await tick();
     expect(env.gh.merges.map((m) => m.number)).toEqual([pr.ref.number]);
-    expect(item(id).nudges.verdict_rebasedSame).toBeDefined();
+    expect(item(id).nudges[`verdict_${sha("rebasedSame")}`]).toBeDefined();
     expect(env.messages.some((m) => /range-diff/.test(m.text))).toBe(false);
   });
 
   it("covers only the head the reviewer was asked about when a push lands mid-review", async () => {
     env = createFactoryEnv();
+    installDoneFixture(env);
     await enable();
     const { id, pr } = await verifying("success");
     const asked = pr.headSha as string;
     expect(item(id).reviewerSessionId).toBeTruthy();
     // B lands while the reviewer still reads A; its approval then comes in.
-    push(pr, "midReviewB");
+    push(pr, sha("midReviewB"));
     await tick();
-    review(id);
+    await review(id);
     expect(item(id).nudges[`verdict_${asked}`]).toBeDefined();
     await tick();
     expect(env.gh.merges).toEqual([]);
     expect(lastMessageTo(item(id).reviewerSessionId as string)).toContain(
-      `git range-diff ${asked}...midReviewB`,
+      `git range-diff ${asked}...${sha("midReviewB")}`,
     );
-    review(id, { ...APPROVE, summary: "B is fine" });
+    await review(id, { ...APPROVE, summary: "B is fine" });
     await tick();
     expect(env.gh.merges.map((m) => m.number)).toEqual([pr.ref.number]);
   });
 
   it("re-checks a conflict resolution that changes the PR's files before it merges", async () => {
     env = createFactoryEnv();
+    installDoneFixture(env);
     await enable();
     const { id, pr, builder } = await verifying("pending");
-    review(id);
+    await review(id);
     await tick();
     pr.mergeable = "conflicting";
     await tick();
     expect(lastMessageTo(builder)).toMatch(/\*\*Rebase\*\*/);
 
-    env.gh.push(pr, "resolved1", ["src/counter-merge.ts"]);
-    env.gh.rebase(pr, "resolved1", "success");
+    env.gh.push(pr, sha("resolved1"), ["src/counter-merge.ts"]);
+    env.gh.rebase(pr, sha("resolved1"), "success");
     await env.setStatus(builder, "idle");
     await tick();
     expect(reviewCheck(id)?.state).toBe("pending");
     expect(env.gh.merges).toEqual([]);
 
-    review(id, { ...APPROVE, summary: "The resolution keeps both sides" });
+    await review(id, { ...APPROVE, summary: "The resolution keeps both sides" });
     await tick();
     expect(env.gh.merges.map((m) => m.number)).toEqual([pr.ref.number]);
   });
 
   it("doesn't merge a head that moved between the merge decision and the merge call", async () => {
     env = createFactoryEnv();
+    installDoneFixture(env);
     await enable();
     const { id, pr } = await verifying("pending");
-    review(id);
+    await review(id);
     await tick();
     // The checks pass on A; a push lands just before the merge call.
     const merge = env.gh.merge.bind(env.gh);
@@ -174,7 +292,7 @@ describe("an approval covers one head commit", () => {
     env.gh.merge = async (projectId, number, opts) => {
       if (!moved) {
         moved = true;
-        push(pr, "lateB");
+        push(pr, sha("lateB"));
       }
       return merge(projectId, number, opts);
     };

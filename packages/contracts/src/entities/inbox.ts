@@ -24,6 +24,7 @@ export const InboxItemKind = z.enum([
   "spec_approval",
   /** Owner approval or rejection of a checklist proposal. */
   "checklist_approval",
+  "owner_decision",
   /**
    * Factory merges set aside for a person's quick look (§10.1, `factory-spot-checks.ts`): one item
    * per project ("3 merges to spot-check"), refreshed as merges are sampled and resolved once none

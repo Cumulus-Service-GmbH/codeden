@@ -84,6 +84,7 @@ export async function startHarness(
     realtimeFlushMs: 10,
     runnerRequestTimeoutFloorMs: RUNNER_REQUEST_TIMEOUT_FLOOR_MS,
     ...extra,
+    factory: { jevScript: null, ...extra.factory },
   });
   const api = async (method: string, path: string, body?: unknown) => {
     const send = () =>

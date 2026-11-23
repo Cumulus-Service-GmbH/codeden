@@ -1,4 +1,9 @@
-import type { FactoryLimits, FactoryTuning, MergePolicy } from "@codeden/contracts";
+import {
+  type FactoryLimits,
+  type FactoryTuning,
+  type MergePolicy,
+  ReviewPolicy,
+} from "@codeden/contracts";
 import { useId, useState } from "react";
 import { Field } from "@/components/automations/form-bits";
 import { NumberField } from "@/components/common/number-field";
@@ -32,6 +37,7 @@ export type TuningDraft = AgentsDraft &
     | "spotCheckPercent"
     | "team"
     | "resultSummaryBytes"
+    | "reviewPolicy"
   >;
 
 /** The editable tuning knobs of a saved tuning. */
@@ -49,6 +55,7 @@ export function tuningDraft(t: FactoryTuning): TuningDraft {
     spotCheckPercent: t.spotCheckPercent,
     team: t.team,
     resultSummaryBytes: t.resultSummaryBytes,
+    reviewPolicy: t.reviewPolicy,
     minBacklog: t.minBacklog,
     discoveryIntervalMin: t.discoveryIntervalMin,
     discoveryPerRound: t.discoveryPerRound,
@@ -197,6 +204,40 @@ export function LimitsEditor({
           className="min-h-16 font-mono text-[12.5px]"
         />
       </Field>
+      <Field label="LOW findings" htmlFor={`${id}-low-findings`}>
+        <select
+          id={`${id}-low-findings`}
+          className={SELECT}
+          value={limits.lowFindings}
+          onChange={(event) =>
+            onChange({ ...limits, lowFindings: event.target.value === "fix" ? "fix" : "defer" })
+          }
+        >
+          <option value="fix">Fix</option>
+          <option value="defer">Defer</option>
+        </select>
+      </Field>
+      {tuning && onTuningChange && (
+        <Field label="Daily review budget (USD)" htmlFor={`${id}-review-budget`}>
+          <NumberField
+            id={`${id}-review-budget`}
+            decimal
+            optional
+            min={0}
+            value={tuning.reviewPolicy?.dailyBudgetUsd}
+            placeholder="No cap"
+            onChange={(dailyBudgetUsd) =>
+              onTuningChange({
+                ...tuning,
+                reviewPolicy: ReviewPolicy.parse({
+                  ...tuning.reviewPolicy,
+                  dailyBudgetUsd: dailyBudgetUsd || undefined,
+                }),
+              })
+            }
+          />
+        </Field>
+      )}
       <BudgetFields limits={limits} onChange={onChange} />
       <div className="grid gap-3 sm:grid-cols-3">
         <Field

@@ -64,6 +64,8 @@ export const ProviderCapabilities = z.object({
    * enforced (fail closed): only a provider whose sessions run under those rules declares true.
    */
   enforcesSecurityRules: z.boolean().optional(),
+  /** The one-shot lane enforces no tools and receives no workspace access. */
+  toolFreeRuns: z.boolean().optional(),
   /**
    * With `enforcesSecurityRules`: the rules cover only sessions that run in a CodeDen worktree
    * (the guard's scope), so an agent session elsewhere (the project folder itself) counts as

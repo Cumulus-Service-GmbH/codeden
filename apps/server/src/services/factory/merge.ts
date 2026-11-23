@@ -1,8 +1,10 @@
 import type { FactoryItem, FactoryLoop, GitHubPrRef, MergePath, Project } from "@codeden/contracts";
 import { errorMessage, ServiceError } from "../errors";
+import { jevPasses } from "../review-jev";
 import { type FactoryContext, factoryNotice, raiseInbox } from "./context";
 import { followUpsAtMerge } from "./follow-ups";
 import type { FactoryPr } from "./github-port";
+import { trackedHead } from "./rebase";
 import { spotCheckAtMerge } from "./spot-checks";
 import { stuckDecisionId, stuckInboxId } from "./stuck";
 
@@ -25,6 +27,7 @@ export function prInboxIds(itemId: string): string[] {
     escalatedInboxId(itemId),
     stuckInboxId(itemId),
     stuckDecisionId(itemId),
+    `inbox:factory-owner-decision:${itemId}`,
   ];
 }
 
@@ -100,6 +103,7 @@ export async function readyForYou(
   project: Project,
   item: FactoryItem,
 ): Promise<void> {
+  if (ctx.jevScript !== null && !jevPasses(item.jev, trackedHead(item))) return;
   const why =
     item.trust === "admitted"
       ? "it came from an untrusted author, so a person merges it"
@@ -208,6 +212,13 @@ export async function autoMerge(
   checks: FactoryItem["checks"],
   how: { path: MergePath; note?: string },
 ): Promise<FactoryLoop | MergeFailed> {
+  if (ctx.jevScript !== null && !jevPasses(current.jev, pr.headSha)) {
+    return {
+      failed: "Jev must pass for the current head before merging",
+      refusal: false,
+      settling: false,
+    };
+  }
   const title = `${current.title} (#${pr.ref.number})`;
   const res = await ctx.github
     .merge(project.id, pr.ref.number, { sha: pr.headSha, title })

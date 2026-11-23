@@ -31,6 +31,14 @@ import {
   SpotCheck,
   SpotCheckPercent,
 } from "./factory-spot-checks";
+import {
+  JevReceipt,
+  JevTestEvidence,
+  ReviewAcceptanceSpec,
+  ReviewArbitration,
+  ReviewFindingInput,
+  ReviewPolicy,
+} from "./review-policy";
 import { AutonomyPolicy, Team } from "./team";
 
 /**
@@ -126,6 +134,11 @@ export function truncateReviewSummary(summary: string): string {
 export const ReviewVerdict = z.object({
   verdict: z.enum(["approve", "request_changes", "reject"]),
   summary: z.string().min(1).max(REVIEW_SUMMARY_MAX),
+  jevEvidence: JevTestEvidence.optional(),
+  /** Findings with evidence and normalized severity, when supplied by the reviewer. */
+  findings: z.array(ReviewFindingInput).optional(),
+  /** Structured findings deferred by project review policy. */
+  techDebt: z.array(ReviewFindingInput).optional(),
   /** One entry per acceptance criterion. */
   criteria: z
     .array(z.object({ criterion: z.string(), met: z.boolean(), note: z.string().optional() }))
@@ -188,7 +201,7 @@ export type ReviewVerdictInit = z.input<typeof ReviewVerdict>;
  * upper bound and whose lessons have no limits, so a review is never rejected over them; the tool
  * stores them with `truncateReviewSummary` and `cleanLessons`.
  */
-export const ReviewVerdictSubmission = ReviewVerdict.extend({
+export const ReviewVerdictSubmission = ReviewVerdict.omit({ techDebt: true }).extend({
   summary: z
     .string()
     .min(1)
@@ -211,6 +224,26 @@ export const FactoryItem = z.object({
   source: FactoryItemSource,
   area: DiscoveryArea.nullable(),
   acceptanceCriteria: z.array(z.string()),
+  /** The plan and scope pinned at the start of review. */
+  reviewSpec: ReviewAcceptanceSpec.optional(),
+  arbitration: ReviewArbitration.optional(),
+  /** Arbiter rounds started for this item, including across retries. */
+  arbiterRoundsUsed: z.int().positive().optional(),
+  jev: JevReceipt.optional(),
+  /** Prior done-gate results and the head sent back for a single reviewer response. */
+  jevHistory: z.array(JevReceipt).optional(),
+  jevReviewHead: z.string().optional(),
+  /** Completed review rounds, in order, with the head and the reviewer's dispositions. */
+  reviewRounds: z
+    .array(
+      z.object({
+        head: z.string(),
+        dispositions: z.array(z.string()),
+        verdict: ReviewVerdict.optional(),
+        writerResponse: z.string().optional(),
+      }),
+    )
+    .optional(),
   /** Priority, 0..1 (higher first); null for issues, which queue in order of arrival. */
   score: z.number().min(0).max(1).nullable(),
   stage: FactoryItemStage,
@@ -346,6 +379,8 @@ export type ReviewerFallback = z.infer<typeof ReviewerFallback>;
 
 /** Knobs of the loop beyond the required limits; all have safe defaults. */
 export const FactoryTuning = z.object({
+  /** Per-project review limits. */
+  reviewPolicy: ReviewPolicy.optional(),
   team: Team.default([]),
   autonomyPolicy: AutonomyPolicy.default({}),
   /** UTF-8 byte cap for PM-facing summaries. Null leaves them uncapped. */
@@ -464,18 +499,20 @@ export type FactoryTuning = z.infer<typeof FactoryTuning>;
  * A change to some tuning knobs. Unlike `FactoryTuning.partial()`, absent fields stay absent
  * (no defaults filled in), so saving one knob never resets the others.
  */
-export const FactoryTuningPatch = z.object(
-  Object.fromEntries(
-    Object.entries(FactoryTuning.shape).map(([key, schema]) => {
-      const kind = (schema as z.ZodType)._zod.def.type;
-      const inner =
-        kind === "default" || kind === "prefault"
-          ? (schema as unknown as { unwrap(): z.ZodType }).unwrap()
-          : (schema as z.ZodType);
-      return [key, inner.optional()];
-    }),
-  ) as unknown as { [K in keyof FactoryTuning]: z.ZodOptional<z.ZodType<FactoryTuning[K]>> },
-);
+export const FactoryTuningPatch = z
+  .object(
+    Object.fromEntries(
+      Object.entries(FactoryTuning.shape).map(([key, schema]) => {
+        const kind = (schema as z.ZodType)._zod.def.type;
+        const inner =
+          kind === "default" || kind === "prefault"
+            ? (schema as unknown as { unwrap(): z.ZodType }).unwrap()
+            : (schema as z.ZodType);
+        return [key, inner.optional()];
+      }),
+    ) as unknown as { [K in keyof FactoryTuning]: z.ZodOptional<z.ZodType<FactoryTuning[K]>> },
+  )
+  .extend({ reviewPolicy: ReviewPolicy.optional() });
 export type FactoryTuningPatch = z.infer<typeof FactoryTuningPatch>;
 
 /** A discovery session of loops before 0.6 (kept so old loops still parse). */
@@ -785,6 +822,10 @@ export const FactoryWorkItem = z.object({
   activeSessionId: Id.nullable().default(null),
   stage: FactoryItemStage,
   step: PipelineStep.default("intake"),
+  /** Review rounds and arbitration visible to the factory's session workers. */
+  reviewRound: z.int().positive().optional(),
+  arbitration: ReviewArbitration.optional(),
+  jev: JevReceipt.optional(),
   type: WorkType.nullable().default(null),
   trust: WorkTrust.default("trusted"),
   author: z.string().nullable().default(null),

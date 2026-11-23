@@ -182,3 +182,22 @@ describe("reviewer prompt", () => {
     expect(reReviewPrompt(item)).toMatch(/fix what the error names and call it again/);
   });
 });
+
+it("records the normalized severity of structured findings", async () => {
+  const { call, submitted } = reviewTool();
+  const result = await call("factory_submit_review", {
+    ...verdict("Review complete."),
+    findings: [
+      { location: "src/queue.ts:12", summary: "Queued work may be lost.", severity: "HIGH" },
+      {
+        location: "src/queue.ts:17",
+        summary: "Retry duplicates a queued item.",
+        severity: "MEDIUM",
+        failure_scenario: "Retry after a successful save with a lost response.",
+        repro: "Save twice using the same request id, then count queue entries.",
+      },
+    ],
+  });
+  expect(result.isError, result.text).toBe(false);
+  expect(submitted[0]).toMatchObject({ findings: [{ severity: "LOW" }, { severity: "MEDIUM" }] });
+});

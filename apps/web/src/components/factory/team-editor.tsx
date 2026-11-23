@@ -1,5 +1,6 @@
 import {
   ReasoningEffort,
+  ReviewPolicy,
   type Settings,
   type TeamMember,
   TeamRole,
@@ -25,6 +26,7 @@ const ROLE_LABEL: Record<TeamRole, string> = {
   agentsMdWriter: "AGENTS.md writer",
   planReviewer: "Plan reviewer",
   reviewer: "Code reviewer",
+  arbiter: "Arbiter",
   reviewerFallback: "Code reviewer fallback",
   investigator: "Investigator",
   browserTester: "Browser tester",
@@ -55,6 +57,7 @@ export function TeamEditor({
   }, [isSuccess, reset]);
 
   const { team, resultSummaryBytes } = tuning;
+  const reviewPolicy = tuning.reviewPolicy ?? ReviewPolicy.parse({});
   const useForNewProjects = remembered ?? savedRemembered;
   const changeRole = (role: TeamRole, member: TeamMember | null) => {
     const others = team.filter((entry) => entry.role !== role);
@@ -135,6 +138,21 @@ export function TeamEditor({
             >
               Clear
             </Button>
+            {role === "arbiter" && (
+              <div className="col-span-full">
+                <Field label="Arbiter rounds" htmlFor={`${id}-arbiter-rounds`}>
+                  <NumberField
+                    id={`${id}-arbiter-rounds`}
+                    min={1}
+                    value={reviewPolicy.arbiterRounds}
+                    onChange={(arbiterRounds) =>
+                      onChange({ ...tuning, reviewPolicy: { ...reviewPolicy, arbiterRounds } })
+                    }
+                    wrapperClassName="w-24"
+                  />
+                </Field>
+              </div>
+            )}
             {staleModel && member && provider && (
               <div className="col-span-full flex flex-wrap items-center gap-2 text-3xs">
                 <span id={modelWarningId} className="text-status-waiting">

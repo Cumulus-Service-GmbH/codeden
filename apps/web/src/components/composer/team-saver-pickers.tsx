@@ -20,6 +20,7 @@ export const TEAM_ROLE_LABEL: Record<TeamRole, string> = {
   agentsMdWriter: "AGENTS.md Writer",
   planReviewer: "Plan Reviewer",
   reviewer: "Code Reviewer",
+  arbiter: "Arbiter",
   reviewerFallback: "Code Reviewer Fallback",
   investigator: "Investigator",
   browserTester: "Browser Tester",

@@ -29,6 +29,7 @@ export const OPENCODE_PROVIDER_ID = "opencode";
  * (OpenCode's revert), fork and plan mode (OpenCode's `plan` agent).
  */
 const capabilities: ProviderCapabilities = {
+  toolFreeRuns: true,
   resume: true,
   steer: true,
   interrupt: true,

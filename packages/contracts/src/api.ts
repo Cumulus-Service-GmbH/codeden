@@ -18,6 +18,7 @@ import { ProjectExecutionBackend } from "./execution";
 import { UserInput } from "./input";
 import { FollowupsItem } from "./items";
 import { BrokenExecutable, ProviderInfo, RuntimeResponse } from "./provider";
+import { LowFindingPolicy, ReviewAcceptanceSpec } from "./review-policy";
 import { TeamRole } from "./team";
 import { ProjectTeams } from "./team-run";
 import { TokenSaverLevel } from "./token-saver";
@@ -93,6 +94,8 @@ export type CreateProjectResponse = z.infer<typeof CreateProjectResponse>;
 /** `PATCH /api/projects/:id`. */
 export const UpdateProjectRequest = z.object({
   teams: ProjectTeams.optional(),
+  /** The project's policy for LOW review findings. */
+  lowFindings: LowFindingPolicy.optional(),
   name: z.string().trim().min(1).max(100).optional(),
   defaultProvider: ProviderId.nullable().optional(),
   /**
@@ -320,6 +323,8 @@ export const REVIEW_FOCUS_MAX = 4_000;
  * brief from CodeDen. The source is only read.
  */
 export const ReviewSessionRequest = z.object({
+  /** The approved plan and threat model, when supplied by the owner. */
+  acceptanceSpec: ReviewAcceptanceSpec.optional(),
   /** The provider that reviews; it must enforce read-only (`capabilities.readOnly`). */
   provider: ProviderId,
   /**
@@ -342,6 +347,15 @@ export type ReviewSessionResponse = z.infer<typeof ReviewSessionResponse>;
 
 /** Recorded with a session about how it was started (forced starts keep their reason). */
 export const SessionStartMeta = z.object({
+  /** Pinned metadata for an independent session review. */
+  review: z
+    .object({
+      head: z.string(),
+      round: z.int().positive(),
+      limit: z.int().positive(),
+      spec: ReviewAcceptanceSpec.optional(),
+    })
+    .optional(),
   workspaceMode: WorkspaceMode.default("worktree"),
   /** Set when the runner could not prepare the requested workspace and CodeDen fell back. */
   workspaceFallback: z.string().nullable(),
