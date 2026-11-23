@@ -66,10 +66,27 @@ export const TeamWorkerJev = z.object({
       historyBytes: z.int().nonnegative().optional(),
       inputSha256: z.string().optional(),
       reasons: z.array(z.string()).optional(),
+      /** Exact scores returned by the done gate. */
+      scores: z.record(z.string(), z.number().min(0).max(1)).optional(),
     })
     .optional(),
 });
 export type TeamWorkerJev = z.infer<typeof TeamWorkerJev>;
+
+/** Provenance of a shared review recorded for the assignment's build history. */
+export const TeamReviewRecord = z.object({
+  provider: TeamMember.shape.provider,
+  model: id,
+  effort: ReasoningEffort,
+  slot: z.enum(["primary", "fallback"]),
+  receipt: id,
+  head: commitSha,
+  historySha256: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
+});
+export type TeamReviewRecord = z.infer<typeof TeamReviewRecord>;
 
 /** One assignment in the run. Runner resources are absent until provisioned. */
 export const TeamWorker = z.object({
@@ -87,6 +104,38 @@ export const TeamWorker = z.object({
   startedAt: z.int().nonnegative().optional(),
   checkpoint: TeamWorkerCheckpoint.nullable(),
   jev: TeamWorkerJev.optional(),
+  /** Candidate that was sent back for a blocking review finding. */
+  deltaBase: commitSha.optional(),
+  /** Whether the previous review requested a fix for a blocking finding. */
+  blockingReview: z.boolean().optional(),
+  /** The worktree's pinned starting commit. */
+  baseHead: commitSha.optional(),
+  /** Original candidate that must be retained in a conflict resolution. */
+  resolutionHead: commitSha.optional(),
+  /** Assembler commit from which the resolution checkout was created. */
+  resolutionBase: commitSha.optional(),
+  /** Current coordinator step, retained when an assignment is blocked. */
+  step: z.enum(["writing", "review", "delta", "Arbiter", "Jev", "merge"]).optional(),
+  /** Latest progress line sent to the Architect. */
+  progress: id.optional(),
+  /** Latest review invocation and the history digest supplied to it. */
+  reviewRunId: id.optional(),
+  reviews: z.array(TeamReviewRecord).optional(),
+  historySha256: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
+  /** The single ruling after a fix delta still has a blocking finding. */
+  arbiter: z
+    .object({
+      verdict: z.enum(["FIX REQUIRED", "DOWNGRADE TO LOW"]),
+      reason: id,
+      historySha256: z
+        .string()
+        .regex(/^[0-9a-f]{64}$/)
+        .optional(),
+    })
+    .optional(),
   /** The first product refusal, retained across worker attempts for the single reviewer escalation. */
   jevRefusal: TeamWorkerJev.shape.receipt,
 });
@@ -97,7 +146,7 @@ export const TeamCoordinationMessage = z.discriminatedUnion("type", [
   z.object({ type: z.literal("worker_finished"), itemId: id, attempt: z.int().positive() }),
   z.object({ type: z.literal("worker_failed"), itemId: id, attempt: z.int().positive() }),
   z.object({ type: z.literal("review_done"), itemId: id, attempt: z.int().positive() }),
-  z.object({ type: z.literal("continue") }),
+  z.object({ type: z.literal("continue"), itemId: id.optional(), progress: id.optional() }),
 ]);
 export type TeamCoordinationMessage = z.infer<typeof TeamCoordinationMessage>;
 
@@ -110,7 +159,15 @@ export const TeamRun = z.object({
   team: Team,
   limits: TeamRunSettings,
   revision: id,
-  items: z.array(z.object({ id, text: id, dependsOn: z.array(id) })),
+  items: z.array(
+    z.object({
+      id,
+      text: id,
+      dependsOn: z.array(id),
+      /** Owner-approved criteria, in their original wording and order. */
+      criteria: z.array(id).min(1).optional(),
+    }),
+  ),
   assembler: id,
   coordinatorId: id.nullable(),
   workers: z.array(TeamWorker),

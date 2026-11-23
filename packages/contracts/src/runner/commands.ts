@@ -308,6 +308,11 @@ export const RunnerCommand = z.discriminatedUnion("name", [
     assembler: z.string().min(1),
     workerBranch: z.string().min(1),
     head: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/),
+    /** Both candidate parents must be retained when merging a conflict resolution. */
+    resolutionParents: z
+      .array(z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/))
+      .length(2)
+      .optional(),
   }),
   /** Stage (all changes, or `paths`) and commit. */
   z.object({
@@ -511,6 +516,7 @@ export const RunnerCommandResults = {
     ),
   }),
   "git.mergeTeamWorker": z.object({
+    needsResolution: z.boolean().optional(),
     conflict: z.string().optional(),
     headMoved: z.boolean().optional(),
   }),

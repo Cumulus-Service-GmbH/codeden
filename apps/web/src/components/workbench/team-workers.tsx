@@ -1,4 +1,5 @@
 import type { TeamRun, TeamWorker } from "@codeden/contracts";
+import { Fragment } from "react";
 import { useSnapshot } from "@/lib/queries";
 
 function estimatedMinutes(run: TeamRun, startedAt: number | undefined): number | undefined {
@@ -31,6 +32,12 @@ function JevStatus({ jev }: { jev: NonNullable<TeamWorker["jev"]> }) {
             <dd>{jev.receipt.inputSha256}</dd>
           </>
         )}
+        {Object.entries(jev.receipt.scores ?? {}).map(([label, score]) => (
+          <Fragment key={label}>
+            <dt>{label}</dt>
+            <dd>{score}</dd>
+          </Fragment>
+        ))}
         {jev.receipt.reasons?.map((reason) => (
           <dd key={reason}>{reason}</dd>
         ))}
@@ -56,6 +63,8 @@ export function TeamWorkers({ sessionId }: { sessionId: string }) {
           return (
             <li key={worker.itemId}>
               {run.items.find((item) => item.id === worker.itemId)?.text} · {worker.status}
+              {worker.step && ` · ${worker.step}`}
+              {worker.arbiter && ` · ${worker.arbiter.verdict}`}
               {worker.attempt > 0 && ` · Round ${worker.attempt}/${run.limits.maxRounds}`}
               {minutes !== undefined && ` · ETA ~${minutes} min`}
               {worker.jev && <JevStatus jev={worker.jev} />}
@@ -79,19 +88,28 @@ export function TeamRunProgress({ run }: { run: TeamRun }) {
         {run.teamName} · {done}/{run.workers.length}
       </h3>
       {current && <p>{run.items.find((item) => item.id === current.itemId)?.text}</p>}
-      {run.workers.some((worker) => worker.jev) && (
-        <ul>
-          {run.workers.map(
-            (worker) =>
-              worker.jev && (
-                <li key={worker.itemId}>
-                  {run.items.find((item) => item.id === worker.itemId)?.text}
-                  <JevStatus jev={worker.jev} />
-                </li>
-              ),
-          )}
-        </ul>
-      )}
+      <ul>
+        {run.workers.map((worker) => {
+          const minutes =
+            worker.status === "running" ? estimatedMinutes(run, worker.startedAt) : undefined;
+          return (
+            <li key={worker.itemId}>
+              {worker.status === "completed" ? "[x]" : worker.status === "queued" ? "[ ]" : "[~]"}{" "}
+              {run.items.find((item) => item.id === worker.itemId)?.text}
+              {" · "}
+              {worker.status}
+              {worker.step && ` · ${worker.step}`}
+              {worker.attempt > 0 && ` · Round ${worker.attempt}/${run.limits.maxRounds}`}
+              {worker.arbiter && ` · ${worker.arbiter.verdict}`}
+              {minutes !== undefined &&
+                ` · ETA ${new Date(Date.now() + minutes * 60_000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`}
+              {worker.sessionId && <p>{worker.sessionId}</p>}
+              {worker.progress && <p>{worker.progress}</p>}
+              {worker.jev && <JevStatus jev={worker.jev} />}
+            </li>
+          );
+        })}
+      </ul>
     </section>
   );
 }

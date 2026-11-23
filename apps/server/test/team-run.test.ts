@@ -1,4 +1,6 @@
-import { mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
+
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
   EventEnvelope,
@@ -17,7 +19,8 @@ import { ensureHome } from "../src/paths";
 import { createServices } from "../src/services/container";
 import type { RunnerPort } from "../src/services/runner-port";
 import { listTeamRuns, saveTeamRun } from "../src/services/sessions/team-run-projection";
-import { TeamRuns } from "../src/services/sessions/team-runs";
+import { resolveApprovedTeamPlan } from "../src/services/sessions/team-run-scheduler";
+import { type TeamRunPorts, TeamRuns } from "../src/services/sessions/team-runs";
 import { SettingsStore } from "../src/settings-store";
 import { createGithubEnv } from "./support/github-env";
 
@@ -36,35 +39,51 @@ const teams: ProjectTeams = {
   })),
 };
 
-function setup(save: (run: TeamRun) => void = () => {}, initial: TeamRun[] = []) {
+function setup(
+  save: (run: TeamRun) => void = () => {},
+  initial: TeamRun[] = [],
+  criteria?: string[],
+) {
   const merge = vi.fn(
-    async (): Promise<{ conflict?: string }> => ({ conflict: "Conflicting files" }),
+    async (): Promise<{ conflict?: string; needsResolution?: boolean }> => ({
+      conflict: "Conflicting files",
+    }),
   );
-  const launch = vi.fn(async (member: TeamMember, branch: string, base: string) => ({
-    sessionId: `${member.model}/${branch}`,
-    branch,
-    worktree: `${base}/${branch}`,
-  }));
+  const launch = vi.fn(
+    async (
+      member: TeamMember,
+      branch: string,
+      base: string,
+      _run: TeamRun,
+      _item?: TeamRun["items"][number],
+      _packet?: string,
+    ) => ({
+      sessionId: `${member.model}/${branch}`,
+      branch,
+      worktree: `${base}/${branch}`,
+    }),
+  );
   const coordinate = vi.fn(async () => {});
   const verify = vi.fn(async () => {});
   const head = vi.fn(async () => "a".repeat(40));
-  const review = vi.fn(
-    async (): Promise<{ head: string } | { changes: string; history: string }> => ({
-      head: "a".repeat(40),
-    }),
-  );
+  const review = vi.fn<TeamRunPorts["review"]>(async () => ({ head: "a".repeat(40) }));
   const gate = vi.fn(async () => ({
     status: "pass" as "pass" | "revise" | "unavailable",
     receipt: { head: "a".repeat(40), historyPath: "/history", historySha256: "b".repeat(64) },
   }));
   const ownerDecision = vi.fn();
+  const arbiter = vi.fn<NonNullable<TeamRunPorts["arbiter"]>>(async () => ({
+    verdict: "FIX REQUIRED",
+    reason: "Add a regression test.",
+  }));
+  const defer = vi.fn(async () => {});
   const runs = new TeamRuns(
     {
       approvedPlan: async (_projectId, request) =>
         "checklistId" in request && request.checklistId === "approved"
           ? {
               revision: "approved-v1",
-              items: ["a", "b"].map((id) => ({ id, text: id, dependsOn: [] })),
+              items: ["a", "b"].map((id) => ({ id, text: id, dependsOn: [], criteria })),
             }
           : undefined,
       configuration: () => ({ teams, defaults: [] }),
@@ -76,13 +95,27 @@ function setup(save: (run: TeamRun) => void = () => {}, initial: TeamRun[] = [])
       review,
       gate,
       ownerDecision,
+      arbiter,
+      defer,
       merge,
       verify,
       save,
     },
     initial,
   );
-  return { runs, launch, merge, coordinate, verify, gate, review, head, ownerDecision };
+  return {
+    runs,
+    launch,
+    merge,
+    coordinate,
+    verify,
+    gate,
+    review,
+    head,
+    ownerDecision,
+    arbiter,
+    defer,
+  };
 }
 
 it("uses the selected Team's models and dispatch cap", async () => {
@@ -113,11 +146,17 @@ it("keeps merge conflicts waiting and sends typed coordination", async () => {
   expect(result.workers[0]).toMatchObject({
     status: "waiting",
     checkpoint: { blocker: "Conflicting files" },
+    step: "merge",
   });
   expect(coordinate).toHaveBeenCalledWith(run.coordinatorId, {
     type: "worker_finished",
     itemId: "a",
     attempt: 1,
+  });
+  expect(coordinate).toHaveBeenCalledWith(run.coordinatorId, {
+    type: "continue",
+    itemId: "a",
+    progress: "a · waiting · round 1/2 · Conflicting files",
   });
 });
 
@@ -150,12 +189,17 @@ it("rebuilds worker state and conflict notices from the event log", async () => 
 });
 
 it("retries a failed worker, ignores the superseded session, and reports exhaustion", async () => {
-  const { runs } = setup();
+  const { runs, launch } = setup();
   const run = await runs.start("project", { checklistId: "approved" });
   const first = run.workers[0]?.sessionId ?? "";
   const retried = await runs.finish(run.id, first, "Worker failed");
   const second = retried.workers[0]?.sessionId ?? "";
   expect(second).not.toBe(first);
+  const retry = launch.mock.calls.find(
+    ([member, branch]) => `${member.model}/${branch}` === second,
+  );
+  expect(retry?.[2]).toBe(run.workers[0]?.branch);
+  expect(retry?.[5]).toMatch(/Completed work[\s\S]*Remaining work[\s\S]*Worker failed/);
   expect(retried.workers[0]).toMatchObject({ attempt: 2, status: "running" });
   await expect(runs.finish(run.id, first, null)).rejects.toThrow("No running assignment");
   const exhausted = await runs.finish(run.id, second, "Retry failed");
@@ -176,7 +220,7 @@ it("reviews and merges all assignments before verifying the assembled result", a
   expect(verify).toHaveBeenCalledOnce();
 });
 
-it("starts both named Teams through MCP and handles a runner completion conflict", async () => {
+it("commits worker changes before review and handles a runner completion conflict through MCP", async () => {
   const env = createGithubEnv();
   try {
     const project = { ...env.localProject, teams };
@@ -186,6 +230,7 @@ it("starts both named Teams through MCP and handles a runner completion conflict
     const prepared: RunnerCommandOf<"workspace.prepare">[] = [];
     const opened: RunnerCommandOf<"session.start">[] = [];
     const merged: RunnerCommandOf<"git.mergeTeamWorker">[] = [];
+    const commits: RunnerCommandOf<"git.commit">[] = [];
     const fake = new FakeProvider();
     const runner: RunnerPort = {
       isConnected: () => true,
@@ -209,14 +254,28 @@ it("starts both named Teams through MCP and handles a runner completion conflict
           opened.push(command);
           return { resumeToken: null };
         }
+        if (command.name === "git.status") {
+          return {
+            branch: prepared.find(({ path }) => path === command.cwd)?.branch,
+            files: [{ path: "test.ts", status: "??" }],
+          };
+        }
+        if (command.name === "git.commit") {
+          commits.push(command);
+          return { commit: "a".repeat(40) };
+        }
         if (command.name === "git.branches") {
           return {
             branches: prepared.map(({ branch }) => ({
               name: branch,
               remote: false,
-              commit: "a".repeat(40),
+              commit: (branch?.startsWith("team/") ? "b" : "a").repeat(40),
             })),
           };
+        }
+        if (command.name === "git.diff") {
+          expect(command).toMatchObject({ fromRef: "b".repeat(40), toRef: "a".repeat(40) });
+          return { diff: "Frozen candidate patch" };
         }
         if (command.name === "git.mergeTeamWorker") {
           merged.push(command);
@@ -283,7 +342,24 @@ it("starts both named Teams through MCP and handles a runner completion conflict
           status: "pass",
           receipt: { head: "a".repeat(40), historyPath: "/history", historySha256: "b".repeat(64) },
         }),
-        review: async () => ({ head: "a".repeat(40) }),
+        review: async (_run, _worker, context) => {
+          expect(context.historySha256).toMatch(/^[a-f0-9]{64}$/);
+          expect(context.historyPath).toEqual(expect.any(String));
+          expect(readFileSync(context.historyPath ?? "", "utf8")).toContain(
+            `Candidate ${"a".repeat(40)}`,
+          );
+          expect(readFileSync(context.historyPath ?? "", "utf8")).toContain(
+            "Frozen candidate patch",
+          );
+          expect(context.historyBrief).not.toContain("Frozen candidate patch");
+          expect(commits).toEqual([
+            expect.objectContaining({
+              cwd: prepared[1]?.path,
+              message: "feat: complete Team assignment",
+            }),
+          ]);
+          return { head: "a".repeat(40) };
+        },
         verify: async () => {},
       },
     });
@@ -401,6 +477,11 @@ it("returns a product refusal to the reviewer once, then raises an owner decisio
   const run = await runs.start("project", { checklistId: "approved" });
   const result = await runs.finish(run.id, run.workers[0]?.sessionId ?? "", null);
   expect(review).toHaveBeenCalledTimes(2);
+  const firstContext = review.mock.calls[0]?.[2];
+  const secondContext = review.mock.calls[1]?.[2];
+  expect(firstContext?.reviewRunId).toBeTruthy();
+  expect(secondContext?.reviewRunId).toBeTruthy();
+  expect(secondContext?.reviewRunId).not.toBe(firstContext?.reviewRunId);
   expect(ownerDecision).toHaveBeenCalledOnce();
   expect(result.workers[0]).toMatchObject({ status: "waiting", jev: { status: "owner decision" } });
   expect(merge).not.toHaveBeenCalled();
@@ -440,4 +521,145 @@ it("preserves the reviewer escalation limit across worker attempts", async () =>
   expect(review).toHaveBeenCalledTimes(3);
   expect(ownerDecision).toHaveBeenCalledOnce();
   expect(result.workers[0]).toMatchObject({ jev: { status: "owner decision" } });
+});
+
+it("requests a coverage delta with the verbatim acceptance criterion before running Jev", async () => {
+  const criterion = "A finished assignment appears in the checklist.";
+  const { runs, launch, gate, review } = setup(undefined, [], [criterion]);
+  review.mockResolvedValue({
+    head: "a".repeat(40),
+    evidence: {
+      criteria: [criterion],
+      evidence: ["criteria[0] tests\n ✓ shows finished assignment"],
+      history: "",
+    },
+  });
+  const run = await runs.start("project", { checklistId: "approved" });
+  const result = await runs.finish(run.id, run.workers[0]?.sessionId ?? "", null);
+  expect(result.items[0]?.criteria).toEqual([criterion]);
+  expect(launch.mock.calls[2]?.[5]).toContain(criterion);
+  expect(launch.mock.calls[2]?.[5]).toContain("one named test per criterion");
+  expect(gate).not.toHaveBeenCalled();
+});
+
+it("sends a persistent blocking finding to the Arbiter before a third review", async () => {
+  const { runs, review, arbiter, merge } = setup();
+  review
+    .mockResolvedValueOnce({
+      changes: "Fix regression",
+      history: "First finding",
+      head: "a".repeat(40),
+    })
+    .mockResolvedValueOnce({
+      changes: "Still broken",
+      history: "Delta finding",
+      head: "b".repeat(40),
+    });
+  const run = await runs.start("project", { checklistId: "approved" });
+  const delta = await runs.finish(run.id, run.workers[0]?.sessionId ?? "", null);
+  const result = await runs.finish(run.id, delta.workers[0]?.sessionId ?? "", null);
+  expect(review.mock.calls[1]?.[2].deltaBase).toBe("a".repeat(40));
+  expect(arbiter).toHaveBeenCalledOnce();
+  expect(result.workers[0]).toMatchObject({
+    status: "waiting",
+    arbiter: { verdict: "FIX REQUIRED" },
+  });
+  expect(merge).not.toHaveBeenCalled();
+});
+
+it("dispatches a Writer on the assembler for a genuine merge conflict and reviews its delta", async () => {
+  const { runs, launch, merge, review } = setup();
+  merge.mockResolvedValueOnce({ conflict: "Conflicting files", needsResolution: true });
+  const run = await runs.start("project", { checklistId: "approved" });
+  const resolving = await runs.finish(run.id, run.workers[0]?.sessionId ?? "", null);
+  const worker = resolving.workers[0];
+  expect(worker).toMatchObject({ status: "running", attempt: 2, resolutionHead: "a".repeat(40) });
+  expect(launch.mock.calls[2]?.[2]).toBe(run.assembler);
+  expect(launch.mock.calls[2]?.[5]).toContain("Preserve both sides and every test");
+  merge.mockResolvedValueOnce({});
+  const result = await runs.finish(run.id, worker?.sessionId ?? "", null);
+  expect(review.mock.calls[1]?.[2].deltaBase).toBe("a".repeat(40));
+  expect(result.workers[0]?.status).toBe("completed");
+});
+
+it("returns a pinned item to the Writer for an evidence delta before renewing Jev", async () => {
+  const criterion = "A finished assignment appears in the checklist.";
+  const { runs, launch, review, gate, ownerDecision } = setup(undefined, [], [criterion]);
+  review.mockResolvedValue({
+    head: "a".repeat(40),
+    evidence: {
+      criteria: [criterion],
+      evidence: [
+        `criteria[0] (Finished assignment) tests at ${"a".repeat(40)}\nVITEST_MAX_WORKERS=2 pnpm -s vitest run --reporter=verbose checklist.test.ts | grep -iE 'finished assignment'\n ✓ checklist.test.ts > shows finished assignment\n Test Files  1 passed (1)\n Tests  1 passed (1)`,
+      ],
+      history: "",
+    },
+  });
+  gate.mockResolvedValue({
+    status: "revise",
+    receipt: { head: "a".repeat(40), historyPath: "/history", historySha256: "b".repeat(64) },
+  });
+  const run = await runs.start("project", { checklistId: "approved" });
+  const delta = await runs.finish(run.id, run.workers[0]?.sessionId ?? "", null);
+  expect(gate).toHaveBeenCalledOnce();
+  expect(launch.mock.calls[2]?.[5]).toContain("Jev refused");
+  const result = await runs.finish(run.id, delta.workers[0]?.sessionId ?? "", null);
+  expect(gate).toHaveBeenCalledTimes(2);
+  expect(review.mock.calls[1]?.[2].deltaBase).toBe("a".repeat(40));
+  expect(ownerDecision).toHaveBeenCalledOnce();
+  expect(result.workers[0]?.jev?.status).toBe("owner decision");
+});
+
+it("records Arbiter-downgraded findings as debt before asking Jev about the same head", async () => {
+  const { runs, review, arbiter, defer, gate, head, merge } = setup();
+  const oldHead = "a".repeat(40);
+  const newHead = "b".repeat(40);
+  const debt = [{ location: "file.ts:9", summary: "Retain this verbatim.", receipt: "review-2" }];
+  review
+    .mockResolvedValueOnce({ changes: "Fix regression", history: "First", head: oldHead })
+    .mockResolvedValueOnce({ changes: "Still broken", history: "Delta", head: newHead });
+  arbiter.mockResolvedValueOnce({
+    verdict: "DOWNGRADE TO LOW",
+    reason: "No concrete failure scenario.",
+    approval: { head: newHead, debt },
+  });
+  head.mockResolvedValue(newHead);
+  gate.mockResolvedValue({
+    status: "pass",
+    receipt: { head: newHead, historyPath: "/history", historySha256: "b".repeat(64) },
+  });
+  merge.mockResolvedValue({});
+  const run = await runs.start("project", { checklistId: "approved" });
+  const delta = await runs.finish(run.id, run.workers[0]?.sessionId ?? "", null);
+  const result = await runs.finish(run.id, delta.workers[0]?.sessionId ?? "", null);
+  expect(defer).toHaveBeenCalledExactlyOnceWith(expect.anything(), expect.anything(), debt);
+  expect(gate).toHaveBeenCalledOnce();
+  expect(result.workers[0]).toMatchObject({
+    status: "completed",
+    arbiter: { verdict: "DOWNGRADE TO LOW" },
+  });
+});
+
+it("opens an owner-approved checklist by its project key or exact pinned digest", () => {
+  const tasks = [{ id: "a", text: "Keep the owner's words." }];
+  const sha = createHash("sha256").update(JSON.stringify(tasks)).digest("hex");
+  const checklist = {
+    projectId: "project",
+    state: "approved",
+    approvedAt: "2026-11-23T09:00:00.000Z",
+    plan: { sha, reviewRef: "review-1", tasks },
+  };
+  const pinned = {
+    revision: sha,
+    items: [{ ...tasks[0], dependsOn: [], criteria: [tasks[0]?.text] }],
+  };
+  expect(resolveApprovedTeamPlan(checklist, "project", { checklistId: "project" })).toEqual(pinned);
+  expect(resolveApprovedTeamPlan(checklist, "project", { planSha: sha })).toEqual(pinned);
+  expect(
+    resolveApprovedTeamPlan(checklist, "project", { planSha: "0".repeat(64) }),
+  ).toBeUndefined();
+  expect(
+    resolveApprovedTeamPlan({ ...checklist, state: "draft" }, "project", { planSha: sha }),
+  ).toBeUndefined();
+  expect(resolveApprovedTeamPlan(checklist, "outside", { planSha: sha })).toBeUndefined();
 });

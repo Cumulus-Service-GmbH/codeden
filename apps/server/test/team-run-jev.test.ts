@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
@@ -50,6 +50,7 @@ it.each([
             verdict,
             pass: verdict === "proceed",
             reasons: [],
+            jev: { answers: { met_0: { type: "noul", noul: 0.97 } } },
           }),
           stderr: "",
           timedOut: false,
@@ -69,10 +70,41 @@ it.each([
         .digest("hex");
       expect(result).toMatchObject({
         status,
-        receipt: { head, historyPath, historySha256: digest },
+        receipt: { head, historyPath, historySha256: digest, scores: { met_0: 0.97 } },
       });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
   },
 );
+
+it("refuses a proceed result if the history changes during the invocation", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "team-jev-"));
+  const historyPath = join(dir, "item.md");
+  try {
+    const result = await runJevDone(
+      async () => {
+        await appendFile(historyPath, "Changed after input creation.\n");
+        return {
+          code: 0,
+          stdout: JSON.stringify({ gate: "done", verdict: "proceed", pass: true }),
+          stderr: "",
+          notFound: false,
+          timedOut: false,
+          path: process.execPath,
+        };
+      },
+      "/installed/jev.mjs",
+      historyPath,
+      {
+        head: "a".repeat(40),
+        criteria: ["Preserve history."],
+        evidence: [],
+        history: "Original history.",
+      },
+    );
+    expect(result.status).toBe("unavailable");
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});

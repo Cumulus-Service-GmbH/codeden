@@ -1,7 +1,8 @@
-import { createHash, randomUUID } from "node:crypto";
-import { appendFile, readFile, unlink, writeFile } from "node:fs/promises";
-import type { TeamWorkerJev } from "@codeden/contracts";
+import { randomUUID } from "node:crypto";
+import { readFile, unlink, writeFile } from "node:fs/promises";
+import { TeamWorkerJev } from "@codeden/contracts";
 import type { Exec } from "../exec";
+import { historyDigest, recordTeamHistory } from "./team-run-history";
 
 export interface TeamReviewEvidence {
   /** Product acceptance criteria and the corresponding test, review and history command output. */
@@ -17,9 +18,8 @@ export async function runJevDone(
   historyPath: string,
   { head, criteria, evidence, history }: TeamReviewEvidence & { head: string },
 ): Promise<TeamWorkerJev> {
-  await appendFile(historyPath, `${history}\n`, { mode: 0o600 });
-  const historyBytes = await readFile(historyPath);
-  const historySha256 = createHash("sha256").update(historyBytes).digest("hex");
+  const historyBytes = await recordTeamHistory(historyPath, `${history}\n`);
+  const historySha256 = historyDigest(historyBytes);
   const receipt: NonNullable<TeamWorkerJev["receipt"]> = {
     head,
     historyPath,
@@ -47,15 +47,28 @@ export async function runJevDone(
       [script, "done", inputPath, "--log", `${historyPath}.jsonl`],
       {
         timeoutMs: 180_000,
-        env: process.versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : undefined,
+        env: {
+          NODE_OPTIONS: "",
+          ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+        },
       },
     );
     const out = JSON.parse(result.stdout);
-    if (out.gate === "done" && !out.dryRun && !result.timedOut) {
+    if (!(await readFile(historyPath)).equals(historyBytes)) {
+      receipt.reasons = ["Item history changed during the done invocation"];
+    } else if (out.gate === "done" && !out.dryRun && !result.timedOut) {
       if (typeof out.inputSha256 === "string") receipt.inputSha256 = out.inputSha256;
       if (Array.isArray(out.reasons)) {
         receipt.reasons = out.reasons.filter((reason: unknown) => typeof reason === "string");
       }
+      const scores = Object.entries(out.jev?.answers ?? {}).flatMap(([key, answer]) => {
+        if (typeof answer !== "object" || answer === null || !("noul" in answer)) return [];
+        return [[key, answer.noul]];
+      });
+      const parsed = TeamWorkerJev.shape.receipt
+        .unwrap()
+        .shape.scores.safeParse(Object.fromEntries(scores));
+      if (scores.length && parsed.success) receipt.scores = parsed.data;
       if (result.code === 0 && out.verdict === "proceed" && out.pass === true) status = "pass";
       if (
         result.code === 2 &&
@@ -71,6 +84,9 @@ export async function runJevDone(
   } finally {
     await unlink(inputPath);
   }
-  await appendFile(historyPath, `Jev ${status} at ${head}: ${receipt.reasons?.join("; ") ?? ""}\n`);
+  await recordTeamHistory(
+    historyPath,
+    `Jev ${status} at ${head}: ${receipt.reasons?.join("; ") ?? ""} ${JSON.stringify(receipt.scores ?? {})}\n`,
+  );
   return { status, receipt };
 }

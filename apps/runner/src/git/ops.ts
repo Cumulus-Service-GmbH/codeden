@@ -109,6 +109,7 @@ export async function mergeTeamWorker({
   assembler,
   workerBranch,
   head,
+  resolutionParents,
 }: RunnerCommandOf<"git.mergeTeamWorker">): Promise<RunnerCommandResult<"git.mergeTeamWorker">> {
   const state = await status(cwd);
   if (
@@ -125,14 +126,18 @@ export async function mergeTeamWorker({
   ) {
     return { headMoved: true };
   }
+  for (const parent of resolutionParents ?? []) {
+    if (parent === head || !(await gitOk(cwd, ["merge-base", "--is-ancestor", parent, head]))) {
+      return { conflict: "Conflict resolution must retain both candidate parents" };
+    }
+  }
   const result = await git(cwd, ["merge", "--no-ff", "--no-edit", "--no-autostash", head], {
     okCodes: [0, 1, 128],
   });
   if (result.code === 0) return {};
-  if (await gitOk(cwd, ["rev-parse", "--verify", "MERGE_HEAD"])) {
-    await git(cwd, ["merge", "--abort"]);
-  }
-  return { conflict: `Could not merge worker ${workerBranch} into ${assembler}` };
+  const needsResolution = await gitOk(cwd, ["rev-parse", "--verify", "MERGE_HEAD"]);
+  if (needsResolution) await git(cwd, ["merge", "--abort"]);
+  return { needsResolution, conflict: `Could not merge worker ${workerBranch} into ${assembler}` };
 }
 
 /** Stage all changes (or `paths`) and commit. Returns null when nothing was staged. */

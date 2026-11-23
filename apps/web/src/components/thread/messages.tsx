@@ -103,8 +103,9 @@ export function UserMessage({ item }: { item: ItemOf<"user_message"> }) {
       <div className="flex items-center gap-2 py-1 text-xs text-muted-foreground">
         <span className="font-medium">Team</span>
         <span>
-          {label}
-          {"itemId" in team && ` · ${team.itemId} · Round ${team.attempt}`}
+          {team.type === "continue"
+            ? (team.progress ?? label)
+            : `${label} · ${team.itemId} · Round ${team.attempt}`}
         </span>
       </div>
     );

@@ -1,10 +1,10 @@
 import { randomUUID } from "node:crypto";
-import { appendFile } from "node:fs/promises";
 import {
   type ProjectTeams,
   type StartTeamRun,
   type TeamCoordinationMessage,
   type TeamMember,
+  type TeamReviewRecord,
   type TeamRole,
   type TeamRun,
   type TeamWorker,
@@ -12,11 +12,14 @@ import {
   teamMember,
 } from "@codeden/contracts";
 import type { TeamReviewEvidence } from "./team-run-jev";
+import { checkpoint, reviewAndMerge } from "./team-run-review";
 import { eligibleAssignments, resolveRunTeam } from "./team-run-scheduler";
 
-type TeamReviewResult =
-  | { head: string; evidence?: TeamReviewEvidence }
-  | { changes: string; history: string };
+type DeferredFinding = { location: string; summary: string; receipt: string };
+type ReviewApproval = { head: string; evidence?: TeamReviewEvidence; debt?: DeferredFinding[] };
+type TeamReviewResult = (ReviewApproval | { changes: string; history: string; head?: string }) & {
+  record?: TeamReviewRecord;
+};
 
 export interface TeamRunPorts {
   configuration(projectId: string): { teams: ProjectTeams; defaults: readonly TeamMember[] };
@@ -32,14 +35,32 @@ export interface TeamRunPorts {
     base: string,
     run: TeamRun,
     item?: TeamRun["items"][number],
-  ): Promise<{ sessionId: string; branch: string; worktree: string }>;
+    packet?: string,
+  ): Promise<{ sessionId: string; branch: string; worktree: string; baseHead?: string }>;
   coordinate(sessionId: string, message: TeamCoordinationMessage): Promise<void>;
+  seal?(run: TeamRun, worker: TeamWorker): Promise<void>;
+  writerResponse?(worker: TeamWorker): string | undefined;
   head(run: TeamRun, worker: TeamWorker): Promise<string>;
   review(
     run: TeamRun,
     worker: TeamWorker,
-    context: { historyPath?: string; refusal?: TeamWorkerJev["receipt"] },
+    context: {
+      reviewRunId: string;
+      candidateHead?: string;
+      deltaBase?: string;
+      historyPath?: string;
+      historyBrief?: string;
+      historySha256?: string;
+      refusal?: TeamWorkerJev["receipt"];
+    },
   ): Promise<TeamReviewResult>;
+  arbiter?(
+    run: TeamRun,
+    worker: TeamWorker,
+    context: { historyPath?: string; historySha256?: string },
+  ): Promise<NonNullable<TeamWorker["arbiter"]> & { approval?: ReviewApproval }>;
+  defer?(run: TeamRun, worker: TeamWorker, findings: DeferredFinding[]): Promise<void>;
+  capture?(run: TeamRun, worker: TeamWorker): Promise<{ head: string; history: string }>;
   history?(run: TeamRun, worker: TeamWorker): Promise<string>;
   gate(
     run: TeamRun,
@@ -53,7 +74,7 @@ export interface TeamRunPorts {
     run: TeamRun,
     worker: TeamWorker,
     reviewedHead: string,
-  ): Promise<{ conflict?: string; headMoved?: boolean }>;
+  ): Promise<{ conflict?: string; headMoved?: boolean; needsResolution?: boolean }>;
   verify(run: TeamRun): Promise<void>;
   save(run: TeamRun): void;
 }
@@ -99,7 +120,7 @@ export class TeamRuns {
       const interrupted = run.workers.filter((worker) => worker.status === "running");
       if (!interrupted.length && run.status !== "running") continue;
       const reason = "Team run interrupted by server restart";
-      for (const worker of interrupted) this.checkpoint(worker, "waiting", reason);
+      for (const worker of interrupted) checkpoint(worker, "waiting", reason);
       run.status = "waiting";
       run.notice = reason;
       this.save(run);
@@ -228,14 +249,32 @@ export class TeamRuns {
           type: failure === null ? "worker_finished" : "worker_failed",
           ...identity,
         });
+        if (failure === null || worker.attempt < run.limits.maxRounds) {
+          await this.ports.seal?.(run, worker);
+        }
         if (failure !== null) {
-          this.checkpoint(worker, "failed", failure);
+          checkpoint(worker, "failed", failure);
+          if (worker.checkpoint) {
+            worker.checkpoint.summary =
+              this.ports.writerResponse?.(worker) ??
+              "See the preserved worker branch for completed work.";
+            worker.checkpoint.nextSteps = `Resolve the blocker: ${failure}\nThen finish the remaining acceptance criteria in plan order.`;
+          }
         } else {
-          await this.reviewAndMerge(run, worker, coordinatorId, identity);
+          await reviewAndMerge(this.ports, run, worker, coordinatorId, (value) => this.save(value));
         }
       } catch (error) {
-        this.checkpoint(worker, "waiting", String(error));
+        checkpoint(worker, "waiting", String(error));
       }
+      const progress = [
+        worker.itemId,
+        worker.status,
+        `round ${worker.attempt}/${run.limits.maxRounds}`,
+        worker.checkpoint?.blocker?.split(/\r?\n/, 1)[0],
+      ]
+        .filter(Boolean)
+        .join(" · ");
+      worker.progress = progress;
       this.save(run);
       await this.dispatch(run);
       if (run.workers.every((entry) => entry.status === "completed")) {
@@ -258,76 +297,13 @@ export class TeamRuns {
         }
       }
       this.save(run);
+      await this.ports.coordinate(coordinatorId, {
+        type: "continue",
+        itemId: worker.itemId,
+        progress,
+      });
       return structuredClone(run);
     });
-  }
-
-  private async reviewAndMerge(
-    run: TeamRun,
-    worker: TeamWorker,
-    coordinatorId: string,
-    identity: { itemId: string; attempt: number },
-  ) {
-    const historyPath = await this.ports.history?.(run, worker);
-
-    for (let round = 0; round < 2; round++) {
-      worker.jev = { status: "pending" };
-      this.save(run);
-      const review = await this.ports.review(run, worker, {
-        historyPath,
-        refusal: worker.jevRefusal,
-      });
-      await this.ports.coordinate(coordinatorId, { type: "review_done", ...identity });
-      if ("changes" in review) {
-        if (historyPath) await appendFile(historyPath, `${review.history}\n`);
-        this.checkpoint(worker, "failed", "Review requested changes");
-        if (worker.checkpoint) worker.checkpoint.nextSteps = review.changes;
-        return;
-      }
-      if (review.head !== (await this.ports.head(run, worker))) {
-        throw new Error("Worker head moved after review");
-      }
-      worker.jev = await this.ports.gate(run, worker, review, historyPath);
-      if (worker.jev.status === "pass") {
-        if (
-          worker.jev.receipt?.head !== review.head ||
-          review.head !== (await this.ports.head(run, worker))
-        ) {
-          worker.jev = { status: "pending" };
-          throw new Error("Jev receipt does not cover the current worker head");
-        }
-        this.save(run);
-        const { conflict, headMoved } = await this.ports.merge(run, worker, review.head);
-        if (headMoved) {
-          worker.jev = { status: "pending" };
-          throw new Error("Jev receipt does not cover the current worker head");
-        }
-        this.checkpoint(worker, conflict ? "waiting" : "completed", conflict ?? null);
-        return;
-      }
-      if (worker.jev.status !== "revise" || !worker.jev.receipt) {
-        throw new Error("Jev done gate is unavailable");
-      }
-      if (worker.jevRefusal) {
-        worker.jev = { status: "owner decision", receipt: worker.jev.receipt };
-        this.checkpoint(worker, "waiting", "Jev requires an owner decision");
-        this.save(run);
-        this.ports.ownerDecision(run, worker);
-        return;
-      }
-      worker.jevRefusal = worker.jev.receipt;
-      this.save(run);
-    }
-  }
-
-  private checkpoint(worker: TeamWorker, status: TeamWorker["status"], blocker: string | null) {
-    worker.status = status;
-    worker.checkpoint = {
-      summary: status === "completed" ? "Reviewed and merged" : "Assignment paused",
-      nextSteps: blocker ?? "",
-      blocker,
-      updatedAt: Date.now(),
-    };
   }
 
   private async dispatch(run: TeamRun) {
@@ -339,11 +315,10 @@ export class TeamRuns {
       const worker = run.workers.find((entry) => entry.itemId === itemId);
       const item = run.items.find((entry) => entry.id === itemId);
       if (!worker || !item) throw new Error("Assignment is outside the approved plan");
-      const base =
-        worker.checkpoint?.blocker === "Review requested changes"
-          ? (worker.branch ?? run.assembler)
-          : run.assembler;
+      const resolving = worker.step === "merge" && worker.resolutionHead && !worker.resolutionBase;
+      const base = resolving ? run.assembler : (worker.branch ?? run.assembler);
       worker.status = "running";
+      worker.step = worker.checkpoint ? "delta" : "writing";
       worker.jev = { status: "pending" };
       worker.attempt += 1;
       worker.startedAt = Date.now();
@@ -358,10 +333,14 @@ export class TeamRuns {
           base,
           run,
           item,
+          worker.checkpoint
+            ? `Completed work\n${worker.checkpoint.summary}\n\nRemaining work, in order\n${worker.checkpoint.nextSteps}`
+            : undefined,
         );
         Object.assign(worker, resources);
+        if (resolving) worker.resolutionBase = resources.baseHead;
       } catch (error) {
-        this.checkpoint(worker, "waiting", String(error));
+        checkpoint(worker, "waiting", String(error));
         run.status = "waiting";
         run.notice = worker.checkpoint?.blocker ?? null;
       }
