@@ -11,6 +11,7 @@ import type {
   JsonValue,
   McpServerState,
   ProjectRemoteWarning,
+  ProjectTeams,
   QueueSender,
   SessionChecks,
   SessionResult,
@@ -70,6 +71,7 @@ export const projects = sqliteTable(
     autonomyMode: text("autonomy_mode").notNull().default("assisted"),
     visionPath: text("vision_path").notNull().default(".codeden/VISION.md"),
     factoryLimits: json<FactoryLimits>("factory_limits"),
+    teams: json<ProjectTeams>("teams"),
     killSwitch: integer("kill_switch", { mode: "boolean" }).notNull().default(false),
     timezone: text("timezone"),
     /** Agent sessions run with `CI=true` (§4.2); the migration keeps it on for every project. */

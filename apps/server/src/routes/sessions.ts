@@ -21,6 +21,7 @@ import {
   ThreadItemsQuery,
   type ToolOutputResponse,
   UpdateSessionRequest,
+  UserInput,
 } from "@codeden/contracts";
 import { Hono } from "hono";
 import type { AppServices } from "../services/container";
@@ -32,6 +33,8 @@ import { exportSessionTranscript } from "../services/sessions/transcript-export"
 import { asUserResponse } from "./user-response";
 import { jsonBody, queryOf } from "./validate";
 
+const PublicInput = UserInput.omit({ teamCoordination: true });
+
 /**
  * `/api/sessions`: start (with conflict handling), message, steer, interrupt, compact, respond, stop,
  * fork, handoff, review, export as Markdown, archive (removes the worktree, §9), unarchive and the
@@ -41,25 +44,29 @@ export function sessionRoutes(s: AppServices, installToken: string) {
   return (
     new Hono()
       .get("/", queryOf(ListSessionsQuery), (c) => c.json(s.sessionRepo.list(c.req.valid("query"))))
-      .post("/", jsonBody(StartSessionRequest), async (c) => {
-        const asked = c.req.valid("json");
-        // A Team role chosen in the composer: its tag, and the resolved Team's pins where the user set none.
-        const req = withTeamRole(asked, {
-          defaults: defaultTeam(s.settings.get()),
-          project: asked.projectId ? (s.factory.data.loop(asked.projectId)?.tuning.team ?? []) : [],
-        });
-        const own = (asked.provider && asked.provider !== "auto") || Boolean(asked.model);
-        const result = await s.sessions.start(req, own ? { ownTeamPins: true } : {});
-        if (result.status !== "conflict") {
-          // A new version of a request that had an open conflict: that conflict is done.
-          s.orchestration.conflicts.closeReplaced(req, result);
-          return c.json(result, 200);
-        }
-        // Persist the conflict (inbox item) so it can be resolved later (§8.4); it replaces the
-        // open conflict of an earlier version of the same request.
-        const record = s.orchestration.conflicts.record(req, result.existing);
-        return c.json({ ...result, conflictId: record.id }, 409);
-      })
+      .post(
+        "/",
+        jsonBody(StartSessionRequest.extend({ input: PublicInput.optional() })),
+        async (c) => {
+          const asked = c.req.valid("json");
+          // A Team role chosen in the composer: its tag, and the resolved Team's pins where the user set none.
+          const req = withTeamRole(asked, {
+            defaults: defaultTeam(s.settings.get()),
+            project: asked.teamRole && asked.projectId ? s.projectTeam(asked.projectId) : [],
+          });
+          const own = (asked.provider && asked.provider !== "auto") || Boolean(asked.model);
+          const result = await s.sessions.start(req, own ? { ownTeamPins: true } : {});
+          if (result.status !== "conflict") {
+            // A new version of a request that had an open conflict: that conflict is done.
+            s.orchestration.conflicts.closeReplaced(req, result);
+            return c.json(result, 200);
+          }
+          // Persist the conflict (inbox item) so it can be resolved later (§8.4); it replaces the
+          // open conflict of an earlier version of the same request.
+          const record = s.orchestration.conflicts.record(req, result.existing);
+          return c.json({ ...result, conflictId: record.id }, 409);
+        },
+      )
       .get("/admission", (c) => c.json(s.admission.status()))
       .post("/:id/admission/run-next", (c) => {
         if (!s.admission.runNext(c.req.param("id"))) {
@@ -71,10 +78,12 @@ export function sessionRoutes(s: AppServices, installToken: string) {
       .patch("/:id", jsonBody(UpdateSessionRequest), async (c) =>
         c.json(await s.sessions.update(c.req.param("id"), c.req.valid("json"))),
       )
-      .post("/:id/messages", jsonBody(SendMessageRequest), async (c) =>
-        c.json(await s.sessions.send(c.req.param("id"), c.req.valid("json"))),
+      .post(
+        "/:id/messages",
+        jsonBody(SendMessageRequest.extend({ input: PublicInput })),
+        async (c) => c.json(await s.sessions.send(c.req.param("id"), c.req.valid("json"))),
       )
-      .post("/:id/steer", jsonBody(SteerRequest), async (c) => {
+      .post("/:id/steer", jsonBody(SteerRequest.extend({ input: PublicInput })), async (c) => {
         await s.sessions.steer(c.req.param("id"), c.req.valid("json").input);
         return c.json({ ok: true as const });
       })

@@ -91,6 +91,25 @@ export function UserMessage({ item }: { item: ItemOf<"user_message"> }) {
   const { attachments, from: recorded } = item.input;
   const folded = useMemo(() => foldDigest(item.input.text), [item.input.text]);
   const sender = useMemo(() => splitSender(folded.text, recorded), [folded.text, recorded]);
+  const team = item.input.teamCoordination;
+  if (recorded === "codeden" && team) {
+    const label = {
+      worker_finished: "Worker finished",
+      worker_failed: "Worker failed",
+      review_done: "Review finished",
+      continue: "Continue",
+    }[team.type];
+    return (
+      <div className="flex items-center gap-2 py-1 text-xs text-muted-foreground">
+        <span className="font-medium">Team</span>
+        <span>
+          {team.type === "continue"
+            ? (team.progress ?? label)
+            : `${label} · ${team.itemId} · Round ${team.attempt}`}
+        </span>
+      </div>
+    );
+  }
   if (folded.wake && attachments.length === 0) return <WakeLine folded={folded} />;
   const from = sender.from === "user" ? null : sender.from;
   const text = folded.text;

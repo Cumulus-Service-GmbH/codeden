@@ -132,6 +132,7 @@ export class ProjectService {
     const current = this.get(id);
     const next = { ...current, updatedAt: new Date().toISOString() } as Project;
     if (patch.name !== undefined) next.name = patch.name;
+    if (patch.teams !== undefined) next.teams = patch.teams;
     Object.assign(next, defaultAgent(current, patch));
     if (patch.autonomy !== undefined) next.autonomy = patch.autonomy;
     if (patch.timezone !== undefined) next.timezone = patch.timezone;

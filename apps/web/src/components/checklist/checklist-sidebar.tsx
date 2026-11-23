@@ -4,6 +4,7 @@ import { DecisionCards, useDecisionCards } from "@/components/inbox/decision-car
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { TeamRunProgress } from "@/components/workbench/team-workers";
 import { useSnapshot } from "@/lib/queries";
 import { useViewport } from "@/lib/viewport";
 import { useLayoutStore } from "@/stores/layout";
@@ -59,6 +60,7 @@ function ChecklistBody({
 }) {
   const lists = useChecklists();
   const { data: cards } = useDecisionCards();
+  const { data } = useSnapshot();
   const pinned = useLayoutStore((s) => s.checklistPinned);
   const setPinned = useLayoutStore((s) => s.setChecklistPinned);
   const setCollapsed = useLayoutStore((s) => s.setChecklistCollapsed);
@@ -108,7 +110,10 @@ function ChecklistBody({
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto scroll-thin px-1.5">
         <DecisionCards cards={cards ?? []} />
-        {lists.length === 0 ? (
+        {data?.teamRuns?.map((run) => (
+          <TeamRunProgress key={run.id} run={run} />
+        ))}
+        {lists.length === 0 && !data?.teamRuns?.length ? (
           <p className="px-4 py-10 text-center text-xs text-muted-foreground">
             No checklist yet. The orchestrator keeps it here.
           </p>

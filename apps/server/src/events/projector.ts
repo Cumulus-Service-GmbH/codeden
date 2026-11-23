@@ -10,6 +10,7 @@ import {
   projects,
   projectTechDebt,
   sessions,
+  teamRuns,
 } from "../db/schema";
 import { applyFactoryProjection } from "../services/factory/projection";
 import {
@@ -43,6 +44,14 @@ export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
       tx.insert(projectTechDebt)
         .values({ projectId: view.projectId, view })
         .onConflictDoUpdate({ target: projectTechDebt.projectId, set: { view } })
+        .run();
+      return [];
+    }
+    case "team_run.updated": {
+      const { run } = e.payload;
+      tx.insert(teamRuns)
+        .values({ id: run.id, run })
+        .onConflictDoUpdate({ target: teamRuns.id, set: { run } })
         .run();
       return [];
     }

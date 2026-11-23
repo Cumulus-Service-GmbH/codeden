@@ -10,6 +10,7 @@ import { RoleSessionsRef } from "./orchestration";
 import { ProviderInfo } from "./provider";
 import { RunnerRecord } from "./runners";
 import { Settings } from "./settings";
+import { TeamRun } from "./team-run";
 import { UpdateStatus } from "./updates";
 import { ScheduledRun } from "./work";
 
@@ -48,6 +49,7 @@ export const Snapshot = z.object({
   settings: Settings,
   projects: z.array(Project),
   checklists: z.array(ProjectChecklist).optional(),
+  teamRuns: z.array(TeamRun).optional(),
   /**
    * Every session that isn't archived, plus the recently archived ones
    * (`SNAPSHOT_ARCHIVED_SESSIONS_DAYS`, at most `SNAPSHOT_ARCHIVED_SESSIONS_MAX`), oldest first.

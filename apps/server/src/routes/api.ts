@@ -19,6 +19,7 @@ import type { AppServices } from "../services/container";
 import { badRequest } from "../services/errors";
 import { archivedSessionCounts, snapshotSessions } from "../services/sessions/archived";
 import { sessionSnapshot } from "../services/sessions/snapshot";
+import { listTeamRuns } from "../services/sessions/team-run-projection";
 import { agentConfigRoutes, sessionAgentConfigRoutes } from "./agent-config";
 import { automationRoutes, projectAutomationRoutes } from "./automations";
 import { browserRoutes, sessionBrowserRoutes } from "./browser";
@@ -154,6 +155,7 @@ function buildSnapshot(ctx: ApiContext, capabilities: readonly string[]): Snapsh
     settings: s.settings.get(),
     projects: s.projects.list(),
     checklists: s.checklist.list(),
+    teamRuns: listTeamRuns(s.db),
     sessions: snapshotSessions(s.db),
     archivedSessionCounts: archivedSessionCounts(s.db),
     inbox: s.inbox

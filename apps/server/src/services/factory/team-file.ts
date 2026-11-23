@@ -78,7 +78,7 @@ export interface TeamFileDeps {
   worktreesDir: string;
   /** The default Team (Settings, Factory > Team setup). */
   defaults: () => Team;
-  /** The project's Team (its factory settings). */
+  /** The project's default Team. */
   projectTeam: (projectId: string) => Team;
   project: (projectId: string) => Pick<Project, "path" | "slug">;
   session: (sessionId: string) => Session | undefined;
@@ -136,11 +136,16 @@ export function teamFileChanges(events: readonly RawEventEnvelope[]) {
   for (const event of events) {
     const payload = event.payload as {
       loop?: { projectId?: unknown };
+      project?: { id?: unknown };
       session?: { id?: unknown };
     } | null;
     if (event.type === "settings.updated") all = true;
-    const projectId = payload?.loop?.projectId;
-    if (event.type === "factory.loop.updated" && typeof projectId === "string") {
+    const projectId =
+      event.type === "project.updated" ? payload?.project?.id : payload?.loop?.projectId;
+    if (
+      (event.type === "factory.loop.updated" || event.type === "project.updated") &&
+      typeof projectId === "string"
+    ) {
       projects.add(projectId);
     }
     const sessionId = payload?.session?.id ?? event.sessionId;
