@@ -42,6 +42,7 @@ import {
 } from "../runner-port";
 import type { UtilityService } from "../utility";
 import { assertProjectActive, inArchivedProject } from "./archived-project";
+import { archivedRoleRefusal, isArchivedRoleSession } from "./archived-role";
 import { freezeChecks, roundAfter, withRound } from "./checks";
 import { compactingRefusal, compactionRunning, compactRefusal, startCompaction } from "./compact";
 import { derivePurpose, deriveWorkKey, findConflicts } from "./conflicts";
@@ -116,6 +117,11 @@ export class SessionService {
    * second turn.
    */
   private readonly delivering = new Set<string>();
+  /**
+   * Sessions being stopped with their queue kept (`stopKeepingQueue`). A message for one of them
+   * waits in the queue, which moves on with the rest, instead of starting a turn on it.
+   */
+  private readonly retiring = new Set<string>();
 
   constructor(private readonly deps: SessionServiceDeps) {
     this.holds = new OutboxHolds({
@@ -334,9 +340,12 @@ export class SessionService {
   ): Promise<SendMessageResponse> {
     const session = this.deps.repo.get(id);
     assertProjectActive(this.deps.projects, session);
+    // A newer session holds the role: this one stays archived (§8.1).
+    if (isArchivedRoleSession(session)) throw archivedRoleRefusal(session);
     if (NOT_STARTED.has(session.status)) return this.enqueue(id, req.input, from);
     // A turn on its way to the runner counts as running, though there is nothing to steer yet.
-    const delivering = this.delivering.has(id);
+    // So does a session being retired: the message moves on with its queue (`stopKeepingQueue`).
+    const delivering = this.delivering.has(id) || this.retiring.has(id);
     if (BUSY.has(session.status) || delivering) {
       if (req.whenBusy === "reject") throw conflict("A turn is running", "turn_running");
       if (req.whenBusy === "steer" && !delivering) {
@@ -485,17 +494,22 @@ export class SessionService {
   /**
    * Stop a session whose queued messages move on to another session (a role moved to another
    * provider, `RoleSessions`): they are returned instead of dropped. They leave the queue
-   * before anything is awaited, so no delivery can send one to the session being stopped; if
-   * the stop fails they go back in their places.
+   * before anything is awaited, so no delivery can send one to the session being stopped, and a
+   * message that arrives meanwhile is queued (`retiring`) and returned with them; if the stop
+   * fails they go back in their places.
    */
   async stopKeepingQueue(id: string): Promise<QueuedMessage[]> {
     const taken = this.deps.outbox.clear(id);
+    this.retiring.add(id);
     try {
       await this.stop(id);
     } catch (error) {
+      this.retiring.delete(id);
       this.restoreQueued(taken);
+      this.flushIfSettled(id);
       throw error;
     }
+    this.retiring.delete(id);
     // Whatever was queued while the runner stopped it.
     return [...taken, ...this.deps.outbox.clear(id)];
   }
@@ -521,11 +535,11 @@ export class SessionService {
    * turn still running on the runner is no error: the message waits for its end.
    */
   async flushOutbox(id: string): Promise<void> {
-    if (this.holds.isHeld(id) || this.delivering.has(id)) return;
+    if (this.holds.isHeld(id) || this.delivering.has(id) || this.retiring.has(id)) return;
     const next = this.deps.outbox.peek(id);
     if (!next) return;
     const session = this.deps.repo.get(id);
-    if (!FLUSHABLE.has(session.status)) return;
+    if (!FLUSHABLE.has(session.status) || isArchivedRoleSession(session)) return;
     // Its project was archived while the message waited: it stays queued, undelivered.
     if (inArchivedProject(this.deps.projects, session)) return;
     this.deps.outbox.remove(next, "sent");
@@ -565,7 +579,7 @@ export class SessionService {
   async continueAfterRestart(id: string, text: string): Promise<void> {
     if (this.delivering.has(id)) return;
     const session = this.deps.repo.get(id);
-    if (inArchivedProject(this.deps.projects, session)) return;
+    if (inArchivedProject(this.deps.projects, session) || isArchivedRoleSession(session)) return;
     await this.sendNow(session, { text, attachments: [], from: "codeden" }, "codeden");
   }
 
@@ -644,12 +658,13 @@ export class SessionService {
     const runner = this.runnerOf(session.id);
     await applyPendingConfig(this.deps.repo, runner, session);
     const previous = session.status;
-    // Messaging an archived session brings it back.
+    // Messaging an archived agent session brings it back; an archived role session never gets
+    // here (`send` refuses it) and would stay archived.
     this.deps.repo.update(session.id, (s) => ({
       ...s,
       status: "running",
       endedAt: null,
-      archivedAt: null,
+      archivedAt: s.role === "agent" ? null : (s.archivedAt ?? null),
     }));
     try {
       // Cleanup removed the worktree (§9), or a container session's start failed and took its
