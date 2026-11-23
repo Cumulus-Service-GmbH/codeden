@@ -24,6 +24,9 @@ export async function serve(opts: { home?: string; port: number; fake: boolean }
     dataDir: home,
     token,
     enableFakeProvider: opts.fake || process.env.CODEDEN_FAKE_PROVIDER === "1",
+    onShutdownStart: () => {
+      closing = true;
+    },
     onShutdownRequest: (exitCode) => {
       console.log(`server: shutdown requested through the API (code ${exitCode})`);
       process.exit(exitCode);

@@ -14,10 +14,19 @@
     <meta name="apple-mobile-web-app-title" content="CodeDen" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black" />
     <title>CodeDen</title>
+    <style>
+      #startup-fallback {
+        visibility: hidden;
+        animation: show-startup-fallback 0s 1.5s forwards;
+      }
+      @keyframes show-startup-fallback {
+        to { visibility: visible; }
+      }
+    </style>
   </head>
   <body>
     <div id="root">
-      <main>
+      <main id="startup-fallback">
         <h1>CodeDen is loading</h1>
         <p>If this page stays here, <a href="/">open CodeDen again</a>.</p>
       </main>

@@ -87,7 +87,9 @@ export interface StartServerOptions {
   migrationsDir?: string;
   /** Wait for the runner handshake before resolving. Default false. */
   waitForRunner?: boolean;
-  /** Called when a client requests shutdown via the API (the CLI exits the process). */
+  /** Called before scheduling shutdown requested through the API. */
+  onShutdownStart?: () => void;
+  /** Called after an API-requested shutdown finishes (the host exits the process). */
   onShutdownRequest?: (exitCode: number) => void;
   /** Secret storage: the OS keychain by default; `"memory"` for tests. */
   secrets?: SecretStore | "memory";
@@ -339,6 +341,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
     network: { network, sessionCookie, tokenCookie, token: opts.token },
     log,
     shutdown: ({ stopRunner }) => {
+      opts.onShutdownStart?.();
       setTimeout(() => {
         void close({ stopRunner })
           .catch((error: unknown) => {

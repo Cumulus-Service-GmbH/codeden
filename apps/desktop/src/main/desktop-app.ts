@@ -18,7 +18,7 @@ import { armQuitWatchdog, forceExit } from "./exit";
 import { registerBridge } from "./ipc";
 import { appMenuTemplate } from "./menu";
 import { loadAfterReady, waitForServer } from "./recovery";
-import { homeFiles } from "./server-plan";
+import { homeFiles, serverHealthy } from "./server-plan";
 import {
   applyLaunchAtLogin,
   fileLogger,
@@ -172,7 +172,7 @@ export class DesktopApp {
 
   /** Connect to (or start) the server and load the UI. */
   private async open(): Promise<void> {
-    if (this.connecting || this.quitting) return;
+    if (this.conn || this.connecting || this.quitting) return;
     this.connecting = true;
     try {
       this.conn = await connect({
@@ -245,6 +245,23 @@ export class DesktopApp {
     } finally {
       if (this.uiLoad === conn) this.uiLoad = undefined;
     }
+  }
+
+  private async retryLoading(): Promise<void> {
+    if (this.quitting) return;
+    const conn = this.conn;
+    if (conn && !conn.server) {
+      const healthy = await serverHealthy(conn.url);
+      if (this.conn !== conn || this.quitting) return;
+      if (!healthy) {
+        this.conn = undefined;
+        this.loaded = false;
+        this.monitor?.stop();
+        clearInterval(this.standaloneTimer);
+      }
+    }
+    if (this.conn) await this.loadUi();
+    else await this.open();
   }
 
   private quit(reason: QuitInitiator): void {
@@ -404,7 +421,9 @@ export class DesktopApp {
 
   /** Attached to a server started by `codeden`: follow the update mode here (§17). */
   private startStandaloneUpdates(): void {
+    const conn = this.conn;
     const tick = () => {
+      if (this.conn !== conn) return;
       const settings = this.status.settings;
       if (!settings) return;
       const state = this.updates.state;
@@ -461,8 +480,7 @@ export class DesktopApp {
       openLogs: () => void shell.openPath(homeFiles(this.args.home).logs),
       exportDiagnostics: () => void exportDiagnostics(this.diagnostics),
       retryLoading: () => {
-        const retry = this.conn ? this.loadUi() : this.open();
-        void retry.catch(() => this.log("app: could not retry loading the UI"));
+        void this.retryLoading().catch(() => this.log("app: could not retry loading the UI"));
       },
       quit: () => this.quit("menu"),
       zoom: (command) => {
