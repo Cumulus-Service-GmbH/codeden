@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { ReviewVerdict } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { reviewedHead, settleApproval, verdictHead } from "../src/services/factory/approval";
@@ -153,6 +154,43 @@ describe("an approval covers one head commit", () => {
       expect(item(id).review).toMatchObject({ verdict: "request_changes", findings: [finding] });
     },
   );
+
+  it("pins the acceptance spec end to end: out-of-spec findings go to tech debt and unreadable locations stay in scope and blocking", async () => {
+    env = createFactoryEnv();
+    await enable();
+    const { id } = await verifying("pending");
+    const { reviewSpec } = item(id);
+    expect(reviewSpec).toEqual({
+      planSha: createHash("sha256")
+        .update(JSON.stringify(["A counter", ["Counter increments"]]))
+        .digest("hex"),
+      scope: ["src/counter.ts", "test/counter.test.ts"],
+      security: false,
+    });
+
+    const blocking = {
+      location: "src/counter.ts (line 12)",
+      severity: "HIGH" as const,
+      summary: "The counter crashes on reset.",
+      failure_scenario: "Resetting an empty counter throws.",
+      repro: "Start with an empty counter and select Reset.",
+    };
+    const debt = {
+      location: "src/export.ts:8",
+      severity: "HIGH" as const,
+      summary: "Exporting empty results loses the header.",
+      failure_scenario: "An empty result set produces a blank export.",
+      repro: "Export an empty result set and check for the header.",
+    };
+    await submitReview(id, { ...APPROVE, verdict: "request_changes", findings: [debt, blocking] });
+
+    expect(item(id).reviewSpec).toEqual(reviewSpec);
+    expect(item(id).review).toMatchObject({
+      verdict: "request_changes",
+      findings: [blocking],
+      techDebt: [debt],
+    });
+  });
 
   it("keeps the approval when the merge queue only brings the PR up to date with main", async () => {
     // Under the strict policy the queue brings a PR that is behind up to date (update-branch).
