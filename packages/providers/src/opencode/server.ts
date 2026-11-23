@@ -1,5 +1,6 @@
 import type { ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { agentEnv } from "../util/agent-env";
 import { killTree, type ResolvedCommand, spawnResolved } from "../util/exec";
@@ -199,6 +200,7 @@ export function openCodeServerEnv(
     drop.add("OPENCODE_CONFIG_CONTENT");
     drop.add("OPENCODE_CONFIG_PROJECT_DISABLE");
     drop.add("OPENCODE_DISABLE_CLAUDE_CODE");
+    drop.add("XDG_CONFIG_HOME");
   }
   const env: NodeJS.ProcessEnv = {};
   let userConfig: string | undefined;
@@ -210,6 +212,7 @@ export function openCodeServerEnv(
   env.OPENCODE_PASSWORD = password;
   if (readOnly) {
     env.OPENCODE_CONFIG_DIR = guardPluginDir();
+    env.XDG_CONFIG_HOME = join(env.OPENCODE_CONFIG_DIR, "config");
     env.OPENCODE_CONFIG_PROJECT_DISABLE = "1";
     env.OPENCODE_DISABLE_CLAUDE_CODE = "1";
   }

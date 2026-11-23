@@ -1,3 +1,6 @@
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import type { SessionOptions } from "@codeden/contracts";
 import { describe, expect, it } from "vitest";
 import { buildQueryOptions } from "../src/claude/options";
@@ -351,6 +354,30 @@ describe("read-only sessions (orchestrator and PMs, §11.2)", () => {
     expect(env.OPENCODE_CONFIG).toBeUndefined();
     expect(env.OPENCODE_CONFIG_DIR).not.toBe("/user/opencode");
     expect(env.OPENCODE_CONFIG_PROJECT_DISABLE).toBe("1");
+  });
+
+  it("isolates read-only roles from the user's global OpenCode MCP config", () => {
+    const home = mkdtempSync(join(tmpdir(), "codeden-test-home-"));
+    const globalConfig = (env: NodeJS.ProcessEnv) =>
+      join(env.XDG_CONFIG_HOME || join(env.HOME ?? home, ".config"), "opencode", "opencode.json");
+    try {
+      for (const xdgHome of [undefined, join(home, "xdg")]) {
+        const userEnv = { HOME: home, XDG_CONFIG_HOME: xdgHome };
+        const path = globalConfig(userEnv);
+        mkdirSync(dirname(path), { recursive: true });
+        writeFileSync(
+          path,
+          JSON.stringify({ mcp: { servers: { user: { type: "local", command: ["user-tool"] } } } }),
+        );
+
+        const agent = openCodeServerEnv(userEnv, undefined, "test-password", {});
+        const readOnly = openCodeServerEnv(userEnv, undefined, "test-password", {}, true);
+        expect(globalConfig(agent)).toBe(path);
+        expect(existsSync(globalConfig(readOnly))).toBe(false);
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
   });
 
   it("denies a user MCP tool for a read-only role on OpenCode at every level", () => {
