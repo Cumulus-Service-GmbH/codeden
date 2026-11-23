@@ -18,6 +18,9 @@ type Entry = Pick<PendingApproval, "kind"> &
   ToolContext & { requestedBy?: DecisionCard["requestedBy"] };
 type Classification = { delegable: true } | { delegable: false; ownerOnly: OwnerOnlyCategory };
 
+// Security rule 3 keeps this list empty.
+export const DELEGABLE_GUARD_SCOPES: readonly string[] = [];
+
 function ownerOnly(category: OwnerOnlyCategory = "unclassified"): Classification {
   return { delegable: false, ownerOnly: category };
 }
@@ -48,26 +51,28 @@ function sensitiveText(text: string): OwnerOnlyCategory | undefined {
 }
 
 function ownerScope(scope: string): OwnerOnlyCategory | undefined {
-  if (scope.startsWith("resource:") || scope === "az-connectedmachine-run-command-create") {
-    return "new_azure_resource";
+  if (scope.startsWith("resource:")) return "new_azure_resource";
+  if (
+    scope.includes("dbops") ||
+    /^(?:db-read|(?:prd-)?db-migration|az-ssh-arc)$/.test(scope) ||
+    /^(?:az-)?connectedmachine(?:-|$)/.test(scope)
+  ) {
+    return "prd_db";
   }
-  if (/^(?:prd-db-migration|db-migration|dbops-lan)$/.test(scope)) return "prd_db";
-  if (/^(?:prd-|webchat-|job-|acr-build)/.test(scope) || scope === "dbops-migration-image") {
+  if (/^(?:prd|deploy|webchat|job|acr-build|container-app-update)(?:[-.:_]|$)/.test(scope)) {
     return "prd_write";
   }
-  if (scope === "secrets" || scope === "spending") return scope;
-  if (scope === "store-submission") return "store_submission";
   return undefined;
 }
 
-function delegableScope(scope: string): boolean {
-  return (
-    /^(?:db-read|db-migration|dbops-lan|az-ssh-arc)$/.test(scope) ||
-    /^az-connectedmachine-run-command-(?!create$)[a-z][a-z-]*$/.test(scope)
-  );
-}
-
 export function classifyApproval(entry: Entry): Classification {
+  if (entry.hookReason !== undefined) {
+    const token = parseCardToken(entry.hookReason);
+    if (token?.cls === "delegable" && DELEGABLE_GUARD_SCOPES.includes(token.scope)) {
+      return { delegable: true };
+    }
+    return ownerOnly(token ? ownerScope(token.scope) : undefined);
+  }
   if (entry.kind === "plan_card") {
     return isDelegablePlan(entry.requestedBy, entry.steps) ? { delegable: true } : ownerOnly();
   }
@@ -81,27 +86,16 @@ export function classifyApproval(entry: Entry): Classification {
     return ownerOnly();
   }
 
-  const token = parseCardToken(entry.hookReason);
   if (entry.action === "secrets") return ownerOnly("secrets");
   const cleanAction =
     entry.action === "file_change" ||
     entry.action === "outside_worktree" ||
     entry.action === "plan";
-  // A recognized delegable guard token covers the exact command the guard classified.
-  if (
-    token?.cls === "delegable" &&
-    delegableScope(token.scope) &&
-    (cleanAction || entry.action === "command")
-  ) {
-    return { delegable: true };
-  }
-
   const text = `${entry.command ?? ""}\n${JSON.stringify(entry.toolInput ?? null)}`;
-  const category = (token?.cls === "owner-only" && ownerScope(token.scope)) || sensitiveText(text);
+  const category = sensitiveText(text);
   if (category) return ownerOnly(category);
   if (
     !cleanAction ||
-    entry.hookReason !== undefined ||
     entry.hookAsk ||
     text.includes("[codeden-card") ||
     entry.reason?.includes("[codeden-card") ||

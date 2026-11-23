@@ -6,7 +6,7 @@ import { ApprovalAction } from "./items";
 export const CARD_TOKEN =
   /^\[codeden-card v1 scope=([a-z0-9][a-z0-9_.:-]{0,63}) class=(owner-only|delegable)\]( |$)/;
 
-/** Read the single leading token from provider-supplied hook text. */
+/** Read the single leading token from provider-supplied hook text. Guard cards are always owner-only. */
 export function parseCardToken(
   hookReason: string | undefined,
 ): { scope: string; cls: "owner-only" | "delegable" } | null {
@@ -21,6 +21,7 @@ export function parseCardToken(
  * Owner-only operations: (a) production writes and deploys, (b) secrets and credentials,
  * (c) production SAP and database writes, (d) store submissions and external testers,
  * (e) new Azure resources, (f) spending. Unclassified requests fail closed.
+ * The `prd_db` category also covers database and host access that requires the owner's card.
  */
 export const OwnerOnlyCategory = z.enum([
   "prd_write",

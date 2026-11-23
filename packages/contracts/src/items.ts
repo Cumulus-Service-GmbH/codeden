@@ -227,7 +227,7 @@ export const ApprovalRequestItem = z.object({
   /** Why this was flagged as risky. */
   reason: z.string().optional(),
   /** The marked hook ask text after HOOK_ASK_MARKER, verbatim. Only the provider adapter
-   * sets it. Used to classify approvals, never treated as trusted when absent. */
+   * sets it. Guard cards are always owner-only. */
   hookReason: z.string().optional(),
   /** The provider saw a hook ask without marked reason text. */
   hookAsk: z.literal(true).optional(),
