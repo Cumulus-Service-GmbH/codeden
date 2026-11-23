@@ -1,9 +1,11 @@
+import { mkdirSync, symlinkSync } from "node:fs";
 import { join, resolve } from "node:path";
 import {
   type AgentEvent,
   agentEventToNewEvent,
   type ItemOf,
   McpTokenClaims,
+  type Session,
 } from "@codeden/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ToolCaller } from "../src/mcp/registry";
@@ -109,17 +111,28 @@ it("classifyApproval handles sensitive actions and delegable approvals", () => {
     delegable: false,
     ownerOnly: "secrets",
   });
-  const delegated: Entry[] = [
-    ordinary,
-    { ...ordinary, paths: [resolve(cwd, "src/app.ts")] },
-    { ...ordinary, action: "plan" },
-    { kind: "plan_card", requestedBy: "pm", steps: [pmStep] },
-  ];
+  const delegated: Entry[] = [{ kind: "plan_card", requestedBy: "pm", steps: [pmStep] }];
   for (const entry of delegated) expect(classifyApproval(entry)).toEqual({ delegable: true });
 });
 
 it.each([
   ".git/hooks/pre-commit",
+  ".git./hooks/pre-commit",
+  ".GIT /hooks/pre-commit",
+  ".Git/hooks/pre-commit",
+  ".github/workflows/ci.yml",
+  ".husky/pre-commit",
+  ".vscode/tasks.json",
+  ".mcp.json",
+  ".codeden/project.json",
+  ".cursor/rules/project.mdc",
+  ".gemini/settings.json",
+  ".opencode/commands/check.md",
+  ".gitattributes",
+  ".gitmodules",
+  "opencode.json",
+  "OpEnCoDe.JSON. ",
+  "src/.hidden",
   ".claude/settings.json",
   ".codex/config.toml",
   ".ssh/authorized_keys",
@@ -141,22 +154,28 @@ it.each([
   ".bash_profile",
   "~/.claude/settings.json",
   "../other/file.ts",
-  resolve(cwd, "../worktree-link/src/app.ts"),
 ])("classifyApproval keeps file changes to %s owner-only", (path) => {
-  expect(classifyApproval({ ...ordinary, paths: ["src/app.ts", path] }).delegable).toBe(false);
+  const { service, add } = setup();
+  add("restricted", { paths: ["src/app.ts", path] });
+  expect(service.list().approvals[0]?.delegable).toBe(false);
 });
 
 it.each(["file_path", "path", "notebook_path"])("checks %s alongside listed paths", (key) => {
-  expect(
-    classifyApproval({ ...ordinary, toolInput: { [key]: "../other/file.ts" } }).delegable,
-  ).toBe(false);
-  expect(
-    classifyApproval({ ...ordinary, paths: undefined, toolInput: { [key]: "src/app.ts" } }),
-  ).toEqual({ delegable: true });
+  const { service, add } = setup();
+  const outside = add("outside", { toolInput: { [key]: "../other/file.ts" } });
+  const inside = add("inside", { paths: undefined, toolInput: { [key]: "src/app.ts" } });
+  expect(service.list().approvals).toEqual(
+    expect.arrayContaining([
+      expect.objectContaining({ id: outside.id, delegable: false }),
+      expect.objectContaining({ id: inside.id, delegable: true }),
+    ]),
+  );
 });
 
-it.each([{ paths: undefined }, { cwd: undefined }])("requires paths and cwd (%j)", (patch) => {
-  expect(classifyApproval({ ...ordinary, ...patch })).toEqual({
+it("requires at least one path for a file change", () => {
+  const { service, add } = setup();
+  add("no-targets", { paths: undefined });
+  expect(service.list().approvals[0]).toMatchObject({
     delegable: false,
     ownerOnly: "unclassified",
   });
@@ -178,6 +197,8 @@ afterEach(async () => {
 function setup(onRespond?: () => void) {
   const fixture = createGithubEnv();
   env = fixture;
+  const worktree = join(fixture.dir, ".worktree");
+  mkdirSync(worktree);
   const paths = ensureHome(join(fixture.dir, "home"));
   const runner: RunnerPort = {
     isConnected: () => true,
@@ -203,11 +224,17 @@ function setup(onRespond?: () => void) {
   const add = (
     id: string,
     patch: Partial<ItemOf<"approval_request">> = {},
-    projectId = fixture.localProject.id,
-    parentSessionId: string | null = null,
+    session: Partial<Session> = {},
   ) => {
     const sessionId = `session-${id}`;
-    fixture.addSession({ id: sessionId, projectId, scope: { projectId }, parentSessionId });
+    const projectId = session.projectId ?? fixture.localProject.id;
+    fixture.addSession({
+      id: sessionId,
+      projectId,
+      scope: { projectId },
+      worktreePath: worktree,
+      ...session,
+    });
     const emit = (event: AgentEvent) => agentEventToNewEvent(sessionId, event);
     const item: ItemOf<"approval_request"> = {
       kind: "approval_request",
@@ -215,7 +242,7 @@ function setup(onRespond?: () => void) {
       requestId: `request-${id}`,
       title: `Review ${id}`,
       action: "file_change",
-      cwd,
+      cwd: worktree,
       paths: ["src/app.ts"],
       status: "in_progress",
       options: ["allow_once", "deny"],
@@ -228,8 +255,94 @@ function setup(onRespond?: () => void) {
     ]);
     return { id: `inbox:${sessionId}:${item.id}`, sessionId, item };
   };
-  return { ...fixture, services, service: services.orchestratorApprovals, add };
+  return { ...fixture, services, service: services.orchestratorApprovals, worktree, add };
 }
+
+it.each([
+  "outside target",
+  "absolute outside target",
+  "parent traversal through a link",
+  "outside cwd",
+  "symlink cwd",
+  "unavailable root",
+  "missing root",
+] as const)("leaves a file change with %s to the owner", async (scenario) => {
+  const { dir, worktree, service, add, runnerCalls, store } = setup();
+  const outside = join(dir, "outside");
+  const link = join(worktree, "link");
+  mkdirSync(outside);
+  symlinkSync(outside, link, "junction");
+  const item = {
+    "outside target": { paths: ["link/new/file.ts"] },
+    "absolute outside target": { paths: [join(outside, "file.ts")] },
+    "parent traversal through a link": { paths: ["link/../file.ts"] },
+    "outside cwd": { cwd: outside },
+    "symlink cwd": { cwd: link },
+    "unavailable root": {},
+    "missing root": {},
+  }[scenario];
+  const session =
+    scenario === "missing root"
+      ? { worktreePath: null }
+      : scenario === "unavailable root"
+        ? { worktreePath: join(dir, "removed-worktree") }
+        : {};
+  const { id } = add("unverified", item, session);
+  const head = store.headSeq();
+  expect(service.list().approvals[0]).toMatchObject({
+    id,
+    delegable: false,
+    ownerOnly: "unclassified",
+  });
+  for (const choice of ["approve", "deny"] as const) {
+    await expect(
+      service.decide(actor, { ...decision, id, decision: choice }),
+    ).rejects.toMatchObject({
+      code: "owner_only_approval",
+    });
+  }
+  expect(runnerCalls).toEqual([]);
+  expect(store.headSeq()).toBe(head);
+});
+
+it.each(["restricted target", "dangling link", "nested cwd target"] as const)(
+  "leaves a file change through a %s symlink to the owner",
+  (scenario) => {
+    const { dir, worktree, service, add } = setup();
+    const hidden = join(worktree, ".hidden");
+    const nested = join(worktree, "nested");
+    mkdirSync(hidden);
+    mkdirSync(nested);
+    const cwd = scenario === "nested cwd target" ? nested : worktree;
+    const destination = scenario === "restricted target" ? hidden : join(dir, "outside");
+    if (scenario === "nested cwd target") mkdirSync(destination);
+    symlinkSync(destination, join(cwd, "link"), "junction");
+    add("linked", { cwd, paths: ["link/file.ts"] });
+    expect(service.list().approvals[0]).toMatchObject({
+      delegable: false,
+      ownerOnly: "unclassified",
+    });
+  },
+);
+
+it("delegates new files inside the worktree with an optional cwd", () => {
+  const { worktree, service, add } = setup();
+  const nested = join(worktree, "nested");
+  mkdirSync(nested);
+  add("relative", { cwd: undefined, paths: ["new/dir/app.ts"] });
+  add("absolute", { cwd: nested, paths: [join(worktree, "src", "app.ts")] });
+  add("plan", { action: "plan", paths: undefined });
+  expect(service.list().approvals.map(({ delegable }) => delegable)).toEqual([true, true, true]);
+});
+
+it("leaves a tool plan without a worktree to the owner", () => {
+  const { service, add } = setup();
+  add("plan", { action: "plan", paths: undefined }, { worktreePath: null });
+  expect(service.list().approvals[0]).toMatchObject({
+    delegable: false,
+    ownerOnly: "unclassified",
+  });
+});
 
 it("lists two projects with transcript context and redacts nested secrets", () => {
   const { service, add, localProject, githubProject } = setup();
@@ -241,7 +354,7 @@ it("lists two projects with transcript context and redacts nested secrets", () =
     toolName: "Bash",
     toolInput: { command: `echo ${secret}`, nested: [secret] },
   });
-  const remote = add("remote", {}, githubProject.id);
+  const remote = add("remote", {}, { projectId: githubProject.id });
   const output = service.list();
   expect(output.approvals).toEqual(
     expect.arrayContaining([
@@ -327,10 +440,10 @@ it.each([
 it.each(["orchestrator", "child", "grandchild"] as const)(
   "refuses an approval from the %s session",
   async (name) => {
-    const { service, add, store, runnerCalls, localProject } = setup();
+    const { service, add, store, runnerCalls } = setup();
     const own = add("orchestrator");
-    const child = add("child", {}, localProject.id, own.sessionId);
-    const grandchild = add("grandchild", {}, localProject.id, child.sessionId);
+    const child = add("child", {}, { parentSessionId: own.sessionId });
+    const grandchild = add("grandchild", {}, { parentSessionId: child.sessionId });
     const { id } = { orchestrator: own, child, grandchild }[name];
     const head = store.headSeq();
     for (const choice of ["approve", "deny"] as const) {
@@ -346,13 +459,37 @@ it.each(["orchestrator", "child", "grandchild"] as const)(
   },
 );
 
+it.each(["archived orchestrator", "archived orchestrator's child"] as const)(
+  "refuses both decisions for the %s after Start fresh",
+  async (name) => {
+    const { service, add, store, runnerCalls } = setup();
+    const archived = add(
+      "archived",
+      {},
+      { role: "orchestrator", archivedAt: "2026-11-23T00:00:00Z" },
+    );
+    const child = add("child", {}, { parentSessionId: archived.sessionId });
+    const { id } = name === "archived orchestrator" ? archived : child;
+    const head = store.headSeq();
+    for (const choice of ["approve", "deny"] as const) {
+      await expect(
+        service.decide(actor, { ...decision, id, decision: choice }),
+      ).rejects.toMatchObject({
+        code: "owner_only_approval",
+      });
+    }
+    expect(runnerCalls).toEqual([]);
+    expect(store.headSeq()).toBe(head);
+  },
+);
+
 it.each(["missing-parent", "deep"])("refuses an approval with %s ancestry", async (name) => {
-  const { service, add, addSession, runnerCalls, localProject } = setup();
+  const { service, add, addSession, runnerCalls } = setup();
   let parent = addSession({ parentSessionId: null });
   for (let depth = 0; depth < 20; depth++) {
     parent = addSession({ parentSessionId: parent.id });
   }
-  const { id } = add(name, {}, localProject.id, name === "deep" ? parent.id : "unknown-parent");
+  const { id } = add(name, {}, { parentSessionId: name === "deep" ? parent.id : "unknown-parent" });
   await expect(service.decide(actor, { ...decision, id })).rejects.toMatchObject({
     code: "owner_only_approval",
     message: "This approval requires the owner (unclassified)",
