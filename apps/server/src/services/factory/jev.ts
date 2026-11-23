@@ -58,6 +58,14 @@ export function submitJevReview(ctx: FactoryContext, item: FactoryItem, verdict:
   return true;
 }
 
+function usesVerificationEvidence(item: FactoryItem): boolean {
+  return (
+    item.acceptanceCriteria.length === 0 ||
+    item.checks.some((check) => check.name === "review" && check.state === "skipped") ||
+    (item.source === "revert" && !item.reviewerSessionId)
+  );
+}
+
 export async function advanceJev(
   ctx: FactoryContext,
   project: Project,
@@ -101,6 +109,7 @@ export async function advanceJev(
   // A branch update can carry forward review approval. The tests and done receipt still
   // need to cover the new SHA, even if the update introduced no PR changes.
   if (
+    !usesVerificationEvidence(item) &&
     item.jev?.status === "pass" &&
     item.jev.head !== head &&
     item.review?.jevEvidence?.head !== head
@@ -160,58 +169,87 @@ async function evaluate(ctx: FactoryContext, project: Project, item: FactoryItem
     status: "unavailable",
     reasons: [reason],
   });
-  if (!cwd || heads.some((sha) => !SHA.test(sha))) {
-    return unavailable("The pinned worktree or review history is unavailable.");
-  }
-  const git = (args: string[]) =>
-    ctx.exec("git", ["--no-pager", ...args], { cwd }).catch(() => null);
-  const base = await git([
-    "merge-base",
-    heads[0] ?? head,
-    `refs/remotes/origin/${baseBranchOf(project)}`,
-  ]);
-  let previous = base?.stdout.trim() ?? "";
-  if (base?.code !== 0 || !SHA.test(previous))
-    return unavailable("The review base is unavailable.");
-  const diffs: string[] = [];
-  for (const sha of heads) {
-    const diff = await git([
-      "diff",
-      "--no-color",
-      "--no-ext-diff",
-      "--no-textconv",
-      previous,
-      sha,
-      "--",
-    ]);
-    if (diff?.code !== 0 || diff.stdout.length >= 1024 * 1024) {
-      return unavailable("A pinned review diff is missing or too large.");
-    }
-    diffs.push(`## ${previous} → ${sha}\n\n${diff.stdout}`);
-    previous = sha;
+  const alternative = usesVerificationEvidence(item);
+  const exactRevert = item.source === "revert" && !item.reviewerSessionId;
+  const docs = item.checks.some((check) => check.name === "review" && check.state === "skipped");
+  let criteria = item.acceptanceCriteria;
+  let evidence: string[];
+  let history: string;
+  if (
+    alternative &&
+    (trackedHead(item) !== head ||
+      !item.checks.some((check) => check.name === "ci" && check.state === "pass"))
+  ) {
+    return unavailable("Passing CI on the current head is required for verification evidence.");
   }
 
-  const tests = item.review?.jevEvidence;
-  const criteria = item.acceptanceCriteria;
-  const history = [historyBrief(item), ...diffs].join("\n\n");
-  const testOutput =
-    tests?.head === head && tests.tests.length === criteria.length
-      ? tests.tests.map(
-          (output, i) =>
-            `criteria[${i}] (${criteria[i]?.slice(0, 60)}) tests at ${head}\n${output}`,
+  if (exactRevert) {
+    const mergeSha = item.revertOf && ctx.store.item(item.revertOf)?.mergeSha;
+    if (
+      !mergeSha ||
+      !(await ctx.github.revertMatches(project.id, { headSha: head, mergeSha }).catch(() => false))
+    ) {
+      return unavailable("Could not verify the exact revert at the current head.");
+    }
+    const treeComparison = JSON.stringify({ head, mergeSha, exactInverse: true });
+    history = `${historyBrief(item)}\n\n${treeComparison}`;
+    if (!criteria.length)
+      criteria = ["Restores the repository tree from before the reverted merge."];
+    evidence = [verificationEvidence(item, head, criteria, treeComparison)];
+  } else {
+    if (!cwd || heads.some((sha) => !SHA.test(sha))) {
+      return unavailable("The pinned worktree or review history is unavailable.");
+    }
+    const git = (args: string[]) =>
+      ctx.exec("git", ["--no-pager", ...args], { cwd }).catch(() => null);
+    const base = await git([
+      "merge-base",
+      heads[0] ?? head,
+      `refs/remotes/origin/${baseBranchOf(project)}`,
+    ]);
+    let previous = base?.stdout.trim() ?? "";
+    if (base?.code !== 0 || !SHA.test(previous))
+      return unavailable("The review base is unavailable.");
+    const diffs: string[] = [];
+    for (const sha of heads) {
+      const diff = await git([
+        "diff",
+        "--no-color",
+        "--no-ext-diff",
+        "--no-textconv",
+        previous,
+        sha,
+        "--",
+      ]);
+      if (diff?.code !== 0 || diff.stdout.length >= 1024 * 1024) {
+        return unavailable("A pinned review diff is missing or too large.");
+      }
+      diffs.push(`## ${previous} → ${sha}\n\n${diff.stdout}`);
+      previous = sha;
+    }
+    history = [historyBrief(item), ...diffs].join("\n\n");
+    if (alternative) {
+      if (!criteria.length) criteria = ["Passes the repository's automated checks at this commit."];
+      evidence = [verificationEvidence(item, head, criteria, docs ? diffs.join("\n\n") : "")];
+    } else {
+      const tests = item.review?.jevEvidence;
+      if (
+        tests?.head !== head ||
+        tests.tests.length !== criteria.length ||
+        tests.tests.some(
+          (output) =>
+            !output.startsWith("VITEST_MAX_WORKERS=2 pnpm -s vitest run --reporter=verbose ") ||
+            !output.includes(" | grep -iE ") ||
+            !output.includes("Test Files") ||
+            !output.includes("Tests "),
         )
-      : [];
-  if (
-    !testOutput.length ||
-    tests?.tests.some(
-      (output) =>
-        !output.startsWith("VITEST_MAX_WORKERS=2 pnpm -s vitest run --reporter=verbose ") ||
-        !output.includes(" | grep -iE ") ||
-        !output.includes("Test Files") ||
-        !output.includes("Tests "),
-    )
-  )
-    return unavailable("Criterion-indexed test output is missing for the current head.");
+      )
+        return unavailable("Criterion-indexed test output is missing for the current head.");
+      evidence = tests.tests.map(
+        (output, i) => `criteria[${i}] (${criteria[i]?.slice(0, 60)}) tests at ${head}\n${output}`,
+      );
+    }
+  }
 
   const receipts = rounds.map((round, index) =>
     JSON.stringify({
@@ -238,7 +276,17 @@ async function evaluate(ctx: FactoryContext, project: Project, item: FactoryItem
     head,
     criteria,
     history,
-    evidence: [...testOutput, `${refs}\n${receipts.join("\n")}\nHIGH or MEDIUM findings: ${count}`],
+    evidence: [...evidence, `${refs}\n${receipts.join("\n")}\nHIGH or MEDIUM findings: ${count}`],
     historyEvidence: `${refs}\n${earlier.join("\n")}\nHIGH or MEDIUM findings: ${count}\n${item.arbitration?.ruling ?? "No such file"}`,
   });
+}
+
+function verificationEvidence(
+  item: FactoryItem,
+  head: string,
+  criteria: string[],
+  output: string,
+): string {
+  const refs = criteria.map((_, index) => `criteria[${index}]`).join(" and ");
+  return `${refs}\n${JSON.stringify({ head, checks: item.checks })}\n${output}`;
 }

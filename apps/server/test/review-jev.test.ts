@@ -176,3 +176,86 @@ it("sends a product refusal to the reviewer once and then to the owner inbox", a
 it("routes an unavailable gate straight to the owner", () => {
   expect(jevNext("unavailable", 0)).toBe("owner");
 });
+
+it.each(["docs", "revert", "criteria-less"] as const)(
+  "runs the done gate with pinned verification evidence for %s",
+  async (kind) => {
+    const dir = await mkdtemp(join(tmpdir(), "review-jev-"));
+    try {
+      let item = {
+        id: "item",
+        projectId: "project",
+        title: "Candidate",
+        type: kind === "docs" ? "docs" : "feature",
+        source: kind === "revert" ? "revert" : "issue",
+        revertOf: kind === "revert" ? "original" : undefined,
+        builderSessionId: kind === "revert" ? null : "builder",
+        reviewerSessionId: kind === "criteria-less" ? "reviewer" : null,
+        acceptanceCriteria: kind === "docs" ? ["Documents how to save."] : [],
+        review: kind === "docs" ? null : { verdict: "approve", criteria: [] },
+        nudges: { [`head_${head}`]: "2026-11-23T00:00:00.000Z" },
+        checks: [
+          { name: "ci", state: "pass" },
+          { name: "review", state: kind === "docs" ? "skipped" : "pass" },
+        ],
+      } as unknown as FactoryItem;
+      const revertMatches = vi.fn(async () => true);
+      const exec: Exec = async (command, args) => {
+        const result = { code: 0, stderr: "", timedOut: false, notFound: false, path: command };
+        if (command === "git") {
+          return {
+            ...result,
+            stdout: args.includes("merge-base") ? "b".repeat(40) : "+Click Save.",
+          };
+        }
+        const input = JSON.parse(await readFile(args[2] ?? "", "utf8"));
+        expect(input.objective).toContain(head);
+        expect(input.criteria).not.toHaveLength(0);
+        expect(input.evidence[0]).toContain(head);
+        expect(input.evidence[0]).toContain(kind === "docs" ? "+Click Save." : '"state":"pass"');
+        const stdout = JSON.stringify({
+          gate: "done",
+          pass: true,
+          verdict: "proceed",
+          reasons: [],
+          inputSha256: "1234567890abcdef",
+        });
+        await writeFile(args[4] ?? "", stdout);
+        return { ...result, stdout };
+      };
+      const put = vi.fn();
+      const ctx = {
+        reviewDataDir: dir,
+        store: {
+          updateItem: (_id: string, change: (current: FactoryItem) => FactoryItem) => {
+            item = change(item);
+            return item;
+          },
+          item: () => ({ mergeSha: "c".repeat(40) }),
+        },
+        github: { revertMatches },
+        repo: { find: () => ({ session: { status: "idle", worktreePath: dir } }) },
+        inbox: { find: () => undefined, put },
+        exec,
+        now: () => new Date("2026-11-23T00:00:00Z"),
+      } as unknown as FactoryContext;
+      const project = {
+        id: item.projectId,
+        defaultBranch: "main",
+        factoryLimits: FactoryLimits.parse({}),
+      } as Parameters<typeof advanceJev>[1];
+
+      expect(await advanceJev(ctx, project, item, head)).toBe(true);
+      expect(jevPasses(item.jev, head)).toBe(true);
+      expect(put).not.toHaveBeenCalled();
+      if (kind === "revert") {
+        expect(revertMatches).toHaveBeenCalledWith(item.projectId, {
+          headSha: head,
+          mergeSha: "c".repeat(40),
+        });
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  },
+);

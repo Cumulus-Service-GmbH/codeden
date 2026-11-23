@@ -310,6 +310,24 @@ describe("reviewing a session with another agent", () => {
     expect(all("session.start").at(-1)?.input?.text).toContain("Review only the delta");
   });
 
+  it("reviews a session again without a checkpoint or a self-diff", async () => {
+    const sessions = services();
+    const src = source();
+    const first = await sessions.review(src.id, { provider: "codex" });
+    await settle(sessions);
+    env.repo.update(first.sessionId, (session) => ({ ...session, status: "idle" }));
+    env.store.append([
+      agentEventToNewEvent(src.id, { type: "turn.started", threadId: "t-root", turnId: "u2" }),
+      agentEventToNewEvent(src.id, { type: "turn.completed", threadId: "t-root", turnId: "u2" }),
+    ]);
+
+    const next = await sessions.review(src.id, { provider: "codex" });
+    await settle(sessions);
+
+    expect(all("git.diff").at(-1)).toMatchObject({ fromRef: "main", toRef: src.branch });
+    expect(env.repo.find(next.sessionId)?.startMeta?.review?.round).toBe(2);
+  });
+
   it("leaves the source untouched", async () => {
     const sessions = services();
     const src = source();

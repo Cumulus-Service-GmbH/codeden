@@ -86,6 +86,52 @@ describe("an approval covers one head commit", () => {
     expect(env.gh.merges.map((m) => m.number)).toEqual([pr.ref.number]);
   });
 
+  it("re-checks a changed PR after the second review round approves it", async () => {
+    env = createFactoryEnv({ limits: { mergePolicy: "strict" } });
+    await enable();
+    const { id, pr } = await verifying("pending");
+    const previous = pr.headSha as string;
+    push(pr, "roundB");
+    await tick();
+    review(id);
+    env.factory.data.updateItem(id, (i) => ({
+      ...i,
+      reviewRounds: [
+        { head: previous, dispositions: ["Request changes"] },
+        { head: "roundB", dispositions: ["Approve"] },
+      ],
+    }));
+
+    push(pr, "roundC");
+    await tick();
+
+    expect(lastMessageTo(item(id).reviewerSessionId as string)).toContain("roundC");
+    expect(env.gh.merges).toEqual([]);
+  });
+
+  it.each(["src/new.ts:3", "./src/new.ts:12-18", "src/new.ts#L12-L18"])(
+    "keeps a blocking finding on a newly changed file at %s",
+    async (location) => {
+      env = createFactoryEnv();
+      await enable();
+      const { id, pr } = await verifying("pending");
+      expect(item(id).reviewSpec?.scope).not.toContain("src/new.ts");
+      env.gh.push(pr, "roundB", ["src/new.ts"]);
+      await tick();
+
+      const finding = {
+        location,
+        summary: "Empty input crashes.",
+        severity: "HIGH" as const,
+        failure_scenario: "An empty input reaches the renderer.",
+        repro: "Open the page with an empty input.",
+      };
+      await review(id, { ...APPROVE, verdict: "request_changes", findings: [finding] });
+
+      expect(item(id).review).toMatchObject({ verdict: "request_changes", findings: [finding] });
+    },
+  );
+
   it("keeps the approval when the merge queue only brings the PR up to date with main", async () => {
     // Under the strict policy the queue brings a PR that is behind up to date (update-branch).
     env = createFactoryEnv({ limits: { mergePolicy: "strict" } });

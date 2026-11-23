@@ -195,9 +195,11 @@ export function confirmArbiter(ctx: FactoryContext, item: FactoryItem, verdict: 
   const arbiter = item.arbitration;
   if (arbiter?.state !== "confirming" || verdict.blockers === "environment") return false;
   const confirmation = `${verdict.verdict}: ${verdict.summary}`;
+  const approved = verdict.verdict === "approve";
+  const note = approved ? "Jev pending" : `Arbiter confirmation: ${confirmation}`;
   ctx.store.updateItem(item.id, (i) => ({
     ...i,
-    arbitration: { ...arbiter, state: "jev_pending", confirmation },
+    arbitration: { ...arbiter, state: approved ? "jev_pending" : "blocked", confirmation },
     review: verdict,
     reviewRounds: [
       ...(i.reviewRounds ?? []),
@@ -209,8 +211,22 @@ export function confirmArbiter(ctx: FactoryContext, item: FactoryItem, verdict: 
       },
     ],
     nudges: withVerdictHead(i.nudges, arbiter.head, ctx.now().toISOString()),
-    note: "Jev pending",
+    note,
   }));
+  if (!approved) ownerDecision(ctx, item, note);
+  return true;
+}
+
+export function stopUnapprovedArbitration(ctx: FactoryContext, item: FactoryItem): boolean {
+  const arbiter = item.arbitration;
+  if (arbiter?.state !== "jev_pending" || item.review?.verdict === "approve") return false;
+  block(
+    ctx,
+    item,
+    arbiter.head,
+    item.review?.summary ?? "The Arbiter ruling has no approval.",
+    arbiter.ruling,
+  );
   return true;
 }
 

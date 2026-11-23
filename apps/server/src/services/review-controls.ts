@@ -20,8 +20,8 @@ export function reviewVendorsMatch(author: ReviewProvider, reviewer: ReviewProvi
 
 export function reviewRound(
   input: Partial<ReviewPolicy>,
-  prior: readonly { head: string; dispositions: readonly string[] }[],
-  diff: { head: string; lines: number },
+  prior: readonly { head: string | null; dispositions: readonly string[] }[],
+  diff: { head: string | null; lines: number },
 ) {
   const policy = ReviewPolicy.parse(input);
   const number = prior.length + 1;
@@ -30,7 +30,7 @@ export function reviewRound(
   const blocked =
     number > limit
       ? "round_limit"
-      : previous?.head === diff.head
+      : diff.head !== null && previous?.head === diff.head
         ? "unchanged_head"
         : !Number.isSafeInteger(diff.lines) || diff.lines < 0 || diff.lines > MAX_REVIEW_LINES
           ? "diff_size"
@@ -49,18 +49,22 @@ export function sortReviewFindings(
   input: ReviewAcceptanceSpec | undefined,
   findings: readonly ReviewFinding[],
   lowPolicy: "fix" | "defer",
+  changedFiles: readonly string[] = [],
 ): { fix: ReviewFinding[]; debt: ReviewFinding[] } {
   const spec = input && ReviewAcceptanceSpec.parse(input);
   const fix: ReviewFinding[] = [];
   const debt: ReviewFinding[] = [];
   for (const input of findings) {
     const finding = ReviewFinding.parse(input);
-    const path = finding.location.replace(/:\d+(?::\d+)?$/, "");
+    const path = finding.location
+      .replace(/^(?:\.\/)+/, "")
+      .replace(/(?::\d+(?::\d+|-\d+)?|#L\d+(?:-L?\d+)?)$/, "");
     const inScope =
       !path.startsWith("/") &&
       !path.includes("\\") &&
       !path.split("/").some((part) => part === ".." || part === ".") &&
       (!spec ||
+        changedFiles.includes(path) ||
         spec.scope.some((entry) =>
           entry.endsWith("/") ? path.startsWith(entry) : path === entry,
         ));
@@ -86,9 +90,10 @@ export function applyReviewFindingPolicy(
   verdict: ReviewVerdict,
   spec: ReviewAcceptanceSpec | undefined,
   lowPolicy: "fix" | "defer",
+  changedFiles: readonly string[] = [],
 ): ReviewVerdict {
   if (!verdict.findings?.length) return verdict;
-  const { fix, debt } = sortReviewFindings(spec, verdict.findings, lowPolicy);
+  const { fix, debt } = sortReviewFindings(spec, verdict.findings, lowPolicy, changedFiles);
   const independentBlocker =
     verdict.blockers === "environment" ||
     verdict.criteria.some((criterion) => !criterion.met) ||

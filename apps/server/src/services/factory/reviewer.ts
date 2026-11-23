@@ -173,20 +173,21 @@ export async function ensureReviewer(
   vision: string,
   pr: FactoryPr,
 ): Promise<FactoryItem> {
-  if (pr.additions + pr.deletions > MAX_REVIEW_LINES && (!item.review || recheckOf(item))) {
+  const old = recheckOf(item);
+  if (pr.additions + pr.deletions > MAX_REVIEW_LINES && (!item.review || old)) {
     return ctx.store.updateItem(
       item.id,
       (i) => ({ ...i, note: `Review blocked: the diff exceeds ${MAX_REVIEW_LINES} changed lines` }),
       { touch: false },
     );
   }
-  if ((!item.review || recheckOf(item)) && pr.headSha) {
+  if ((!item.review || old) && pr.headSha) {
     const round = reviewRound(loop.tuning.reviewPolicy ?? {}, item.reviewRounds ?? [], {
       head: pr.headSha,
       lines: pr.additions + pr.deletions,
     });
     const reason =
-      round.blocked === "round_limit"
+      round.blocked === "round_limit" && !old
         ? `Review round ${round.number}/${round.limit} blocked by the round limit`
         : round.blocked === "unchanged_head" && item.nudges.rereview_pending
           ? "Waiting for a new commit to review"
@@ -203,7 +204,6 @@ export async function ensureReviewer(
       { touch: false },
     );
   }
-  const old = recheckOf(item);
   if (item.reviewerSessionId && (!item.review || old)) {
     const reviewer = ctx.repo.find(item.reviewerSessionId)?.session;
     if (!reviewer || reviewVendorIsDistinct(ctx, item, reviewer.provider) === false) {

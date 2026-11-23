@@ -269,7 +269,8 @@ export function submitReview(
     throw badRequest(APPROVE_WITH_CONCERNS, "approve_with_concerns");
   }
   const lowPolicy = ctx.projects.get(item.projectId).factoryLimits.lowFindings;
-  const settled = applyReviewFindingPolicy(verdict, item.reviewSpec, lowPolicy);
+  const files = item.pr && ctx.prFiles.get(item.projectId, item.pr.number);
+  const settled = applyReviewFindingPolicy(verdict, item.reviewSpec, lowPolicy, files ?? []);
   if (item.jevReviewHead) {
     const recorded = submitJevReview(ctx, item, settled);
     return {
@@ -279,7 +280,8 @@ export function submitReview(
     };
   }
   if (confirmArbiter(ctx, item, settled)) {
-    return { recorded: true, item, message: "Confirmation recorded. Jev pending." };
+    const next = settled.verdict === "approve" ? "Jev pending." : "Owner decision needed.";
+    return { recorded: true, item, message: `Confirmation recorded. ${next}` };
   }
   if (item.arbitration) {
     return {

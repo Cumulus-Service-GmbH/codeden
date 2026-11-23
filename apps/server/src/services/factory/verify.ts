@@ -8,7 +8,7 @@ import {
 import { errorMessage } from "../errors";
 import { jevPasses } from "../review-jev";
 import { settleApproval, verdictHead } from "./approval";
-import { advanceArbiter, reviewEscalation } from "./arbiter";
+import { advanceArbiter, reviewEscalation, stopUnapprovedArbitration } from "./arbiter";
 import { codeFiles, evaluateChecks, hasTestResults, sameChecks } from "./checks";
 import { CI_KICK_NUDGE, kickCi } from "./ci-kick";
 import { type FactoryContext, visionOf } from "./context";
@@ -99,7 +99,7 @@ export async function advanceVerifying(
     return loop;
   }
   // What it changes, for overlap-aware scheduling of the queue (`overlap.ts`).
-  ctx.prFiles.set(project.id, pr.ref.number, pr.files);
+  ctx.prFiles.set(project.id, pr.ref.number, changedPaths(pr));
   // Work over its spend cap moves on through the steps that start no agent turn (CI, the merge
   // queue, update-branch, the merge) and stops before one that would (`item-budget.ts`).
   const beforeAgentTurn = (current: FactoryItem) =>
@@ -183,6 +183,7 @@ export async function advanceVerifying(
     nudges: nudgesFor(i.nudges, i.review),
   }));
 
+  if (stopUnapprovedArbitration(ctx, current)) return loop;
   if (outcome === "escalate") return escalate(ctx, loop, current, checks);
   if (
     pr.headSha &&

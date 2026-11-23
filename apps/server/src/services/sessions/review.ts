@@ -127,10 +127,10 @@ export async function planReview(
   const head = latest?.commit ?? source.branch ?? "HEAD";
   const previous = previousReviews(repo, source);
   const history = previous.map(({ session, review }) => ({
-    head: review.head,
+    head: session.forkedFrom?.checkpoint != null ? review.head : null,
     dispositions: [lastReply(repo, session)?.slice(0, 4_000) ?? "No review text recorded."],
   }));
-  const round = reviewRound({}, history, { head, lines: 0 });
+  const round = reviewRound({}, history, { head: latest?.commit ?? null, lines: 0 });
   if (round.blocked === "round_limit") {
     throw conflict(`Review limit reached after ${round.limit} rounds`, "review_round_limit");
   }
@@ -154,7 +154,7 @@ export async function planReview(
     diff.files?.reduce((total, file) => total + file.additions + file.deletions, 0) ??
     diff.diff.split("\n").length;
   if (
-    reviewRound({}, history, { head, lines }).blocked ||
+    reviewRound({}, history, { head: latest?.commit ?? null, lines }).blocked ||
     Buffer.byteLength(diff.diff) > 1_000_000
   ) {
     throw badRequest("The diff is too large for one review", "review_diff_size");
