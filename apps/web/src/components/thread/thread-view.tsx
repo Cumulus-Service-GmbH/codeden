@@ -8,7 +8,13 @@ import { SessionComposer } from "@/components/composer/composer";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useClient } from "@/lib/api";
-import { useEarlierTurns, useSessionLookup, useSnapshotData, useTranscript } from "@/lib/queries";
+import {
+  useEarlierTurns,
+  useProjectArchived,
+  useSessionLookup,
+  useSnapshotData,
+  useTranscript,
+} from "@/lib/queries";
 import { checksRunning } from "@/lib/transcript/checks";
 import { activeTurn } from "@/lib/transcript/reducer";
 import { latestFollowups } from "@/lib/transcript/timeline";
@@ -105,6 +111,8 @@ export function ThreadView({
   );
   // Sent from the New session draft: shown until the transcript has the turn.
   const firstMessage = useNewSessionStore((s) => s.firstMessages[sessionId]);
+  // An archived project's sessions are read-only: no follow-ups to send.
+  const archived = useProjectArchived(session?.projectId);
 
   const showLatest = () => {
     const { childThread, rightTab } = useLayoutStore.getState();
@@ -182,7 +190,9 @@ export function ThreadView({
       )}
       {!history && (
         <>
-          {followups && !running && <FollowupChips sessionId={sessionId} suggestions={followups} />}
+          {followups && !running && !archived && (
+            <FollowupChips sessionId={sessionId} suggestions={followups} />
+          )}
           <QueuedMessages session={session} running={running} />
           <SessionComposer session={session} running={running} checking={checking} />
         </>
