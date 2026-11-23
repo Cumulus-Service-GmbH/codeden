@@ -52,6 +52,10 @@ export const TechDebtAction = z.discriminatedUnion("action", [
 ]);
 export type TechDebtAction = z.infer<typeof TechDebtAction>;
 
+/** A local update can succeed even when its tracking issue could not be synchronized. */
+export const TechDebtActionResult = TechDebtView.extend({ syncError: z.string().optional() });
+export type TechDebtActionResult = z.infer<typeof TechDebtActionResult>;
+
 /** A failed import leaves the local view available and can be retried. */
 export const TechDebtList = TechDebtView.extend({ importError: z.string().optional() });
 export type TechDebtList = z.infer<typeof TechDebtList>;

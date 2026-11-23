@@ -81,6 +81,12 @@ export async function syncDebtTick(
   finding: TechDebtFinding,
 ) {
   const { body, date } = await port.read(issue);
+  const writeIfUnchanged = async (next: string) => {
+    if ((await port.read(issue)).body !== body) {
+      throw conflict("The tracking issue changed during synchronization");
+    }
+    await port.write(issue, next);
+  };
   let found = false;
   const next = body
     .split(/(\r?\n)/)
@@ -92,7 +98,7 @@ export async function syncDebtTick(
     })
     .join("");
   if (found) {
-    if (next !== body) await port.write(issue, next);
+    if (next !== body) await writeIfUnchanged(next);
     return;
   }
   if (finding.source) throw conflict("The tracking issue entry changed or was removed");
@@ -105,7 +111,7 @@ export async function syncDebtTick(
     ...(finding.pr ? [` | PR: ${inline(finding.pr)}`] : []),
     ` <!-- codeden:tech-debt ${finding.id} -->`,
   ].join("");
-  await port.write(issue, `${prefix}${line}${newline}`);
+  await writeIfUnchanged(`${prefix}${line}${newline}`);
 }
 
 function inline(value: string): string {

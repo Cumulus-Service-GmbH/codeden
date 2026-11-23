@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { EventEnvelope, TechDebtAction, TechDebtIssue, TechDebtView } from "../src";
+import {
+  EventEnvelope,
+  TechDebtAction,
+  TechDebtActionResult,
+  TechDebtIssue,
+  TechDebtView,
+} from "../src";
 
 describe("project tech debt contracts", () => {
   it("round-trips the append-only view and accepts only qualified issue references", () => {
@@ -27,5 +33,12 @@ describe("project tech debt contracts", () => {
       false,
     );
     expect(TechDebtAction.safeParse({ action: "fix", ids: ["f", "f"] }).success).toBe(false);
+  });
+
+  it("round-trips a synchronization warning without adding it to the durable view", () => {
+    const view = { projectId: "p", issue: "owner/repo#246", imported: true, findings: [] };
+    const result = { ...view, syncError: "The issue could not be synchronized." };
+    expect(TechDebtActionResult.parse(JSON.parse(JSON.stringify(result)))).toEqual(result);
+    expect(TechDebtView.parse(result)).toEqual(view);
   });
 });

@@ -28,7 +28,9 @@ export function TechDebtPanel({ projectId }: { projectId: string }) {
       cache.setQueryData(queryKey, view);
       if (action.action === "fix") setSelected([]);
       if (action.action === "dismiss") setDismiss(null);
-      if (action.action === "configure") return cache.invalidateQueries({ queryKey });
+      if (action.action === "configure" || action.action === "fix") {
+        return cache.invalidateQueries({ queryKey });
+      }
     },
   });
   const submit = (value: unknown) => {
@@ -50,6 +52,7 @@ export function TechDebtPanel({ projectId }: { projectId: string }) {
       {query.isPending && <p role="status">Loading tech debt…</p>}
       {query.error && <p role="alert">{query.error.message}</p>}
       {(error || update.error) && <p role="alert">{error || update.error?.message}</p>}
+      {update.data?.syncError && <p role="alert">{update.data.syncError}</p>}
       {view && (
         <>
           <form
@@ -132,16 +135,6 @@ export function TechDebtPanel({ projectId }: { projectId: string }) {
                 {finding.reason && <p className="break-words">{finding.reason}</p>}
                 {(finding.status === "open" || finding.status === "in_progress") && (
                   <div className="flex flex-wrap gap-2">
-                    {finding.status === "in_progress" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        disabled={update.isPending}
-                        onClick={() => submit({ action: "fix", ids: [finding.id] })}
-                      >
-                        Retry fix
-                      </Button>
-                    )}
                     <Button
                       size="sm"
                       variant="outline"

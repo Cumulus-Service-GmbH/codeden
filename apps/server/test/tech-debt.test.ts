@@ -71,6 +71,74 @@ describe("project tech debt", () => {
     });
   });
 
+  it.each(["unreachable", "edited", "removed", "changed during sync", "write rejected"] as const)(
+    "commits a local closure when the tracking issue is %s",
+    async (failure) => {
+      const { env, service, project, read, write } = setup();
+      await service.act(project, { action: "configure", issue });
+      const { findings } = await service.list(project);
+      const id = findings[0]?.id ?? "";
+      const reason = "Superseded by the shared implementation.";
+      const action =
+        failure === "unreachable" || failure === "removed"
+          ? ({ action: "fixed", id } as const)
+          : ({ action: "dismiss", id, reason } as const);
+      const finalFinding = {
+        id,
+        status: action.action === "fixed" ? "fixed" : "dismissed",
+        reason: action.action === "fixed" ? null : reason,
+      };
+      let lastEventAtRead: (typeof env.events)[number] | undefined;
+      read.mockImplementationOnce(async () => {
+        lastEventAtRead = env.events.at(-1);
+        if (failure === "unreachable") throw new Error("Issue unavailable");
+        const body = {
+          edited: low.replace("shared helper", "new helper"),
+          removed: medium,
+          "changed during sync": low,
+          "write rejected": low,
+        }[failure];
+        return { body, date };
+      });
+      if (failure === "changed during sync") {
+        read.mockResolvedValueOnce({ body: `${low}\n${medium}`, date });
+      }
+      if (failure === "write rejected") {
+        read.mockResolvedValueOnce({ body: low, date });
+        write.mockRejectedValueOnce(new Error("Write rejected"));
+      }
+
+      expect(await service.act(project, action)).toMatchObject({
+        findings: [finalFinding],
+        syncError: expect.any(String),
+      });
+      expect(lastEventAtRead).toMatchObject({
+        type: "tech_debt.updated",
+        payload: { view: { findings: [finalFinding] } },
+      });
+      expect((await service.list(project)).findings).toMatchObject([finalFinding]);
+      expect(write).toHaveBeenCalledTimes(failure === "write rejected" ? 1 : 0);
+    },
+  );
+
+  it("imports new LOW entries when saving the same issue and preserves existing findings by ID", async () => {
+    const { service, project, read } = setup();
+    await service.act(project, { action: "configure", issue });
+    const { findings } = await service.list(project);
+    const id = findings[0]?.id ?? "";
+    await service.act(project, { action: "dismiss", id, reason: "Superseded." });
+    read.mockResolvedValueOnce({
+      body: `${low.replace("[ ]", "[x]")}\n- [ ] LOW src/check.ts:3 — Reuse the validator.`,
+      date: "2026-11-23T00:00:00Z",
+    });
+    await service.act(project, { action: "configure", issue });
+
+    expect((await service.list(project)).findings).toMatchObject([
+      { id, status: "dismissed", reason: "Superseded." },
+      { location: "src/check.ts:3", status: "open", date: "2026-11-23T00:00:00Z" },
+    ]);
+  });
+
   it("keeps local findings project-scoped and starts a normal fix before changing status", async () => {
     const { service, local, project, read, write, start } = setup();
     const finding = {
@@ -96,8 +164,8 @@ describe("project tech debt", () => {
     expect(write).not.toHaveBeenCalled();
   });
 
-  it.each(["failed", "stopped", "idle"] as const)(
-    "retries a finding after its fix session goes %s without ticking the issue",
+  it.each(["failed", "stopped", "completed"] as const)(
+    "reopens a finding after its fix session goes %s without ticking the issue",
     async (status) => {
       const { env, service, project, start, write } = setup();
       await service.act(project, { action: "configure", issue });
@@ -110,6 +178,10 @@ describe("project tech debt", () => {
         status: "running",
       });
       await service.act(project, fix);
+      expect((await service.list(project)).findings[0]).toMatchObject({
+        status: "in_progress",
+        sessionId: session.id,
+      });
       await expect(service.act(project, fix)).rejects.toThrow();
       expect(start).toHaveBeenCalledTimes(1);
 
@@ -120,12 +192,34 @@ describe("project tech debt", () => {
           payload: { session: { ...session, status } },
         },
       ]);
+      expect((await service.list(project)).findings[0]).toMatchObject({
+        status: "open",
+        sessionId: null,
+      });
       start.mockResolvedValueOnce("retry-session");
       expect((await service.act(project, fix)).findings[0]).toMatchObject({
         status: "in_progress",
         sessionId: "retry-session",
       });
       expect(write).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(["idle", "interrupted"] as const)(
+    "keeps a finding in progress while its fix session is %s and resumable",
+    async (status) => {
+      const { env, service, project, start } = setup();
+      await service.act(project, { action: "configure", issue });
+      const { findings } = await service.list(project);
+      const fix = { action: "fix" as const, ids: [findings[0]?.id ?? ""] };
+      const session = env.addSession({ id: "fix-session", projectId: project.id, status });
+      await service.act(project, fix);
+      expect((await service.list(project)).findings[0]).toMatchObject({
+        status: "in_progress",
+        sessionId: session.id,
+      });
+      await expect(service.act(project, fix)).rejects.toThrow("Select open findings");
+      expect(start).toHaveBeenCalledTimes(1);
     },
   );
 

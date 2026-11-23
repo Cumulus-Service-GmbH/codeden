@@ -3829,21 +3829,6 @@
       "entityType": "indexes"
     },
     {
-      "table": "project_tech_debt",
-      "name": "fk_project_tech_debt_project_id_projects_id_fk",
-      "columns": [
-        "project_id"
-      ],
-      "tableTo": "projects",
-      "columnsTo": [
-        "id"
-      ],
-      "onUpdate": "NO ACTION",
-      "onDelete": "NO ACTION",
-      "nameExplicit": false,
-      "entityType": "fks"
-    },
-    {
       "table": "automation_schedules",
       "name": "automation_schedules_pk",
       "columns": [
