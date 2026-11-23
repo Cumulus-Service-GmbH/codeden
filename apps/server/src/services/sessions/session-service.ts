@@ -762,7 +762,12 @@ export class SessionService {
   }
 
   /** Answer a question or approval; `by` is who answered a question (the user or the PM). */
-  async respond(id: string, req: RespondRequest, by: Answerer = "user"): Promise<void> {
+  async respond(
+    id: string,
+    req: RespondRequest,
+    by: Answerer = "user",
+    options: { closeInbox?: boolean } = {},
+  ): Promise<void> {
     const session = this.deps.repo.get(id);
     this.assertForcedProvider(session);
     // Questions asked through CodeDen's ask_user tool are answered here, not by the provider.
@@ -778,7 +783,7 @@ export class SessionService {
         throw toServiceError(e);
       });
     // The orchestrator closes the request in the same transaction as its audit record.
-    if (req.response.kind === "approval" && req.response.decidedBy === "orchestrator") return;
+    if (options.closeInbox === false) return;
     const resolution: JsonValue =
       req.response.kind === "approval"
         ? { decision: req.response.decision, decidedBy: req.response.decidedBy ?? "user" }

@@ -55,8 +55,8 @@ export class OrchestratorApprovals {
   private readonly deciding = new Set<string>();
 
   constructor(
-    private readonly inbox: Pick<InboxService, "list">,
-    private readonly repo: Pick<SessionRepo, "item" | "approvalRequest">,
+    private readonly inbox: Pick<InboxService, "list" | "closeForRequest">,
+    private readonly repo: Pick<SessionRepo, "item" | "approvalRequest" | "find">,
     private readonly decisions: DecisionApprovals,
     private readonly sessions: Pick<SessionService, "respond">,
     private readonly store: Pick<EventStore, "appendFrom">,
@@ -75,6 +75,9 @@ export class OrchestratorApprovals {
     const entry = this.entries().find(({ approval }) => approval.id === id);
     if (!entry) throw notFound("No pending approval with that ID", "approval_not_found");
     const { approval, request, cardId } = entry;
+    if (!this.hasIndependentSession(approval.sessionId, orchestratorSessionId)) {
+      throw forbidden("This approval requires the owner (unclassified)", "owner_only_approval");
+    }
     if (!approval.delegable || (!request && !cardId)) {
       throw forbidden(
         `This approval requires the owner (${approval.ownerOnly ?? "unclassified"})`,
@@ -106,17 +109,32 @@ export class OrchestratorApprovals {
     this.deciding.add(id);
     try {
       if (request) {
-        await this.sessions.respond(request.sessionId, {
-          requestId: request.requestId,
-          response: {
-            kind: "approval",
-            decision: responseDecision,
-            message: reason,
-            decidedBy: "orchestrator",
+        await this.sessions.respond(
+          request.sessionId,
+          {
+            requestId: request.requestId,
+            response: {
+              kind: "approval",
+              decision: responseDecision,
+              message: reason,
+              decidedBy: "orchestrator",
+            },
           },
-        });
+          "user",
+          { closeInbox: false },
+        );
         decidedAt = new Date().toISOString();
-        this.store.appendFrom(record);
+        try {
+          this.store.appendFrom(record);
+        } catch (error) {
+          this.inbox.closeForRequest(request.sessionId, request.requestId, {
+            decision,
+            decidedBy: "orchestrator",
+            reason,
+            auditFailed: true,
+          });
+          throw error;
+        }
       } else if (cardId) {
         if (decision === "approve") await this.decisions.confirm(cardId, actor, record);
         else this.decisions.deny(cardId, actor, record);
@@ -125,6 +143,17 @@ export class OrchestratorApprovals {
     } finally {
       this.deciding.delete(id);
     }
+  }
+
+  private hasIndependentSession(sessionId: string | null, orchestratorSessionId: string): boolean {
+    for (let steps = 0; steps < 20; steps++) {
+      if (!sessionId || sessionId === orchestratorSessionId) return false;
+      const found = this.repo.find(sessionId);
+      if (!found) return false;
+      sessionId = found.session.parentSessionId;
+      if (!sessionId) return true;
+    }
+    return false;
   }
 
   private entries(): Entry[] {
@@ -252,7 +281,7 @@ export class OrchestratorApprovals {
       { type: "approval.decided_by_orchestrator", sessionId: null, payload },
       { type: "inbox.created", sessionId, payload: { item } },
     ];
-    if (original) {
+    if (original?.status === "open") {
       const resolved = closedItem(
         original,
         "resolved",

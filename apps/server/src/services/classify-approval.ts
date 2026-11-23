@@ -1,3 +1,4 @@
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import {
   type DecisionCard,
   type ItemOf,
@@ -7,12 +8,12 @@ import {
 } from "@codeden/contracts";
 import { isDelegablePlan } from "./decision-approvals";
 
-type ToolContext = Pick<ItemOf<"approval_request">, "url" | "singleUse" | "hookAsk">;
+type ToolContext = Pick<ItemOf<"approval_request">, "url" | "singleUse" | "hookAsk" | "paths">;
 type Entry = Pick<PendingApproval, "kind"> &
   Partial<
     Pick<
       PendingApproval,
-      "action" | "command" | "hookReason" | "reason" | "toolInput" | "toolName" | "steps"
+      "action" | "command" | "cwd" | "hookReason" | "reason" | "toolInput" | "toolName" | "steps"
     >
   > &
   ToolContext & { requestedBy?: DecisionCard["requestedBy"] };
@@ -65,6 +66,35 @@ function ownerScope(scope: string): OwnerOnlyCategory | undefined {
   return undefined;
 }
 
+const restrictedSegment =
+  /^(?:\.git|\.claude|\.codex|\.ssh|\.azure|\.kube|\.aws|\.gnupg|\.config|\.env.*|\.npmrc|\.netrc|\.pgpass|\.zshrc|\.bashrc|\.profile|\.zprofile|\.bash_profile)$/is;
+
+function safeFileChange({ cwd, paths, toolInput }: Entry): boolean {
+  if (!cwd || !isAbsolute(cwd)) return false;
+  const targets = [...(paths ?? [])];
+  if (toolInput && typeof toolInput === "object" && !Array.isArray(toolInput)) {
+    for (const key of ["file_path", "path", "notebook_path"]) {
+      const value = toolInput[key];
+      if (typeof value === "string") targets.push(value);
+    }
+  }
+  return (
+    targets.length > 0 &&
+    targets.every((path) => {
+      if (!path || /^~(?:[/\\]|$)/.test(path)) return false;
+      const target = resolve(cwd, path);
+      const offset = relative(cwd, target);
+      return (
+        offset !== "" &&
+        offset !== ".." &&
+        !offset.startsWith(`..${sep}`) &&
+        !isAbsolute(offset) &&
+        !`${path}/${target}`.split(/[/\\]/).some((segment) => restrictedSegment.test(segment))
+      );
+    })
+  );
+}
+
 export function classifyApproval(entry: Entry): Classification {
   if (entry.hookReason !== undefined) {
     const token = parseCardToken(entry.hookReason);
@@ -86,16 +116,15 @@ export function classifyApproval(entry: Entry): Classification {
     return ownerOnly();
   }
 
+  if (entry.action === "outside_worktree") return ownerOnly();
   if (entry.action === "secrets") return ownerOnly("secrets");
-  const cleanAction =
-    entry.action === "file_change" ||
-    entry.action === "outside_worktree" ||
-    entry.action === "plan";
-  const text = `${entry.command ?? ""}\n${JSON.stringify(entry.toolInput ?? null)}`;
+  const cleanAction = entry.action === "file_change" || entry.action === "plan";
+  const text = `${entry.command ?? ""}\n${JSON.stringify(entry.toolInput ?? null)}\n${entry.paths?.join("\n") ?? ""}`;
   const category = sensitiveText(text);
   if (category) return ownerOnly(category);
   if (
     !cleanAction ||
+    (entry.action === "file_change" && !safeFileChange(entry)) ||
     entry.hookAsk ||
     text.includes("[codeden-card") ||
     entry.reason?.includes("[codeden-card") ||
