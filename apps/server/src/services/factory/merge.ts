@@ -103,7 +103,7 @@ export async function readyForYou(
   project: Project,
   item: FactoryItem,
 ): Promise<void> {
-  if (!jevPasses(item.jev, trackedHead(item))) return;
+  if (ctx.jevScript !== null && !jevPasses(item.jev, trackedHead(item))) return;
   const why =
     item.trust === "admitted"
       ? "it came from an untrusted author, so a person merges it"
@@ -212,7 +212,7 @@ export async function autoMerge(
   checks: FactoryItem["checks"],
   how: { path: MergePath; note?: string },
 ): Promise<FactoryLoop | MergeFailed> {
-  if (!jevPasses(current.jev, pr.headSha)) {
+  if (ctx.jevScript !== null && !jevPasses(current.jev, pr.headSha)) {
     return {
       failed: "Jev must pass for the current head before merging",
       refusal: false,

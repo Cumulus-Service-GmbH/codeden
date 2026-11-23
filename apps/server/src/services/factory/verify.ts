@@ -2,6 +2,8 @@ import {
   type FactoryItem,
   type FactoryLoop,
   isFactoryMode,
+  JEV_COMPLETION_SKIPPED,
+  type JevReceipt,
   type Project,
   type ReviewVerdict,
 } from "@codeden/contracts";
@@ -67,11 +69,14 @@ export async function advanceVerifying(
   // Its builder or reviewer stopped on purpose, with a reason: that call, never a failure
   // (`stops.ts`). A PR merged or closed meanwhile is settled below as usual.
   if (stoppedOnPurpose(ctx, item) && !decidedPr(ctx, item)) return endStopped(ctx, loop, item);
+  const jevConfigured = ctx.jevScript !== null;
   // Ready and waiting for a person: the synced PR says when they merge or close it; GitHub
   // itself is asked again only every few minutes (new commits, CI, conflicts).
   if (
     item.nudges.ready &&
-    jevPasses(item.jev, trackedHead(item)) &&
+    (jevConfigured
+      ? jevPasses(item.jev, trackedHead(item))
+      : item.jev?.status === "not configured") &&
     !mayAutoMerge(item, project.factoryLimits)
   ) {
     const ref = ctx.github.prRef(project.id, item.pr.number);
@@ -143,7 +148,7 @@ export async function advanceVerifying(
     return settleApproval(n, tracked, pr, review, at);
   };
   const head = trackHead(item.nudges, pr, at);
-  if (item.nudges.ready && !jevPasses(item.jev, pr.headSha)) {
+  if (jevConfigured && item.nudges.ready && !jevPasses(item.jev, pr.headSha)) {
     const ready = ctx.inbox.find(readyInboxId(item.id));
     if (ready?.status === "open")
       ctx.inbox.close(ready, "resolved", { note: "Waiting for Jev on the current head" });
@@ -176,8 +181,16 @@ export async function advanceVerifying(
     areas: withVisionFile(vision.parsed.protectedAreas, project.visionPath),
     now: now.toISOString(),
   });
+  const unconfiguredJev: JevReceipt | undefined = jevConfigured
+    ? undefined
+    : {
+        head: pr.headSha && /^[a-f0-9]{40}$/.test(pr.headSha) ? pr.headSha : null,
+        status: "not configured",
+        reasons: [JEV_COMPLETION_SKIPPED],
+      };
   let current = ctx.store.updateItem(item.id, (i) => ({
     ...i,
+    ...(unconfiguredJev ? { jev: unconfiguredJev } : {}),
     pr: pr.ref,
     checks: sameChecks(i.checks, checks) ? i.checks : checks,
     nudges: nudgesFor(i.nudges, i.review),
@@ -186,6 +199,7 @@ export async function advanceVerifying(
   if (stopUnapprovedArbitration(ctx, current)) return loop;
   if (outcome === "escalate") return escalate(ctx, loop, current, checks);
   if (
+    jevConfigured &&
     pr.headSha &&
     (!current.arbitration ||
       (current.arbitration.head === pr.headSha && current.arbitration.state === "jev_pending")) &&
@@ -259,6 +273,10 @@ export async function advanceVerifying(
   }
 
   if (!pr.headSha) return loop;
+  if (jevConfigured && !jevPasses(current.jev, pr.headSha)) {
+    leaveQueue(ctx, current);
+    return loop;
+  }
   // Every check passed: the merge queue merges it in its turn, or a person does.
   if (!mayAutoMerge(current, project.factoryLimits) || !isFactoryMode(project.autonomyMode)) {
     current = leaveQueue(ctx, current);

@@ -1,11 +1,15 @@
 import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { vi } from "vitest";
+import type { ExecResult } from "../../src/services/exec";
 import type { FactoryEnv } from "./factory-env";
 
 export const sha = (label: string) => createHash("sha1").update(label).digest("hex");
 
-export function installDoneFixture(env: FactoryEnv) {
+export const fixtureJevScript = "/fixture/jev.mjs";
+
+export function installDoneFixture(env: FactoryEnv, done?: (result: ExecResult) => ExecResult) {
+  env.factory.ctx.jevScript = fixtureJevScript;
   const openPr = env.gh.openPr.bind(env.gh);
   vi.spyOn(env.gh, "openPr").mockImplementation((opts) => {
     const pr = openPr(opts);
@@ -33,7 +37,8 @@ export function installDoneFixture(env: FactoryEnv) {
       inputSha256: "1234567890abcdef",
     });
     await writeFile(args[4] ?? "", stdout);
-    return { ...result, stdout };
+    const passed = { ...result, stdout };
+    return done ? done(passed) : passed;
   };
 }
 

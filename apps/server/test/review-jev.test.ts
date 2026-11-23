@@ -8,14 +8,32 @@ import type { Exec } from "../src/services/exec";
 import type { FactoryContext } from "../src/services/factory/context";
 import { advanceJev, submitJevReview } from "../src/services/factory/jev";
 import { autoMerge } from "../src/services/factory/merge";
-import { jevNext, jevPasses, runJevDone } from "../src/services/review-jev";
+import {
+  jevNext,
+  jevPasses,
+  resolveFactoryJevScript,
+  runJevDone,
+} from "../src/services/review-jev";
 
+const jevScript = "/fixture/jev.mjs";
 const head = "a".repeat(40);
+
+it("detects configuration from the installed Jev script", async () => {
+  const home = await mkdtemp(join(tmpdir(), "review-jev-home-"));
+  try {
+    const script = join(home, "jev.mjs");
+    expect(resolveFactoryJevScript(script)).toBeNull();
+    await writeFile(script, "");
+    expect(resolveFactoryJevScript(script)).toBe(script);
+  } finally {
+    await rm(home, { recursive: true, force: true });
+  }
+});
 
 it("refuses to call GitHub merge without a Jev pass", async () => {
   const merge = vi.fn();
   const result = await autoMerge(
-    { github: { merge } } as never,
+    { github: { merge }, jevScript } as never,
     {} as never,
     {} as never,
     { id: "item", title: "Candidate" } as never,
@@ -55,7 +73,7 @@ it("passes the history by path and binds its digest and result to the item head"
         path: node,
       };
     };
-    const receipt = await runJevDone(exec, dir, {
+    const receipt = await runJevDone(exec, jevScript, dir, {
       head,
       criteria: ["Saves the item."],
       evidence: ["criterion output"],
@@ -72,7 +90,7 @@ it("passes the history by path and binds its digest and result to the item head"
     expect(jevPasses(receipt, movedHead)).toBe(false);
     const merge = vi.fn();
     const result = await autoMerge(
-      { github: { merge } } as never,
+      { github: { merge }, jevScript } as never,
       {} as never,
       {} as never,
       { id: "item", title: "Candidate", jev: receipt } as never,
@@ -135,6 +153,7 @@ it("sends a product refusal to the reviewer once and then to the owner inbox", a
     });
     const ctx = {
       reviewDataDir: dir,
+      jevScript,
       store: {
         updateItem: (_id: string, change: (current: FactoryItem) => FactoryItem) => {
           item = change(item);
@@ -226,6 +245,7 @@ it.each(["docs", "revert", "criteria-less"] as const)(
       const put = vi.fn();
       const ctx = {
         reviewDataDir: dir,
+        jevScript,
         store: {
           updateItem: (_id: string, change: (current: FactoryItem) => FactoryItem) => {
             item = change(item);

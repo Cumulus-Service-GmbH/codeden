@@ -55,21 +55,35 @@ export const ReviewArbitration = z.object({
 });
 export type ReviewArbitration = z.infer<typeof ReviewArbitration>;
 
-/** Result of the done gate, bound to the reviewed head and its history snapshot. */
-export const JevReceipt = z.object({
-  head: z.string().regex(/^[a-f0-9]{40}$/),
-  status: z.enum(["pending", "pass", "revise", "unavailable", "owner decision"]),
-  historyPath: z.string().optional(),
-  historySha256: z
-    .string()
-    .regex(/^[a-f0-9]{64}$/)
-    .optional(),
-  inputSha256: z
-    .string()
-    .regex(/^[a-f0-9]{16}$/)
-    .optional(),
-  reasons: z.array(z.string()),
-});
+export const JEV_COMPLETION_SKIPPED = "Jev not configured, completion check skipped";
+
+/** Completion check status for the reviewed head, with history digests when available. */
+export const JevReceipt = z
+  .object({
+    head: z
+      .string()
+      .regex(/^[a-f0-9]{40}$/)
+      .nullable(),
+    status: z.enum([
+      "pending",
+      "pass",
+      "revise",
+      "unavailable",
+      "owner decision",
+      "not configured",
+    ]),
+    historyPath: z.string().optional(),
+    historySha256: z
+      .string()
+      .regex(/^[a-f0-9]{64}$/)
+      .optional(),
+    inputSha256: z
+      .string()
+      .regex(/^[a-f0-9]{16}$/)
+      .optional(),
+    reasons: z.array(z.string()),
+  })
+  .refine((receipt) => receipt.head !== null || receipt.status === "not configured");
 export type JevReceipt = z.infer<typeof JevReceipt>;
 
 /** Verbatim, criterion-indexed test output collected by the reviewer at the pinned head. */

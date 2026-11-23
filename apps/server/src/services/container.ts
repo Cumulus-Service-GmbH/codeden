@@ -44,6 +44,7 @@ import type { AutomationPort, GithubPort } from "./orchestration/ports";
 import { ProjectService } from "./projects/project-service";
 import { ProjectRedetector } from "./projects/redetector";
 import { ProviderHistoryService } from "./providers/history";
+import { resolveFactoryJevScript } from "./review-jev";
 import {
   isRemoteRunner,
   type RunnerPort,
@@ -501,7 +502,15 @@ export function createServices(opts: ServicesOptions): AppServices {
     github: factoryGithub,
     complete: (job, system, prompt) => utility.complete(job, system, prompt),
     archiveSession: (id) => worktreeCleanup.archive(id),
-    options: opts.factory,
+    options: {
+      ...opts.factory,
+      jevScript:
+        opts.factory?.jevScript === undefined
+          ? resolveFactoryJevScript(
+              join(userHome, ".claude", "skills", "trioharness-codeden", "scripts", "jev.mjs"),
+            )
+          : opts.factory.jevScript,
+    },
     log: opts.log,
   });
   // Keep every session's Team file current, so its tools see a Team or model change at once.

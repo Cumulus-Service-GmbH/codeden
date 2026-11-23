@@ -1,15 +1,24 @@
 import { createHash } from "node:crypto";
+import { lstatSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { JevReceipt, type JevReceipt as Receipt } from "@codeden/contracts";
 import type { Exec } from "./exec";
 
 export const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
 
+export function resolveFactoryJevScript(script: string): string | null {
+  try {
+    return lstatSync(script, { throwIfNoEntry: false }) ? script : null;
+  } catch {
+    return script;
+  }
+}
+
 export function jevPasses(receipt: Receipt | undefined, head: string | null) {
   return (
     receipt?.status === "pass" &&
+    head !== null &&
     receipt.head === head &&
     Boolean(receipt.inputSha256 && receipt.historySha256 && receipt.historyPath)
   );
@@ -22,6 +31,7 @@ export function jevNext(status: Receipt["status"], priorRefusals: number) {
 /** The history path is part of the evidence, not an extra CLI flag. */
 export async function runJevDone(
   exec: Exec,
+  script: string,
   dir: string,
   input: {
     head: string;
@@ -59,15 +69,12 @@ export async function runJevDone(
     );
     const result = await exec(
       process.versions.electron ? "node" : process.execPath,
-      [
-        join(homedir(), ".claude", "skills", "trioharness-codeden", "scripts", "jev.mjs"),
-        "done",
-        inputPath,
-        "--log",
-        logPath,
-      ],
+      [script, "done", inputPath, "--log", logPath],
       { cwd: attempt, timeoutMs: 120_000, env: { NODE_OPTIONS: "" } },
     );
+    if (result.timedOut || result.notFound || result.code === null) {
+      return unavailable("The done gate was unreachable or timed out.");
+    }
     const output = JSON.parse(result.stdout);
     if (output.gate !== "done" || sha256(await readFile(historyPath, "utf8")) !== historySha256) {
       return unavailable("The done result or its history did not match this invocation.");
@@ -85,7 +92,11 @@ export async function runJevDone(
       head: input.head,
       status: pass
         ? "pass"
-        : result.code === 2 && output.verdict === "revise" && !evidenceProblem
+        : result.code === 2 &&
+            output.pass === false &&
+            output.verdict === "revise" &&
+            output.inputSha256 &&
+            !evidenceProblem
           ? "revise"
           : "unavailable",
       historyPath,

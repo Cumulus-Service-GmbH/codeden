@@ -1,6 +1,7 @@
 import { ReviewPolicy } from "@codeden/contracts";
 import { act, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
+import { ChecklistSection } from "@/components/checklist/checklist-section";
 import { PipelineDiagram } from "@/components/factory/pipeline-diagram";
 import { ChildRuns } from "@/components/workbench/child-runs";
 import { createMockClient } from "@/lib/api/mock";
@@ -91,4 +92,31 @@ it("places disputed work on the Arbiter step in the pipeline diagram", async () 
   expect(arbiterSteps).toHaveLength(3);
   const chip = diagram.getByRole("button", { name: `#${item.issue.number}` });
   expect(chip.closest('[data-node="Arbiter"]')).toBe(arbiterSteps[0]);
+});
+
+it("shows that the completion check was skipped because Jev is not configured", async () => {
+  const { client, session, item, status } = await arbiterFixture();
+  const project = (await client.getSnapshot()).projects.find(({ id }) => id === status.projectId);
+  if (!project) throw new Error("Expected the factory project in the demo");
+  vi.spyOn(client.factory, "status").mockResolvedValue({
+    ...status,
+    inProgress: [{ ...item, jev: { head: null, status: "not configured", reasons: [] } }],
+  });
+  renderWithClient(
+    <>
+      <ChildRuns session={session} />
+      <div data-testid="factory-checklist">
+        <ChecklistSection
+          project={project}
+          checklist={{ projectId: project.id, items: [], changes: [], updatedAt: item.updatedAt }}
+        />
+      </div>
+    </>,
+    client,
+  );
+  const workers = within(await screen.findByRole("region", { name: "Workers" }));
+  const checklist = within(screen.getByTestId("factory-checklist"));
+  const message = "Jev not configured, completion check skipped";
+  expect(await workers.findByText(message)).toBeTruthy();
+  expect(await checklist.findByText(message)).toBeTruthy();
 });

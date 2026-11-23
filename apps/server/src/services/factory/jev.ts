@@ -274,13 +274,19 @@ async function evaluate(ctx: FactoryContext, project: Project, item: FactoryItem
       ),
     );
   const refs = criteria.map((_, index) => `criteria[${index}]`).join(" and ");
-  return runJevDone(ctx.exec, join(ctx.reviewDataDir, "review-history", sha256(item.id)), {
-    head,
-    criteria,
-    history,
-    evidence: [...evidence, `${refs}\n${receipts.join("\n")}\nHIGH or MEDIUM findings: ${count}`],
-    historyEvidence: `${refs}\n${earlier.join("\n")}\nHIGH or MEDIUM findings: ${count}\n${item.arbitration?.ruling ?? "No such file"}`,
-  });
+  if (!ctx.jevScript) return unavailable("The done gate script was not supplied.");
+  return runJevDone(
+    ctx.exec,
+    ctx.jevScript,
+    join(ctx.reviewDataDir, "review-history", sha256(item.id)),
+    {
+      head,
+      criteria,
+      history,
+      evidence: [...evidence, `${refs}\n${receipts.join("\n")}\nHIGH or MEDIUM findings: ${count}`],
+      historyEvidence: `${refs}\n${earlier.join("\n")}\nHIGH or MEDIUM findings: ${count}\n${item.arbitration?.ruling ?? "No such file"}`,
+    },
+  );
 }
 
 function verificationEvidence(

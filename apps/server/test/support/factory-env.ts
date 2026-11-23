@@ -127,6 +127,7 @@ const MID_TURN = new Set<string>(["created", "queued", "starting", "running", "w
 export function createFactoryEnv(
   opts: {
     limits?: Partial<FactoryLimits>;
+    jevScript?: string | null;
     providers?: string[];
     modelVendors?: Record<string, ProviderInfo["capabilities"]["modelVendor"]>;
     /**
@@ -373,7 +374,13 @@ export function createFactoryEnv(
           worktreeRemovedAt: s.worktreePath ? at : null,
         }));
       },
-      options: { autoTick: false, now: () => env.now(), ciGraceMs: 60_000, settleMs: 0 },
+      options: {
+        autoTick: false,
+        now: () => env.now(),
+        ciGraceMs: 60_000,
+        settleMs: 0,
+        jevScript: opts.jevScript ?? null,
+      },
     });
   env.factory = build();
   env.restart = () => {

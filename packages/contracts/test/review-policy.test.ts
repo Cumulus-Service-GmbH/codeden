@@ -59,4 +59,6 @@ it("round-trips a done receipt with its pinned head and history digest", () => {
   };
   expect(JevReceipt.parse(JSON.parse(JSON.stringify(receipt)))).toEqual(receipt);
   expect(JevReceipt.safeParse({ ...receipt, head: "short" }).success).toBe(false);
+  const skipped = { head: receipt.head, status: "not configured", reasons: [] };
+  expect(JevReceipt.parse(JSON.parse(JSON.stringify(skipped)))).toEqual(skipped);
 });
