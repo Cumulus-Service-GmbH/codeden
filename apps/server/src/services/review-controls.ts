@@ -59,16 +59,15 @@ export function sortReviewFindings(
     const path = finding.location
       .replace(/^(?:\.\/)+/, "")
       .replace(/(?::\d+(?::\d+|-\d+)?|#L\d+(?:-L?\d+)?)$/, "");
-    const inScope =
+    const outOfScope =
+      spec &&
+      path.length > 0 &&
       !path.startsWith("/") &&
-      !path.includes("\\") &&
+      !/[\\\s:`(),]/.test(path) &&
       !path.split("/").some((part) => part === ".." || part === ".") &&
-      (!spec ||
-        changedFiles.includes(path) ||
-        spec.scope.some((entry) =>
-          entry.endsWith("/") ? path.startsWith(entry) : path === entry,
-        ));
-    (inScope && (finding.severity !== "LOW" || lowPolicy === "fix") ? fix : debt).push(finding);
+      !changedFiles.includes(path) &&
+      !spec.scope.some((entry) => (entry.endsWith("/") ? path.startsWith(entry) : path === entry));
+    (!outOfScope && (finding.severity !== "LOW" || lowPolicy === "fix") ? fix : debt).push(finding);
   }
   return { fix, debt };
 }

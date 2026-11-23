@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  applyReviewFindingPolicy,
   MAX_REVIEW_LINES,
   reviewRound,
   reviewVendorsMatch,
@@ -76,8 +77,34 @@ it("pins the same plan and scope regardless of changed review findings", async (
   );
 });
 
-it("keeps an independent failing criterion even when every finding is deferred", async () => {
-  const { applyReviewFindingPolicy } = await import("../src/services/review-controls");
+it.each(["src/a.ts:L12", "src/a.ts:12:3-14:1", "src/a.ts (line 12)", "/repo/src/a.ts:12"])(
+  "keeps an evidenced HIGH finding with location %s blocking",
+  (location) => {
+    const finding = {
+      location,
+      severity: "HIGH" as const,
+      summary: "Empty input fails",
+      failure_scenario: "An empty input crashes validation.",
+      repro: "Pass an empty input.",
+    };
+    const draft = {
+      verdict: "request_changes" as const,
+      summary: "Review findings",
+      lessons: [],
+      criteria: [{ criterion: "Input is validated", met: true }],
+      vision: { aligned: true },
+      tests: { adequate: true },
+      security: { concerns: [] },
+      findings: [finding],
+    };
+    const scope = ["src/a.ts"];
+    expect(
+      applyReviewFindingPolicy(draft, { planSha: "a".repeat(64), scope }, "defer", scope),
+    ).toMatchObject({ verdict: "request_changes", findings: [finding], techDebt: [] });
+  },
+);
+
+it("keeps an independent failing criterion even when every finding is deferred", () => {
   const draft = {
     verdict: "request_changes" as const,
     summary: "Review findings",
