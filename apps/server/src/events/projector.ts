@@ -168,6 +168,7 @@ export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
       applyRunnerProjection(tx, e);
       return [];
     case "session.autonomy_changed":
+    case "session.autonomy_overridden":
     case "settings.updated":
     case "automation.updated":
     case "runner.draining":

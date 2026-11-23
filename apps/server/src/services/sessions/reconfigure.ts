@@ -1,12 +1,7 @@
-import type {
-  AutonomyLevel,
-  Session,
-  SessionAutonomyChanged,
-  UpdateSessionRequest,
-} from "@codeden/contracts";
+import type { AutonomyLevel, Session, UpdateSessionRequest } from "@codeden/contracts";
 import { type RunnerPort, runnerErrorCode } from "../runner-port";
 import { withLoopSetting } from "./checks";
-import type { SessionRepo, StoredStartMeta } from "./repo";
+import type { AutonomyAudit, SessionRepo, StoredStartMeta } from "./repo";
 
 /**
  * Settings waiting for the runner: model/effort for the session's next turn, and an autonomy
@@ -59,7 +54,7 @@ export async function updateSession(
   runner: RunnerPort,
   id: string,
   req: UpdateSessionRequest,
-  audit?: Pick<SessionAutonomyChanged, "changedBy" | "reason">,
+  audit?: AutonomyAudit,
 ): Promise<Session> {
   const change: PendingConfig = {};
   if (req.model !== undefined) change.model = req.model;

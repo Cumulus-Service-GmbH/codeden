@@ -17,7 +17,6 @@ import type {
   SendMessageRequest,
   SendMessageResponse,
   Session,
-  SessionAutonomyChanged,
   SessionDetail,
   StartSessionRequest,
   StartSessionResponse,
@@ -66,7 +65,7 @@ import {
 import { deliverPriority } from "./priority-delivery";
 import type { Answerer, QuestionBroker } from "./questions";
 import { applyPendingConfig, updateSession } from "./reconfigure";
-import { emptyStartMeta, type SessionRepo, type StoredStartMeta } from "./repo";
+import { type AutonomyAudit, emptyStartMeta, type SessionRepo, type StoredStartMeta } from "./repo";
 import { planReview } from "./review";
 import { retireRoleSession } from "./role-retire";
 import { startWorkspace } from "./start-workspace";
@@ -162,16 +161,14 @@ export class SessionService {
 
   /**
    * Model and effort (applied on the next turn), autonomy and plan mode (pushed to the runner)
-   * or title.
+   * or title. The owner can override the autonomy floor. Agents must respect it.
    */
-  update(
-    id: string,
-    req: UpdateSessionRequest,
-    audit?: Pick<SessionAutonomyChanged, "changedBy" | "reason">,
-  ): Promise<Session> {
+  update(id: string, req: UpdateSessionRequest, audit?: AutonomyAudit): Promise<Session> {
     const session = this.deps.repo.get(id);
     assertRoleWritable(session);
-    assertAutonomy(req.autonomy, this.deps.repo.find(id)?.startMeta?.autonomyFloor);
+    if (!(audit && "owner" in audit)) {
+      assertAutonomy(req.autonomy, this.deps.repo.find(id)?.startMeta?.autonomyFloor);
+    }
     if (req.untilChecksPass !== undefined || req.checkRounds !== undefined) {
       if (session.role !== "agent" || !session.checks?.commands.length) {
         throw badRequest(

@@ -24,7 +24,7 @@ import { Session } from "./entities/session";
 import { FACTORY_EVENT_PAYLOADS } from "./factory-api";
 import { GITHUB_EVENT_PAYLOADS } from "./github";
 import { ConflictRecord, Notice } from "./orchestration";
-import { SessionAutonomyChanged } from "./pm-session-tools";
+import { SessionAutonomyChanged, SessionAutonomyOverridden } from "./pm-session-tools";
 import { PtyId } from "./runner/commands";
 import { RunnerDeletedPayload, RunnerRecordRef, RunnerRegisteredPayload } from "./runners";
 import { Settings } from "./settings";
@@ -95,6 +95,8 @@ export const EventEnvelope = z.discriminatedUnion("type", [
   /** Any change to a session row, including status transitions. */
   globalEvent("session.updated", z.object({ session: Session })),
   globalEvent("session.autonomy_changed", SessionAutonomyChanged),
+  /** An authenticated owner changed the session's autonomy. */
+  globalEvent("session.autonomy_overridden", SessionAutonomyOverridden),
   globalEvent("inbox.created", z.object({ item: InboxItem })),
   globalEvent("inbox.updated", z.object({ item: InboxItem })),
   globalEvent("automation.saved", z.object({ automation: Automation })),

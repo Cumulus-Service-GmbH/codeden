@@ -51,6 +51,8 @@ const ID_CHUNK = 500;
 /** A `file_edit` tool call. */
 export type FileEditCall = Extract<ToolCallItem, { toolKind: "file_edit" }>;
 
+export type AutonomyAudit = Pick<SessionAutonomyChanged, "changedBy" | "reason"> | { owner: true };
+
 /** What a queued session needs to start later (kept with its start metadata). */
 export interface PendingStart {
   fork?: LaunchFork;
@@ -227,22 +229,27 @@ export class SessionRepo {
    * Apply `change` to the current row and append `session.updated` when it changed. Synchronous
    * end to end, so there is no read-modify-write race with event ingestion.
    */
-  update(
-    id: string,
-    change: (s: Session) => Session,
-    audit?: Pick<SessionAutonomyChanged, "changedBy" | "reason">,
-  ): Session {
+  update(id: string, change: (s: Session) => Session, audit?: AutonomyAudit): Session {
     const current = this.get(id);
     const next = change(current);
     if (next === current) return current;
     const session = { ...next, updatedAt: new Date().toISOString() };
     const events: NewEvent[] = [{ type: "session.updated", sessionId: id, payload: { session } }];
     if (audit && session.autonomy !== current.autonomy) {
-      events.push({
-        type: "session.autonomy_changed",
-        sessionId: id,
-        payload: { ...audit, previous: current.autonomy, autonomy: session.autonomy },
-      });
+      const levels = { previous: current.autonomy, autonomy: session.autonomy };
+      if ("owner" in audit) {
+        events.push({
+          type: "session.autonomy_overridden",
+          sessionId: id,
+          payload: { actor: "owner", at: session.updatedAt, sessionId: id, ...levels },
+        });
+      } else {
+        events.push({
+          type: "session.autonomy_changed",
+          sessionId: id,
+          payload: { ...audit, ...levels },
+        });
+      }
     }
     this.store.append(events);
     return session;

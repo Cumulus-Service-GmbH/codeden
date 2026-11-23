@@ -75,9 +75,13 @@ export function sessionRoutes(s: AppServices, installToken: string) {
         return c.json(s.admission.status());
       })
       .get("/:id", (c) => c.json(s.sessions.detail(c.req.param("id"))))
-      .patch("/:id", jsonBody(UpdateSessionRequest), async (c) =>
-        c.json(await s.sessions.update(c.req.param("id"), c.req.valid("json"))),
-      )
+      .patch("/:id", jsonBody(UpdateSessionRequest), async (c) => {
+        // security.ts requires the install token or the owner's signed-in session.
+        // Agent MCP calls use separate routes.
+        return c.json(
+          await s.sessions.update(c.req.param("id"), c.req.valid("json"), { owner: true }),
+        );
+      })
       .post(
         "/:id/messages",
         jsonBody(SendMessageRequest.extend({ input: PublicInput })),

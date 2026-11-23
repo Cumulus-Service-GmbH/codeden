@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ChecklistItem } from "./checklist";
-import { AutonomyLevel, Id, ProviderId, ReasoningEffort } from "./common";
+import { AutonomyLevel, Id, ProviderId, ReasoningEffort, Timestamp } from "./common";
 import { TokenSaverLevel } from "./token-saver";
 import { ConflictDecision, WorkKey } from "./work";
 
@@ -51,3 +51,16 @@ export const SessionAutonomyChanged = SetSessionAutonomyInput.omit({ sessionId: 
   changedBy: Id,
 });
 export type SessionAutonomyChanged = z.infer<typeof SessionAutonomyChanged>;
+
+/**
+ * Audit record for the owner's autonomy change from the UI (an authenticated user request).
+ * The owner is not bound by the autonomy policy; agents are.
+ */
+export const SessionAutonomyOverridden = z.object({
+  actor: z.literal("owner"),
+  at: Timestamp,
+  sessionId: Id,
+  previous: AutonomyLevel,
+  autonomy: AutonomyLevel,
+});
+export type SessionAutonomyOverridden = z.infer<typeof SessionAutonomyOverridden>;
