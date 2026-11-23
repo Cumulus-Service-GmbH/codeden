@@ -42,10 +42,19 @@ it("shows a GitHub approval card in the inbox", async () => {
 
   const button = cards.getByRole<HTMLButtonElement>("button", { name: "Approve" });
   expect(button.disabled).toBe(true);
-  const ownerWords = '  Ship "this" head.  ';
-  fireEvent.change(cards.getByRole("textbox", { name: "Approval message for the pull request" }), {
-    target: { value: ownerWords },
+  const message = cards.getByRole<HTMLTextAreaElement>("textbox", {
+    name: "Approval message for the pull request",
   });
+  fireEvent.change(message, { target: { value: 'Ship "this" head.' } });
+  expect(button.disabled).toBe(true);
+  expect(message.required).toBe(true);
+  const help = cards.getByText(
+    "Use 1–200 characters. ASCII letters, digits, spaces and .,:;!?'()/- are allowed.",
+  );
+  expect(message.getAttribute("aria-describedby")).toBe(help.id);
+
+  const ownerWords = "  Ship this head, please!  ";
+  fireEvent.change(message, { target: { value: ownerWords } });
   expect(button.disabled).toBe(false);
   fireEvent.click(button);
   await waitFor(() => expect(approve).toHaveBeenCalledExactlyOnceWith(card.id, { ownerWords }));

@@ -6,6 +6,7 @@ import { defineTool } from "../src/mcp/define";
 import { ToolRegistry } from "../src/mcp/registry";
 import { postGithubApproval } from "../src/mcp/tools/decisions";
 import { inboxRoutes } from "../src/routes/inbox";
+import { errorResponse } from "../src/routes/validate";
 import type { AppServices } from "../src/services/container";
 import { DecisionApprovals } from "../src/services/decision-approvals";
 import { ServiceError } from "../src/services/errors";
@@ -61,7 +62,9 @@ describe("decision approvals", () => {
     const { service, check, post } = setup();
     check.mockRejectedValueOnce(new ServiceError(409, "stale_approval", "PR head moved"));
     const card = service().raise(pm, "project", { kind: "github", target });
-    await expect(service().confirm(card.id, owner)).rejects.toThrow("PR head moved");
+    await expect(
+      service().confirm(card.id, owner, undefined, { ownerWords: "Approved" }),
+    ).rejects.toThrow("PR head moved");
     await expect(service().confirm(card.id, owner)).rejects.toThrow("unavailable");
     expect(post).not.toHaveBeenCalled();
   });
@@ -137,7 +140,7 @@ describe("post_github_approval", () => {
       kind: "github",
       target: { ...target, repository: "acme/widgets", pullNumber: pr.number },
     });
-    const route = inboxRoutes(services);
+    const route = inboxRoutes(services).onError(errorResponse);
     const registry = new ToolRegistry([postGithubApproval], services);
     const caller = { ...pm, caller: "mcp" as const, signal: new AbortController().signal };
     return {
@@ -334,10 +337,44 @@ describe("post_github_approval", () => {
     }
   });
 
+  it("keeps a merge approval pending until valid owner words are supplied", async () => {
+    const env = setupMergeApproval();
+    try {
+      const missing = await env.approve();
+      expect(missing.status).toBe(400);
+      expect(await missing.json()).toMatchObject({
+        error: { message: expect.stringMatching(/owner words.*required/i) },
+      });
+      expect(env.decisions.pending()).toEqual([env.card]);
+
+      const invalid = await env.approve({ ownerWords: 'Approve"' });
+      expect(invalid.status).toBe(400);
+      expect(await invalid.json()).toMatchObject({
+        error: { message: expect.stringMatching(/owner words allowlist/i) },
+      });
+      expect(env.decisions.pending()).toEqual([env.card]);
+      expect(env.store.listTypes(["decision.confirmed"])).toEqual([]);
+      expect(env.gh.requests).toEqual([]);
+
+      expect((await env.approve({ ownerWords })).status).toBe(200);
+      expect(env.decisions.pending()).toEqual([]);
+      expect((await env.post()).isError).toBe(false);
+      expect(env.writes()).toHaveLength(1);
+    } finally {
+      await env.close();
+    }
+  });
+
   it("refuses a legacy card confirmed without owner words", async () => {
     const env = setupMergeApproval();
     try {
-      expect((await env.approve()).status).toBe(200);
+      env.store.append([
+        {
+          type: "decision.confirmed",
+          sessionId: null,
+          payload: { id: env.card.id, by: { role: "owner" } },
+        },
+      ]);
       await expect(env.decisions.postGithub(env.card.id, pm)).rejects.toThrow("owner words");
       expect(env.writes()).toEqual([]);
     } finally {
@@ -365,7 +402,14 @@ it("approves only the selected run and environments after the owner clicks, once
     const writes = () => env.gh.requests.filter(({ method }) => method === "POST");
     await expect(service.postGithub(card.id, pm)).rejects.toThrow();
     expect(writes()).toEqual([]);
-    await service.confirm(card.id, owner);
+    const route = inboxRoutes({ decisions: service } as AppServices).onError(errorResponse);
+    const response = await route.request(`/decision-cards/${card.id}/approve`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: "{}",
+    });
+    expect(response.status).toBe(200);
+    expect(service.pending()).toEqual([]);
     expect(writes()).toEqual([]);
     await service.postGithub(card.id, pm);
     await expect(service.postGithub(card.id, pm)).rejects.toThrow("unused owner approval");
