@@ -58,6 +58,8 @@ describe.skipIf(!built)("self-update with a fake registry (§16)", () => {
     current = run(["--version"]);
     registry = await startFakeRegistry();
     registry.publish(NEXT, packCli({ version: NEXT, stripDependencies: true }));
+    // A leaked dry-run setting would make npm skip installing the update.
+    process.env.npm_config_dry_run = "true";
   }, 120_000);
 
   afterAll(async () => {
