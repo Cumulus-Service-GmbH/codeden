@@ -17,11 +17,20 @@ import { browserScreenshot } from "./browser-screenshot";
 import { browserSelect } from "./browser-select";
 import { browserUpload } from "./browser-upload";
 import { readChecklist, updateChecklistItem } from "./checklist";
+import {
+  confirmPlanApproval,
+  executePlanStep,
+  listDecisionCards,
+  postGithubApproval,
+  raiseGithubApproval,
+  raisePlanApproval,
+} from "./decisions";
 import { factoryTools } from "./factory";
 import { finish } from "./finish";
 import { generateImage } from "./generate-image";
 import { githubTools } from "./github";
 import { orchestratorTools } from "./orchestrator";
+import { mergePullRequest, resumeSession } from "./orchestrator/decision-actions";
 import { pmTools } from "./pm";
 import { reportProgress } from "./report-progress";
 import { shareToChat } from "./share-to-chat";
@@ -54,7 +63,15 @@ export const allTools: AnyServerTool[] = [
   browserOpenDevServer,
   generateImage,
   listTechDebt,
+  raiseGithubApproval,
+  raisePlanApproval,
+  confirmPlanApproval,
+  executePlanStep,
+  listDecisionCards,
+  postGithubApproval,
   ...orchestratorTools,
+  mergePullRequest,
+  resumeSession,
   ...pmTools,
   ...wakeupTools,
   ...githubTools,

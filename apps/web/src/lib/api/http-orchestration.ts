@@ -2,6 +2,7 @@ import {
   ArchiveSessionResponse,
   ChildRunList,
   ConflictRecord,
+  DecisionCard,
   GithubConnection,
   GithubIssueDetails,
   GithubIssuesResponse,
@@ -56,6 +57,8 @@ export function httpGithubApi(http: Fetcher): GithubApi {
   const { get, post } = http;
   const project = (id: string) => `/projects/${enc(id)}/github`;
   return {
+    decisionCards: () => get("/inbox/decision-cards", (v) => DecisionCard.array().parse(v)),
+    approveDecisionCard: (id) => post(`/inbox/decision-cards/${enc(id)}/approve`, {}, () => {}),
     connection: () => get("/github/connection", (v) => GithubConnection.parse(v)),
     issues: (id, state = "open") =>
       get(`${project(id)}/issues${qs({ state })}`, (v) => GithubIssuesResponse.parse(v)),

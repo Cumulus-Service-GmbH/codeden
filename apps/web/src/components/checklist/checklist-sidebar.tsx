@@ -1,5 +1,6 @@
 import { ListChecks, PanelRightClose, PanelRightOpen, Pin, PinOff, X } from "lucide-react";
 import { type ReactNode, useEffect } from "react";
+import { DecisionCards, useDecisionCards } from "@/components/inbox/decision-cards";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -57,6 +58,7 @@ function ChecklistBody({
   pinsNarrow?: boolean;
 }) {
   const lists = useChecklists();
+  const { data: cards } = useDecisionCards();
   const pinned = useLayoutStore((s) => s.checklistPinned);
   const setPinned = useLayoutStore((s) => s.setChecklistPinned);
   const setCollapsed = useLayoutStore((s) => s.setChecklistCollapsed);
@@ -105,6 +107,7 @@ function ChecklistBody({
         </HeaderButton>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto scroll-thin px-1.5">
+        <DecisionCards cards={cards ?? []} />
         {lists.length === 0 ? (
           <p className="px-4 py-10 text-center text-xs text-muted-foreground">
             No checklist yet. The orchestrator keeps it here.

@@ -17,6 +17,7 @@ import { AutomationService, type AutomationServiceDeps } from "./automations/aut
 import { BrowserService } from "./browser/browser-service";
 import { ChecklistListener } from "./checklist/checklist-listener";
 import { ChecklistService } from "./checklist/checklist-service";
+import { DecisionApprovals } from "./decision-approvals";
 import { type Exec, runTool } from "./exec";
 import { type FactoryOptions, FactoryService } from "./factory/factory-service";
 import { type FactoryGithub, GithubFactoryPort } from "./factory/github-port";
@@ -28,6 +29,7 @@ import {
 import { FILE_RESET_NOTICES, reportFileReset } from "./file-reset-notice";
 import { ConfigFiles } from "./files/config-files";
 import { createGitBroker, type GitBroker } from "./git-broker";
+import { githubApprovalPort } from "./github/approval-card";
 import { GithubService, type GithubServiceDeps } from "./github/github-service";
 import { projectTrustedAuthors } from "./github/review-trust";
 import { ImageService } from "./images/image-service";
@@ -200,6 +202,7 @@ export interface AppServices {
   orchestration: OrchestrationService;
   /** GitHub connection, issue/PR sync, PRs and evidence (§9). */
   github: GithubService;
+  decisions: DecisionApprovals;
   /** Usage and cost reports, budgets and rate limits (§12.6). */
   usage: UsageService;
   /** Automations: definitions, scheduler, runs and issue triage (§10). */
@@ -616,6 +619,7 @@ export function createServices(opts: ServicesOptions): AppServices {
       isRemote: (sessionId) => isRemoteRunner(runners.forSession(sessionId)),
     }),
     github,
+    decisions: new DecisionApprovals(opts.store, githubApprovalPort(github.client)),
     orchestration,
     automations,
     userHome,

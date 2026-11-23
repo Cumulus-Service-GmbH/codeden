@@ -151,7 +151,7 @@ describe("automations (§10): scheduler, guards, runs, PM tools, files", () => {
     });
   });
 
-  it("lets the PM skip the next run, pause and resume", async () => {
+  it("lets the PM skip and pause, and resumes only with an orchestrator plan and PM confirmation", async () => {
     const listed = (await pmTool("list_scheduled_runs", {})) as { runs: ScheduledRun[] };
     expect(listed.runs[0]).toMatchObject({ automationId: auditId, at: "2026-11-07T10:15:00.000Z" });
     const skipped = (await pmTool("skip_next_run", { automationId: auditId })) as {
@@ -179,7 +179,27 @@ describe("automations (§10): scheduler, guards, runs, PM tools, files", () => {
 
     await pmTool("pause_automation", { automationId: auditId });
     expect(await upcoming()).toEqual([]);
-    await pmTool("resume_automation", { automationId: auditId });
+    await expect(pmTool("resume_automation", { automationId: auditId })).rejects.toThrow();
+    const orchestratorTool = (name: string, args: unknown) =>
+      h.server.services.tools.call(name, args, {
+        role: "orchestrator",
+        projectId: null,
+        sessionId: "orchestrator-test",
+        caller: "mcp",
+        signal: new AbortController().signal,
+      });
+    const step = { action: "resume_automation", args: { automationId: auditId } };
+    const raised = await orchestratorTool("raise_plan_approval", {
+      projectId: h.projectId,
+      steps: [step],
+    });
+    expect(raised.isError).toBe(false);
+    const { id: cardId } = JSON.parse(raised.text) as { id: string };
+    const args = { cardId, projectId: h.projectId, step };
+    expect((await orchestratorTool("execute_plan_step", args)).isError).toBe(true);
+    await pmTool("confirm_plan_approval", { cardId });
+    expect((await orchestratorTool("execute_plan_step", args)).isError).toBe(false);
+    expect((await orchestratorTool("execute_plan_step", args)).isError).toBe(true);
     expect((await upcoming())[0]).toMatchObject({ at: "2026-11-07T10:20:00.000Z", skipped: false });
     const tools = (await pmTool("list_automations", {})) as { automations: { id: string }[] };
     expect(tools.automations.map((a) => a.id)).toContain(auditId);

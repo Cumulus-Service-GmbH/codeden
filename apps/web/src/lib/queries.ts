@@ -312,3 +312,5 @@ export function useEarlierTurns(sessionId: string): EarlierTurns {
     },
   };
 }
+
+export const decisionCardsKey = ["decision-cards"] as const;

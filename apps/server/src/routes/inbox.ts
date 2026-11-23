@@ -37,6 +37,15 @@ export function inboxRoutes(s: AppServices) {
       }
       return c.json(counts);
     })
+    .get("/decision-cards", (c) => c.json(s.decisions.pending()))
+    .post("/decision-cards/:id/approve", async (c) => {
+      await s.decisions.confirm(c.req.param("id"), {
+        role: "owner",
+        projectId: null,
+        sessionId: null,
+      });
+      return c.json({ approved: true });
+    })
     .post("/dismiss", jsonBody(DismissInboxRequest), (c) => {
       const { ids, filter, note } = c.req.valid("json");
       const scope = ids ? { ids } : { filter: filter ?? {} };

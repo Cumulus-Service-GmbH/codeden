@@ -8,8 +8,10 @@ import {
 import { expect, it, vi } from "vitest";
 import { openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
+import { ToolRegistry } from "../src/mcp/registry";
 import { setSessionAutonomy, startSession } from "../src/mcp/tools/pm/sessions";
 import type { AppServices } from "../src/services/container";
+import { DecisionApprovals } from "../src/services/decision-approvals";
 import { SessionRepo } from "../src/services/sessions/repo";
 import { SessionService, type SessionServiceDeps } from "../src/services/sessions/session-service";
 import { sampleSession, sampleSessionEvent } from "./helpers";
@@ -77,6 +79,7 @@ async function start(
           }),
       },
       sessionRepo,
+      decisions: new DecisionApprovals(store, { check: vi.fn(), post: vi.fn() }),
       sessions: {
         start: async (req: StartSessionRequest) => {
           started.push(req);
@@ -84,17 +87,22 @@ async function start(
         },
       },
     } as unknown as AppServices;
-    const result = await startSession.handler(
-      startSession.input.parse({ prompt: "Go", purpose: "Go", ...input }),
-      {
-        services,
-        projectId: "p1",
-        sessionId: opts.sessionId ?? sampleSession.id,
-        role: opts.callerTitle === "[Architect] Lead" ? "agent" : "pm",
-        caller: "mcp",
-        signal: new AbortController().signal,
-      },
-    );
+    const ctx = {
+      services,
+      projectId: "p1",
+      sessionId: opts.sessionId ?? sampleSession.id,
+      role: opts.callerTitle === "[Architect] Lead" ? ("agent" as const) : ("pm" as const),
+      caller: "mcp" as const,
+      signal: new AbortController().signal,
+    };
+    const args = { prompt: "Go", purpose: "Go", ...input };
+    if (ctx.role === "agent" && opts.architect) {
+      const registry = new ToolRegistry([startSession], services);
+      const result = await registry.call("start_session", args, ctx);
+      expect(result.isError, result.text).toBe(false);
+      return { started };
+    }
+    const result = await startSession.handler(startSession.input.parse(args), ctx);
     return { result, started };
   } finally {
     database.close();

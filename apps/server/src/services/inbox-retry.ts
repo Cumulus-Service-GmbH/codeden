@@ -48,7 +48,11 @@ export async function retryRunFailed(deps: InboxRetryDeps, id: string): Promise<
     const message = errorMessage(error);
     // A provider that refused to open the session reported it already: its crash updated the item.
     const current = deps.inbox.find(id);
-    if (current?.status === "open" && current.updatedAt === item.updatedAt) {
+    if (
+      current?.status === "open" &&
+      current.updatedAt === item.updatedAt &&
+      current.attempts === item.attempts
+    ) {
       deps.inbox.put(runFailedAgain(current, message, new Date().toISOString()));
     }
     throw new ServiceError(

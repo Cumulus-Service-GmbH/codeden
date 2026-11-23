@@ -38,11 +38,11 @@ const settle = () => new Promise((r) => setImmediate(r));
 
 let seq = 0;
 /** The runner's report of a session its provider refused to open (a CLI too old). */
-function refusedOpen(sessionId: string, message = TOO_OLD) {
+function refusedOpen(sessionId: string, message = TOO_OLD, ts = new Date().toISOString()) {
   const msg: RunnerEventMessage = {
     type: "event",
     seq: ++seq,
-    ts: new Date().toISOString(),
+    ts,
     event: {
       kind: "session.process",
       sessionId,
@@ -401,7 +401,7 @@ describe("Retry of a failed run (#275)", () => {
         send: async (id: string, req: { input: { text: string } }) => {
           expect(req.input.text).toBe(RETRY_TEXT);
           // The runner refuses again: it reports the crash, then answers the command.
-          refusedOpen(id);
+          refusedOpen(id, TOO_OLD, failed?.updatedAt);
           throw toServiceError(
             new RunnerCommandError("open_failed", `Could not open the session: ${TOO_OLD}`),
           );

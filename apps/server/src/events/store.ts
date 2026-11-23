@@ -1,4 +1,4 @@
-import type { EventEnvelope, NewEvent, RawEventEnvelope } from "@codeden/contracts";
+import type { EventEnvelope, EventType, NewEvent, RawEventEnvelope } from "@codeden/contracts";
 import { and, asc, gt, inArray, isNull, max, or } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { events } from "../db/schema";
@@ -60,6 +60,15 @@ export class EventStore {
       .where(and(gt(events.seq, afterSeq), sessionFilter))
       .orderBy(asc(events.seq))
       .limit(limit)
+      .all();
+  }
+
+  listTypes(types: EventType[]): RawEventEnvelope[] {
+    return this.db
+      .select()
+      .from(events)
+      .where(inArray(events.type, types))
+      .orderBy(asc(events.seq))
       .all();
   }
 

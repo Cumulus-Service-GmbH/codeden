@@ -66,8 +66,9 @@ export const pauseAutomation = defineTool({
 /** `resume_automation` (§8.4, always loaded). */
 export const resumeAutomation = defineTool({
   name: "resume_automation",
-  description: "Resume a paused automation in this project.",
-  roles: ["pm"],
+  description:
+    "Resume a paused automation via execute_plan_step. Requires a confirmed plan for its project.",
+  roles: ["orchestrator"],
   scope: "project",
   alwaysLoad: true,
   input: z.object({ automationId: z.string().min(1) }),

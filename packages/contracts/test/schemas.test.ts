@@ -204,6 +204,16 @@ describe("persisted events", () => {
       },
       { type: "settings.updated", sessionId: null, payload: { settings: defaultSettings() } },
       {
+        type: "decision.step_result",
+        sessionId: "s1",
+        payload: {
+          id: "card",
+          step: { action: "merge_pull_request", args: { pullNumber: 10 } },
+          ok: false,
+          error: "PR must pass merge verification",
+        },
+      },
+      {
         type: "runner.connected",
         sessionId: null,
         payload: { runnerId: "r", version: "0.0.0", protocolVersion: 1 },

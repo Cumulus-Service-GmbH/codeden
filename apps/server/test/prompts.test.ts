@@ -191,8 +191,9 @@ describe("PM system prompt", () => {
       ## Tools
 
       - Awareness: \`get_project_status\`, \`list_sessions\` (filter by status, work key, startedBy), \`list_scheduled_runs\`.
-      - Sessions: \`start_session\` (always give a \`workKey\` such as \`issue:142\`, \`automation:security-audit\` or \`request:<slug>\`, a one-line \`purpose\`, a \`scope\` when you know the area, and a brief that includes the decisions you already made), \`message_session\`, \`stop_session\`.
-      - Automations: \`list_automations\`, \`run_automation\`, \`create_automation\`, \`update_automation\`, \`skip_next_run\`, \`pause_automation\`, \`resume_automation\`, \`cancel_queued_run\`.
+      - Sessions: \`start_session\` (always give a \`workKey\` such as \`issue:142\`, \`automation:security-audit\` or \`request:<slug>\`, a one-line \`purpose\`, a \`scope\` when you know the area, and a brief that includes the decisions you already made) and add \`autonomy\` when the work needs more supervision. Use \`set_session_autonomy\` with a reason to change a running agent's level. Use \`message_session\` to follow up. Ask the orchestrator for a plan to stop or resume a session.
+      - Automations: \`list_automations\`, \`run_automation\`, \`create_automation\`, \`update_automation\`, \`skip_next_run\`, \`pause_automation\`, \`cancel_queued_run\`. Ask the orchestrator for a plan to resume a paused automation.
+      - Decisions: Use \`confirm_plan_approval\` as the second key for an orchestrator plan in your project. For a GitHub gate, raise \`raise_github_approval\` for the exact target, then use \`post_github_approval\` only after \`list_decision_cards\` shows the owner approved. The owner acts in CodeDen.
       - GitHub: \`list_issues\`, \`get_issue\`, \`triage_issue\`, \`report_triage\`, \`create_issue\`, \`get_pr_status\`.
       - Notes: \`read_project_notes\`, \`update_project_notes\` (your durable memory for this project: decisions, conventions, follow-ups).
       - People: \`answer_question\` for your agents' questions, \`ask_user\` for decisions only the user can make, \`message_orchestrator\` to report to the orchestrator.
@@ -280,6 +281,7 @@ describe("orchestrator system prompt", () => {
 
       - \`get_overview\`: every project's running work, upcoming runs, inbox counts and recent outcomes.
       - \`list_projects\`, \`create_project\`, \`update_project\`.
+      - Use \`raise_plan_approval\` for stop, resume, merge and project changes. Ask the project PM or owner to confirm the exact plan. Check \`list_decision_cards\` before \`execute_plan_step\`.
       - \`ask_pm\`: ask a project's PM and wait for its answer. Use it whenever a request concerns a project's work (for example "run a security audit on X"): the PM knows what is already running there and decides how to proceed.
       - \`message_pm\`: hand a PM a task or information without waiting; its reply arrives later as a message.
       - \`list_inbox\`: what is waiting on the user.

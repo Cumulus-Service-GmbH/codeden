@@ -23,6 +23,7 @@ export class FakeGithub {
   readonly repo = REPO;
   issues = new Map<number, FakeIssue>();
   requests: FakeRequest[] = [];
+  pendingDeployments = new Map<number, number[]>();
   validTokens = new Set(["tok-1"]);
   /** The account each token signs in as (`/user`, GraphQL `viewer`); default `octo`. */
   accounts = new Map<string, string>();
@@ -153,6 +154,22 @@ export class FakeGithub {
     const rest = path.slice(prefix.length);
     let m: RegExpMatchArray | null;
 
+    m = rest.match(/^\/actions\/runs\/(\d+)\/pending_deployments$/);
+    if (m) {
+      const runId = Number(m[1]);
+      const pending = this.pendingDeployments.get(runId);
+      if (!pending) return notFound;
+      if (method === "GET") return ok(pending.map((id) => ({ environment: { id } })));
+      if (method === "POST" && b.state === "approved") {
+        const ids = b.environment_ids as number[];
+        this.pendingDeployments.set(
+          runId,
+          pending.filter((id) => !ids.includes(id)),
+        );
+        return ok([]);
+      }
+    }
+
     if (method === "GET" && rest === "/issues") {
       const state = query.get("state") ?? "open";
       const since = query.get("since");
@@ -262,6 +279,7 @@ export class FakeGithub {
         );
       return ok({
         number: issue.number,
+        state: issue.state,
         body: issue.body,
         additions: 3,
         deletions: 1,
@@ -269,6 +287,15 @@ export class FakeGithub {
         head: { sha: issue.pr.headSha, ref: issue.pr.head },
         base: { ref: issue.pr.base },
       });
+    }
+    m = rest.match(/^\/pulls\/(\d+)\/reviews$/);
+    if (m && method === "POST") {
+      const issue = this.issues.get(Number(m[1]));
+      if (!issue?.pr) return notFound;
+      if (b.event === "APPROVE" && issue.author === login) {
+        return { status: 422, data: { message: "Cannot approve your own pull request" } };
+      }
+      return ok({ id: this.nextId++, commit_id: b.commit_id, state: "APPROVED" });
     }
     m = rest.match(/^\/pulls\/(\d+)\/files$/);
     if (m) {
