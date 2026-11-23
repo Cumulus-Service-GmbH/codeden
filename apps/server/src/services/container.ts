@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { defaultTeam, messageFrom, type Session } from "@codeden/contracts";
+import { defaultTeam, messageFrom, type Session, type Team } from "@codeden/contracts";
 import { createImageEngineRegistry, type ImageEngineRegistry } from "@codeden/providers";
 import type { Db } from "../db/client";
 import type { EventStore } from "../events/store";
@@ -146,6 +146,7 @@ export interface ServicesOptions {
 /** Every application service, wired together. Routes and the realtime hub use these. */
 export interface AppServices {
   teamRuns?: TeamRuns;
+  projectTeam(projectId: string, teamId?: string): Team;
   db: Db;
   store: EventStore;
   settings: SettingsStore;
@@ -264,11 +265,19 @@ export function createServices(opts: ServicesOptions): AppServices {
     opts.gitBroker ??
     createGitBroker({ exec, token: async () => (await github.auth.token())?.value ?? null });
   // `factory` is created below; sessions start only after the container is built.
+  const projectTeam: AppServices["projectTeam"] = (projectId, teamId) => {
+    const teams = projects.get(projectId).teams;
+    return (
+      teams?.teams.find(({ id }) => id === (teamId ?? teams.defaultTeamId))?.team ??
+      factory.data.loop(projectId)?.tuning.team ??
+      []
+    );
+  };
   const teamFiles: TeamFileDeps = {
     home: opts.paths.home,
     worktreesDir: opts.paths.worktrees,
     defaults: () => defaultTeam(opts.settings.get()),
-    projectTeam: (projectId) => factory.data.loop(projectId)?.tuning.team ?? [],
+    projectTeam,
     project: (projectId) => projects.get(projectId),
     session: (sessionId) => sessionRepo.find(sessionId)?.session,
     ownTeamPins: (sessionId) => sessionRepo.find(sessionId)?.startMeta?.ownTeamPins === true,
@@ -486,6 +495,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     log: opts.log,
   });
   const services: AppServices = {
+    projectTeam,
     db: opts.db,
     store: opts.store,
     settings: opts.settings,

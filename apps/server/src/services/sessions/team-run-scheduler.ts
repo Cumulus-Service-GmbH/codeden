@@ -22,6 +22,10 @@ export function resolveRunTeam(
   return { ...selected, ...resolveTeam({ defaults, project: selected.team, session }) };
 }
 
+export function assignmentRoundLimit(worker: TeamWorker, maxRounds: number): number {
+  return maxRounds + (worker.arbiter?.verdict === "FIX REQUIRED" ? 1 : 0);
+}
+
 /** Plan dispatch in checklist order. The caller reserves these slots before launching sessions. */
 export function eligibleAssignments(
   workers: readonly TeamWorker[],
@@ -37,7 +41,7 @@ export function eligibleAssignments(
     .filter(
       (worker) =>
         (worker.status === "queued" || worker.status === "failed") &&
-        worker.attempt < maxRounds &&
+        worker.attempt < assignmentRoundLimit(worker, maxRounds) &&
         worker.dependsOn.every((dependency) => completed.has(dependency)),
     )
     .slice(0, slots)

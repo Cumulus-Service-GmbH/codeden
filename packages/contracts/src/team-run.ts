@@ -100,6 +100,8 @@ export const TeamWorker = z.object({
   status: z.enum(["queued", "running", "waiting", "completed", "failed", "stopped"]),
   dependsOn: z.array(id),
   attempt: z.int().nonnegative(),
+  /** The persisted session is still responsible for completing this attempt after restart. */
+  reconciling: z.boolean().optional(),
   /** When this attempt started, used to estimate remaining time. */
   startedAt: z.int().nonnegative().optional(),
   checkpoint: TeamWorkerCheckpoint.nullable(),
@@ -169,6 +171,8 @@ export const TeamRun = z.object({
     }),
   ),
   assembler: id,
+  /** The run-owned merge checkout, separate from the Architect session. */
+  assemblerWorktree: id.optional(),
   coordinatorId: id.nullable(),
   workers: z.array(TeamWorker),
   status: z.enum(["running", "waiting", "ready"]),

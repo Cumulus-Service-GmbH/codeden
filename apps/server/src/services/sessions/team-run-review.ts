@@ -3,6 +3,7 @@ import { readFile } from "node:fs/promises";
 import { TeamReviewRecord, type TeamRun, type TeamWorker } from "@codeden/contracts";
 import { historyDigest, recordTeamHistory } from "./team-run-history";
 import type { TeamReviewEvidence } from "./team-run-jev";
+import { assignmentRoundLimit } from "./team-run-scheduler";
 import type { TeamRunPorts } from "./team-runs";
 
 function testsAtHead(output: string, index: number, head: string) {
@@ -132,7 +133,7 @@ export async function reviewAndMerge(
           review = approval;
         } else {
           changes = ruling.reason;
-          if (worker.attempt >= run.limits.maxRounds) {
+          if (worker.attempt >= assignmentRoundLimit(worker, run.limits.maxRounds)) {
             throw new Error(`Arbiter fix exceeds the Team round limit. ${changes}`);
           }
         }

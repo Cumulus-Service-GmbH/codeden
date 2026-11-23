@@ -16,6 +16,7 @@ import { openDatabase } from "../src/db/client";
 import { applyProjection } from "../src/events/projector";
 import { EventStore } from "../src/events/store";
 import { ensureHome } from "../src/paths";
+import { sessionRoutes } from "../src/routes/sessions";
 import { createServices } from "../src/services/container";
 import type { RunnerPort } from "../src/services/runner-port";
 import { listTeamRuns, saveTeamRun } from "../src/services/sessions/team-run-projection";
@@ -61,6 +62,7 @@ function setup(
       sessionId: `${member.model}/${branch}`,
       branch,
       worktree: `${base}/${branch}`,
+      baseHead: (base.startsWith("work/") ? "c" : "b").repeat(40),
     }),
   );
   const coordinate = vi.fn(async () => {});
@@ -90,6 +92,8 @@ function setup(
       vendor: (member) => (member.role === "reviewer" ? "review-vendor" : "writer-vendor"),
       freeAgentSlots: () => 8,
       launch,
+      prepareAssembler: async () => "/assembler",
+      hasWorkerSession: () => true,
       coordinate,
       head,
       review,
@@ -207,6 +211,14 @@ it("retries a failed worker, ignores the superseded session, and reports exhaust
   expect(exhausted.workers[0]).toMatchObject({ attempt: 2, status: "failed" });
 });
 
+it("reviews the retry against the original base, including sealed work from the first attempt", async () => {
+  const { runs, review } = setup();
+  const run = await runs.start("project", { checklistId: "approved" });
+  const retry = await runs.finish(run.id, run.workers[0]?.sessionId ?? "", "Retry needed");
+  await runs.finish(run.id, retry.workers[0]?.sessionId ?? "", null);
+  expect(review.mock.calls[0]?.[1].baseHead).toBe("b".repeat(40));
+});
+
 it("reviews and merges all assignments before verifying the assembled result", async () => {
   const { runs, merge, verify } = setup();
   merge.mockResolvedValue({});
@@ -269,7 +281,12 @@ it("commits worker changes before review and handles a runner completion conflic
             branches: prepared.map(({ branch }) => ({
               name: branch,
               remote: false,
-              commit: (branch?.startsWith("team/") ? "b" : "a").repeat(40),
+              commit: (branch?.startsWith("team/")
+                ? "b"
+                : branch?.endsWith("/1-1")
+                  ? "c"
+                  : "a"
+              ).repeat(40),
             })),
           };
         }
@@ -279,7 +296,13 @@ it("commits worker changes before review and handles a runner completion conflic
         }
         if (command.name === "git.mergeTeamWorker") {
           merged.push(command);
-          return { conflict: "Conflicting files" };
+          const architect = opened.find(({ options }) => options.model === "build-architect");
+          return {
+            conflict:
+              command.cwd === architect?.options.cwd
+                ? "Architect left notes.md"
+                : "Conflicting files",
+          };
         }
         return {};
       }) as RunnerPort["request"],
@@ -302,6 +325,7 @@ it("commits worker changes before review and handles a runner completion conflic
       imageEngines: new ImageEngineRegistry([]),
       userHome: env.dir,
     };
+    options.settings.update({ limits: { maxActiveSessions: 8 } });
     const defaults = createServices(options);
     expect(defaults.tools.list("pm").map(({ name }) => name)).toContain("start_team_run");
     expect(
@@ -342,7 +366,7 @@ it("commits worker changes before review and handles a runner completion conflic
           status: "pass",
           receipt: { head: "a".repeat(40), historyPath: "/history", historySha256: "b".repeat(64) },
         }),
-        review: async (_run, _worker, context) => {
+        review: async (_run, worker, context) => {
           expect(context.historySha256).toMatch(/^[a-f0-9]{64}$/);
           expect(context.historyPath).toEqual(expect.any(String));
           expect(readFileSync(context.historyPath ?? "", "utf8")).toContain(
@@ -354,7 +378,11 @@ it("commits worker changes before review and handles a runner completion conflic
           expect(context.historyBrief).not.toContain("Frozen candidate patch");
           expect(commits).toEqual([
             expect.objectContaining({
-              cwd: prepared[1]?.path,
+              cwd: prepared.find(({ branch }) => branch === worker.branch?.replace(/-2$/, "-1"))
+                ?.path,
+            }),
+            expect.objectContaining({
+              cwd: worker.worktree,
               message: "feat: complete Team assignment",
             }),
           ]);
@@ -363,6 +391,19 @@ it("commits worker changes before review and handles a runner completion conflic
         verify: async () => {},
       },
     });
+    const startSession = vi.spyOn(services.sessions, "start").mockResolvedValue({
+      status: "started",
+      sessionId: "role-session",
+    });
+    const response = await sessionRoutes(services, "token").request("/", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId: project.id, teamRole: "writer" }),
+    });
+    expect(response.status).toBe(200);
+    expect(startSession.mock.calls[0]?.[0].model).toBe("build-writer");
+    startSession.mockRestore();
+
     const start = (teamId?: string) =>
       services.tools.call(
         "start_team_run",
@@ -396,13 +437,26 @@ it("commits worker changes before review and handles a runner completion conflic
       "release-architect",
       "release-writer",
     ]);
-    expect(prepared[1]?.baseRef).toBe(prepared[0]?.branch);
-    expect(prepared[3]?.baseRef).toBe(prepared[2]?.branch);
-    expect(new Set(prepared.map(({ path }) => path)).size).toBe(4);
-
     const run = TeamRun.parse(JSON.parse(first.text));
-    const sessionId = run.workers[0]?.sessionId;
-    if (!sessionId) throw new Error("Worker was not launched");
+    const release = TeamRun.parse(JSON.parse(second.text));
+    expect(prepared.find(({ branch }) => branch === run.workers[0]?.branch)?.baseRef).toBe(
+      run.assembler,
+    );
+    expect(prepared.find(({ branch }) => branch === release.workers[0]?.branch)?.baseRef).toBe(
+      release.assembler,
+    );
+    expect(new Set(prepared.map(({ path }) => path)).size).toBe(6);
+    expect(run.assemblerWorktree).toBe(
+      prepared.find(({ branch }) => branch === run.assembler)?.path,
+    );
+    const firstSessionId = run.workers[0]?.sessionId;
+    if (!firstSessionId || !services.teamRuns) throw new Error("Worker was not launched");
+    const retried = await services.teamRuns.finish(run.id, firstSessionId, "Retry needed");
+    const retry = retried.workers[0];
+    expect(retry).toMatchObject({ status: "running", attempt: 2 });
+    const sessionId = retry?.sessionId;
+    if (!sessionId) throw new Error("Retry was not launched");
+    await services.sessions.launching.get(sessionId);
     const settled = new Promise<TeamRun>((resolve) => {
       const unsubscribe = env.store.subscribe(() => {
         const updated = listTeamRuns(env.db.db).find((entry) => entry.id === run.id);
@@ -436,12 +490,50 @@ it("commits worker changes before review and handles a runner completion conflic
     expect(merged).toEqual([
       {
         name: "git.mergeTeamWorker",
-        cwd: prepared[0]?.path,
+        cwd: prepared.find(({ branch }) => branch === run.assembler)?.path,
         assembler: run.assembler,
-        workerBranch: run.workers[0]?.branch,
+        workerBranch: retry.branch,
         head: "a".repeat(40),
       },
     ]);
+    services.sessionRepo.update(sessionId, (session) => ({
+      ...session,
+      branch: null,
+      worktreePath: null,
+      status: "queued",
+    }));
+    vi.useFakeTimers();
+    try {
+      const queued = vi.spyOn(services.sessions, "start").mockResolvedValueOnce({
+        status: "queued",
+        sessionId,
+        behind: [],
+      });
+      const attempt = Promise.race([
+        services.teamRuns.start(project.id, { checklistId: "approved" }),
+        new Promise((resolve) => setTimeout(resolve, 1, "launch remained blocked")),
+      ]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(await attempt).toMatchObject({
+        status: "waiting",
+        notice: expect.stringContaining("queued"),
+      });
+      expect(services.sessionRepo.get(sessionId).status).toBe("stopped");
+      services.sessionRepo.update(sessionId, (session) => ({ ...session, status: "starting" }));
+      queued.mockResolvedValueOnce({ status: "started", sessionId });
+      const incomplete = Promise.race([
+        services.teamRuns.start(project.id, { checklistId: "approved" }),
+        new Promise((resolve) => setTimeout(resolve, 11 * 60_000, "launch remained blocked")),
+      ]);
+      await vi.advanceTimersByTimeAsync(11 * 60_000);
+      expect(await incomplete).toMatchObject({
+        status: "waiting",
+        notice: expect.stringContaining("worktree preparation timed out"),
+      });
+      queued.mockRestore();
+    } finally {
+      vi.useRealTimers();
+    }
   } finally {
     await env.close();
   }
@@ -487,22 +579,25 @@ it("returns a product refusal to the reviewer once, then raises an owner decisio
   expect(merge).not.toHaveBeenCalled();
 });
 
-it("records interrupted assignments as waiting on restart", async () => {
+it("reviews a worker whose original session completes after the server restarts", async () => {
   const { runs } = setup();
   const run = await runs.start("project", { checklistId: "approved" });
   const save = vi.fn();
   const restored = setup(save, [run]);
+  restored.merge.mockResolvedValue({});
+  expect(TeamRun.parse(save.mock.calls[0]?.[0]).workers[0]?.reconciling).toBe(true);
   await restored.runs.finishWorker(run.workers[0]?.sessionId ?? "", null);
-  expect(save).toHaveBeenCalledExactlyOnceWith(
+  expect(restored.review).toHaveBeenCalledOnce();
+  expect(save).toHaveBeenLastCalledWith(
     expect.objectContaining({
-      status: "waiting",
+      status: "running",
       workers: [
-        expect.objectContaining({ status: "waiting" }),
-        expect.objectContaining({ status: "queued" }),
+        expect.objectContaining({ status: "completed" }),
+        expect.objectContaining({ status: "running" }),
       ],
     }),
   );
-  expect(restored.launch).not.toHaveBeenCalled();
+  expect(restored.launch).toHaveBeenCalledOnce();
 });
 
 it("preserves the reviewer escalation limit across worker attempts", async () => {
@@ -543,7 +638,7 @@ it("requests a coverage delta with the verbatim acceptance criterion before runn
 });
 
 it("sends a persistent blocking finding to the Arbiter before a third review", async () => {
-  const { runs, review, arbiter, merge } = setup();
+  const { runs, review, arbiter, merge, launch } = setup();
   review
     .mockResolvedValueOnce({
       changes: "Fix regression",
@@ -561,10 +656,16 @@ it("sends a persistent blocking finding to the Arbiter before a third review", a
   expect(review.mock.calls[1]?.[2].deltaBase).toBe("a".repeat(40));
   expect(arbiter).toHaveBeenCalledOnce();
   expect(result.workers[0]).toMatchObject({
-    status: "waiting",
+    status: "running",
+    attempt: 3,
     arbiter: { verdict: "FIX REQUIRED" },
   });
+  expect(launch.mock.calls[3]?.[5]).toContain("Add a regression test.");
   expect(merge).not.toHaveBeenCalled();
+  await runs.finish(run.id, result.workers[0]?.sessionId ?? "", null);
+  expect(review).toHaveBeenCalledTimes(3);
+  expect(review.mock.calls[2]?.[2].deltaBase).toBe("b".repeat(40));
+  expect(merge).toHaveBeenCalledOnce();
 });
 
 it("dispatches a Writer on the assembler for a genuine merge conflict and reviews its delta", async () => {

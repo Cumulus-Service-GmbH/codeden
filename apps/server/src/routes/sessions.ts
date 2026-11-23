@@ -52,9 +52,7 @@ export function sessionRoutes(s: AppServices, installToken: string) {
           // A Team role chosen in the composer: its tag, and the resolved Team's pins where the user set none.
           const req = withTeamRole(asked, {
             defaults: defaultTeam(s.settings.get()),
-            project: asked.projectId
-              ? (s.factory.data.loop(asked.projectId)?.tuning.team ?? [])
-              : [],
+            project: asked.teamRole && asked.projectId ? s.projectTeam(asked.projectId) : [],
           });
           const own = (asked.provider && asked.provider !== "auto") || Boolean(asked.model);
           const result = await s.sessions.start(req, own ? { ownTeamPins: true } : {});

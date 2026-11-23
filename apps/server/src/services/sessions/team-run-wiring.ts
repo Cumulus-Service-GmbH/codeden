@@ -43,14 +43,20 @@ export type TeamRunIntegrations = Partial<
 
 function waitForWorktree({ sessionRepo, store }: AppServices, sessionId: string) {
   return new Promise<{ sessionId: string; branch: string; worktree: string }>((resolve, reject) => {
+    const close = () => {
+      clearTimeout(timeout);
+      unsubscribe();
+    };
     const check = () => {
-      const session = sessionRepo.get(sessionId);
-      if (session.branch && session.worktreePath) {
-        unsubscribe();
+      const session = sessionRepo.find(sessionId)?.session;
+      if (session?.branch && session.worktreePath) {
+        close();
         resolve({ sessionId, branch: session.branch, worktree: session.worktreePath });
-      } else if (["failed", "stopped", "interrupted"].includes(session.status)) {
-        unsubscribe();
-        reject(new Error(`Team worktree preparation ended with status ${session.status}`));
+      } else if (!session || ["failed", "stopped", "interrupted"].includes(session.status)) {
+        close();
+        reject(
+          new Error(`Team worktree preparation ended with status ${session?.status ?? "missing"}`),
+        );
       }
     };
     const unsubscribe = store.subscribe((batch) => {
@@ -60,6 +66,10 @@ function waitForWorktree({ sessionRepo, store }: AppServices, sessionId: string)
         check();
       }
     });
+    const timeout = setTimeout(() => {
+      close();
+      reject(new Error("Team worktree preparation timed out"));
+    }, 10 * 60_000);
     check();
   });
 }
@@ -129,8 +139,7 @@ export function wireTeamRuns(
         if (!run.coordinatorId || !worker.sessionId || !worker.branch) {
           throw new Error("Team assembler or worker worktree is unavailable");
         }
-        const assembler = sessionRepo.get(run.coordinatorId);
-        if (!assembler.worktreePath || assembler.branch !== run.assembler) {
+        if (!run.assemblerWorktree) {
           throw new Error("Team assembler worktree is unavailable");
         }
         const runner = services.runners.forSession(run.coordinatorId);
@@ -142,7 +151,7 @@ export function wireTeamRuns(
         }
         return runner.request({
           name: "git.mergeTeamWorker",
-          cwd: assembler.worktreePath,
+          cwd: run.assemblerWorktree,
           assembler: run.assembler,
           workerBranch: worker.branch,
           head,
@@ -253,7 +262,7 @@ export function wireTeamRuns(
               {
                 id: "default",
                 name: "Default Team",
-                team: services.factory.data.loop(projectId)?.tuning.team ?? [],
+                team: services.projectTeam(projectId),
                 limits: {
                   maxParallel: settings.limits.maxActiveSessions,
                   maxAssignments: 20,
@@ -267,6 +276,28 @@ export function wireTeamRuns(
       },
       freeAgentSlots: () => admission.free(),
       save: (run) => saveTeamRun(store, run),
+      hasWorkerSession: (id) => {
+        const status = sessionRepo.find(id)?.session.status;
+        return status !== undefined && !["failed", "stopped", "completed"].includes(status);
+      },
+      prepareAssembler: async (run, coordinatorId) => {
+        const project = services.projects.get(run.projectId);
+        const workspace = await services.runners.forSession(coordinatorId).request({
+          name: "workspace.prepare",
+          sessionId: run.id,
+          repoPath: project.path,
+          strategy: "worktree",
+          path: join(services.paths.worktrees, project.slug, `team-${run.id}`),
+          branch: run.assembler,
+          baseRef: project.defaultBranch ?? undefined,
+          setupCommands: [],
+          runProjectSetup: false,
+          fetch: project.kind === "github",
+        });
+        if (workspace.branch !== run.assembler)
+          throw new Error("Team assembler branch unavailable");
+        return workspace.cwd;
+      },
       launch: async (member, branch, base, run, item, packet) => {
         const title = item ? `[Writer] ${item.text}` : `[Architect] ${run.teamName}`;
         const result = await sessions.start(
@@ -290,7 +321,8 @@ export function wireTeamRuns(
             },
           }),
         );
-        if (result.status !== "started" && result.status !== "queued") {
+        if (result.status === "queued") await sessions.stop(result.sessionId);
+        if (result.status !== "started") {
           throw new Error(`Session launch: ${result.status}`);
         }
         const workspace = await waitForWorktree(services, result.sessionId);

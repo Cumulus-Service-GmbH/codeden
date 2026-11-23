@@ -13,7 +13,7 @@ import {
 } from "@codeden/contracts";
 import type { TeamReviewEvidence } from "./team-run-jev";
 import { checkpoint, reviewAndMerge } from "./team-run-review";
-import { eligibleAssignments, resolveRunTeam } from "./team-run-scheduler";
+import { assignmentRoundLimit, eligibleAssignments, resolveRunTeam } from "./team-run-scheduler";
 
 type DeferredFinding = { location: string; summary: string; receipt: string };
 type ReviewApproval = { head: string; evidence?: TeamReviewEvidence; debt?: DeferredFinding[] };
@@ -37,6 +37,8 @@ export interface TeamRunPorts {
     item?: TeamRun["items"][number],
     packet?: string,
   ): Promise<{ sessionId: string; branch: string; worktree: string; baseHead?: string }>;
+  prepareAssembler(run: TeamRun, coordinatorId: string): Promise<string>;
+  hasWorkerSession(sessionId: string): boolean;
   coordinate(sessionId: string, message: TeamCoordinationMessage): Promise<void>;
   seal?(run: TeamRun, worker: TeamWorker): Promise<void>;
   writerResponse?(worker: TeamWorker): string | undefined;
@@ -117,12 +119,25 @@ export class TeamRuns {
       for (const worker of run.workers) {
         if (worker.jev?.status === "owner decision") this.ports.ownerDecision(run, worker);
       }
-      const interrupted = run.workers.filter((worker) => worker.status === "running");
-      if (!interrupted.length && run.status !== "running") continue;
+      const running = run.workers.filter((worker) => worker.status === "running");
+      if (!running.length && run.status !== "running") continue;
       const reason = "Team run interrupted by server restart";
-      for (const worker of interrupted) checkpoint(worker, "waiting", reason);
-      run.status = "waiting";
-      run.notice = reason;
+      for (const worker of running) {
+        if (
+          worker.sessionId &&
+          (worker.step === "writing" || worker.step === "delta") &&
+          this.ports.hasWorkerSession(worker.sessionId)
+        ) {
+          worker.reconciling = true;
+        } else {
+          delete worker.reconciling;
+          checkpoint(worker, "waiting", reason);
+        }
+      }
+      if (!run.coordinatorId || !running.some((worker) => worker.reconciling)) {
+        run.status = "waiting";
+        run.notice = reason;
+      }
       this.save(run);
     }
   }
@@ -220,9 +235,9 @@ export class TeamRuns {
       };
       this.save(run);
       try {
-        const coordinator = await this.ports.launch(architect, run.assembler, "", run);
+        const coordinator = await this.ports.launch(architect, `team-architect/${id}`, "", run);
         run.coordinatorId = coordinator.sessionId;
-        run.assembler = coordinator.branch;
+        run.assemblerWorktree = await this.ports.prepareAssembler(run, coordinator.sessionId);
         this.save(run);
         await this.dispatch(run);
       } catch (error) {
@@ -243,13 +258,15 @@ export class TeamRuns {
       }
       const coordinatorId = run.coordinatorId;
       if (!coordinatorId) throw new Error("Missing Team coordinator");
+      delete worker.reconciling;
+      const roundLimit = assignmentRoundLimit(worker, run.limits.maxRounds);
       const identity = { itemId: worker.itemId, attempt: worker.attempt };
       try {
         await this.ports.coordinate(coordinatorId, {
           type: failure === null ? "worker_finished" : "worker_failed",
           ...identity,
         });
-        if (failure === null || worker.attempt < run.limits.maxRounds) {
+        if (failure === null || worker.attempt < roundLimit) {
           await this.ports.seal?.(run, worker);
         }
         if (failure !== null) {
@@ -269,7 +286,7 @@ export class TeamRuns {
       const progress = [
         worker.itemId,
         worker.status,
-        `round ${worker.attempt}/${run.limits.maxRounds}`,
+        `round ${worker.attempt}/${roundLimit}`,
         worker.checkpoint?.blocker?.split(/\r?\n/, 1)[0],
       ]
         .filter(Boolean)
@@ -289,7 +306,8 @@ export class TeamRuns {
         const blocked = run.workers.find(
           (entry) =>
             entry.status === "waiting" ||
-            (entry.status === "failed" && entry.attempt >= run.limits.maxRounds),
+            (entry.status === "failed" &&
+              entry.attempt >= assignmentRoundLimit(entry, run.limits.maxRounds)),
         );
         if (blocked) {
           run.status = "waiting";
@@ -337,7 +355,7 @@ export class TeamRuns {
             ? `Completed work\n${worker.checkpoint.summary}\n\nRemaining work, in order\n${worker.checkpoint.nextSteps}`
             : undefined,
         );
-        Object.assign(worker, resources);
+        Object.assign(worker, { ...resources, baseHead: worker.baseHead ?? resources.baseHead });
         if (resolving) worker.resolutionBase = resources.baseHead;
       } catch (error) {
         checkpoint(worker, "waiting", String(error));
