@@ -2,13 +2,16 @@ import { TeamRun } from "@codeden/contracts";
 import { render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { ChecklistSidebar } from "@/components/checklist/checklist-sidebar";
-import { TooltipProvider } from "@/components/ui/tooltip";
 import { TeamRunProgress, TeamWorkers } from "@/components/workbench/team-workers";
 
 import { useLayoutStore } from "@/stores/layout";
+import { renderWithClient } from "./utils";
 
 const snapshot = vi.hoisted(() => ({ projects: [], teamRuns: [] as TeamRun[] }));
-vi.mock("@/lib/queries", () => ({ useSnapshot: () => ({ data: snapshot }) }));
+vi.mock("@/lib/queries", async (importOriginal) => ({
+  ...(await importOriginal()),
+  useSnapshot: () => ({ data: snapshot }),
+}));
 
 afterEach(() => {
   snapshot.teamRuns = [];
@@ -123,11 +126,7 @@ it("groups workers under their Team in the workers pane with step, round, Arbite
 it("shows each Team's progress in the checklist sidebar", () => {
   snapshot.teamRuns = [buildRun(), releaseRun()];
   useLayoutStore.getState().toggleChecklist(true);
-  render(
-    <TooltipProvider>
-      <ChecklistSidebar />
-    </TooltipProvider>,
-  );
+  renderWithClient(<ChecklistSidebar />);
 
   const sidebar = within(screen.getByTestId("checklist-sidebar"));
   const build = within(sidebar.getByRole("region", { name: "Build progress" }));
