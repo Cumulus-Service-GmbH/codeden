@@ -2,9 +2,9 @@ import { describe, expect, it } from "vitest";
 import { defaultSettings, Settings, TokenSaverSettings, tokenSaverLevel } from "../src";
 
 describe("Settings.tokenSaver", () => {
-  it("defaults to lite (this local build) with no role or project overrides, so older settings files still parse", () => {
+  it("defaults to off with no role or project overrides, so older settings files still parse", () => {
     const expected = {
-      default: "lite",
+      default: "off",
       roles: { orchestrator: null, pm: null, agent: null },
       projects: {},
     };

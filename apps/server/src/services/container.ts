@@ -455,6 +455,8 @@ export function createServices(opts: ServicesOptions): AppServices {
     sessions,
     projects,
     inbox,
+    settings: opts.settings,
+    runner: opts.runner,
     artifacts,
     github: opts.orchestration?.github ?? new GithubServicePort(github),
     trustedAuthors,

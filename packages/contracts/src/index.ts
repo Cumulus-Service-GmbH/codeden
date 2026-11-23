@@ -32,6 +32,7 @@ export * from "./factory-api";
 export * from "./factory-control";
 export * from "./factory-cost";
 export * from "./factory-follow-ups";
+export * from "./factory-hold";
 export * from "./factory-lessons";
 export * from "./factory-needs-you";
 export * from "./factory-pipeline";

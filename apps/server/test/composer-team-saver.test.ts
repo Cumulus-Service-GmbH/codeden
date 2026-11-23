@@ -12,6 +12,7 @@ const writer = {
   model: "m-project",
   effort: "high" as const,
 };
+const saverProvider = { id: "claude", capabilities: { systemPrompt: true } };
 
 it("round-trips a start with a Team role and a token saver level", () => {
   const req = StartSessionRequest.parse({
@@ -73,13 +74,13 @@ it("the session's own saver level wins over the project and role defaults", () =
   });
   const launcher = (tokenSaver: string | undefined) =>
     new SessionLauncher({
-      runner: { mcpProxyUrl: () => null, providers: () => [] },
+      runner: { mcpProxyUrl: () => null, providers: () => [saverProvider] },
       projects: { get: () => null },
       home: "/tmp/codeden-home",
       tokenSaver: () => settings,
       repo: { find: () => ({ startMeta: tokenSaver ? { tokenSaver } : {} }) },
     } as unknown as LauncherDeps);
-  const session = { ...sampleSession, projectId: "p1" };
+  const session = { ...sampleSession, projectId: "p1", provider: saverProvider.id };
   expect(launcher("ultra").sessionOptions(session).systemPrompt).toContain(
     tokenSaverNote("ultra") ?? "x",
   );
@@ -90,7 +91,13 @@ it("the session's own saver level wins over the project and role defaults", () =
 });
 
 it("a child session inherits the parent's token saver level", () => {
-  const parent = { ...sampleSession, id: "parent", projectId: "p1", role: "pm" as const };
+  const parent = {
+    ...sampleSession,
+    id: "parent",
+    projectId: "p1",
+    role: "pm" as const,
+    provider: saverProvider.id,
+  };
   const child = { ...parent, id: "child", parentSessionId: parent.id, role: "agent" as const };
   const grandchild = { ...child, id: "grandchild", parentSessionId: child.id };
   const rows = new Map<
@@ -102,7 +109,7 @@ it("a child session inherits the parent's token saver level", () => {
     [grandchild.id, { session: grandchild, startMeta: {} }],
   ]);
   const launcher = new SessionLauncher({
-    runner: { mcpProxyUrl: () => null, providers: () => [] },
+    runner: { mcpProxyUrl: () => null, providers: () => [saverProvider] },
     projects: { get: () => null },
     home: "/tmp/codeden-home",
     tokenSaver: () => TokenSaverSettings.parse({ default: "lite", roles: { pm: "full" } }),

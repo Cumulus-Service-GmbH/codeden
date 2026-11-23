@@ -118,6 +118,7 @@ export class FactoryStore {
       tuning: FactoryTuning.parse(this.rememberedSetup() ?? {}),
       drain: null,
       failedSessionsSweptAt: null,
+      holds: [],
       lastTickAt: null,
       updatedAt: now.toISOString(),
     };
@@ -532,6 +533,7 @@ const ITEM_DEFAULTS = {
   followUps: [],
   spotCheck: null,
   lessonsNote: null,
+  stop: null,
 } satisfies Partial<FactoryItem>;
 
 /** An item as read from the projection, with the fields newer versions added. */
@@ -576,6 +578,8 @@ export function upgradeLoop(loop: FactoryLoop): FactoryLoop {
     drain: loop.drain ? { ...loop.drain, deadline: loop.drain.deadline ?? null } : null,
     // Loops saved before the sweep of failed sessions (#411) haven't run it.
     failedSessionsSweptAt: loop.failedSessionsSweptAt ?? null,
+    // Loops saved before holds (#593) have none.
+    holds: loop.holds ?? [],
   });
 }
 

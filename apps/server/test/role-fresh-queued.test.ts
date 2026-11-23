@@ -1,9 +1,10 @@
-import type { Session } from "@codeden/contracts";
+import { type Session, Settings } from "@codeden/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
 import { RoleSessions } from "../src/services/orchestration/role-sessions";
 import type { ProjectService } from "../src/services/projects/project-service";
+import { SessionRepo } from "../src/services/sessions/repo";
 import type { SessionService } from "../src/services/sessions/session-service";
 import { sampleSession } from "./helpers";
 
@@ -24,8 +25,12 @@ describe("Start fresh at the session limit", () => {
       const detail = (id: string) => ({ session: id === "o1" ? previous : replacement });
       const roles = new RoleSessions({
         db: database.db,
+        repo: new SessionRepo(database.db, store),
         sessions: { start, detail } as unknown as SessionService,
+        inbox: { list: () => [], close: vi.fn() },
         projects: {} as ProjectService,
+        settings: { get: () => Settings.parse({}) },
+        runner: { isConnected: () => true, providers: () => [] },
       });
       const first = roles.startFresh("o1");
       const duplicate = roles.startFresh("o1");

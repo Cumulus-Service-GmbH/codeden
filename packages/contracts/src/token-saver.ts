@@ -24,7 +24,7 @@ export type TokenSaverProjectOverride = z.infer<typeof TokenSaverProjectOverride
  */
 export const TokenSaverSettings = z.object({
   /** The level for every session without a role or project override. */
-  default: TokenSaverLevel.default("lite"),
+  default: TokenSaverLevel.default("off"),
   /** Per-role defaults; null (or absent) uses `default`. */
   roles: z
     .object({

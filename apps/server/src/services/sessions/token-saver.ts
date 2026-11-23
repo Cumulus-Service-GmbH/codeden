@@ -27,6 +27,7 @@ export function tokenSaverNote(level: TokenSaverLevel): string | null {
     "## Token saver",
     "",
     `Token saver is on for this session (${level}). Follow these rules for the whole session.`,
+    "They change only how you write and how much you read. Everything above still applies in full: your role's limits, your permission level and approvals, security rules, and every report or tool call CodeDen asks of you.",
     ...TERSE.slice(0, COUNT[level]).map((l) => `- ${l}`),
     ...FIXED.map((l) => `- ${l}`),
   ].join("\n");

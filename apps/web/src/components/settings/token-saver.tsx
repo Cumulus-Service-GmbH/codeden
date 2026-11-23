@@ -31,7 +31,7 @@ export function TokenSaverSettingsSection() {
   return (
     <SettingsSection
       title="Token saver"
-      description={`Adds a short note to each session's system prompt: answer tersely, write the least code, search narrowly. Exact technical terms and the words not, never, no and only are kept, and security warnings, irreversible steps and text that leaves the session stay in full sentences. Lite is the mildest; Full and Ultra cut more prose. Every session gets it: yours, project managers, the orchestrator, the factory and automations, on every provider. It applies to sessions started or resumed after a change. It stays in force on resume and after compaction on ${covered}; other providers get it at the start of a conversation, so a change reaches them in new conversations. Projects can override it in their settings.`}
+      description={`Adds a short note to each session's system prompt: answer tersely, write the least code, search narrowly. Exact technical terms and the words not, never, no and only are kept, and security warnings, irreversible steps and text that leaves the session stay in full sentences. Lite is the mildest; Full and Ultra cut more prose. It never relaxes CodeDen's own rules. Sessions get it on providers whose system prompt holds for the whole conversation (${covered}), whoever started them: you, project managers, the orchestrator, the factory or automations. It applies to sessions started or resumed after a change. Projects can override it in their settings.`}
     >
       <SettingRow label="Default level" stacked>
         <Segmented<TokenSaverLevel>

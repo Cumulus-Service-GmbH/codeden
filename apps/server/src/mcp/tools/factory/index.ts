@@ -17,6 +17,7 @@ import {
   factoryResume,
   factoryStop,
 } from "./control";
+import { factoryHoldIssue, factoryReleaseIssue } from "./hold";
 import { factoryFileIssue, factoryPlanRound, factoryReportFindings } from "./scout";
 import { asTool, forSession, inFactoryProject } from "./shared";
 
@@ -26,7 +27,7 @@ import { asTool, forSession, inFactoryProject } from "./shared";
 export const factoryStatus = defineTool({
   name: "factory_status",
   description:
-    "Read a factory loop, its current halt source and reason, and its last pause, resume or stop, including the actor, time and reason. A PM reads only its own project. The orchestrator must pass projectId. When draining, the factory finishes its current work before stopping and `drain.inFlight` says how many items are left. The result also includes limits (auto-merge, trusted authors), spend against the daily budget, each work item's pipeline (bug, feature, docs) and step, issues ignored because their author isn't trusted, the merge checks of open pull requests, recent merges, failures and reverts, and the dark factory's scout.",
+    "Read a factory loop, its current halt source and reason, and its last pause, resume or stop, including the actor, time and reason. A PM reads only its own project. The orchestrator must pass projectId. When draining, the factory finishes its current work before stopping and `drain.inFlight` says how many items are left. The result also includes limits (auto-merge, trusted authors), spend against the daily budget, each work item's pipeline (bug, feature, docs) and step, issues ignored because their author isn't trusted, issues held out of the loop with why (`held`), the merge checks of open pull requests, recent merges, failures and reverts, and the dark factory's scout.",
   roles: ["pm", "orchestrator"],
   scope: "global",
   alwaysLoad: true,
@@ -64,6 +65,15 @@ export const factoryStatus = defineTool({
         waiting: s.backlog.map(brief),
         inProgress: s.inProgress.map(brief),
         ignored: s.ignored.map(brief),
+        // Held out of the loop (factory_hold_issue or the label): not taken in, or parked.
+        held: s.held.map((h) => ({
+          issue: h.issue.number,
+          title: h.issue.title,
+          itemId: h.itemId,
+          reason: h.reason,
+          by: h.by,
+          since: h.since,
+        })),
         mergeChecks: s.mergeChecks,
         // The PRs the factory owns: the merge queue first, then the rest and today's merges.
         pullRequests: s.pullRequests.map((p) => ({
@@ -191,5 +201,7 @@ export const factoryTools: AnyServerTool[] = [
   factorySetType,
   factoryAllowLargeChange,
   factoryRetryItem,
+  factoryHoldIssue,
+  factoryReleaseIssue,
   factoryRecordDecision,
 ];

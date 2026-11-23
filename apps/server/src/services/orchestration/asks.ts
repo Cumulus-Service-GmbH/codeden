@@ -108,7 +108,7 @@ export class PmAsks {
     return true;
   }
 
-  /** A held ask's notice is delivered by project, so its waiter follows the replacement PM. */
+  /** An ask still waiting to be delivered follows the replacement PM. */
   retarget(previousId: string, sessionId: string): void {
     for (const waiter of this.waiters.values()) {
       if (waiter.pmSessionId === previousId && !waiter.turnId) waiter.pmSessionId = sessionId;

@@ -10,12 +10,16 @@ import {
   type FactoryDismissRequest,
   type FactoryFileIssueRequest,
   type FactoryFinding,
+  type FactoryHoldBy,
+  type FactoryHoldRequest,
+  type FactoryHoldResult,
   type FactoryItem,
   type FactoryItemResponse,
   type FactoryLesson,
   type FactoryLoop,
   type FactoryLoopControl,
   type FactoryPlanRoundRequest,
+  type FactoryReleaseRequest,
   type FactoryReproductionReport,
   type FactoryRetryMode,
   type FactoryScorecard,
@@ -24,6 +28,7 @@ import {
   type FactorySpotCheckRequest,
   type FactorySpotCheckResponse,
   type FactoryStatus,
+  type FactoryStopBy,
   isFactoryMode,
   type KillSwitchMode,
   type KillSwitchResponse,
@@ -61,6 +66,7 @@ import { fileFollowUp } from "./follow-ups";
 import { dismissFollowUp } from "./follow-ups-held";
 import type { FactoryGithub } from "./github-port";
 import { resumeBlocker } from "./halt";
+import { holdIssue, releaseIssue } from "./hold";
 import { itemCosts } from "./item-cost";
 import { allowLargeChange } from "./large-change";
 import { forgetLesson, keepLessons } from "./lessons";
@@ -86,6 +92,7 @@ import { SlotBoard } from "./slots";
 import { assertSpecAllowsPr, decideSpec } from "./spec-approval";
 import { decideSpotCheck, fileSpotCheckIssue } from "./spot-checks";
 import { buildStatus, factoryHalt, runState } from "./status";
+import { recordStop } from "./stops";
 import { FactoryStore } from "./store";
 import { answerProviderQuestion, recordDecision, unattendedSession } from "./unattended";
 import { readVision, writeVision } from "./vision";
@@ -440,7 +447,7 @@ export class FactoryService {
   ): Promise<KillSwitchResponse & { changed?: boolean }> {
     if (on && opts.mode === "drain") return this.drain(projectId, opts.drainLimitMin, opts.control);
     if (on) {
-      const changed = this.recordStop(projectId, true, opts.control ?? userControl);
+      const changed = this.recordLoopStop(projectId, true, opts.control ?? userControl);
       return controlResult(
         { on, stoppedSessions: await this.halt(projectId), draining: false, inFlight: 0 },
         opts.control,
@@ -464,7 +471,11 @@ export class FactoryService {
     });
   }
 
-  private recordStop(projectId: string, projectSwitch: boolean, source: ControlSource): boolean {
+  private recordLoopStop(
+    projectId: string,
+    projectSwitch: boolean,
+    source: ControlSource,
+  ): boolean {
     const project = this.deps.projects.get(projectId);
     if (!isFactoryMode(project.autonomyMode)) {
       if (projectSwitch || this.data.loop(projectId)?.drain) this.writeKillSwitch(projectId, true);
@@ -505,7 +516,7 @@ export class FactoryService {
     if (on) {
       if (changed) {
         for (const project of projects) {
-          if (!project.killSwitch) this.recordStop(project.id, false, userControl);
+          if (!project.killSwitch) this.recordLoopStop(project.id, false, userControl);
         }
       }
       const stopped = await Promise.all(projects.map(({ id }) => this.halt(id)));
@@ -678,6 +689,48 @@ export class FactoryService {
     const item = decisions.retry(this.ctx, projectId, itemId, mode, by);
     this.soon(projectId);
     return item;
+  }
+
+  /**
+   * Hold an open issue out of the loop (`hold.ts`): the hold label goes on it and the reason is
+   * recorded with the loop, so it runs after the ticks already queued.
+   */
+  async hold(
+    projectId: string,
+    req: FactoryHoldRequest,
+    by: FactoryHoldBy,
+  ): Promise<FactoryHoldResult> {
+    const res = await this.serialize(projectId, "hold", () =>
+      holdIssue(this.ctx, projectId, req, by),
+    );
+    this.soon(projectId);
+    return res;
+  }
+
+  /** Release a held issue: the label comes off and the loop picks it up on its next tick. */
+  async release(
+    projectId: string,
+    req: FactoryReleaseRequest,
+    by: FactoryHoldBy,
+  ): Promise<FactoryHoldResult> {
+    const res = await this.serialize(projectId, "release", () =>
+      releaseIssue(this.ctx, projectId, req, by),
+    );
+    this.soon(projectId);
+    return res;
+  }
+
+  /**
+   * Before a factory builder or reviewer is stopped with a reason: record the stop on its item, so
+   * the item stops as that call rather than as a failure (`stops.ts`). `stop` null takes it back
+   * (the session couldn't be stopped). Null when the session works on no factory item.
+   */
+  recordStop(
+    projectId: string,
+    sessionId: string,
+    stop: { reason: string; by: FactoryStopBy } | null,
+  ): FactoryItem | null {
+    return recordStop(this.ctx, projectId, sessionId, stop);
   }
 
   /**

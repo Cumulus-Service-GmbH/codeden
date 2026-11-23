@@ -111,7 +111,8 @@ export const ProviderCapabilities = z.object({
   /**
    * `SessionOptions.systemPrompt` reaches the model when the session starts and again on every
    * resume, and stays in force after compaction, so notes such as the token saver (#602) hold for
-   * the whole conversation. False or absent: it may apply only to the first start.
+   * the whole conversation. False or absent: it may reach only the first prompt, so sessions on
+   * the provider get no token saver note.
    */
   systemPrompt: z.boolean().optional(),
 });

@@ -24,7 +24,11 @@ import { ReadOnlyBadge, RoleBadge } from "./role-badge";
 export const roleDraftKey = (role: OrchestrationRole, projectId: string | null) =>
   role === "orchestrator" ? "role:orchestrator" : `role:pm:${projectId}`;
 
-/** The orchestrator or a project's PM session from the snapshot (`roleSessions` first). */
+/**
+ * The orchestrator or a project's PM session from the snapshot (`roleSessions` first). A retired
+ * one (archived when the role moved to another provider, §8.1) doesn't count: the role shows as
+ * not started until its next message starts a fresh session.
+ */
 export function useRoleSession(
   role: OrchestrationRole,
   projectId: string | null,
