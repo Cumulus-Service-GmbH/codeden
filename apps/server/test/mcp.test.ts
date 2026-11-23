@@ -122,6 +122,7 @@ describe("CodeDen MCP endpoint", () => {
       "get_session",
       "start_session",
       "set_session_autonomy",
+      "start_team_run",
       "message_session",
       "answer_question",
       "list_scheduled_runs",

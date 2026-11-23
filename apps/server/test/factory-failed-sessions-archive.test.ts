@@ -155,8 +155,10 @@ describe("failed factory sessions are archived (#411)", () => {
   });
 
   it("archives a reviewer stopped at its usage limit only once a fresh one has started", async () => {
-    env = createFactoryEnv();
-    enable();
+    env = createFactoryEnv({ providers: ["claude", "codex", "gemini"] });
+    enable("dark_factory", {
+      tuning: { builderProvider: "claude", reviewerProvider: "codex", reviewerFallback: "any" },
+    });
     const { id } = await verifying("pending");
     const first = reviewerOf(id);
     hitsUsageLimit(first);

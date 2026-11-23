@@ -21,7 +21,10 @@ const settle = () => new Promise((r) => setImmediate(r));
 
 /** Claude builds; reviews run on OpenCode, falling back to any other provider. */
 function setup(): void {
-  env = createFactoryEnv({ providers: ["claude", "codex", "opencode"] });
+  env = createFactoryEnv({
+    providers: ["claude", "codex", "opencode"],
+    modelVendors: { opencode: "openai" },
+  });
   enable("software_factory", {
     tuning: { builderProvider: "claude", reviewerProvider: "opencode", reviewerFallback: "any" },
   });

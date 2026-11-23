@@ -3,7 +3,13 @@ import { errorMessage } from "../errors";
 import type { SessionRepo } from "../sessions/repo";
 import type { FactoryContext } from "./context";
 import { itemSessionIds, sessionsByWorkKey } from "./item-cost";
-import { isBusy, isFactorySession, LENS_WORK_KEY_PREFIX, SCOUT_WORK_KEY } from "./sessions";
+import {
+  isBusy,
+  isFactorySession,
+  LENS_WORK_KEY_PREFIX,
+  REVIEW_WORK_KEY_PREFIX,
+  SCOUT_WORK_KEY,
+} from "./sessions";
 import { FINISHED_STAGES } from "./store";
 
 /**
@@ -140,7 +146,7 @@ export function archiveFinished(ctx: FactoryContext, projectId: string): void {
 
 /**
  * Archive the earlier sessions (attempts before a retry, replaced reviewers) once none of them
- * is busy. One that ended in failure waits while the item still waits for its replacement
+ * is busy. A reviewer that ended in failure waits while the item still waits for its replacement
  * reviewer (`awaitingReviewer`). Each is handled once: a session restored after stays.
  */
 function archiveEarlier(ctx: FactoryContext, item: FactoryItem): void {
@@ -149,7 +155,11 @@ function archiveEarlier(ctx: FactoryContext, item: FactoryItem): void {
     .filter(archivable);
   if (sessions.some(isBusy)) return;
   const held = new Set(
-    awaitingReviewer(item) ? sessions.filter((s) => endedInFailure(ctx, s)).map((s) => s.id) : [],
+    awaitingReviewer(item)
+      ? sessions
+          .filter((s) => s.workKey.startsWith(REVIEW_WORK_KEY_PREFIX) && endedInFailure(ctx, s))
+          .map((s) => s.id)
+      : [],
   );
   const handled = new Set(item.earlierSessionIds.filter((id) => !held.has(id)));
   if (handled.size === 0) return;
