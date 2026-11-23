@@ -26,7 +26,16 @@ import {
 import { removeTree } from "./remove-tree";
 
 const info = (id: string): ProviderInfo =>
-  ({ id, displayName: id, models: [], capabilities: {} }) as unknown as ProviderInfo;
+  ({
+    id,
+    displayName: id,
+    models: [],
+    capabilities: {
+      readOnly: true,
+      enforcesSecurityRules: true,
+      ...(id === "claude" ? { securityRulesWorktreesOnly: true } : {}),
+    },
+  }) as unknown as ProviderInfo;
 
 export interface RoleEnv {
   roles: RoleSessions;
