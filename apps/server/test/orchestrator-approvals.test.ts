@@ -1,5 +1,5 @@
-import { mkdirSync, symlinkSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { linkSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   type AgentEvent,
   agentEventToNewEvent,
@@ -30,13 +30,7 @@ const caller = (role: ToolCaller["role"]): ToolCaller => ({
 });
 const actor = caller("orchestrator");
 const decision = { decision: "approve", reason: "Reviewed." } as const;
-const cwd = resolve("worktree");
-const ordinary = {
-  kind: "tool_approval" as const,
-  action: "file_change" as const,
-  cwd,
-  paths: ["src/app.ts"],
-};
+const ordinary = { kind: "tool_approval", action: "plan" } as const;
 type Entry = Parameters<typeof classifyApproval>[0];
 
 it.each([
@@ -91,8 +85,9 @@ const refused: Entry[] = [
   { kind: "github_card" },
   { kind: "plan_card", requestedBy: "orchestrator", steps: [pmStep] },
   { kind: "plan_card", requestedBy: "pm", steps: [{ action: "production", args: {} }] },
-  { kind: "tool_approval", action: "command", command: prefix },
-  { kind: "tool_approval", action: "command", reason: prefix },
+  { ...ordinary, command: prefix },
+  { ...ordinary, reason: prefix },
+  { ...ordinary, reason: "A hook asked for approval" },
   { ...ordinary, hookReason: `comment ${prefix}` },
   { ...ordinary, hookReason: `${prefix} ${prefix}` },
   { ...ordinary, hookReason: "" },
@@ -111,77 +106,23 @@ it("classifyApproval handles sensitive actions and delegable approvals", () => {
     delegable: false,
     ownerOnly: "secrets",
   });
-  const delegated: Entry[] = [{ kind: "plan_card", requestedBy: "pm", steps: [pmStep] }];
-  for (const entry of delegated) expect(classifyApproval(entry)).toEqual({ delegable: true });
-});
-
-it.each([
-  ".git/hooks/pre-commit",
-  ".git./hooks/pre-commit",
-  ".GIT /hooks/pre-commit",
-  ".Git/hooks/pre-commit",
-  ".github/workflows/ci.yml",
-  ".husky/pre-commit",
-  ".vscode/tasks.json",
-  ".mcp.json",
-  ".codeden/project.json",
-  ".cursor/rules/project.mdc",
-  ".gemini/settings.json",
-  ".opencode/commands/check.md",
-  ".gitattributes",
-  ".gitmodules",
-  "opencode.json",
-  "OpEnCoDe.JSON. ",
-  "src/.hidden",
-  ".claude/settings.json",
-  ".codex/config.toml",
-  ".ssh/authorized_keys",
-  ".azure/config",
-  ".kube/config",
-  ".aws/config",
-  ".gnupg/config",
-  ".config/app/config",
-  ".env",
-  ".env.local",
-  ".envrc",
-  ".npmrc",
-  ".netrc",
-  ".pgpass",
-  ".zshrc",
-  ".bashrc",
-  ".profile",
-  ".zprofile",
-  ".bash_profile",
-  "~/.claude/settings.json",
-  "../other/file.ts",
-])("classifyApproval keeps file changes to %s owner-only", (path) => {
-  const { service, add } = setup();
-  add("restricted", { paths: ["src/app.ts", path] });
-  expect(service.list().approvals[0]?.delegable).toBe(false);
-});
-
-it.each(["file_path", "path", "notebook_path"])("checks %s alongside listed paths", (key) => {
-  const { service, add } = setup();
-  const outside = add("outside", { toolInput: { [key]: "../other/file.ts" } });
-  const inside = add("inside", { paths: undefined, toolInput: { [key]: "src/app.ts" } });
-  expect(service.list().approvals).toEqual(
-    expect.arrayContaining([
-      expect.objectContaining({ id: outside.id, delegable: false }),
-      expect.objectContaining({ id: inside.id, delegable: true }),
-    ]),
-  );
-});
-
-it("requires at least one path for a file change", () => {
-  const { service, add } = setup();
-  add("no-targets", { paths: undefined });
-  expect(service.list().approvals[0]).toMatchObject({
-    delegable: false,
-    ownerOnly: "unclassified",
+  expect(classifyApproval(ordinary)).toEqual({ delegable: true });
+  expect(classifyApproval({ kind: "plan_card", requestedBy: "pm", steps: [pmStep] })).toEqual({
+    delegable: true,
   });
 });
 
-it("scans listed paths for sensitive text", () => {
+it.each([{ command: "password" }, { hookReason: prefix }])(
+  "classifyApproval leaves a file change with %j unclassified",
+  (context) => {
+    expect(classifyApproval({ ...ordinary, action: "file_change", ...context })).toEqual({
+      delegable: false,
+      ownerOnly: "unclassified",
+    });
+  },
+);
+
+it("scans a plan's listed paths for sensitive text", () => {
   expect(classifyApproval({ ...ordinary, paths: ["src/password.txt"] })).toEqual({
     delegable: false,
     ownerOnly: "secrets",
@@ -241,9 +182,8 @@ function setup(onRespond?: () => void) {
       id: `item-${id}`,
       requestId: `request-${id}`,
       title: `Review ${id}`,
-      action: "file_change",
+      action: "plan",
       cwd: worktree,
-      paths: ["src/app.ts"],
       status: "in_progress",
       options: ["allow_once", "deny"],
       ...patch,
@@ -258,95 +198,56 @@ function setup(onRespond?: () => void) {
   return { ...fixture, services, service: services.orchestratorApprovals, worktree, add };
 }
 
-it.each([
-  "outside target",
-  "absolute outside target",
-  "parent traversal through a link",
-  "outside cwd",
-  "symlink cwd",
-  "unavailable root",
-  "missing root",
-] as const)("leaves a file change with %s to the owner", async (scenario) => {
-  const { dir, worktree, service, add, runnerCalls, store } = setup();
-  const outside = join(dir, "outside");
-  const link = join(worktree, "link");
-  mkdirSync(outside);
-  symlinkSync(outside, link, "junction");
-  const item = {
-    "outside target": { paths: ["link/new/file.ts"] },
-    "absolute outside target": { paths: [join(outside, "file.ts")] },
-    "parent traversal through a link": { paths: ["link/../file.ts"] },
-    "outside cwd": { cwd: outside },
-    "symlink cwd": { cwd: link },
-    "unavailable root": {},
-    "missing root": {},
-  }[scenario];
-  const session =
-    scenario === "missing root"
-      ? { worktreePath: null }
-      : scenario === "unavailable root"
-        ? { worktreePath: join(dir, "removed-worktree") }
-        : {};
-  const { id } = add("unverified", item, session);
-  const head = store.headSeq();
-  expect(service.list().approvals[0]).toMatchObject({
-    id,
-    delegable: false,
-    ownerOnly: "unclassified",
-  });
-  for (const choice of ["approve", "deny"] as const) {
-    await expect(
-      service.decide(actor, { ...decision, id, decision: choice }),
-    ).rejects.toMatchObject({
-      code: "owner_only_approval",
-    });
-  }
-  expect(runnerCalls).toEqual([]);
-  expect(store.headSeq()).toBe(head);
-});
-
-it.each(["restricted target", "dangling link", "nested cwd target"] as const)(
-  "leaves a file change through a %s symlink to the owner",
-  (scenario) => {
-    const { dir, worktree, service, add } = setup();
-    const hidden = join(worktree, ".hidden");
-    const nested = join(worktree, "nested");
-    mkdirSync(hidden);
-    mkdirSync(nested);
-    const cwd = scenario === "nested cwd target" ? nested : worktree;
-    const destination = scenario === "restricted target" ? hidden : join(dir, "outside");
-    if (scenario === "nested cwd target") mkdirSync(destination);
-    symlinkSync(destination, join(cwd, "link"), "junction");
-    add("linked", { cwd, paths: ["link/file.ts"] });
-    expect(service.list().approvals[0]).toMatchObject({
-      delegable: false,
-      ownerOnly: "unclassified",
-    });
-  },
-);
-
-it("delegates new files inside the worktree with an optional cwd", () => {
-  const { worktree, service, add } = setup();
-  const nested = join(worktree, "nested");
-  mkdirSync(nested);
-  add("relative", { cwd: undefined, paths: ["new/dir/app.ts"] });
-  add("absolute", { cwd: nested, paths: [join(worktree, "src", "app.ts")] });
-  add("plan", { action: "plan", paths: undefined });
-  expect(service.list().approvals.map(({ delegable }) => delegable)).toEqual([true, true, true]);
-});
-
-it("leaves a tool plan without a worktree to the owner", () => {
-  const { service, add } = setup();
-  add("plan", { action: "plan", paths: undefined }, { worktreePath: null });
-  expect(service.list().approvals[0]).toMatchObject({
-    delegable: false,
-    ownerOnly: "unclassified",
-  });
+describe.each([
+  "a clean in-worktree file",
+  "a symlink",
+  "a hardlink",
+  "opencode.jsonc",
+  "no cwd",
+  "patch-text targets",
+] as const)("file change with %s", (scenario) => {
+  it.each(["approve", "deny"] as const)(
+    "decide_approval refuses %s without side effects",
+    async (choice) => {
+      const { dir, worktree, services, service, add, runnerCalls, store } = setup();
+      const outside = join(dir, "outside");
+      mkdirSync(outside);
+      writeFileSync(join(outside, "file.ts"), "");
+      writeFileSync(join(worktree, "app.ts"), "");
+      symlinkSync(outside, join(worktree, "linked"), "junction");
+      linkSync(join(outside, "file.ts"), join(worktree, "shared.ts"));
+      const patch: Partial<ItemOf<"approval_request">> = {
+        "a clean in-worktree file": {},
+        "a symlink": { paths: ["linked/file.ts"] },
+        "a hardlink": { paths: ["shared.ts"] },
+        "opencode.jsonc": { paths: ["opencode.jsonc"] },
+        "no cwd": { cwd: undefined },
+        "patch-text targets": {
+          toolInput: {
+            patch: "*** Begin Patch\n*** Add File: notes.txt\n+Notes\n*** End Patch",
+          },
+        },
+      }[scenario];
+      const { id } = add("edit", { action: "file_change", paths: ["app.ts"], ...patch });
+      const head = store.headSeq();
+      expect(
+        await services.tools.call("decide_approval", { ...decision, id, decision: choice }, actor),
+      ).toEqual({ isError: true, text: "This approval requires the owner (unclassified)" });
+      expect(service.list().approvals[0]).toMatchObject({
+        id,
+        delegable: false,
+        ownerOnly: "unclassified",
+      });
+      expect(runnerCalls).toEqual([]);
+      expect(store.headSeq()).toBe(head);
+    },
+  );
 });
 
 it("lists two projects with transcript context and redacts nested secrets", () => {
   const { service, add, localProject, githubProject } = setup();
   const local = add("local", {
+    action: "file_change",
     command: `echo ${secret}`,
     reason: `Review ${secret}`,
     hookReason: `${prefix} Review ${secret}`,
@@ -379,10 +280,10 @@ it.each([
   ["approve", "allow_once", "approved"],
   ["deny", "deny", "denied"],
 ] as const)(
-  "%s delegates to the runner and records one audit batch",
+  "%s delegates a plan without a cwd or worktree and records one audit batch",
   async (choice, responseDecision, past) => {
     const { service, add, services, store, runnerCalls } = setup();
-    const target = add("safe");
+    const target = add("safe", { cwd: undefined }, { worktreePath: null });
     const reason = `Reviewed ${secret}`;
     const batches: string[][] = [];
     store.subscribe((events) => batches.push(events.map(({ type }) => type)));
