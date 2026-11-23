@@ -36,7 +36,7 @@ const teams: ProjectTeams = {
       model: `${id}-${role}`,
       effort: "low",
     })),
-    limits: { maxParallel: index + 1, maxAssignments: 2, maxRounds: 2 },
+    limits: { maxParallel: index + 1, maxAssignments: 3, maxRounds: 2 },
   })),
 };
 
@@ -44,6 +44,7 @@ function setup(
   save: (run: TeamRun) => void = () => {},
   initial: TeamRun[] = [],
   criteria?: string[],
+  itemIds = ["a", "b"],
 ) {
   const merge = vi.fn(
     async (): Promise<{ conflict?: string; needsResolution?: boolean }> => ({
@@ -85,7 +86,7 @@ function setup(
         "checklistId" in request && request.checklistId === "approved"
           ? {
               revision: "approved-v1",
-              items: ["a", "b"].map((id) => ({ id, text: id, dependsOn: [], criteria })),
+              items: itemIds.map((id) => ({ id, text: id, dependsOn: [], criteria })),
             }
           : undefined,
       configuration: () => ({ teams, defaults: [] }),
@@ -136,6 +137,41 @@ it("uses the selected Team's models and dispatch cap", async () => {
   expect(build.workers.map((worker) => worker.status)).toEqual(["running", "queued"]);
   expect(release.workers.map((worker) => worker.status)).toEqual(["running", "running"]);
   expect(release.workers[0]?.branch).not.toEqual(release.workers[1]?.branch);
+});
+
+it("creates one worker per plan item, each on its own branch and checkout off the assembler branch, with at most maxParallel running", async () => {
+  const itemIds = ["a", "b", "c"];
+  const save = vi.fn(
+    (run: TeamRun) => run.workers.filter(({ status }) => status === "running").length,
+  );
+  const { runs, launch, merge } = setup(save, [], undefined, itemIds);
+  merge.mockResolvedValue({});
+
+  const run = await runs.start("project", { teamId: "release", checklistId: "approved" });
+  expect(run.limits.maxParallel).toBe(2);
+  expect(run.workers.map(({ itemId }) => itemId)).toEqual(itemIds);
+  expect(run.workers.map(({ status }) => status)).toEqual(["running", "running", "queued"]);
+  expect(launch.mock.calls.filter(([member]) => member.role === "writer")).toHaveLength(2);
+
+  const next = await runs.finish(run.id, run.workers[0]?.sessionId ?? "", null);
+  expect(next.workers.map(({ status }) => status)).toEqual(["completed", "running", "running"]);
+  expect(Math.max(...save.mock.results.map(({ value }) => value))).toBe(2);
+
+  const assignments = launch.mock.calls.filter(([member]) => member.role === "writer");
+  expect(assignments.map(([, , base, , item]) => [base, item?.id])).toEqual(
+    itemIds.map((id) => [run.assembler, id]),
+  );
+  for (const worker of next.workers) {
+    expect(worker).toMatchObject({
+      branch: expect.any(String),
+      worktree: expect.any(String),
+      baseHead: "b".repeat(40),
+    });
+    expect(worker.branch).not.toBe(run.assembler);
+    expect(worker.worktree).not.toBe(run.assemblerWorktree);
+  }
+  expect(new Set(next.workers.map(({ branch }) => branch)).size).toBe(3);
+  expect(new Set(next.workers.map(({ worktree }) => worktree)).size).toBe(3);
 });
 
 it("keeps merge conflicts waiting and sends typed coordination", async () => {
