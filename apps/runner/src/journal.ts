@@ -208,6 +208,7 @@ export class Journal {
       // A partial write can contain whole records. Only restart may recover their sequence
       // numbers from disk. Stop writing and compacting until then.
       this.appendError = error instanceof Error ? error : new Error(String(error));
+      this.cancelPersist();
       this.opts.onAppendError?.(this.appendError);
       throw this.appendError;
     }
@@ -224,7 +225,7 @@ export class Journal {
 
   /** Acknowledge everything with `seq <= seq` (cumulative ack). */
   ack(seq: number): void {
-    if (this.handedOver) return;
+    if (this.handedOver || this.appendError) return;
     const upTo = Math.min(seq, this.state.lastSeq);
     if (upTo <= this.state.ackedSeq) return;
     this.state.ackedSeq = upTo;
@@ -258,8 +259,7 @@ export class Journal {
     this.flushTimer = undefined;
     this.pending = [];
     this.pendingBytes = 0;
-    if (this.persistTimer) clearTimeout(this.persistTimer);
-    this.persistTimer = undefined;
+    this.cancelPersist();
   }
 
   private advanceHead(ackedSeq: number): void {
@@ -290,16 +290,19 @@ export class Journal {
     this.persistTimer.unref();
   }
 
+  private cancelPersist(): void {
+    if (this.persistTimer) clearTimeout(this.persistTimer);
+    this.persistTimer = undefined;
+  }
+
   /**
    * Write the acked position, then compact when it is due (`all`: whenever anything is acked).
    * State first, so `lastSeq` outlives the events the compaction drops.
    */
   private persist(all: boolean): void {
-    if (this.persistTimer) clearTimeout(this.persistTimer);
-    this.persistTimer = undefined;
+    this.cancelPersist();
     if (!this.handedOver && !this.owned()) this.handOver();
-    if (this.handedOver) return;
-    if (this.appendError) throw this.appendError;
+    if (this.handedOver || this.appendError) return;
     this.writeState(this.state);
     if (all ? this.head > 0 : this.compactDue()) this.compact();
   }

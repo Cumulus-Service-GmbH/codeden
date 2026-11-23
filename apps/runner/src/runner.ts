@@ -184,8 +184,13 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
       handOver();
       return;
     }
-    if (event.kind === "agent" && event.event.type === "item.delta") journal.queueDelta(event);
-    else journal.append(event);
+    try {
+      if (event.kind === "agent" && event.event.type === "item.delta") journal.queueDelta(event);
+      else journal.append(event);
+    } catch (error) {
+      // onAppendError has already scheduled recovery. Let it close the running sessions.
+      if (!stopped) throw error;
+    }
   };
   // Every durable event goes through the batcher: streamed deltas wait briefly to be merged,
   // and any other event journals the batches it follows first, so order is kept.

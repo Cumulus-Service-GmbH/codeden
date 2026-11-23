@@ -121,6 +121,7 @@ it("refuses further writes after a torn batch and recovers its complete prefix o
   expect(reopened.after(0).map((event) => event.seq)).toEqual([1]);
   expect(reopened.append(draining("recovered")).seq).toBe(2);
   reopened.close();
+  expect(new Journal(dir).after(0).map((event) => event.seq)).toEqual([1, 2]);
 });
 
 it("replays persisted records first and sends pending deltas once the runner attaches", async () => {
@@ -280,6 +281,23 @@ describe("Journal acks", () => {
   });
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("cancels ack persistence and ignores late acks after an append error", () => {
+    const dir = join(home, "failed-append-acks");
+    const journal = new Journal(dir, { compactEntries: 1 });
+    journal.append(draining("one"));
+    journal.append(draining("two"));
+    journal.ack(1);
+    expect(vi.getTimerCount()).toBe(1);
+
+    io.tearNextAppend = true;
+    expect(() => journal.append(draining("three"))).toThrow("simulated torn append");
+    expect(vi.getTimerCount()).toBe(0);
+    journal.ack(2);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(journal.after(0).map((event) => event.seq)).toEqual([2]);
+    expect(stateOf(dir)).toMatchObject({ lastSeq: 0, ackedSeq: 0 });
   });
 
   it("do not rewrite the journal and its state on every ack", () => {
