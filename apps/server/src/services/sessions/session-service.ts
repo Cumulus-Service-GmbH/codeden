@@ -46,6 +46,7 @@ import {
 } from "../runner-port";
 import type { UtilityService } from "../utility";
 import type { SessionAdmission } from "./admission";
+import { assertProjectActive, inArchivedProject } from "./archived-project";
 import { assertAutonomy } from "./autonomy-policy";
 import { freezeChecks, roundAfter, withRound } from "./checks";
 import { compactingRefusal, compactionRunning, compactRefusal, startCompaction } from "./compact";
@@ -576,6 +577,7 @@ export class SessionService {
     from: QueueSender = "user",
   ): Promise<SendMessageResponse> {
     const session = this.deps.repo.get(id);
+    assertProjectActive(this.deps.projects, session);
     assertRoleWritable(session);
     this.assertForcedProvider(session);
     if (NOT_STARTED.has(session.status)) return this.enqueue(id, req.input, from);
@@ -657,6 +659,7 @@ export class SessionService {
     source: QueueSender | QueuedMessage = "user",
   ): Promise<"steered" | "queued"> {
     const session = this.deps.repo.get(id);
+    assertProjectActive(this.deps.projects, session);
     this.assertForcedProvider(session);
     if (!BUSY.has(session.status)) throw conflict("No turn is running", "no_turn");
     const capabilities = this.provider(session.provider, id)?.capabilities;
@@ -746,6 +749,7 @@ export class SessionService {
    */
   async compact(id: string): Promise<CompactSessionResponse> {
     const session = this.deps.repo.get(id);
+    assertProjectActive(this.deps.projects, session);
     this.assertForcedProvider(session);
     const refusal = compactRefusal(session, this.provider(session.provider, id), {
       delivering: this.delivering.has(id),
@@ -839,7 +843,8 @@ export class SessionService {
       !this.holds.isHeld(session.id) &&
       !this.delivering.has(session.id) &&
       !this.priorityWaits.has(session.id) &&
-      FLUSHABLE.has(session.status)
+      FLUSHABLE.has(session.status) &&
+      !inArchivedProject(this.deps.projects, session)
     );
   }
 
@@ -950,6 +955,7 @@ export class SessionService {
   async continueAfterRestart(id: string, text: string): Promise<void> {
     if (this.delivering.has(id)) return;
     const session = this.deps.repo.get(id);
+    if (inArchivedProject(this.deps.projects, session)) return;
     const input: UserInput = { text, attachments: [], from: "codeden" };
     if (this.deps.repo.find(id)?.startMeta?.admission) return;
     if (!this.reserve(session)) {
