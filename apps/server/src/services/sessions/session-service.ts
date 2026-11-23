@@ -244,7 +244,7 @@ export class SessionService {
       workspaceFallback: null,
       forced,
       queuedBehind,
-      // A pending start keeps its pasted images as artifacts, like a queued message.
+      // A pending start keeps its pasted images and files as artifacts, like a queued message.
       pending: queued
         ? { input: req.input && this.externalize(session, req.input), workspace }
         : null,
@@ -682,7 +682,7 @@ export class SessionService {
     return { status: "queued" };
   }
 
-  /** Pasted images saved as artifacts: the form CodeDen stores (queued messages). */
+  /** Pasted images and files saved as artifacts: the form CodeDen stores (queued messages). */
   private externalize(session: Session, input: UserInput): UserInput {
     return this.deps.artifacts.externalizeAttachments(input, {
       sessionId: session.id,
@@ -690,9 +690,15 @@ export class SessionService {
     });
   }
 
-  /** Input handed to the runner: artifacts resolved to the file paths providers read. */
+  /**
+   * Input handed to the runner: artifacts resolved to the file paths providers read, only the
+   * session's own (and its project's shared ones, from a conflicting start).
+   */
   private forRunner(session: Session, input: UserInput): UserInput {
-    return this.deps.artifacts.resolveAttachments(this.externalize(session, input));
+    return this.deps.artifacts.resolveAttachments(this.externalize(session, input), {
+      sessionId: session.id,
+      projectId: session.projectId,
+    });
   }
 
   private launchInBackground(
