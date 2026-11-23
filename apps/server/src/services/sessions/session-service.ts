@@ -63,6 +63,7 @@ import {
   supervisedUnsupported,
 } from "./permissions";
 import { deliverPriority } from "./priority-delivery";
+import { autoOrder } from "./provider-order";
 import type { QuestionBroker, ResponseActor } from "./questions";
 import { applyPendingConfig, assertConfigRevision, updateSession } from "./reconfigure";
 import { type AutonomyAudit, emptyStartMeta, type SessionRepo, type StoredStartMeta } from "./repo";
@@ -104,9 +105,6 @@ export interface CheckRuns {
   /** Whether checks are running for the session now. */
   isRunning(sessionId: string): boolean;
 }
-
-/** Preferred providers when the choice is `auto` (first ready one wins). */
-const AUTO_ORDER = ["claude", "codex", "opencode", "cursor", "gemini", "antigravity"];
 
 const BUSY = new Set(["running", "waiting"]);
 /** Messages from these senders can start a turn without a global session slot. */
@@ -1183,8 +1181,7 @@ export class SessionService {
     }
     const configured = this.configuredProvider(req.role, projectDefault);
     if (configured) return configured;
-    const auto = [...AUTO_ORDER, ...available].find((id) => available.includes(id));
-    return auto ?? "claude";
+    return autoOrder(available)[0] ?? "claude";
   }
 
   /** PM and orchestrator choices take precedence over the project default. */
