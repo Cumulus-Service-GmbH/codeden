@@ -1,7 +1,7 @@
 import { join } from "node:path";
 import type { FactoryItem, JevReceipt, Project, ReviewVerdict } from "@codeden/contracts";
 import { jevNext, jevPasses, runJevDone, sha256 } from "../review-jev";
-import { withVerdictHead } from "./approval";
+import { verdictHead, withVerdictHead } from "./approval";
 import { baseBranchOf, type FactoryContext, raiseInbox } from "./context";
 import { trackedHead } from "./rebase";
 import { isBusy } from "./sessions";
@@ -109,9 +109,11 @@ export async function advanceJev(
   // A branch update can carry forward review approval. The tests and done receipt still
   // need to cover the new SHA, even if the update introduced no PR changes.
   if (
+    !receipt &&
     !usesVerificationEvidence(item) &&
-    item.jev?.status === "pass" &&
-    item.jev.head !== head &&
+    item.review?.verdict === "approve" &&
+    verdictHead(item) === head &&
+    (item.review.jevEvidence || item.jev?.status === "pass") &&
     item.review?.jevEvidence?.head !== head
   ) {
     const started = await startReviewer(

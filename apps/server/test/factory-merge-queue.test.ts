@@ -1,7 +1,6 @@
-import { createHash } from "node:crypto";
-import { writeFile } from "node:fs/promises";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
+import { installDoneFixture, jevEvidence, sha } from "./support/factory-jev-fixture";
 import { APPROVE, factorySteps } from "./support/factory-steps";
 
 /**
@@ -19,51 +18,12 @@ const { item, tick, later, lastMessageTo, enable, verifying, review } = factoryS
 const prEntry = async (itemId: string) =>
   (await env.factory.status(env.project.id)).pullRequests.find((p) => p.itemId === itemId);
 
-const sha = (label: string) => createHash("sha1").update(label).digest("hex");
-
-function installDoneFixture() {
-  const openPr = env.gh.openPr.bind(env.gh);
-  vi.spyOn(env.gh, "openPr").mockImplementation((opts) => {
-    const pr = openPr(opts);
-    pr.headSha = sha(pr.headSha ?? "");
-    return pr;
-  });
-  const update = env.gh.updateBranch.bind(env.gh);
-  vi.spyOn(env.gh, "updateBranch").mockImplementation(async (...args) => {
-    await update(...args);
-    const pr = env.gh.prs.get(args[1]);
-    if (pr?.headSha) pr.headSha = sha(pr.headSha);
-  });
-  const exec = env.factory.ctx.exec;
-  env.factory.ctx.exec = async (command, args, opts) => {
-    const result = await exec(command, args, opts);
-    if (command === "git" && args.includes("merge-base")) {
-      return { ...result, stdout: sha("base") };
-    }
-    if (command !== process.execPath || args[1] !== "done") return result;
-    const stdout = JSON.stringify({
-      gate: "done",
-      pass: true,
-      verdict: "proceed",
-      reasons: [],
-      inputSha256: "1234567890abcdef",
-    });
-    await writeFile(args[4] ?? "", stdout);
-    return { ...result, stdout };
-  };
-}
-
 async function reviewWithEvidence(id: string, head: string | null, summary = APPROVE.summary) {
   if (!head) throw new Error("The test PR has no head.");
   const result = await review(id, {
     ...APPROVE,
     summary,
-    jevEvidence: {
-      head,
-      tests: [
-        "VITEST_MAX_WORKERS=2 pnpm -s vitest run --reporter=verbose test/counter.test.ts | grep -iE 'increments'\n✓ Counter increments\n Test Files  1 passed (1)\n Tests  1 passed (1)",
-      ],
-    },
+    jevEvidence: jevEvidence(head),
   });
   const reviewer = item(id).reviewerSessionId;
   if (reviewer) await env.setStatus(reviewer, "idle");
@@ -79,7 +39,7 @@ function pause() {
 describe("the merge queue", () => {
   it("re-tests approved PRs one at a time under the strict policy, oldest approved first", async () => {
     env = createFactoryEnv({ limits: { mergePolicy: "strict" } });
-    installDoneFixture();
+    installDoneFixture(env);
     await enable();
     const a = await verifying("success", "Add a counter", 3);
     const b = await verifying("success", "Add a timer", 4);
@@ -125,7 +85,7 @@ describe("the merge queue", () => {
 
   it("has the reviewer re-check only the resolution after an agent rebased an approved PR", async () => {
     env = createFactoryEnv();
-    installDoneFixture();
+    installDoneFixture(env);
     await enable();
     const { id, pr, builder } = await verifying("pending");
     await reviewWithEvidence(id, pr.headSha);
