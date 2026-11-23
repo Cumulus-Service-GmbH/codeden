@@ -1,13 +1,15 @@
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import {
   type AgentEvent,
   agentEventToNewEvent,
   type ItemOf,
   McpTokenClaims,
 } from "@codeden/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ToolCaller } from "../src/mcp/registry";
 import { ensureHome } from "../src/paths";
+import { inboxRoutes } from "../src/routes/inbox";
+import { sessionRoutes } from "../src/routes/sessions";
 import { createServices } from "../src/services/container";
 import { classifyApproval } from "../src/services/orchestrator-approvals";
 import type { RunnerPort } from "../src/services/runner-port";
@@ -26,7 +28,13 @@ const caller = (role: ToolCaller["role"]): ToolCaller => ({
 });
 const actor = caller("orchestrator");
 const decision = { decision: "approve", reason: "Reviewed." } as const;
-const ordinary = { kind: "tool_approval", action: "file_change" } as const;
+const cwd = resolve("worktree");
+const ordinary = {
+  kind: "tool_approval" as const,
+  action: "file_change" as const,
+  cwd,
+  paths: ["src/app.ts"],
+};
 type Entry = Parameters<typeof classifyApproval>[0];
 
 it.each([
@@ -74,6 +82,7 @@ const refused: Entry[] = [
   { ...ordinary, reason: "Claude in Chrome uses your browser" },
   { ...ordinary, singleUse: true },
   { ...ordinary, hookAsk: true },
+  { ...ordinary, action: "outside_worktree", command: "echo password" },
   { kind: "question" },
   { kind: "checklist_approval" },
   { kind: "spec_approval" },
@@ -102,11 +111,62 @@ it("classifyApproval handles sensitive actions and delegable approvals", () => {
   });
   const delegated: Entry[] = [
     ordinary,
-    { ...ordinary, action: "outside_worktree" },
+    { ...ordinary, paths: [resolve(cwd, "src/app.ts")] },
     { ...ordinary, action: "plan" },
     { kind: "plan_card", requestedBy: "pm", steps: [pmStep] },
   ];
   for (const entry of delegated) expect(classifyApproval(entry)).toEqual({ delegable: true });
+});
+
+it.each([
+  ".git/hooks/pre-commit",
+  ".claude/settings.json",
+  ".codex/config.toml",
+  ".ssh/authorized_keys",
+  ".azure/config",
+  ".kube/config",
+  ".aws/config",
+  ".gnupg/config",
+  ".config/app/config",
+  ".env",
+  ".env.local",
+  ".envrc",
+  ".npmrc",
+  ".netrc",
+  ".pgpass",
+  ".zshrc",
+  ".bashrc",
+  ".profile",
+  ".zprofile",
+  ".bash_profile",
+  "~/.claude/settings.json",
+  "../other/file.ts",
+  resolve(cwd, "../worktree-link/src/app.ts"),
+])("classifyApproval keeps file changes to %s owner-only", (path) => {
+  expect(classifyApproval({ ...ordinary, paths: ["src/app.ts", path] }).delegable).toBe(false);
+});
+
+it.each(["file_path", "path", "notebook_path"])("checks %s alongside listed paths", (key) => {
+  expect(
+    classifyApproval({ ...ordinary, toolInput: { [key]: "../other/file.ts" } }).delegable,
+  ).toBe(false);
+  expect(
+    classifyApproval({ ...ordinary, paths: undefined, toolInput: { [key]: "src/app.ts" } }),
+  ).toEqual({ delegable: true });
+});
+
+it.each([{ paths: undefined }, { cwd: undefined }])("requires paths and cwd (%j)", (patch) => {
+  expect(classifyApproval({ ...ordinary, ...patch })).toEqual({
+    delegable: false,
+    ownerOnly: "unclassified",
+  });
+});
+
+it("scans listed paths for sensitive text", () => {
+  expect(classifyApproval({ ...ordinary, paths: ["src/password.txt"] })).toEqual({
+    delegable: false,
+    ownerOnly: "secrets",
+  });
 });
 
 let env: ReturnType<typeof createGithubEnv> | undefined;
@@ -115,7 +175,7 @@ afterEach(async () => {
   env = undefined;
 });
 
-function setup() {
+function setup(onRespond?: () => void) {
   const fixture = createGithubEnv();
   env = fixture;
   const paths = ensureHome(join(fixture.dir, "home"));
@@ -127,6 +187,7 @@ function setup() {
     waitForConnection: async () => true,
     request: (async (command: Parameters<RunnerPort["request"]>[0]) => {
       fixture.runnerCalls.push(command);
+      if (command.name === "session.respond") onRespond?.();
       return {};
     }) as RunnerPort["request"],
   };
@@ -143,9 +204,10 @@ function setup() {
     id: string,
     patch: Partial<ItemOf<"approval_request">> = {},
     projectId = fixture.localProject.id,
+    parentSessionId: string | null = null,
   ) => {
     const sessionId = `session-${id}`;
-    fixture.addSession({ id: sessionId, projectId, scope: { projectId } });
+    fixture.addSession({ id: sessionId, projectId, scope: { projectId }, parentSessionId });
     const emit = (event: AgentEvent) => agentEventToNewEvent(sessionId, event);
     const item: ItemOf<"approval_request"> = {
       kind: "approval_request",
@@ -153,6 +215,8 @@ function setup() {
       requestId: `request-${id}`,
       title: `Review ${id}`,
       action: "file_change",
+      cwd,
+      paths: ["src/app.ts"],
       status: "in_progress",
       options: ["allow_once", "deny"],
       ...patch,
@@ -257,6 +321,114 @@ it.each([
         },
       }),
     );
+  },
+);
+
+it.each(["orchestrator", "child", "grandchild"] as const)(
+  "refuses an approval from the %s session",
+  async (name) => {
+    const { service, add, store, runnerCalls, localProject } = setup();
+    const own = add("orchestrator");
+    const child = add("child", {}, localProject.id, own.sessionId);
+    const grandchild = add("grandchild", {}, localProject.id, child.sessionId);
+    const { id } = { orchestrator: own, child, grandchild }[name];
+    const head = store.headSeq();
+    for (const choice of ["approve", "deny"] as const) {
+      await expect(
+        service.decide(actor, { ...decision, id, decision: choice }),
+      ).rejects.toMatchObject({
+        code: "owner_only_approval",
+        message: "This approval requires the owner (unclassified)",
+      });
+    }
+    expect(runnerCalls).toEqual([]);
+    expect(store.headSeq()).toBe(head);
+  },
+);
+
+it.each(["missing-parent", "deep"])("refuses an approval with %s ancestry", async (name) => {
+  const { service, add, addSession, runnerCalls, localProject } = setup();
+  let parent = addSession({ parentSessionId: null });
+  for (let depth = 0; depth < 20; depth++) {
+    parent = addSession({ parentSessionId: parent.id });
+  }
+  const { id } = add(name, {}, localProject.id, name === "deep" ? parent.id : "unknown-parent");
+  await expect(service.decide(actor, { ...decision, id })).rejects.toMatchObject({
+    code: "owner_only_approval",
+    message: "This approval requires the owner (unclassified)",
+  });
+  expect(runnerCalls).toEqual([]);
+});
+
+it("closes the request and rethrows when the audit append fails after responding", async () => {
+  const { service, add, services, store, runnerCalls } = setup();
+  const target = add("audit-failure");
+  const failure = new Error("Audit append failed");
+  vi.spyOn(store, "appendFrom").mockImplementationOnce(() => {
+    throw failure;
+  });
+
+  await expect(service.decide(actor, { ...decision, id: target.id })).rejects.toBe(failure);
+  expect(runnerCalls).toHaveLength(1);
+  expect(store.listTypes(["approval.decided_by_orchestrator"])).toEqual([]);
+  expect(services.inbox.find(target.id)).toMatchObject({
+    status: "resolved",
+    resolution: { ...decision, decidedBy: "orchestrator", auditFailed: true },
+  });
+});
+
+it("preserves the owner's resolution written during respond", async () => {
+  const ownerResolution = { decision: "deny", decidedBy: "user" };
+  const { service, services, add, store } = setup(() =>
+    services.inbox.close(services.inbox.get(target.id), "resolved", ownerResolution),
+  );
+  const target = add("owner-resolved");
+
+  await service.decide(actor, { ...decision, id: target.id });
+
+  expect(services.inbox.get(target.id).resolution).toEqual(ownerResolution);
+  expect(store.listTypes(["approval.decided_by_orchestrator"])).toHaveLength(1);
+  expect(store.listTypes(["inbox.updated"])).toHaveLength(1);
+});
+
+const claimedOrchestrator = {
+  kind: "approval",
+  decision: "allow_once",
+  decidedBy: "orchestrator",
+} as const;
+
+it("closes the inbox on respond unless explicitly deferred by the internal caller", async () => {
+  const { add, services } = setup();
+  const target = add("direct-response");
+  await services.sessions.respond(target.sessionId, {
+    requestId: target.item.requestId,
+    response: claimedOrchestrator,
+  });
+  expect(services.inbox.get(target.id).status).toBe("resolved");
+});
+
+it.each(["session", "inbox"])(
+  "the %s route stamps a claimed orchestrator response as the user's",
+  async (route) => {
+    const { add, services, runnerCalls } = setup();
+    const target = add("route-response");
+    const app = route === "session" ? sessionRoutes(services, "token") : inboxRoutes(services);
+    const path = route === "session" ? `/${target.sessionId}/respond` : `/${target.id}/resolve`;
+    const response = await app.request(path, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ requestId: target.item.requestId, response: claimedOrchestrator }),
+    });
+
+    expect(response.status).toBe(200);
+    const asUser = { decision: "allow_once", decidedBy: "user" };
+    expect(runnerCalls).toContainEqual(
+      expect.objectContaining({
+        name: "session.respond",
+        response: { kind: "approval", ...asUser },
+      }),
+    );
+    expect(services.inbox.get(target.id)).toMatchObject({ status: "resolved", resolution: asUser });
   },
 );
 
@@ -382,7 +554,8 @@ it("lists and calls both MCP tools only as the orchestrator", async () => {
 it.each(["approve", "deny"] as const)(
   "can %s a PM tier-0 card while its own card stays open",
   async (choice) => {
-    const { service, services, store, localProject } = setup();
+    const { service, services, store, localProject, addSession } = setup();
+    addSession({ id: "session-pm" });
     const card = services.decisions.raise(
       { ...caller("pm"), projectId: localProject.id },
       localProject.id,
