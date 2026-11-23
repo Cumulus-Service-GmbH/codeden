@@ -112,15 +112,20 @@ it("classifyApproval handles sensitive actions and delegable approvals", () => {
   });
 });
 
-it.each([{ command: "password" }, { hookReason: prefix }])(
-  "classifyApproval leaves a file change with %j unclassified",
-  (context) => {
-    expect(classifyApproval({ ...ordinary, action: "file_change", ...context })).toEqual({
-      delegable: false,
-      ownerOnly: "unclassified",
-    });
-  },
-);
+it.each([
+  [{ command: "password" }, "secrets"],
+  [{ hookReason: prefix }, "prd_db"],
+] as const)("classifyApproval reports a file change with %j as %s", (context, ownerOnly) => {
+  expect(classifyApproval({ ...ordinary, action: "file_change", ...context })).toEqual({
+    delegable: false,
+    ownerOnly,
+  });
+});
+
+const planInputs: Record<string, string>[] = [{}, { plan: "Update the README" }];
+it.each(planInputs)("delegates a plan with empty paths and plan input %j", (toolInput) => {
+  expect(classifyApproval({ ...ordinary, paths: [], toolInput })).toEqual({ delegable: true });
+});
 
 it("scans a plan's listed paths for sensitive text", () => {
   expect(classifyApproval({ ...ordinary, paths: ["src/password.txt"] })).toEqual({
@@ -197,6 +202,41 @@ function setup(onRespond?: () => void) {
   };
   return { ...fixture, services, service: services.orchestratorApprovals, worktree, add };
 }
+
+describe.each<[string, Partial<ItemOf<"approval_request">>]>([
+  ["a plan with a command", { command: "echo hello" }],
+  ["a plan with an empty command", { command: "" }],
+  ["a plan with paths", { paths: ["README.md"] }],
+  ["a plan with file_path input", { toolInput: { file_path: "README.md" } }],
+  ["a plan with content input", { toolInput: { content: "Hello" } }],
+  ["a plan with patch input", { toolInput: { patch: "Update the README" } }],
+  ["a plan with command input", { toolInput: { command: "echo hello" } }],
+  ["a plan with allowedPrompts input", { toolInput: { allowedPrompts: [] } }],
+  ["a plan with an unknown input key", { toolInput: { plan: "Update the README", extra: true } }],
+  ["a plan with null input", { toolInput: null }],
+  ["a plan with array input", { toolInput: [] }],
+  ["a plan with string input", { toolInput: "Update the README" }],
+  ["a clean command action", { action: "command", command: "echo hello" }],
+])("%s", (_scenario, patch) => {
+  it.each(["approve", "deny"] as const)(
+    "decide_approval refuses %s without side effects",
+    async (choice) => {
+      const { add, service, services, store, runnerCalls } = setup();
+      const { id } = add("owner-only", patch);
+      const head = store.headSeq();
+      expect(
+        await services.tools.call("decide_approval", { ...decision, id, decision: choice }, actor),
+      ).toEqual({ isError: true, text: "This approval requires the owner (unclassified)" });
+      expect(service.list().approvals[0]).toMatchObject({
+        id,
+        delegable: false,
+        ownerOnly: "unclassified",
+      });
+      expect(runnerCalls).toEqual([]);
+      expect(store.headSeq()).toBe(head);
+    },
+  );
+});
 
 describe.each([
   "a clean in-worktree file",
