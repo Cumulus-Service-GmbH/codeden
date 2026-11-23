@@ -3,6 +3,7 @@ import { expect, it, vi } from "vitest";
 import { TechDebtBadge } from "@/components/project/tech-debt-badge";
 import { Sidebar } from "@/components/shell/sidebar/sidebar";
 import { createMockClient } from "@/lib/api/mock";
+import { router } from "@/router";
 import { TechDebtPage } from "@/routes/tech-debt";
 import { renderWithClient } from "./utils";
 
@@ -37,4 +38,11 @@ it("links to Tech debt from the sidebar", async () => {
   expect((await screen.findByRole("link", { name: "Tech debt" })).getAttribute("href")).toBe(
     "/tech-debt",
   );
+});
+
+it.each(["tech_debt", "tech-debt"])("opens the project ledger for tab=%s", (tab) => {
+  const match = router
+    .matchRoutes("/projects/project-1", { tab })
+    .find((route) => route.routeId === "/shell/projects/$projectId");
+  expect(match?.search).toMatchObject({ tab: "tech-debt" });
 });
