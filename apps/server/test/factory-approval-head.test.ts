@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { reviewedHead, settleApproval, verdictHead } from "../src/services/factory/approval";
 import { recheckOf, recheckSentFor } from "../src/services/factory/recheck";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
-import { installDoneFixture, jevEvidence, sha } from "./support/factory-jev-fixture";
+import { installDoneFixture, jevEvidence, reviewTeam, sha } from "./support/factory-jev-fixture";
 import { APPROVE, factorySteps } from "./support/factory-steps";
 import type { FakePr } from "./support/fake-factory-github";
 
@@ -196,7 +196,7 @@ describe("an approval covers one head commit", () => {
     // Under the strict policy the queue brings a PR that is behind up to date (update-branch).
     env = createFactoryEnv({ limits: { mergePolicy: "strict" } });
     installDoneFixture(env);
-    await enable();
+    await enable("software_factory", { tuning: { team: reviewTeam } });
     const { id, pr } = await verifying("pending");
     env.gh.pushMain(["src/counter.ts"]);
     await review(id);
@@ -219,7 +219,7 @@ describe("an approval covers one head commit", () => {
   it("keeps the approval on a rebase that brought only main in (the same change)", async () => {
     env = createFactoryEnv();
     installDoneFixture(env);
-    await enable();
+    await enable("software_factory", { tuning: { team: reviewTeam } });
     const { id, pr } = await verifying("pending");
     await review(id);
     await tick();

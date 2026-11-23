@@ -2,7 +2,9 @@ import { ReviewPolicy } from "@codeden/contracts";
 import { act, screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { ChecklistSection } from "@/components/checklist/checklist-section";
+import { tuningDraft } from "@/components/factory/limits-editor";
 import { PipelineDiagram } from "@/components/factory/pipeline-diagram";
+import { TeamEditor } from "@/components/factory/team-editor";
 import { ChildRuns } from "@/components/workbench/child-runs";
 import { TeamWorkers } from "@/components/workbench/team-workers";
 import { createMockClient } from "@/lib/api/mock";
@@ -131,4 +133,13 @@ it("the Workers pane shows the Arbiter role and its round n of N", async () => {
   });
   renderWithClient(<TeamWorkers sessionId={session.id} session={session} />, client);
   expect(await screen.findByText("Arbiter · round 2 of 3")).toBeTruthy();
+});
+
+it("the Team editor says Set the Arbiter in Settings → Team when no Team sets it", async () => {
+  const { client, status } = await arbiterFixture();
+  renderWithClient(
+    <TeamEditor tuning={{ ...tuningDraft(status.tuning), team: [] }} onChange={vi.fn()} />,
+    client,
+  );
+  expect(await screen.findByText("Set the Arbiter in Settings → Team")).toBeTruthy();
 });

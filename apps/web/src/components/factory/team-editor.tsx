@@ -1,4 +1,5 @@
 import {
+  defaultTeam,
   ReasoningEffort,
   ReviewPolicy,
   type Settings,
@@ -43,6 +44,7 @@ export function TeamEditor({
   const id = useId();
   const client = useClient();
   const providers = useSnapshotData((s) => s.runner.providers, []);
+  const defaults = useSnapshotData((s) => defaultTeam(s.settings), []);
   const savedRemembered = useSnapshotData((s) => s.settings.teamSetup.remembered, false);
   const [remembered, setRemembered] = useState<boolean | null>(null);
   const save = useMutation({
@@ -57,6 +59,7 @@ export function TeamEditor({
   }, [isSuccess, reset]);
 
   const { team, resultSummaryBytes } = tuning;
+  const arbiter = teamMember(team, "arbiter") ?? teamMember(defaults, "arbiter");
   const reviewPolicy = tuning.reviewPolicy ?? ReviewPolicy.parse({});
   const useForNewProjects = remembered ?? savedRemembered;
   const changeRole = (role: TeamRole, member: TeamMember | null) => {
@@ -140,6 +143,9 @@ export function TeamEditor({
             </Button>
             {role === "arbiter" && (
               <div className="col-span-full">
+                {(!arbiter?.model?.trim() || arbiter.model.trim().toLowerCase() === "default") && (
+                  <p className="text-3xs text-status-waiting">Set the Arbiter in Settings → Team</p>
+                )}
                 <Field label="Arbiter rounds" htmlFor={`${id}-arbiter-rounds`}>
                   <NumberField
                     id={`${id}-arbiter-rounds`}

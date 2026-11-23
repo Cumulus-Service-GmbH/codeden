@@ -2,7 +2,12 @@ import { afterEach, expect, it, vi } from "vitest";
 import type { ExecResult } from "../src/services/exec";
 import { readyInboxId } from "../src/services/factory/merge";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
-import { fixtureJevScript, installDoneFixture, jevEvidence } from "./support/factory-jev-fixture";
+import {
+  fixtureJevScript,
+  installDoneFixture,
+  jevEvidence,
+  reviewTeam,
+} from "./support/factory-jev-fixture";
 import { APPROVE, factorySteps } from "./support/factory-steps";
 
 let env: FactoryEnv;
@@ -14,7 +19,7 @@ afterEach(async () => {
 const { enable, item, review, tick, verifying } = factorySteps(() => env);
 
 async function finishReview(autoMerge: boolean) {
-  await enable("software_factory", { autoMerge });
+  await enable("software_factory", { autoMerge, tuning: { team: reviewTeam } });
   const { id, pr } = await verifying("success");
   await review(id, {
     ...APPROVE,
@@ -83,4 +88,30 @@ it("an unconfigured completion check is skipped and says so", async () => {
     reasons: ["Jev not configured, completion check skipped"],
   });
   expect(env.execs.some(({ args }) => args[1] === "done")).toBe(false);
+});
+
+it("an unset Jev completion-check reviewer fails closed and says Set the Jev completion-check reviewer in Settings → Team", async () => {
+  env = activeEnv = createFactoryEnv({ jevScript: fixtureJevScript });
+  installDoneFixture(env, (result) => ({ ...result, notFound: true }));
+  const { advanceJev } = await import("../src/services/factory/jev");
+  const { sha } = await import("./support/factory-jev-fixture");
+  const { backlogItem } = factorySteps(() => env);
+  const work = backlogItem();
+  const startTurn = vi.spyOn(env.factory.ctx.sessions, "startTurn");
+  const head = sha("reviewed");
+  expect(
+    await advanceJev(
+      env.factory.ctx,
+      env.project,
+      {
+        ...work,
+        jev: { head, status: "revise", reasons: ["Fix the receipt"] },
+        jevHistory: [{ head, status: "revise", reasons: ["Fix the receipt"] }],
+      },
+      head,
+      { team: [] },
+    ),
+  ).toBe(false);
+  expect(startTurn).not.toHaveBeenCalled();
+  expect(item(work.id).note).toBe("Set the Jev completion-check reviewer in Settings → Team");
 });

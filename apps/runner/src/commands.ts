@@ -108,6 +108,12 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
       if (command.requireToolFree && adapter?.capabilities().toolFreeRuns !== true) {
         throw new CommandError("unsupported", "The provider lacks a tool-free lane");
       }
+      if (
+        command.requireToolFree &&
+        (!command.model?.trim() || command.model.trim().toLowerCase() === "default")
+      ) {
+        throw new CommandError("invalid_model", "A tool-free run requires an explicit model");
+      }
       const utility = adapter?.utilityModel?.();
       if (!utility) {
         throw new CommandError(

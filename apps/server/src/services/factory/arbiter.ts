@@ -1,5 +1,4 @@
 import {
-  DEFAULT_ARBITER,
   type FactoryItem,
   type FactoryLoop,
   type Project,
@@ -8,6 +7,7 @@ import {
   type ReviewVerdict,
   teamMember,
 } from "@codeden/contracts";
+import { modelMatches } from "./agent-choice";
 import { withVerdictHead } from "./approval";
 import { type FactoryContext, raiseInbox } from "./context";
 import { jevReviewBrief, jevWriterResponse } from "./jev";
@@ -76,7 +76,7 @@ export async function advanceArbiter(
   }
   if (current?.state === "ruling" && current.ruling) {
     if (reviewBudgetReached(ctx, loop)) return;
-    await requestConfirmation(ctx, project, item, current.head, current.ruling);
+    await requestConfirmation(ctx, project, loop, item, current.head, current.ruling);
     return;
   }
   if (current?.state === "running") {
@@ -102,7 +102,11 @@ export async function advanceArbiter(
     ? ctx.repo.find(item.reviewerSessionId)?.session
     : undefined;
   if (reviewer && isBusy(reviewer)) return;
-  const arbiter = teamMember(teamTuning(ctx, loop.tuning).team, "arbiter") ?? DEFAULT_ARBITER;
+  const arbiter = teamMember(teamTuning(ctx, loop.tuning).team, "arbiter");
+  if (!arbiter?.model?.trim() || arbiter.model.trim().toLowerCase() === "default") {
+    block(ctx, item, head, "Set the Arbiter in Settings → Team");
+    return;
+  }
   const provider = ctx.sessions.providerInfo(arbiter.provider);
   const lane = provider?.capabilities && arbiterLane(provider.capabilities);
   if (!lane || !ctx.sessions.providers().includes(arbiter.provider)) {
@@ -119,6 +123,10 @@ export async function advanceArbiter(
       (i) => ({ ...i, note: "Arbiter waiting for the daily review budget" }),
       { touch: false },
     );
+    return;
+  }
+  if (lane === "tool_free" && arbiter.effort !== null) {
+    block(ctx, item, head, "The tool-free Arbiter lane cannot apply the configured effort.");
     return;
   }
   if (lane === "tool_free" && policy.dailyBudgetUsd !== undefined) {
@@ -179,18 +187,35 @@ function recordRuling(ctx: FactoryContext, item: FactoryItem, head: string, ruli
 async function requestConfirmation(
   ctx: FactoryContext,
   project: Project,
+  loop: FactoryLoop,
   item: FactoryItem,
   head: string,
   ruling: string,
 ) {
+  const member = teamMember(teamTuning(ctx, loop.tuning).team, "reviewer");
+  if (!member?.model?.trim() || member.model.trim().toLowerCase() === "default") {
+    block(ctx, item, head, "Set the Code Reviewer in Settings → Team", ruling);
+    return;
+  }
   const reviewer = item.reviewerSessionId;
   if (!reviewer) {
     block(ctx, item, head, "The reviewer is unavailable to confirm the ruling.", ruling);
     return;
   }
   const session = ctx.repo.find(reviewer)?.session;
-  if (!session) {
-    block(ctx, item, head, "The reviewer is unavailable to confirm the ruling.", ruling);
+  if (
+    !session ||
+    session.provider !== member.provider ||
+    !modelMatches(ctx.sessions.models(member.provider), member.model, session.model) ||
+    (member.effort !== null && session.effort !== member.effort)
+  ) {
+    block(
+      ctx,
+      item,
+      head,
+      "The configured Code Reviewer is unavailable to confirm the ruling.",
+      ruling,
+    );
     return;
   }
   if (isBusy(session) || !claimSlot(ctx, project, reviewTier(item.checks), `confirm:${item.id}`))

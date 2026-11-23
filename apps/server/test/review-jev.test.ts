@@ -108,7 +108,18 @@ it("passes the history by path and binds its digest and result to the item head"
 it("sends a product refusal to the reviewer once and then to the owner inbox", async () => {
   const dir = await mkdtemp(join(tmpdir(), "review-jev-"));
   try {
-    const reviewer = { id: "reviewer", status: "idle", worktreePath: dir };
+    const reviewer = {
+      id: "reviewer",
+      status: "idle",
+      worktreePath: dir,
+      provider: "fixture",
+      model: "fixture-reviewer",
+    };
+    const tuning = {
+      team: [
+        { role: "reviewer", provider: reviewer.provider, model: reviewer.model, effort: null },
+      ],
+    } as const;
     const verdict = ReviewVerdict.parse({
       verdict: "approve",
       summary: "Saves the item.",
@@ -161,7 +172,8 @@ it("sends a product refusal to the reviewer once and then to the owner inbox", a
         },
       },
       repo: { find: () => ({ session: reviewer }) },
-      sessions: { startTurn, list: () => [reviewer] },
+      settings: { get: () => ({ teamSetup: { remembered: false, team: [] } }) },
+      sessions: { startTurn, list: () => [reviewer], models: () => [] },
       inbox: { find: () => undefined, put },
       admission: { free: () => 1 },
       slots: { wokenThisTick: () => new Set(), claim: () => true, woke: () => {} },
@@ -173,11 +185,11 @@ it("sends a product refusal to the reviewer once and then to the owner inbox", a
       defaultBranch: "main",
       factoryLimits: FactoryLimits.parse({}),
     } as Parameters<typeof advanceJev>[1];
-    expect(await advanceJev(ctx, project, item, head)).toBe(false);
+    expect(await advanceJev(ctx, project, item, head, { team: [...tuning.team] })).toBe(false);
     expect(startTurn).toHaveBeenCalledExactlyOnceWith(reviewer.id, expect.stringContaining(head));
     expect(put).not.toHaveBeenCalled();
     expect(submitJevReview(ctx, item, verdict)).toBe(true);
-    expect(await advanceJev(ctx, project, item, head)).toBe(false);
+    expect(await advanceJev(ctx, project, item, head, { team: [...tuning.team] })).toBe(false);
     expect(startTurn).toHaveBeenCalledTimes(1);
     expect(put).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
@@ -265,7 +277,7 @@ it.each(["docs", "revert", "criteria-less"] as const)(
         factoryLimits: FactoryLimits.parse({}),
       } as Parameters<typeof advanceJev>[1];
 
-      expect(await advanceJev(ctx, project, item, head)).toBe(true);
+      expect(await advanceJev(ctx, project, item, head, { team: [] })).toBe(true);
       expect(jevPasses(item.jev, head)).toBe(true);
       expect(put).not.toHaveBeenCalled();
       if (kind === "revert") {

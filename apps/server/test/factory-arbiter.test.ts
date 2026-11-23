@@ -3,7 +3,15 @@ import { describe, expect, it, vi } from "vitest";
 import { arbiterLane, reviewEscalation } from "../src/services/factory/arbiter";
 
 import { createFactoryEnv } from "./support/factory-env";
+import { reviewTeam } from "./support/factory-jev-fixture";
 import { APPROVE, factorySteps } from "./support/factory-steps";
+
+const arbiter = {
+  role: "arbiter",
+  provider: "claude",
+  model: "fixture-arbiter",
+  effort: null,
+} as const;
 
 describe("factory Arbiter", () => {
   it("requires enforced security and read-only execution or a tool-free lane", () => {
@@ -136,7 +144,10 @@ it("the review flow stops after N Arbiter rounds", async () => {
   const disputed = { ...APPROVE, verdict: "request_changes" as const };
   try {
     await enable("software_factory", {
-      tuning: { reviewPolicy: ReviewPolicy.parse({ reviewerRounds: 1, arbiterRounds: 2 }) },
+      tuning: {
+        team: [...reviewTeam, arbiter],
+        reviewPolicy: ReviewPolicy.parse({ reviewerRounds: 1, arbiterRounds: 2 }),
+      },
     });
     const { id } = await verifying();
     const reviewer = item(id).reviewerSessionId;
@@ -158,6 +169,67 @@ it("the review flow stops after N Arbiter rounds", async () => {
     expect(arbitrate).toHaveBeenCalledTimes(2);
     expect(item(id).arbitration?.state).toBe("blocked");
     expect(env.inbox.find(decisionId)).toMatchObject({ kind: "owner_decision" });
+  } finally {
+    await env.close();
+  }
+});
+
+it.each([
+  {
+    name: "an unset Arbiter blocks the Arbiter step and says Set the Arbiter in Settings → Team",
+    team: [],
+    runs: false,
+  },
+  {
+    name: "an Arbiter without a model fails closed and says Set the Arbiter in Settings → Team",
+    team: [{ ...arbiter, model: null }],
+    runs: false,
+  },
+  { name: "a set Arbiter runs the Arbiter step", team: [arbiter], runs: true },
+  {
+    name: "an Arbiter set in the Default Team runs the Arbiter step",
+    team: [],
+    runs: true,
+    defaults: [arbiter],
+  },
+])("$name", async ({ team, runs, defaults }) => {
+  const env = createFactoryEnv();
+  const { enable, item, review, tick, verifying } = factorySteps(() => env);
+  const sessions = env.factory.ctx.sessions;
+  const startArbiter = vi.spyOn(sessions, "startArbiter");
+  const provider = sessions.providerInfo(arbiter.provider);
+  if (!provider) throw new Error("Expected a provider fixture");
+  vi.spyOn(sessions, "providerInfo").mockReturnValue({
+    ...provider,
+    capabilities: { ...provider.capabilities, toolFreeRuns: true },
+  });
+  const arbitrate = vi
+    .spyOn(sessions, "runToolFreeArbiter")
+    .mockResolvedValue("The finding stands.");
+  try {
+    if (defaults) env.settings.update({ teamSetup: { remembered: true, team: defaults } });
+    await enable("software_factory", {
+      tuning: {
+        team: [...reviewTeam, ...team],
+        reviewPolicy: ReviewPolicy.parse({ reviewerRounds: 1 }),
+      },
+    });
+    const { id } = await verifying();
+    await review(id, { ...APPROVE, verdict: "request_changes" });
+    await env.setStatus(item(id).reviewerSessionId as string, "idle");
+    await tick();
+    if (runs) {
+      expect(arbitrate).toHaveBeenCalledWith(arbiter, expect.any(String));
+      expect(item(id).arbitration?.ruling).toBe("The finding stands.");
+    } else {
+      const reason = "Set the Arbiter in Settings → Team";
+      expect(arbitrate).not.toHaveBeenCalled();
+      expect(startArbiter).not.toHaveBeenCalled();
+      expect(item(id)).toMatchObject({ note: reason, arbitration: { state: "blocked" } });
+      expect(item(id).arbitration?.ruling).toBeUndefined();
+      expect(item(id).arbitration?.sessionId).toBeUndefined();
+      expect(env.inbox.find(`inbox:factory-owner-decision:${id}`)).toMatchObject({ body: reason });
+    }
   } finally {
     await env.close();
   }

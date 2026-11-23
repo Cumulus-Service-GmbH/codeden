@@ -123,6 +123,12 @@ export const startSession = defineTool({
       tuning?.autonomyPolicy,
     );
     assertAutonomy(input.autonomy, autonomyFloor);
+    if (
+      role === "arbiter" &&
+      (!member?.model?.trim() || member.model.trim().toLowerCase() === "default")
+    ) {
+      throw new ToolError("TEAM_ROLE_UNSET: Set the Arbiter in Settings → Team");
+    }
     // A tagged role the resolved Team does not set has no pin to start on: refused, as the guard refuses it.
     if (role && !member) {
       throw new ToolError(

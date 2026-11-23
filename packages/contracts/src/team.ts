@@ -33,14 +33,6 @@ export const TeamMember = z.object({
 });
 export type TeamMember = z.infer<typeof TeamMember>;
 
-/** The Arbiter model used when no project or default Team supplies a pin. */
-export const DEFAULT_ARBITER: TeamMember = {
-  role: "arbiter",
-  provider: "claude",
-  model: "claude-fable-5-2",
-  effort: "high",
-};
-
 /** At most one member per role. Saving the array replaces the entire Team. */
 export const Team = z
   .array(TeamMember)
