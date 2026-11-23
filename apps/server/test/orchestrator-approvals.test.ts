@@ -5,7 +5,7 @@ import {
   type ItemOf,
   McpTokenClaims,
 } from "@codeden/contracts";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { ToolCaller } from "../src/mcp/registry";
 import { ensureHome } from "../src/paths";
 import { createServices } from "../src/services/container";
@@ -30,19 +30,37 @@ const ordinary = { kind: "tool_approval", action: "file_change" } as const;
 type Entry = Parameters<typeof classifyApproval>[0];
 
 it.each([
-  ["prd_write", "webchat-deploy", "az containerapp update"],
-  ["secrets", "secrets", "PASSWORD"],
-  ["prd_db", "prd-db-migration", "DbOps migrate"],
-  ["store_submission", "store-submission", "EAS submit"],
-  ["new_azure_resource", "resource:group", "az group create"],
-  ["spending", "spending", "STRIPE checkout"],
-])("classifyApproval refuses %s guard tokens and text", (ownerOnly, scope, command) => {
-  for (const context of [
-    { hookReason: `[codeden-card v1 scope=${scope} class=owner-only]` },
-    { command },
-    { toolInput: { nested: [command] } },
-  ]) {
+  ["prd_write", "az containerapp update"],
+  ["secrets", "PASSWORD"],
+  ["prd_db", "DbOps migrate"],
+  ["store_submission", "EAS submit"],
+  ["new_azure_resource", "az group create"],
+  ["spending", "STRIPE checkout"],
+])("classifyApproval refuses %s command and tool input text", (ownerOnly, command) => {
+  for (const context of [{ command }, { toolInput: { nested: [command] } }]) {
     expect(classifyApproval({ ...ordinary, ...context })).toEqual({ delegable: false, ownerOnly });
+  }
+});
+
+it.each([
+  ["db-read", "prd_db"],
+  ["db-migration", "prd_db"],
+  ["prd-db-migration", "prd_db"],
+  ["dbops-lan", "prd_db"],
+  ["dbops-migration-image", "prd_db"],
+  ["az-ssh-arc", "prd_db"],
+  ["az-connectedmachine-run-command-create", "prd_db"],
+  ["az-connectedmachine-run-command-delete", "prd_db"],
+  ["resource:group", "new_azure_resource"],
+  ["prd-env-update", "prd_write"],
+  ["webchat-deploy", "prd_write"],
+  ["deploy", "prd_write"],
+  ["container-app-update", "prd_write"],
+  ["unknown", "unclassified"],
+])("classifyApproval maps %s guard cards to %s regardless of token class", (scope, ownerOnly) => {
+  for (const cls of ["owner-only", "delegable"]) {
+    const hookReason = `[codeden-card v1 scope=${scope} class=${cls}]`;
+    expect(classifyApproval({ ...ordinary, hookReason })).toEqual({ delegable: false, ownerOnly });
   }
 });
 
@@ -50,12 +68,11 @@ const refused: Entry[] = [
   ...(["network", "tool", "other", "git_destructive"] as const).map((action) => ({
     ...ordinary,
     action,
-    hookReason: prefix,
   })),
-  { ...ordinary, url: "https://example.invalid", hookReason: prefix },
-  { ...ordinary, toolName: "mcp__claude-in-chrome__navigate", hookReason: prefix },
-  { ...ordinary, reason: "Claude in Chrome uses your browser", hookReason: prefix },
-  { ...ordinary, singleUse: true, hookReason: prefix },
+  { ...ordinary, url: "https://example.invalid" },
+  { ...ordinary, toolName: "mcp__claude-in-chrome__navigate" },
+  { ...ordinary, reason: "Claude in Chrome uses your browser" },
+  { ...ordinary, singleUse: true },
   { ...ordinary, hookAsk: true },
   { kind: "question" },
   { kind: "checklist_approval" },
@@ -67,18 +84,23 @@ const refused: Entry[] = [
   { kind: "tool_approval", action: "command", reason: prefix },
   { ...ordinary, hookReason: `comment ${prefix}` },
   { ...ordinary, hookReason: `${prefix} ${prefix}` },
-  { ...ordinary, hookReason: prefix.replace("db-read", "unknown") },
+  { ...ordinary, hookReason: "" },
+  {
+    kind: "plan_card",
+    requestedBy: "pm",
+    steps: [pmStep],
+    hookReason: "A hook asked for approval",
+  },
 ];
 it.each(refused)("classifyApproval refuses %j", (entry) => {
   expect(classifyApproval(entry)).toEqual({ delegable: false, ownerOnly: "unclassified" });
 });
 it("classifyApproval handles sensitive actions and delegable approvals", () => {
-  expect(classifyApproval({ ...ordinary, action: "secrets", hookReason: prefix })).toEqual({
+  expect(classifyApproval({ ...ordinary, action: "secrets" })).toEqual({
     delegable: false,
     ownerOnly: "secrets",
   });
   const delegated: Entry[] = [
-    { kind: "tool_approval", action: "command", hookReason: prefix, command: "dbops query" },
     ordinary,
     { ...ordinary, action: "outside_worktree" },
     { ...ordinary, action: "plan" },
@@ -237,6 +259,32 @@ it.each([
     );
   },
 );
+
+describe.each([
+  ["staging DB migration", "db-migration", "staging DB migration needs the owner's approval card"],
+  ["DB read", "db-read", "DB read needs the owner's approval card"],
+  ["erpure LAN/host", "dbops-lan", "erpure LAN/host action needs the owner's approval card"],
+])("%s guard card", (_name, scope, reason) => {
+  it.each(["approve", "deny"] as const)(
+    "decide_approval refuses %s without side effects",
+    async (choice) => {
+      const { add, services, store, runnerCalls } = setup();
+      const { id } = add(scope, {
+        action: "command",
+        hookReason: `[codeden-card v1 scope=${scope} class=delegable] ${reason}`,
+      });
+      const head = store.headSeq();
+      expect(
+        await services.tools.call("decide_approval", { ...decision, id, decision: choice }, actor),
+      ).toEqual({
+        isError: true,
+        text: "This approval requires the owner (prd_db)",
+      });
+      expect(runnerCalls).toEqual([]);
+      expect(store.headSeq()).toBe(head);
+    },
+  );
+});
 
 it("refuses both decisions on every owner-only kind without appending or sending", async () => {
   const { service, add, services, store, runnerCalls, localProject } = setup();
