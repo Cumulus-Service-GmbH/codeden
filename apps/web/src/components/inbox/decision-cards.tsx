@@ -1,4 +1,4 @@
-import type { DecisionCard } from "@codeden/contracts";
+import { type DecisionCard, OwnerApprovalWords } from "@codeden/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useId, useState } from "react";
 import { Button } from "@/components/ui/button";
@@ -11,8 +11,11 @@ function DecisionCardRow({ card }: { card: DecisionCard }) {
   const client = useClient();
   const queries = useQueryClient();
   const ownerWordsId = useId();
+  const ownerWordsHelpId = `${ownerWordsId}-help`;
   const [ownerWords, setOwnerWords] = useState("");
   const mergeVerify = card.request.kind === "github" && card.request.target.kind === "merge_verify";
+  const canApprove =
+    !mergeVerify || (!!ownerWords.trim() && OwnerApprovalWords.safeParse(ownerWords).success);
   const approval = useMutation({
     mutationFn: () =>
       client.github.approveDecisionCard(card.id, mergeVerify ? { ownerWords } : undefined),
@@ -63,14 +66,19 @@ function DecisionCardRow({ card }: { card: DecisionCard }) {
         </ol>
       )}
       {mergeVerify && (
-        <label htmlFor={ownerWordsId} className="block space-y-1">
-          <span>Approval message for the pull request</span>
+        <div className="space-y-1">
+          <label htmlFor={ownerWordsId}>Approval message for the pull request</label>
           <Textarea
             id={ownerWordsId}
+            aria-describedby={ownerWordsHelpId}
+            required
             value={ownerWords}
             onChange={(event) => setOwnerWords(event.target.value)}
           />
-        </label>
+          <p id={ownerWordsHelpId} className="text-xs text-muted-foreground">
+            Use 1–200 characters. ASCII letters, digits, spaces and .,:;!?'()/- are allowed.
+          </p>
+        </div>
       )}
       {approval.error && (
         <p role="alert" className="text-xs text-destructive">
@@ -79,7 +87,7 @@ function DecisionCardRow({ card }: { card: DecisionCard }) {
       )}
       <Button
         size="sm"
-        disabled={approval.isPending || (mergeVerify && !ownerWords.trim())}
+        disabled={approval.isPending || !canApprove}
         onClick={() => approval.mutate()}
       >
         {approval.isPending ? "Recording approval…" : "Approve"}

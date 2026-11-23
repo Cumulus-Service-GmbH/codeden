@@ -16,7 +16,7 @@ import {
 import { z } from "zod";
 import type { ProjectionReader } from "../events/reducer/types";
 import type { EventStore } from "../events/store";
-import { errorMessage, ServiceError } from "./errors";
+import { badRequest, errorMessage, ServiceError } from "./errors";
 import { checkPlanStep } from "./plan-approval";
 
 interface Actor {
@@ -176,15 +176,22 @@ export class DecisionApprovals {
     if (!state || state.confirmed) refuse("Approval card is unavailable or already used");
     const { card } = state;
     const by = this.confirmingActor(card, actor);
+    let ownerWords: string | undefined;
     if (card.request.kind === "github") {
+      if (card.request.target.kind === "merge_verify") {
+        if (input?.ownerWords === undefined) {
+          throw badRequest("Owner words are required to confirm a pull request approval");
+        }
+        const words = OwnerApprovalWords.safeParse(input.ownerWords);
+        if (!words.success) {
+          throw badRequest(
+            words.error.issues[0]?.message ?? "Owner words must match the owner words allowlist",
+          );
+        }
+        ownerWords = words.data;
+      }
       await this.checkGithub(id, card.request.target);
     }
-    const ownerWords =
-      by.role === "owner" &&
-      card.request.kind === "github" &&
-      card.request.target.kind === "merge_verify"
-        ? input?.ownerWords
-        : undefined;
     this.store.appendFrom((reader) => {
       const current = this.cards().get(id);
       if (!current || current.confirmed) refuse("Approval card is unavailable or already used");
