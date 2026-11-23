@@ -1,7 +1,21 @@
 import { expect, it } from "vitest";
-import { FactoryLimits, JevReceipt, ReviewFinding, ReviewPolicy, teamRoleOfTitle } from "../src";
+import {
+  DEFAULT_ARBITER,
+  FactoryLimits,
+  FactoryTuning,
+  JevReceipt,
+  ReviewFinding,
+  ReviewPolicy,
+  teamRoleOfTitle,
+} from "../src";
 
-it("recognizes the Arbiter and reads older settings with review defaults", () => {
+it("recognizes the default Arbiter and reads older settings with review settings defaults", () => {
+  expect(DEFAULT_ARBITER).toEqual({
+    role: "arbiter",
+    provider: "claude",
+    model: "claude-fable-5-2",
+    effort: "high",
+  });
   expect(teamRoleOfTitle("[Arbiter] Review disputed findings")).toBe("arbiter");
   expect(FactoryLimits.parse({}).lowFindings).toBe("defer");
   const policy = ReviewPolicy.parse({});
@@ -12,6 +26,14 @@ it("recognizes the Arbiter and reads older settings with review defaults", () =>
     jevAttempts: 3,
     totalRounds: 8,
   });
+});
+
+it("round-trips an optional daily review budget in USD", () => {
+  expect(ReviewPolicy.parse({}).dailyBudgetUsd).toBeUndefined();
+  const tuning = FactoryTuning.parse({ reviewPolicy: { dailyBudgetUsd: 12.5 } });
+  expect(FactoryTuning.parse(JSON.parse(JSON.stringify(tuning))).reviewPolicy?.dailyBudgetUsd).toBe(
+    12.5,
+  );
 });
 
 it.each(["HIGH", "MEDIUM"] as const)("requires a scenario and repro to retain %s", (severity) => {
