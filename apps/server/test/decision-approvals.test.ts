@@ -214,7 +214,7 @@ describe("post_github_approval", () => {
     ["control character", "Approved\t"],
     ["201 characters", "A".repeat(201)],
     ["accented letter", "Approuvé"],
-  ])("refuses stored owner words containing %s without writing to GitHub", async (_name, words) => {
+  ])("refuses stored owner words containing %s without contacting GitHub", async (_name, words) => {
     const env = setupMergeApproval();
     try {
       env.store.append([
@@ -227,7 +227,14 @@ describe("post_github_approval", () => {
       const result = await env.post();
       expect(result.isError).toBe(true);
       expect(result.text).toMatch(/owner words allowlist/i);
-      expect(env.writes()).toEqual([]);
+      expect.soft(env.gh.requests).toEqual([]);
+      expect.soft(env.store.listTypes(["decision.github_claimed"])).toEqual([]);
+      expect(env.results()).toMatchObject([
+        {
+          type: "decision.github_refused",
+          payload: { id: env.card.id, mode: "comment", outcome: "failed" },
+        },
+      ]);
     } finally {
       await env.close();
     }
