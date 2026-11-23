@@ -9,6 +9,7 @@ import {
   type GitHubCommentOutcome,
   type GitHubCommentResult,
   type NewEvent,
+  OwnerApprovalWords,
   type PlanApprovalStep,
   redactSecrets,
 } from "@codeden/contracts";
@@ -252,7 +253,7 @@ export class DecisionApprovals {
     const { target } = state.card.request;
     const { sessionId } = actor;
     const comment = target.kind === "merge_verify";
-    const refuseUsed = () => {
+    const refusePost = (message: string): never => {
       if (comment) {
         this.store.append([
           {
@@ -262,10 +263,19 @@ export class DecisionApprovals {
           },
         ]);
       }
-      refuse("An unused owner approval for this project's GitHub gate is required");
+      refuse(message);
     };
-    if (state.claimed) refuseUsed();
-    if (comment && state.ownerWords === undefined) refuse("The card has no recorded owner words");
+    const unusedRequired = "An unused owner approval for this project's GitHub gate is required";
+    if (state.claimed) refusePost(unusedRequired);
+    if (comment) {
+      if (state.ownerWords === undefined) refuse("The card has no recorded owner words");
+      const words = OwnerApprovalWords.safeParse(state.ownerWords);
+      if (!words.success) {
+        refusePost(
+          words.error.issues[0]?.message ?? "Owner words must match the owner words allowlist",
+        );
+      }
+    }
     await this.checkGithub(id, target);
     // The claim stays used if the process stops before recording the outcome.
     const claim = this.store.appendFrom(() => {
@@ -275,7 +285,7 @@ export class DecisionApprovals {
         ? []
         : [{ type: "decision.github_claimed", sessionId, payload: { id } }];
     });
-    if (!claim.length) refuseUsed();
+    if (!claim.length) refusePost(unusedRequired);
     const outcome = await this.github.post(target, id, state.ownerWords);
     if (!comment) {
       this.store.append([{ type: "decision.github_posted", sessionId, payload: { id } }]);
