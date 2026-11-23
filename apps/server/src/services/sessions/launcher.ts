@@ -467,11 +467,17 @@ export class SessionLauncher {
     ].join("\n\n");
     const settings = this.deps.tokenSaver?.();
     if (!settings) return base;
-    // A level chosen for this session at its start wins over the project and role defaults.
-    const chosen = this.deps.repo?.find(session.id)?.startMeta?.tokenSaver;
-    const note = tokenSaverNote(
-      chosen ?? tokenSaverLevel(settings, session.role, session.projectId),
-    );
+    const ancestors = new Set<string>();
+    let source = session;
+    let chosen = this.deps.repo?.find(source.id)?.startMeta?.tokenSaver;
+    while (chosen === undefined && source.parentSessionId && !ancestors.has(source.id)) {
+      ancestors.add(source.id);
+      const parent = this.deps.repo?.find(source.parentSessionId);
+      if (!parent || parent.session.projectId !== session.projectId) break;
+      source = parent.session;
+      chosen = parent.startMeta?.tokenSaver;
+    }
+    const note = tokenSaverNote(chosen ?? tokenSaverLevel(settings, source.role, source.projectId));
     return note ? `${base}\n\n${note}` : base;
   }
 

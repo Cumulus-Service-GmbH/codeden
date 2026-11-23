@@ -5,6 +5,9 @@ import { ClaudePolicy } from "../src/claude/permissions";
 import { codexPolicy } from "../src/codex/config";
 import { FakeProvider } from "../src/fake/adapter";
 import type { FakeSession } from "../src/fake/session";
+import { openCodeConfig } from "../src/opencode/config";
+import { OpenCodePolicy } from "../src/opencode/policy";
+import { openCodeServerEnv } from "../src/opencode/server";
 import { readOnlyCommandDenial } from "../src/policy/read-only";
 
 const base: SessionOptions = {
@@ -325,6 +328,41 @@ describe("read-only sessions (orchestrator and PMs, §11.2)", () => {
     expect(buildQueryOptions({ ...input, session: base }).strictMcpConfig).toBe(true);
     const agent = { ...base, role: "agent" as const, readOnly: undefined };
     expect(buildQueryOptions({ ...input, session: agent }).strictMcpConfig).toBeUndefined();
+  });
+
+  it("starts a read-only role on OpenCode with CodeDen's MCP servers only", () => {
+    const config = openCodeConfig({
+      mcpServers: [{ name: "codeden", transport: "http", url: "http://127.0.0.1:4318/mcp" }],
+    });
+    const env = openCodeServerEnv(
+      {
+        OPENCODE_CONFIG: "/user/opencode.json",
+        OPENCODE_CONFIG_DIR: "/user/opencode",
+        OPENCODE_CONFIG_CONTENT: JSON.stringify({
+          mcp: { servers: { user: { type: "local", command: ["user-tool"] } } },
+        }),
+      },
+      undefined,
+      "test-password",
+      config,
+      base.readOnly,
+    );
+    expect(JSON.parse(env.OPENCODE_CONFIG_CONTENT ?? "")).toEqual(config);
+    expect(env.OPENCODE_CONFIG).toBeUndefined();
+    expect(env.OPENCODE_CONFIG_DIR).not.toBe("/user/opencode");
+    expect(env.OPENCODE_CONFIG_PROJECT_DISABLE).toBe("1");
+  });
+
+  it("denies a user MCP tool for a read-only role on OpenCode at every level", () => {
+    for (const level of ["auto", "full", "supervised", "read_only"] as const) {
+      const pm = new OpenCodePolicy(level, { cwd: "/repo", extraRoots: [] }, true, ["codeden"]);
+      const request = { id: "permission", sessionID: "pm1", action: "user_tool", resources: [] };
+      expect(pm.decide({ request })).toMatchObject({ kind: "deny" });
+      expect(pm.decide({ request, toolName: "user_tool" })).toMatchObject({ kind: "deny" });
+      expect(pm.decide({ request: { ...request, action: "codeden_start_session" } }).kind).not.toBe(
+        "deny",
+      );
+    }
   });
 
   it("uses Codex's read-only sandbox", () => {

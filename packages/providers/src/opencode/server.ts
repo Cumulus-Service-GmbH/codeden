@@ -4,7 +4,7 @@ import { createInterface } from "node:readline";
 import { agentEnv } from "../util/agent-env";
 import { killTree, type ResolvedCommand, spawnResolved } from "../util/exec";
 import { OpenCodeClient } from "./client";
-import { HIDDEN_ENV_VARS } from "./plugin";
+import { guardPluginDir, HIDDEN_ENV_VARS } from "./plugin";
 
 /** How long `opencode serve` may take to print its URL. It usually takes 200-400 ms. */
 export const OPENCODE_START_TIMEOUT_MS = 20_000;
@@ -16,6 +16,7 @@ export interface OpenCodeServerOptions {
   env?: Record<string, string>;
   /** Inline config (`OPENCODE_CONFIG_CONTENT`), layered over the user's own config. */
   config?: Record<string, unknown>;
+  readOnly?: boolean;
   /** Aborting stops the server at any point, including start-up. */
   signal?: AbortSignal;
   startTimeoutMs?: number;
@@ -56,7 +57,7 @@ export class OpenCodeServer {
       ["serve", "--stdio", "--hostname", "127.0.0.1", "--port", "0"],
       {
         cwd: opts.cwd,
-        env: openCodeServerEnv(process.env, opts.env, password, opts.config ?? {}),
+        env: openCodeServerEnv(process.env, opts.env, password, opts.config ?? {}, opts.readOnly),
         stdio: ["pipe", "pipe", "pipe"],
       },
     );
@@ -189,8 +190,16 @@ export function openCodeServerEnv(
   extra: Record<string, string> | undefined,
   password: string,
   config: Record<string, unknown>,
+  readOnly = false,
 ): NodeJS.ProcessEnv {
   const drop = new Set(["ELECTRON_RUN_AS_NODE", ...HIDDEN_ENV_VARS]);
+  if (readOnly) {
+    drop.add("OPENCODE_CONFIG");
+    drop.add("OPENCODE_CONFIG_DIR");
+    drop.add("OPENCODE_CONFIG_CONTENT");
+    drop.add("OPENCODE_CONFIG_PROJECT_DISABLE");
+    drop.add("OPENCODE_DISABLE_CLAUDE_CODE");
+  }
   const env: NodeJS.ProcessEnv = {};
   let userConfig: string | undefined;
   for (const [key, value] of Object.entries(agentEnv(extra, base))) {
@@ -199,7 +208,14 @@ export function openCodeServerEnv(
     if (!drop.has(upper)) env[key] = value;
   }
   env.OPENCODE_PASSWORD = password;
-  env.OPENCODE_CONFIG_CONTENT = JSON.stringify(mergeConfig(parseConfig(userConfig), config));
+  if (readOnly) {
+    env.OPENCODE_CONFIG_DIR = guardPluginDir();
+    env.OPENCODE_CONFIG_PROJECT_DISABLE = "1";
+    env.OPENCODE_DISABLE_CLAUDE_CODE = "1";
+  }
+  env.OPENCODE_CONFIG_CONTENT = JSON.stringify(
+    readOnly ? config : mergeConfig(parseConfig(userConfig), config),
+  );
   return env;
 }
 
