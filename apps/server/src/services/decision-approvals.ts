@@ -5,9 +5,11 @@ import {
   type DecisionRequest,
   decisionTiers,
   type GitHubApprovalTarget,
+  type NewEvent,
   type PlanApprovalStep,
   redactSecrets,
 } from "@codeden/contracts";
+import type { ProjectionReader } from "../events/reducer/types";
 import type { EventStore } from "../events/store";
 import { errorMessage, ServiceError } from "./errors";
 import { checkPlanStep } from "./plan-approval";
@@ -33,6 +35,31 @@ export function tierFor(action: string): number | undefined {
     : undefined;
 }
 
+/** The orchestrator can decide a plan proposed by a PM and limited to tiers 0 and 1. */
+export function isDelegablePlan(
+  requestedBy: DecisionCard["requestedBy"] | undefined,
+  steps: readonly PlanApprovalStep[] | undefined,
+): boolean {
+  return (
+    requestedBy === "pm" &&
+    !!steps?.length &&
+    steps.every(({ action }) => {
+      const tier = tierFor(action);
+      return tier === 0 || tier === 1;
+    })
+  );
+}
+
+function canOrchestratorDecide(card: DecisionCard, actor: Actor): boolean {
+  return (
+    actor.role === "orchestrator" &&
+    !!actor.sessionId &&
+    actor.sessionId !== card.sessionId &&
+    card.request.kind === "plan" &&
+    isDelegablePlan(card.requestedBy, card.request.steps)
+  );
+}
+
 export class DecisionApprovals {
   constructor(
     private readonly store: Pick<EventStore, "append" | "appendFrom" | "listTypes">,
@@ -47,6 +74,7 @@ export class DecisionApprovals {
     for (const event of this.store.listTypes([
       "decision.raised",
       "decision.confirmed",
+      "decision.denied",
       "decision.step_consumed",
       "decision.github_claimed",
       "decision.github_stale",
@@ -57,7 +85,7 @@ export class DecisionApprovals {
       } else if (event.type === "decision.confirmed") {
         const state = cards.get(DecisionConfirmation.parse(event.payload).id);
         if (state) state.confirmed = true;
-      } else if (event.type === "decision.github_stale") {
+      } else if (event.type === "decision.github_stale" || event.type === "decision.denied") {
         cards.delete((event.payload as { id: string }).id);
       } else if (event.type === "decision.github_claimed") {
         const state = cards.get((event.payload as { id: string }).id);
@@ -109,27 +137,65 @@ export class DecisionApprovals {
     return card;
   }
 
-  async confirm(id: string, actor: Actor): Promise<void> {
+  async confirm(
+    id: string,
+    actor: Actor,
+    record?: (reader: ProjectionReader) => NewEvent[],
+  ): Promise<void> {
     const state = this.cards().get(id);
     if (!state || state.confirmed) refuse("Approval card is unavailable or already used");
     const { card } = state;
-    const by =
-      actor.role === "owner"
-        ? { role: "owner" as const }
-        : card.requestedBy === "orchestrator" &&
-            actor.role === "pm" &&
-            actor.sessionId &&
-            actor.sessionId !== card.sessionId &&
-            actor.projectId === card.projectId
-          ? { role: "pm" as const, sessionId: actor.sessionId }
-          : refuse("This card requires the owner or its eligible second key");
+    const by = this.confirmingActor(card, actor);
     if (card.request.kind === "github") {
       await this.checkGithub(id, card.request.target);
     }
-    this.store.appendFrom(() => {
+    this.store.appendFrom((reader) => {
       const current = this.cards().get(id);
       if (!current || current.confirmed) refuse("Approval card is unavailable or already used");
-      return [{ type: "decision.confirmed", sessionId: null, payload: { id, by } }];
+      return [
+        { type: "decision.confirmed", sessionId: null, payload: { id, by } },
+        ...(record?.(reader) ?? []),
+      ];
+    });
+  }
+
+  private confirmingActor(card: DecisionCard, actor: Actor) {
+    if (actor.role === "owner") return { role: "owner" as const };
+    if (actor.sessionId && canOrchestratorDecide(card, actor)) {
+      return { role: "orchestrator" as const, sessionId: actor.sessionId };
+    }
+    if (
+      card.requestedBy === "orchestrator" &&
+      actor.role === "pm" &&
+      actor.sessionId &&
+      actor.sessionId !== card.sessionId &&
+      actor.projectId === card.projectId
+    ) {
+      return { role: "pm" as const, sessionId: actor.sessionId };
+    }
+    return refuse("This card requires the owner or its eligible second key");
+  }
+
+  deny(id: string, actor: Actor, record: (reader: ProjectionReader) => NewEvent[]): void {
+    const { sessionId } = actor;
+    this.store.appendFrom((reader) => {
+      const current = this.cards().get(id);
+      if (
+        !current ||
+        current.confirmed ||
+        !sessionId ||
+        !canOrchestratorDecide(current.card, actor)
+      ) {
+        refuse("An open PM plan card is required");
+      }
+      return [
+        {
+          type: "decision.denied",
+          sessionId: null,
+          payload: { id, by: { role: "orchestrator", sessionId } },
+        },
+        ...record(reader),
+      ];
     });
   }
 

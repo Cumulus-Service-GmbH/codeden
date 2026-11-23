@@ -546,6 +546,18 @@ export class SessionRepo {
     return row ? rowToItemRecord(row) : undefined;
   }
 
+  /** Legacy inbox rows can identify an approval by request ID alone. */
+  approvalRequest(sessionId: string, requestId: string): ItemRecord | undefined {
+    const matches = this.db
+      .select()
+      .from(items)
+      .where(and(eq(items.sessionId, sessionId), eq(items.kind, "approval_request")))
+      .all()
+      .filter(({ data }) => data.kind === "approval_request" && data.requestId === requestId);
+    const [row] = matches;
+    return matches.length === 1 && row ? rowToItemRecord(row) : undefined;
+  }
+
   /** A page of a thread's items by position (newest page by default). */
   threadPage(sessionId: string, threadId: string, q: ThreadItemsQuery): ThreadItemsPage {
     const base = [eq(items.sessionId, sessionId), eq(items.threadId, threadId)];

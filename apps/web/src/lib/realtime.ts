@@ -81,6 +81,7 @@ export function startRealtime(client: CodeDenClient, queryClient: QueryClient): 
       if (
         env.type === "decision.raised" ||
         env.type === "decision.confirmed" ||
+        env.type === "decision.denied" ||
         env.type === "decision.github_stale"
       ) {
         void queryClient.invalidateQueries({ queryKey: decisionCardsKey });

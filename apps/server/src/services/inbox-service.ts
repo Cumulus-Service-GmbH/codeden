@@ -40,20 +40,17 @@ export class InboxService {
     private readonly responder: () => Responder,
   ) {}
 
-  list(query: ListInboxQuery = {}): InboxItem[] {
-    return this.newest(matching(query), 1000);
+  list(
+    query: ListInboxQuery & { kinds?: readonly InboxItemKind[] } = {},
+    limit: number | null = 1000,
+  ): InboxItem[] {
+    return this.newest(matching(query), limit);
   }
 
   /** The newest `limit` items `where` matches. */
-  private newest(where: SQL | undefined, limit: number): InboxItem[] {
-    return this.db
-      .select()
-      .from(inboxItems)
-      .where(where)
-      .orderBy(desc(inboxItems.createdAt))
-      .limit(limit)
-      .all()
-      .map(rowToInbox);
+  private newest(where: SQL | undefined, limit: number | null): InboxItem[] {
+    const rows = this.db.select().from(inboxItems).where(where).orderBy(desc(inboxItems.createdAt));
+    return (limit === null ? rows : rows.limit(limit)).all().map(rowToInbox);
   }
 
   counts(): InboxCounts {

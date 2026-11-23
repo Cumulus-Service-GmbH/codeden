@@ -777,6 +777,8 @@ export class SessionService {
       .catch((e) => {
         throw toServiceError(e);
       });
+    // The orchestrator closes the request in the same transaction as its audit record.
+    if (req.response.kind === "approval" && req.response.decidedBy === "orchestrator") return;
     const resolution: JsonValue =
       req.response.kind === "approval"
         ? { decision: req.response.decision, decidedBy: req.response.decidedBy ?? "user" }
