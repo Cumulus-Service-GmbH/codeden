@@ -12,6 +12,11 @@ type Answers = Record<string, string[]>;
 type QuestionItem = ItemOf<"user_question">;
 const CONFIRMATION_PREFIX = "confirm-";
 
+/** A server-issued confirmation whose answer must come from the owner. */
+export function isOwnerConfirmation(item: QuestionItem): boolean {
+  return item.id === `${CONFIRMATION_PREFIX}${item.requestId}`;
+}
+
 /** Who answers a question: the user, or the project manager of the session's project. */
 export type Answerer = "user" | "pm";
 
@@ -108,7 +113,7 @@ export class QuestionBroker {
     if (item.status !== "in_progress")
       throw conflict("The question was already answered", "answered");
     const waiter = this.waiters.get(requestId);
-    const confirmation = item.id.startsWith(CONFIRMATION_PREFIX);
+    const confirmation = isOwnerConfirmation(item);
     if (confirmation && by !== "user") {
       throw conflict("Only the user can answer this confirmation", "user_confirmation_required");
     }
@@ -151,7 +156,7 @@ export class QuestionBroker {
         (r) =>
           r.item.kind === "user_question" &&
           r.item.requestId === requestId &&
-          (r.item.deferred || r.item.id === `${CONFIRMATION_PREFIX}${requestId}`),
+          (r.item.deferred || isOwnerConfirmation(r.item)),
       );
   }
 

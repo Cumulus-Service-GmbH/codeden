@@ -9,6 +9,7 @@ import type {
   Session,
 } from "@codeden/contracts";
 import { badRequest, errorMessage } from "../errors";
+import { isOwnerConfirmation } from "../sessions/questions";
 import { type FactoryContext, raiseInbox } from "./context";
 import { isFactorySession } from "./sessions";
 
@@ -90,7 +91,9 @@ export async function answerProviderQuestion(
   if (item?.kind !== "user_question" || item.deferred || item.status !== "in_progress") {
     return false;
   }
-  if (item.mcpServer || !unattendedSession(ctx, e.sessionId)) return false;
+  if (item.mcpServer || isOwnerConfirmation(item) || !unattendedSession(ctx, e.sessionId)) {
+    return false;
+  }
   try {
     await respond(e.sessionId, {
       requestId: item.requestId,

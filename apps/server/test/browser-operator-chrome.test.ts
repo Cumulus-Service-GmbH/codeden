@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   type Item,
+  type RespondRequest,
   RunnerCommand,
   type Session,
   type SessionOptions,
@@ -14,6 +15,7 @@ import { openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
 import { startSession } from "../src/mcp/tools/pm/sessions";
 import type { AppServices } from "../src/services/container";
+import { answerProviderQuestion } from "../src/services/factory/unattended";
 import { forkTitle } from "../src/services/sessions/fork";
 import { handoffTitle } from "../src/services/sessions/handoff";
 import { type LauncherDeps, SessionLauncher } from "../src/services/sessions/launcher";
@@ -155,14 +157,15 @@ describe("PM Chrome confirmation cards", () => {
     ["handles Chrome consent abort", "abort", "", "skipped"],
     ["handles Chrome consent when already aborted", "already aborted", "", "skipped"],
     [
-      "unattended PM Chrome start waits for the owner and reports Cancel",
+      "unattended PM Chrome start waits for explicit owner consent",
       "unattended",
-      "Cancel",
-      "skipped",
+      "Allow Chrome",
+      "started",
     ],
   ] as const)("%s", async (_name, answerer, answer, status) => {
     const database = openDatabase(":memory:");
     const controller = new AbortController();
+    vi.useFakeTimers();
     try {
       const store = new EventStore(database.db);
       store.append(sampleSessionEvent());
@@ -172,13 +175,11 @@ describe("PM Chrome confirmation cards", () => {
         db: database.db,
         store,
         sendMessage: () => sendMessage,
-        waitMs: answerer === "timeout" ? 0 : undefined,
       });
       const services = {
         db: database.db,
         projects: { get: () => ({ kind: "local", archivedAt: null }) },
         factory: {
-          isUnattended: () => answerer === "unattended",
           // The project's Team sets the Browser Operator: a tagged PM start needs it.
           data: {
             loop: () => ({
@@ -225,7 +226,10 @@ describe("PM Chrome confirmation cards", () => {
         },
       );
       if (answerer === "already aborted") {
-        await expect(started).resolves.toMatchObject({ status });
+        await expect(started).resolves.toMatchObject({
+          status,
+          message: "The owner did not approve the Chrome launch.",
+        });
         expect(store.listAfter(0).some((event) => event.type === "inbox.created")).toBe(false);
         return;
       }
@@ -235,13 +239,47 @@ describe("PM Chrome confirmation cards", () => {
           throw new Error("Expected the Chrome confirmation card before the start result");
         }),
       ]).finally(unsubscribe);
-      const card = store
-        .listAfter(0)
-        .filter((event) => event.type === "agent.item.started")
-        .map((event) => (event.payload as { item: Item }).item)
-        .find((item) => item.kind === "user_question");
-      if (!card) throw new Error("Expected the Chrome confirmation card");
+      const event = store.listAfter(0).find((event) => {
+        return (
+          event.type === "agent.item.started" &&
+          (event.payload as { item: Item }).item.kind === "user_question"
+        );
+      });
+      const card = (event?.payload as { item: Item } | undefined)?.item;
+      if (!event || card?.kind !== "user_question")
+        throw new Error("Expected the Chrome confirmation card");
       expect(card.questions[0]?.allowFreeText).toBe(false);
+      if (answerer === "unattended") {
+        const pm = { ...sampleSession, role: "pm" as const, projectId: "p1" };
+        const respond = vi.fn(async (id: string, req: RespondRequest) => {
+          await questions.respond(id, req.requestId, req.response);
+        });
+        const autoAnswered = await answerProviderQuestion(
+          {
+            repo: { find: () => ({ session: pm }) },
+            projects: { get: () => ({ autonomyMode: "dark_factory" }) },
+          } as unknown as Parameters<typeof answerProviderQuestion>[0],
+          respond,
+          event,
+        );
+        expect(autoAnswered).toBe(false);
+        expect(respond).not.toHaveBeenCalled();
+        expect(store.listAfter(0)).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              type: "inbox.created",
+              payload: expect.objectContaining({
+                item: expect.objectContaining({
+                  kind: "question",
+                  status: "open",
+                  requestId: card.requestId,
+                }),
+              }),
+            }),
+          ]),
+        );
+        expect(sessionRepo.item(sampleSession.id, card.id)?.item.status).toBe("in_progress");
+      }
       const response = { kind: "answer" as const, answers: { q1: [answer || "Allow Chrome"] } };
       if (answerer === "pm" || answerer === "unattended") {
         await expect(
@@ -265,10 +303,14 @@ describe("PM Chrome confirmation cards", () => {
         });
       } else if (answerer === "abort") {
         controller.abort();
+      } else if (answerer === "timeout") {
+        await vi.advanceTimersByTimeAsync(4 * 60_000);
       }
       await expect(started).resolves.toMatchObject({
         status,
-        ...(answerer === "unattended" && { message: "The owner cancelled the Chrome launch." }),
+        ...((answerer === "timeout" || answerer === "abort") && {
+          message: "The owner did not approve the Chrome launch.",
+        }),
       });
       if (answerer === "timeout" || answerer === "abort") {
         expect(sessionRepo.item(sampleSession.id, card.id)?.item.status).toBe("cancelled");
@@ -279,6 +321,7 @@ describe("PM Chrome confirmation cards", () => {
       }
     } finally {
       controller.abort();
+      vi.useRealTimers();
       database.close();
     }
   });
