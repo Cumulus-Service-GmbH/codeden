@@ -47,7 +47,7 @@ export class AcpRpc {
     const stdout = child.stdout;
     if (!stdout || !child.stdin) throw new Error(`${label} needs piped stdio`);
     let overflowed = false;
-    readStdioLines(
+    const stopReading = readStdioLines(
       stdout,
       (line) => {
         if (!this.exited && !overflowed) this.onLine(line);
@@ -68,6 +68,7 @@ export class AcpRpc {
       this.stderrTail = (this.stderrTail + d).slice(-4000);
     });
     child.stdin.on("error", () => {});
+    child.once("exit", stopReading);
     child.on("exit", (code) => this.onExit(code));
     child.on("error", (error) => {
       this.stderrTail += `\n${error.message}`;

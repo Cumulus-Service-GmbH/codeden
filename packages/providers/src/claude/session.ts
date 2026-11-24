@@ -120,6 +120,7 @@ export class ClaudeSession implements ProviderSession {
   private abort: AbortController | undefined;
   private stderrTail = "";
   private closed = false;
+  private closing?: Promise<void>;
   private interrupts = 0;
   // hook_response has no tool_use_id. Match by tool name for the rest of the turn,
   // so we may ask more often, never less.
@@ -307,8 +308,12 @@ export class ClaudeSession implements ProviderSession {
     this.broker.respond(requestId, response);
   }
 
-  async close(): Promise<void> {
-    if (this.closed) return;
+  close(): Promise<void> {
+    this.closing ??= this.closeOnce();
+    return this.closing;
+  }
+
+  private async closeOnce(): Promise<void> {
     this.closed = true;
     this.markedHookAsks.clear();
     this.mcpStatus.stop();

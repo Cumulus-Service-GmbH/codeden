@@ -12,7 +12,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ClaudeSession } from "../src/claude/session";
 
 /** A stand-in for the SDK's `query()`: records options and permission-mode changes. */
-function stubSdk(opts: { refuseBypass?: boolean } = {}) {
+function stubSdk(opts: { refuseBypass?: boolean; dispose?: () => Promise<void> } = {}) {
   const launches: Options[] = [];
   const modes: PermissionMode[] = [];
   /** Ends the latest query, as if the CLI exited. */
@@ -40,6 +40,14 @@ function stubSdk(opts: { refuseBypass?: boolean } = {}) {
       supportedModels: async () => [],
       supportedCommands: async () => [],
       close: () => finish(),
+      ...(opts.dispose
+        ? {
+            [Symbol.asyncDispose]: async () => {
+              await opts.dispose?.();
+              finish();
+            },
+          }
+        : {}),
     };
     return q as unknown as Query;
   }) as unknown as ConstructorParameters<typeof ClaudeSession>[1]["query"];
@@ -107,6 +115,23 @@ function open(sdk: ReturnType<typeof stubSdk>, opts: Partial<SessionOptions> = {
     events.filter((e) => e.type === "item.started" && e.item.kind === "approval_request");
   return { session, preToolUse, permission, approvals };
 }
+
+it("joins concurrent closes until the SDK is finished disposing", async () => {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  const dispose = vi.fn(() => promise);
+  const { session } = open(stubSdk({ dispose }));
+  const first = session.close();
+  const completed = vi.fn();
+  const second = session.close().then(completed);
+  try {
+    await Promise.resolve();
+    expect(completed).not.toHaveBeenCalled();
+  } finally {
+    resolve();
+    await Promise.all([first, second]);
+  }
+  expect(dispose).toHaveBeenCalledTimes(1);
+});
 
 it.each([
   [true, "chrome"],

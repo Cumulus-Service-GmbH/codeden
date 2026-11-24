@@ -284,7 +284,14 @@ export function stopStdioChild(child: ChildProcess): Promise<void> {
       resolve();
     };
     child.once("exit", exited);
-    child.stdin?.end();
+    try {
+      child.stdin?.end();
+    } catch {
+      // Continue to signal and wait for exit if stdin is already unusable.
+    }
+  }).catch((error: unknown) => {
+    stopping.delete(child);
+    throw error;
   });
   stopping.set(child, stopped);
   return stopped;

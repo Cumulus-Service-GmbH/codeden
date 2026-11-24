@@ -11,6 +11,7 @@ export function readStdioLines(
   let partial: Buffer | undefined;
   let size = 0;
   let discarding = false;
+  let stopped = false;
   const reset = () => {
     partial = undefined;
     size = 0;
@@ -20,7 +21,7 @@ export function readStdioLines(
     onLine(bytes.toString("utf8", 0, bytes.at(-1) === 13 ? bytes.length - 1 : bytes.length));
   };
   const data = (chunk: Buffer) => {
-    for (let offset = 0; offset < chunk.length; ) {
+    for (let offset = 0; !stopped && offset < chunk.length; ) {
       const lf = chunk.indexOf(10, offset);
       const end = lf < 0 ? chunk.length : lf;
       const length = end - offset;
@@ -51,12 +52,13 @@ export function readStdioLines(
     }
   };
   const end = () => {
-    if (partial && size) emit(partial.subarray(0, size));
+    if (!stopped && partial && size) emit(partial.subarray(0, size));
     reset();
   };
   input.on("data", data);
   input.once("end", end);
   return () => {
+    stopped = true;
     input.off("data", data);
     input.off("end", end);
     reset();

@@ -9,6 +9,9 @@ import { guardPluginDir, HIDDEN_ENV_VARS } from "./plugin";
 /** How long `opencode serve` may take to print its URL. It usually takes 200-400 ms. */
 export const OPENCODE_START_TIMEOUT_MS = 20_000;
 
+const warnStopFailure = (error: unknown) =>
+  console.warn(`OpenCode shutdown failed: ${String(error)}`);
+
 export interface OpenCodeServerOptions {
   /** The server's working directory (sessions still name their own directory). */
   cwd: string;
@@ -73,10 +76,12 @@ export class OpenCodeServer {
         url,
         new OpenCodeClient(url, password, opts.requestTimeoutMs),
       );
-      opts.signal?.addEventListener("abort", () => void server.close(), { once: true });
+      opts.signal?.addEventListener("abort", () => void server.close().catch(warnStopFailure), {
+        once: true,
+      });
       return server;
     } catch (error) {
-      await stopStdioChild(child);
+      await stopStdioChild(child).catch(warnStopFailure);
       throw error;
     }
   }
