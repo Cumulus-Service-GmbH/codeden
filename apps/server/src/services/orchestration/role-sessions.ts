@@ -132,14 +132,12 @@ export class RoleSessions {
     const meta = this.deps.repo.find(session.id)?.startMeta;
     const setting = this.deps.settings.get().providers[session.role];
     if (meta?.roleProvider === undefined) return false;
-    const model = meta.roleModel === undefined ? session.model : meta.roleModel;
-    const effort = meta.roleEffort === undefined ? session.effort : meta.roleEffort;
-    if (
-      meta.roleProvider === setting.provider &&
-      model === setting.model &&
-      effort === setting.effort
-    ) {
-      return false;
+    if (meta.roleProvider === setting.provider) {
+      if (meta.roleModel === undefined || meta.roleEffort === undefined) {
+        this.recordSetting(session.id, setting);
+        return false;
+      }
+      if (meta.roleModel === setting.model && meta.roleEffort === setting.effort) return false;
     }
     const { runner } = this.deps;
     if (!runner.isConnected()) return false;

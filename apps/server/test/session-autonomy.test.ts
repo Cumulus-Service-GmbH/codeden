@@ -125,6 +125,20 @@ describe("updateSession with autonomy", () => {
     expect(pending()).toBeUndefined();
   });
 
+  it("acknowledges a model-only revision for steering without applying the model mid-turn", async () => {
+    const runner = stubRunner();
+    await updateSession(repo, runner.port, session.id, { model: "next-model" });
+    expect(runner.commands).toEqual([]);
+
+    await expect(applyPendingConfig(repo, runner.port, repo.get(session.id), true)).resolves.toBe(
+      1,
+    );
+    expect(runner.commands).toEqual([
+      { name: "session.configure", sessionId: session.id, revision: 1 },
+    ]);
+    expect(pending()).toEqual({ model: "next-model" });
+  });
+
   function service(runner: RunnerPort) {
     return new SessionService({
       repo,
@@ -204,7 +218,10 @@ describe("updateSession with autonomy", () => {
         },
         idle,
       ),
-    ).rejects.toMatchObject({ code: "config_unconfirmed" });
+    ).rejects.toMatchObject({
+      code: "config_unconfirmed",
+      message: expect.stringMatching(/stop and resume/i),
+    });
     expect(runner.commands.some((command) => command.name === "session.compact")).toBe(false);
     expect(repo.get(session.id)).toMatchObject({ autonomy: "supervised", status: "idle" });
   });

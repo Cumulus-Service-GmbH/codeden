@@ -9,9 +9,11 @@ export function configRevision(repo: SessionRepo, id: string): number {
   return repo.find(id)?.startMeta?.configRevision ?? 0;
 }
 
-function unconfirmed() {
+function unconfirmed(unsupported = false) {
   return conflict(
-    "The runner has not confirmed the current session autonomy and settings.",
+    unsupported
+      ? "The runner cannot apply the current session settings live. Stop and resume the session to apply them."
+      : "The runner has not confirmed the current session autonomy and settings.",
     "config_unconfirmed",
   );
 }
@@ -126,12 +128,15 @@ export async function applyPendingConfig(
           ...(pending.planMode !== undefined && { planMode: pending.planMode }),
         }
       : pending;
-    if (Object.keys(change).length === 0) return revision;
     try {
+      // A model-only update can acknowledge its revision for steering without changing the
+      // model during a running turn. The model remains pending for the next turn.
       await configure(repo, runner, session.id, revision, change);
+      if (liveOnly && configRevision(repo, session.id) === revision) return revision;
     } catch (error) {
-      if (runnerErrorCode(error) === "unknown_session") throw error;
-      if (configRevision(repo, session.id) === revision) throw unconfirmed();
+      const code = runnerErrorCode(error);
+      if (code === "unknown_session") throw error;
+      if (configRevision(repo, session.id) === revision) throw unconfirmed(code === "unsupported");
     }
   }
 }

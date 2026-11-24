@@ -201,6 +201,27 @@ describe("role sessions: what does not move a role session (§8.1)", () => {
   }
 
   it(
+    "keeps a legacy PM conversation with a session-only model override",
+    withRoles(async ({ roles, repo, set, settle }) => {
+      await set({ providers: { pm: { provider: "codex" } } });
+      const pm = await roles.ensure("pm", "p1");
+      settle(pm.id);
+      repo.setStartMeta(pm.id, (meta) => {
+        const {
+          roleModel: _model,
+          roleEffort: _effort,
+          ...rest
+        } = meta as NonNullable<typeof meta>;
+        return rest;
+      });
+      repo.update(pm.id, (session) => ({ ...session, model: "custom" }));
+
+      expect((await roles.ensure("pm", "p1")).id).toBe(pm.id);
+      expect(repo.get(pm.id)).toMatchObject({ model: "custom", archivedAt: null });
+    }),
+  );
+
+  it(
     "keeps a session from before the setting was recorded, until the setting next changes",
     withRoles(async ({ roles, repo, set, setQuietly, settle }) => {
       const pm = await roles.ensure("pm", "p1");
