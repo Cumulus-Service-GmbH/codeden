@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import os from "node:os";
 import type {
   CanUseTool,
+  PermissionMode,
   PermissionResult,
   Query,
   SDKUserMessage,
@@ -119,6 +120,9 @@ export class ClaudeSession implements ProviderSession {
   private modeUpdate = Promise.resolve();
   private modeRevision = 0;
   private correctingMode = false;
+  private appliedMode: PermissionMode | undefined;
+  private settingMode: PermissionMode | undefined;
+  private fullFallbackRevision: number | undefined;
   private prompts: AsyncQueue<SDKUserMessage> | undefined;
   private abort: AbortController | undefined;
   private stderrTail = "";
@@ -134,7 +138,7 @@ export class ClaudeSession implements ProviderSession {
   /** Plan mode right now (not just at launch): a restarted query starts with it too. */
   private planMode: boolean;
   /** The approved ExitPlanMode call whose result re-applies the permission level. */
-  private planExitToolUseId: string | undefined;
+  private planExit: { toolUseId: string; mode: PermissionMode; revision: number } | undefined;
   /** Uuids of messages steered into the running turn, so a Stop can tell which it cancelled. */
   private readonly steered = new Set<string>();
   /** The subscription's usage windows, read when a query starts and after each turn. */
@@ -348,12 +352,22 @@ export class ClaudeSession implements ProviderSession {
       if (!active()) return;
       const revision = this.modeRevision;
       const mode = permissionModeFor(this.autonomy, this.planMode);
+      const setMode = async (target: PermissionMode) => {
+        this.settingMode = target;
+        await q.setPermissionMode(target);
+        if (active()) this.appliedMode = target;
+      };
       try {
-        await q.setPermissionMode(mode);
+        await setMode(mode);
+        if (active()) this.fullFallbackRevision = undefined;
       } catch (error) {
-        if (!active() || revision !== this.modeRevision) return;
+        if (!active()) return;
         if (mode !== "bypassPermissions") throw error;
-        await q.setPermissionMode("acceptEdits");
+        if (revision !== this.modeRevision) return;
+        await setMode("acceptEdits");
+        if (active()) this.fullFallbackRevision = revision;
+      } finally {
+        if (active()) this.settingMode = undefined;
       }
     });
     this.modeUpdate = update.catch(() => {});
@@ -380,6 +394,20 @@ export class ClaudeSession implements ProviderSession {
     if (this.q !== q || this.closed || !reported || this.correctingMode) return;
     const expected = permissionModeFor(this.autonomy, this.planMode);
     if (reported === expected) return;
+    // The CLI can report the old or new mode before it acknowledges a write.
+    if (this.settingMode && (reported === this.appliedMode || reported === this.settingMode))
+      return;
+    if (
+      this.planExit?.revision === this.modeRevision &&
+      (reported === "plan" || reported === this.planExit.mode)
+    )
+      return;
+    if (
+      expected === "bypassPermissions" &&
+      reported === "acceptEdits" &&
+      this.fullFallbackRevision === this.modeRevision
+    )
+      return;
     const mode = /^[a-zA-Z]{1,32}$/.test(reported) ? reported : "unrecognized";
     this.warnPermissionMode(
       "claude_permission_mode_drift",
@@ -405,23 +433,24 @@ export class ClaudeSession implements ProviderSession {
   }
 
   /** The plan was approved: implement at the session's level, and tell CodeDen. */
-  private leavePlanMode(toolUseId: string): void {
-    this.planExitToolUseId = toolUseId;
-    if (!this.planMode) return;
-    this.modeRevision++;
-    this.planMode = false;
-    this.policy.setPlanning(false);
-    this.events.push({ type: "session.updated", planMode: false });
+  private leavePlanMode(toolUseId: string, mode: PermissionMode): void {
+    if (this.planMode) {
+      this.modeRevision++;
+      this.planMode = false;
+      this.policy.setPlanning(false);
+      this.events.push({ type: "session.updated", planMode: false });
+    }
+    this.planExit = { toolUseId, mode, revision: this.modeRevision };
   }
 
   /**
-   * Once the approved ExitPlanMode call has run, set the permission level again, in case the
-   * CLI picked its own mode on the way out of `plan`.
+   * Reapply the configured mode after ExitPlanMode, or at turn end if its result was omitted.
    */
   private afterMessage(message: unknown): void {
-    const id = this.planExitToolUseId;
-    if (!id || !carriesToolResult(message, id)) return;
-    this.planExitToolUseId = undefined;
+    if (!this.planExit) return;
+    if (str(message, "type") !== "result" && !carriesToolResult(message, this.planExit.toolUseId))
+      return;
+    this.planExit = undefined;
     // Only a guard: the CLI already took the level's mode with the approval.
     if (!this.planMode) void this.applyPermissionModeInBackground();
   }
@@ -498,6 +527,9 @@ export class ClaudeSession implements ProviderSession {
     this.q = q;
     this.modeUpdate = Promise.resolve();
     this.correctingMode = false;
+    this.appliedMode = permissionModeFor(this.autonomy, this.planMode);
+    this.settingMode = undefined;
+    this.fullFallbackRevision = undefined;
     this.prompts = prompts;
     this.abort = abort;
     void this.pump(q);
@@ -560,7 +592,7 @@ export class ClaudeSession implements ProviderSession {
       if (this.q === q) {
         this.markedHookAsks.clear();
         this.q = undefined;
-        this.planExitToolUseId = undefined;
+        this.planExit = undefined;
         this.prompts = undefined;
       }
     }
@@ -654,10 +686,7 @@ export class ClaudeSession implements ProviderSession {
 
     const gate = this.policy.needsUser(toolName, input, dir);
     if (!gate.ask) {
-      return {
-        behavior: "allow",
-        updatedInput: gate.command ? { ...input, command: gate.command } : input,
-      };
+      return this.approveTool(q, gate.command ? { ...input, command: gate.command } : input);
     }
     const ctx = this.mapper.ctxForTool(options.toolUseID);
     const item = this.approvalItem(toolName, input, options, {
@@ -778,7 +807,7 @@ export class ClaudeSession implements ProviderSession {
     const level = permissionModeFor(this.autonomy, false);
     const mode = level === "bypassPermissions" ? "acceptEdits" : level;
     const result = planDecision(input, response, mode);
-    if (result.behavior === "allow") this.leavePlanMode(options.toolUseID);
+    if (result.behavior === "allow") this.leavePlanMode(options.toolUseID, mode);
     return result;
   }
 }

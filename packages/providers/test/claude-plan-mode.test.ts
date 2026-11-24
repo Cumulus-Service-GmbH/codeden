@@ -267,6 +267,65 @@ describe("Claude plan mode", () => {
     await expect(session.setAutonomy("full")).rejects.toThrow(/acceptEdits/);
   });
 
+  it("keeps the prior Full fallback without repeating corrections", async () => {
+    const sdk = stubSdk();
+    const { session, preToolUse, items } = open(sdk, { autonomy: "full" });
+    sdk.refuse.add("bypassPermissions");
+    await session.setPlanMode(false);
+    await session.send({ text: "Check mode", attachments: [] });
+    await preToolUse("Write", inWorktree, "acceptEdits");
+    await settle();
+    expect(sdk.modes).toEqual(["acceptEdits"]);
+    expect(items("notice")).toEqual([]);
+  });
+
+  it("surfaces a pending plan-mode refusal across an autonomy change", async () => {
+    const sdk = stubSdk();
+    const { session } = open(sdk, { planMode: false });
+    const refusal = Promise.withResolvers<void>();
+    sdk.beforeMode.mockImplementationOnce(() => refusal.promise);
+    const switching = session.setPlanMode(true);
+    await vi.waitFor(() => expect(sdk.beforeMode).toHaveBeenCalledWith("plan"));
+    await session.setAutonomy("full");
+    refusal.reject(new Error("Plan mode unavailable"));
+    await expect(switching).rejects.toThrow("Plan mode unavailable");
+  });
+
+  it.each([
+    ["the tool result", toolResult("exit")],
+    ["turn end", { type: "result", subtype: "success" }],
+  ])("recognizes the approved Full plan's intermediate mode until %s", async (_end, completion) => {
+    const sdk = stubSdk();
+    const { session, items, permission } = open(sdk, { autonomy: "full" });
+    await session.send({ text: "Plan this change", attachments: [] });
+    const approved = permission("ExitPlanMode", { plan: "Change x" }, "exit");
+    await vi.waitFor(() => expect(items("approval_request")).toHaveLength(1));
+    await session.respond("r-exit", { kind: "approval", decision: "allow_once" });
+    await approved;
+    sdk.deliver({ type: "system", subtype: "status", permissionMode: "acceptEdits" });
+    await settle();
+    expect(sdk.modes).toEqual([]);
+    expect(items("notice")).toEqual([]);
+    sdk.deliver(completion);
+    await vi.waitFor(() => expect(sdk.modes).toEqual(["bypassPermissions"]));
+  });
+
+  it("recognizes the previous mode while a configuration change is pending", async () => {
+    const sdk = stubSdk();
+    const { session, items } = open(sdk, { planMode: false });
+    await session.send({ text: "Check mode", attachments: [] });
+    const update = Promise.withResolvers<void>();
+    sdk.beforeMode.mockImplementationOnce(() => update.promise);
+    const switching = session.setAutonomy("supervised");
+    await vi.waitFor(() => expect(sdk.beforeMode).toHaveBeenCalledWith("default"));
+    sdk.deliver({ type: "system", subtype: "status", permissionMode: "acceptEdits" });
+    await settle();
+    update.resolve();
+    await switching;
+    expect(sdk.modes).toEqual(["default"]);
+    expect(items("notice")).toEqual([]);
+  });
+
   it("approving the plan continues at the session's permission level", async () => {
     const sdk = stubSdk();
     const { session, preToolUse, permission, items, planUpdates } = open(sdk);
@@ -350,6 +409,15 @@ describe("Claude plan mode", () => {
         updatedPermissions: [],
       });
       expect(sdk.modes).toEqual(["default", "default"]);
+      if (approval === "allow_session") {
+        await expect(permission("Bash", input, "read-again")).resolves.toEqual({
+          behavior: "allow",
+          updatedInput: { command: expect.any(String) },
+          updatedPermissions: [],
+        });
+        expect(sdk.modes).toEqual(["default", "default", "default"]);
+        expect(items("approval_request")).toHaveLength(2);
+      }
     },
   );
 
