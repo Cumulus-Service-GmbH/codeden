@@ -13,6 +13,7 @@ import {
   type FactorySpotCheckResponse,
   KillSwitchRequest,
   PutVisionRequest,
+  ReviewPolicy,
   SetAutonomyModeRequest,
 } from "@codeden/contracts";
 import { Hono } from "hono";
@@ -38,9 +39,22 @@ export function projectFactoryRoutes(s: AppServices) {
   const f = s.factory;
   return new Hono()
     .get("/:id/factory", async (c) => c.json(await f.status(c.req.param("id"))))
-    .put("/:id/autonomy", jsonBody(SetAutonomyModeRequest), async (c) =>
-      c.json(await f.setMode(c.req.param("id"), c.req.valid("json"))),
-    )
+    .put("/:id/autonomy", jsonBody(SetAutonomyModeRequest), async (c) => {
+      const id = c.req.param("id");
+      const request = c.req.valid("json");
+      if (request.tuning?.reviewPolicy) {
+        // The owner settings endpoint owns these two fields. Keep legacy values for old loops.
+        const { reviewerRounds, totalRounds } = ReviewPolicy.parse(
+          f.data.loop(id)?.tuning.reviewPolicy ?? {},
+        );
+        request.tuning.reviewPolicy = {
+          ...request.tuning.reviewPolicy,
+          reviewerRounds,
+          totalRounds,
+        };
+      }
+      return c.json(await f.setMode(id, request));
+    })
     .get("/:id/vision", (c) => c.json(f.vision(c.req.param("id"))))
     .put("/:id/vision", jsonBody(PutVisionRequest), async (c) =>
       c.json(await f.putVision(c.req.param("id"), c.req.valid("json").contents)),

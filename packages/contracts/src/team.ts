@@ -82,6 +82,54 @@ export const TEAM_FILE_ENV = "TEAM_FILE";
 export const TeamSource = z.enum(["session", "project", "default"]);
 export type TeamSource = z.infer<typeof TeamSource>;
 
+/** The owner-set round limits shared by the Team's reviewers and Arbiter. */
+export const TeamReviewLimits = z.strictObject({
+  /** Maximum model review rounds for one item, including escalation. */
+  totalRounds: z.int().min(1).max(12).default(8),
+  /** Code review rounds before an unresolved item can go to the Arbiter. */
+  reviewerRounds: z.int().min(1).max(5).default(2),
+});
+export type TeamReviewLimits = z.infer<typeof TeamReviewLimits>;
+
+/** Default Team limits and project overrides. A null field restores inheritance. */
+export const TeamReviewLimitSettings = z.strictObject({
+  defaults: TeamReviewLimits.prefault({}),
+  projects: z
+    .record(
+      z.string().min(1),
+      z.strictObject({
+        totalRounds: TeamReviewLimits.shape.totalRounds.unwrap().nullable().optional(),
+        reviewerRounds: TeamReviewLimits.shape.reviewerRounds.unwrap().nullable().optional(),
+      }),
+    )
+    .default({}),
+});
+export type TeamReviewLimitSettings = z.infer<typeof TeamReviewLimitSettings>;
+
+/** Resolve each project field independently, including its provenance for the UI and tools. */
+export function resolveTeamReviewLimits(settings: TeamReviewLimitSettings, projectId: string) {
+  const project = Object.hasOwn(settings.projects, projectId)
+    ? settings.projects[projectId]
+    : undefined;
+  return {
+    limits: {
+      totalRounds: project?.totalRounds ?? settings.defaults.totalRounds,
+      reviewerRounds: project?.reviewerRounds ?? settings.defaults.reviewerRounds,
+    },
+    sources: {
+      totalRounds: project?.totalRounds == null ? "default" : "project",
+      reviewerRounds: project?.reviewerRounds == null ? "default" : "project",
+    },
+  } as const;
+}
+
+/** The event log timestamps this authenticated change with its envelope timestamp. */
+export const TeamReviewLimitsAudit = z.object({
+  actor: z.literal("owner"),
+  oldValue: TeamReviewLimitSettings,
+  newValue: TeamReviewLimitSettings,
+});
+
 /**
  * A session's effective Team, role by role: the session's own choice for its role (from its
  * `[Role]` title tag) over the project's Team over the default Team (Settings, Factory > Team).
@@ -136,6 +184,15 @@ export const TeamFile = z.object({
   team: Team,
   /** Where each member came from (`resolveTeam`). */
   sources: z.partialRecord(TeamRole, TeamSource),
+  /** The limits consumed by the Team review tools, independent of the Arbiter's model. */
+  arbiterLimits: z
+    .object({
+      reviewFixRounds: TeamReviewLimits.shape.reviewerRounds,
+      totalRounds: TeamReviewLimits.shape.totalRounds,
+    })
+    .optional(),
+  /** Identifies the session Team as the source for the exported round limits. */
+  arbiterSettingsSource: z.literal(TEAM_FILE_ENV).optional(),
   updatedAt: z.string(),
 });
 export type TeamFile = z.infer<typeof TeamFile>;

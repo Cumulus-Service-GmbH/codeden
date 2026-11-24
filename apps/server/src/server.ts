@@ -3,6 +3,7 @@ import {
   CODEDEN_VERSION,
   HOME_RUNNER_ID,
   type ServerLock,
+  TeamReviewLimitsAudit,
   TerminalQuery,
 } from "@codeden/contracts";
 import { ImageEngineRegistry } from "@codeden/providers";
@@ -188,7 +189,10 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
   const paths = ensureHome(opts.dataDir);
   const database = openDatabase(paths.db, opts.migrationsDir);
   const store = new EventStore(database.db);
-  const settings = new SettingsStore(paths.settings);
+  const settings = new SettingsStore(paths.settings, () => {
+    const event = store.latest("team_review_limits.updated");
+    return event ? TeamReviewLimitsAudit.parse(event.payload).newValue : undefined;
+  });
   if (settings.reset) reportFileReset(settings.reset, FILE_RESET_NOTICES.settings, { store, log });
   const startedAt = Date.now();
   let port = opts.port;

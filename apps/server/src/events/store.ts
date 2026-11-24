@@ -1,5 +1,5 @@
 import type { EventEnvelope, EventType, NewEvent, RawEventEnvelope } from "@codeden/contracts";
-import { and, asc, gt, inArray, isNull, max, or } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, max, or } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { events } from "../db/schema";
 import { DbProjectionReader, type Tx } from "./projection-db";
@@ -70,6 +70,15 @@ export class EventStore {
       .where(inArray(events.type, types))
       .orderBy(asc(events.seq))
       .all();
+  }
+
+  latest(type: EventType): RawEventEnvelope | undefined {
+    return this.db
+      .select()
+      .from(events)
+      .where(eq(events.type, type))
+      .orderBy(desc(events.seq))
+      .get();
   }
 
   /** Subscribe to committed events; returns an unsubscribe function. */

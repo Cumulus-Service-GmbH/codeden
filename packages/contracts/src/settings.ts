@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { AutonomyLevel, ProviderId, QuietHours, ReasoningEffort } from "./common";
-import { AutonomyPolicy, Team } from "./team";
+import { AutonomyPolicy, Team, TeamReviewLimitSettings } from "./team";
 import { TokenSaverSettings } from "./token-saver";
 import { UpdateMode } from "./updates";
 import { DictationEngine, WhisperModelId } from "./voice-api";
@@ -97,6 +97,8 @@ const CustomModelList = z
  * older files keep working as fields are added.
  */
 export const Settings = z.object({
+  /** Owner-managed Team review limits, with independently inherited project overrides. */
+  teamReviewLimits: TeamReviewLimitSettings.prefault({}),
   /** Save setup in Factory → Team; when `remembered`, a new project's factory settings start from it. */
   teamSetup: z
     .object({

@@ -1,7 +1,7 @@
 import type { FactoryItem, FactoryLoop, Project, Session } from "@codeden/contracts";
 import { MAX_REVIEW_LINES, pinReviewSpec, reviewRound } from "../review-controls";
 import { withAskedHead } from "./approval";
-import { reviewBudgetReached } from "./arbiter";
+import { factoryReviewPolicy, reviewBudgetReached } from "./arbiter";
 import { type ProviderCause, unavailableText } from "./availability";
 import { letGoReviewer } from "./cleanup";
 import type { FactoryContext } from "./context";
@@ -182,7 +182,7 @@ export async function ensureReviewer(
     );
   }
   if ((!item.review || old) && pr.headSha) {
-    const round = reviewRound(loop.tuning.reviewPolicy ?? {}, item.reviewRounds ?? [], {
+    const round = reviewRound(factoryReviewPolicy(ctx, loop), item.reviewRounds ?? [], {
       head: pr.headSha,
       lines: pr.additions + pr.deletions,
     });

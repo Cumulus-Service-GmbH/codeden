@@ -195,6 +195,7 @@ export function AutonomyDialog({
               </p>
             </div>
             <LimitsEditor
+              projectId={project.id}
               limits={limits}
               onChange={setLimits}
               tuning={tuning ?? undefined}

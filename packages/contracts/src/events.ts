@@ -35,6 +35,7 @@ import { SessionAutonomyChanged, SessionAutonomyOverridden } from "./pm-session-
 import { PtyId } from "./runner/commands";
 import { RunnerDeletedPayload, RunnerRecordRef, RunnerRegisteredPayload } from "./runners";
 import { Settings } from "./settings";
+import { TeamReviewLimitsAudit } from "./team";
 import { TeamRun } from "./team-run";
 import { TechDebtView } from "./tech-debt";
 import { Checkpoint, QueuedMessage, SetupStep } from "./workbench";
@@ -120,6 +121,7 @@ export const EventEnvelope = z.discriminatedUnion("type", [
   ),
   globalEvent("artifact.created", z.object({ artifact: Artifact })),
   globalEvent("settings.updated", z.object({ settings: Settings })),
+  globalEvent("team_review_limits.updated", TeamReviewLimitsAudit),
   /**
    * The server added a runner, or re-registered one with new details (projected into
    * `runners`). The home runner is registered on every start.

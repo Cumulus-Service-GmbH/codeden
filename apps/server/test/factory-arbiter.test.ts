@@ -130,6 +130,10 @@ it("the Arbiter rounds setting round-trips", async () => {
 it("the review flow stops after N Arbiter rounds", async () => {
   const env = createFactoryEnv();
   const { enable, item, review, tick, verifying } = factorySteps(() => env);
+  vi.spyOn(env.settings, "teamReviewLimitsFor").mockReturnValue({
+    reviewerRounds: 1,
+    totalRounds: 8,
+  });
   const sessions = env.factory.ctx.sessions;
   const providerInfo = sessions.providerInfo("claude");
   if (!providerInfo) throw new Error("Expected the Claude provider fixture");
@@ -146,7 +150,7 @@ it("the review flow stops after N Arbiter rounds", async () => {
     await enable("software_factory", {
       tuning: {
         team: [...reviewTeam, arbiter],
-        reviewPolicy: ReviewPolicy.parse({ reviewerRounds: 1, arbiterRounds: 2 }),
+        reviewPolicy: ReviewPolicy.parse({ reviewerRounds: 2, arbiterRounds: 2 }),
       },
     });
     const { id } = await verifying();

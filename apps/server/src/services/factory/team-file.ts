@@ -16,10 +16,13 @@ import {
   type Project,
   type RawEventEnvelope,
   resolveTeam,
+  resolveTeamReviewLimits,
   type Session,
   sessionTeamMember,
+  TEAM_FILE_ENV,
   type Team,
   TeamFile,
+  type TeamReviewLimitSettings,
 } from "@codeden/contracts";
 
 /** Where a session's Team file lives under CodeDen's home (`TEAM_FILE` points here). */
@@ -78,6 +81,8 @@ export interface TeamFileDeps {
   worktreesDir: string;
   /** The default Team (Settings, Factory > Team setup). */
   defaults: () => Team;
+  /** The audited defaults and overrides that apply to the session's project. */
+  reviewLimits: () => TeamReviewLimitSettings;
   /** The project's default Team. */
   projectTeam: (projectId: string) => Team;
   project: (projectId: string) => Pick<Project, "path" | "slug">;
@@ -102,6 +107,7 @@ export function writeTeamFile(deps: TeamFileDeps, session: Session, now = new Da
     // Only pins the starter chose are the session's own; ones filled from the Team follow the Team.
     session: deps.ownTeamPins?.(session.id) ? sessionTeamMember(session) : null,
   });
+  const { limits } = resolveTeamReviewLimits(deps.reviewLimits(), session.projectId);
   const body = TeamFile.parse({
     version: 1,
     sessionId: session.id,
@@ -109,6 +115,8 @@ export function writeTeamFile(deps: TeamFileDeps, session: Session, now = new Da
     roots: teamRoots(deps.project(session.projectId), deps.worktreesDir),
     team,
     sources,
+    arbiterLimits: { reviewFixRounds: limits.reviewerRounds, totalRounds: limits.totalRounds },
+    arbiterSettingsSource: TEAM_FILE_ENV,
     updatedAt: now.toISOString(),
   });
   if (sameTeamFile(path, body)) return path;
@@ -286,7 +294,7 @@ export function createTeamFileRefresher(deps: TeamFileDeps) {
     }
     if (all || initial) {
       try {
-        const key = JSON.stringify(deps.defaults());
+        const key = JSON.stringify([deps.defaults(), deps.reviewLimits()]);
         if (key !== seenDefaults) pendingAll = true;
         seenDefaults = key;
       } catch (error) {

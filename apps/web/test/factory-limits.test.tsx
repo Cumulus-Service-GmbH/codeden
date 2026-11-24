@@ -172,6 +172,36 @@ it("saves Team pins with factory tuning and replaces remembered roles in Save se
   expect(reloaded.tuning).toMatchObject({ team, resultSummaryBytes: 1024 });
 });
 
+it("saves review limits from the Arbiter row and shows each project's effective source", async () => {
+  const client = createMockClient();
+  const teamSetup = {
+    remembered: true,
+    team: [{ role: "writer", provider: "codex", model: null, effort: null }] as const,
+    resultSummaryBytes: 1024,
+  };
+  await client.updateSettings({ teamSetup: { ...teamSetup, team: [...teamSetup.team] } });
+  renderWithClient(<AutonomyDialog project={storefront} open onOpenChange={() => {}} />, client, {
+    withRouter: true,
+  });
+  const reviewer = await screen.findByLabelText("Code review rounds before Arbiter");
+  expect(screen.getByText("Effective for this project: 2 (default).")).toBeTruthy();
+  fireEvent.change(reviewer, { target: { value: "4" } });
+  expect(screen.getByText("Effective for this project: 4 (project).")).toBeTruthy();
+  fireEvent.click(screen.getByRole("checkbox", { name: "Edit default Team review limits" }));
+  fireEvent.change(screen.getByLabelText("Total review rounds per item"), {
+    target: { value: "12" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "Save review limits" }));
+  await waitFor(async () => {
+    const { settings } = await client.getSnapshot();
+    expect(settings.teamReviewLimits).toEqual({
+      defaults: { totalRounds: 12, reviewerRounds: 2 },
+      projects: { [storefront.id]: { reviewerRounds: 4 } },
+    });
+    expect(settings.teamSetup).toEqual(teamSetup);
+  });
+});
+
 it("flags stale Team model pins and lets the member follow the provider default", async () => {
   const client = createMockClient();
   const status = await client.factory.status(storefront.id);

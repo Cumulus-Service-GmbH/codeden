@@ -290,6 +290,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     home: opts.paths.home,
     worktreesDir: opts.paths.worktrees,
     defaults: () => defaultTeam(opts.settings.get()),
+    reviewLimits: () => opts.settings.get().teamReviewLimits,
     projectTeam,
     project: (projectId) => projects.get(projectId),
     session: (sessionId) => sessionRepo.find(sessionId)?.session,

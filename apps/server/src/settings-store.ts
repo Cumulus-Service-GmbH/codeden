@@ -1,5 +1,10 @@
 import { existsSync } from "node:fs";
-import { Settings, type SettingsPatch } from "@codeden/contracts";
+import {
+  resolveTeamReviewLimits,
+  Settings,
+  type SettingsPatch,
+  type TeamReviewLimitSettings,
+} from "@codeden/contracts";
 import { readJsonFile, writeJsonFile } from "./json-file";
 import { type FileReset, loadUserJsonFile } from "./user-json-file";
 
@@ -12,7 +17,10 @@ export class SettingsStore {
    */
   readonly reset: FileReset | null;
 
-  constructor(private readonly file: string) {
+  constructor(
+    private readonly file: string,
+    private readonly auditedReviewLimits?: () => TeamReviewLimitSettings | undefined,
+  ) {
     const existed = existsSync(file);
     const { value, reset } = loadUserJsonFile(file, Settings);
     if (!existed) writeJsonFile(file, value);
@@ -27,7 +35,19 @@ export class SettingsStore {
   }
 
   get(): Settings {
-    return this.current;
+    return this.auditedReviewLimits
+      ? {
+          ...this.current,
+          teamReviewLimits:
+            this.auditedReviewLimits() ?? Settings.shape.teamReviewLimits.parse(undefined),
+        }
+      : this.current;
+  }
+
+  /** Native factory loops keep their legacy policy until the first audited Team limits change. */
+  teamReviewLimitsFor(projectId: string) {
+    const settings = this.auditedReviewLimits?.();
+    return settings ? resolveTeamReviewLimits(settings, projectId).limits : undefined;
   }
 
   /** Deep-merge a patch, validate, persist and return the new settings. Throws on invalid input. */
@@ -36,7 +56,7 @@ export class SettingsStore {
     const next = Settings.parse(merged);
     writeJsonFile(this.file, next);
     this.current = next;
-    return next;
+    return this.get();
   }
 }
 

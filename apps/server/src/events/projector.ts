@@ -170,6 +170,7 @@ export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
     case "session.autonomy_changed":
     case "session.autonomy_overridden":
     case "settings.updated":
+    case "team_review_limits.updated":
     case "automation.updated":
     case "runner.draining":
     case "decision.raised":

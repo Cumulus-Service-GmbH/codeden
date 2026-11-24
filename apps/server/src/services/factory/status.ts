@@ -12,6 +12,7 @@ import {
   LESSONS_IN_BRIEF,
   type Project,
   pipelineStep,
+  ReviewPolicy,
   type ScoutStatus,
 } from "@codeden/contracts";
 import { askedHead } from "./approval";
@@ -165,6 +166,7 @@ export async function buildStatus(ctx: FactoryContext, projectId: string): Promi
   const toWork = (i: FactoryItem) => workItem(i, owned(i), costs.get(i.id) ?? null);
   const spend = budgetSpend(ctx, projectId, localDay(ctx.now()), project.factoryLimits);
   const globalKill = ctx.settings.get().factory.killSwitch;
+  const reviewLimits = ctx.settings.teamReviewLimitsFor?.(projectId);
   const githubLogin = isFactoryMode(project.autonomyMode)
     ? await ctx.github.viewerLogin().catch(() => null)
     : null;
@@ -180,7 +182,12 @@ export async function buildStatus(ctx: FactoryContext, projectId: string): Promi
     globalKillSwitch: globalKill,
     drain: drainStatus(ctx, projectId, loop),
     limits: project.factoryLimits,
-    tuning: loop.tuning,
+    tuning: reviewLimits
+      ? {
+          ...loop.tuning,
+          reviewPolicy: { ...ReviewPolicy.parse(loop.tuning.reviewPolicy ?? {}), ...reviewLimits },
+        }
+      : loop.tuning,
     spendToday: { usd: Math.round(spend.usd * 10_000) / 10_000, tokens: spend.tokens },
     mergesToday: loop.day === localDay(ctx.now()) ? loop.mergesToday : 0,
     stats: factoryStats(all, ctx.now()),

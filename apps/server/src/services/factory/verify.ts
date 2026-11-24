@@ -10,7 +10,12 @@ import {
 import { errorMessage } from "../errors";
 import { jevPasses } from "../review-jev";
 import { settleApproval, verdictHead } from "./approval";
-import { advanceArbiter, reviewEscalation, stopUnapprovedArbitration } from "./arbiter";
+import {
+  advanceArbiter,
+  factoryReviewPolicy,
+  reviewEscalation,
+  stopUnapprovedArbitration,
+} from "./arbiter";
 import { codeFiles, evaluateChecks, hasTestResults, sameChecks } from "./checks";
 import { CI_KICK_NUDGE, kickCi } from "./ci-kick";
 import { type FactoryContext, visionOf } from "./context";
@@ -226,7 +231,7 @@ export async function advanceVerifying(
     pr.headSha &&
     (current.arbitration
       ? current.arbitration.state !== "jev_pending" || current.arbitration.head !== pr.headSha
-      : !owesAutoRevise && reviewEscalation(current, loop.tuning.reviewPolicy ?? {}))
+      : !owesAutoRevise && reviewEscalation(current, factoryReviewPolicy(ctx, loop)))
   ) {
     if (!current.arbitration || current.arbitration.state === "queued") {
       const stopped = await beforeAgentTurn(current);

@@ -2,8 +2,11 @@ import {
   defaultTeam,
   ReasoningEffort,
   ReviewPolicy,
+  resolveTeamReviewLimits,
   type Settings,
+  type SettingsPatch,
   type TeamMember,
+  TeamReviewLimitSettings,
   TeamRole,
   teamMember,
 } from "@codeden/contracts";
@@ -34,10 +37,18 @@ const ROLE_LABEL: Record<TeamRole, string> = {
   browserOperator: "Browser operator",
 };
 
+const DEFAULT_REVIEW_LIMITS = TeamReviewLimitSettings.parse({});
+const REVIEW_FIELDS = [
+  { key: "reviewerRounds", label: "Code review rounds before Arbiter", min: 1, max: 5 },
+  { key: "totalRounds", label: "Total review rounds per item", min: 1, max: 12 },
+] as const;
+
 export function TeamEditor({
+  projectId,
   tuning,
   onChange,
 }: {
+  projectId?: string;
   tuning: TuningDraft;
   onChange: (next: TuningDraft) => void;
 }) {
@@ -47,9 +58,34 @@ export function TeamEditor({
   const defaults = useSnapshotData((s) => defaultTeam(s.settings), []);
   const savedRemembered = useSnapshotData((s) => s.settings.teamSetup.remembered, false);
   const [remembered, setRemembered] = useState<boolean | null>(null);
+  const savedLimits = useSnapshotData((s) => s.settings.teamReviewLimits, DEFAULT_REVIEW_LIMITS);
+  const [limitDraft, setLimitDraft] = useState<NonNullable<SettingsPatch["teamReviewLimits"]>>({});
+  const [editDefault, setEditDefault] = useState(false);
+  const defaultLimits = { ...savedLimits.defaults, ...limitDraft.defaults };
+  const projectLimits = projectId
+    ? { ...savedLimits.projects[projectId], ...limitDraft.projects?.[projectId] }
+    : {};
+  const effective = resolveTeamReviewLimits(
+    { defaults: defaultLimits, projects: projectId ? { [projectId]: projectLimits } : {} },
+    projectId ?? "",
+  );
   const save = useMutation({
     mutationFn: (teamSetup: Settings["teamSetup"]) => client.updateSettings({ teamSetup }),
     onError: (error) => toast.error("Setup not saved", { description: error.message }),
+  });
+  const saveLimits = useMutation({
+    mutationFn: () =>
+      client.updateSettings({
+        teamReviewLimits: {
+          ...limitDraft,
+          ...(editDefault || !projectId ? { defaults: limitDraft.defaults ?? defaultLimits } : {}),
+        },
+      }),
+    onSuccess: () => {
+      setLimitDraft({});
+      toast.success("Review limits saved");
+    },
+    onError: (error) => toast.error("Review limits not saved", { description: error.message }),
   });
   const { isSuccess, reset } = save;
   useEffect(() => {
@@ -157,6 +193,75 @@ export function TeamEditor({
                     wrapperClassName="w-24"
                   />
                 </Field>
+                <fieldset disabled={saveLimits.isPending} className="mt-2 space-y-2">
+                  {projectId && (
+                    <label className="flex items-center gap-2 text-xs">
+                      <input
+                        type="checkbox"
+                        checked={editDefault}
+                        onChange={(e) => setEditDefault(e.target.checked)}
+                      />
+                      Edit default Team review limits
+                    </label>
+                  )}
+                  {REVIEW_FIELDS.map(({ key, label, min, max }) => (
+                    <Field
+                      key={key}
+                      label={label}
+                      htmlFor={`${id}-${key}`}
+                      help={
+                        projectId
+                          ? `Effective for this project: ${effective.limits[key]} (${effective.sources[key]}).`
+                          : undefined
+                      }
+                    >
+                      {projectId && !editDefault ? (
+                        <NumberField
+                          id={`${id}-${key}`}
+                          min={min}
+                          max={max}
+                          optional
+                          placeholder={String(defaultLimits[key])}
+                          value={projectLimits[key]}
+                          onChange={(value) =>
+                            setLimitDraft((draft) => ({
+                              ...draft,
+                              projects: {
+                                [projectId]: { ...draft.projects?.[projectId], [key]: value },
+                              },
+                            }))
+                          }
+                          wrapperClassName="w-24"
+                        />
+                      ) : (
+                        <NumberField
+                          id={`${id}-${key}`}
+                          min={min}
+                          max={max}
+                          value={defaultLimits[key]}
+                          onChange={(value) =>
+                            setLimitDraft((draft) => ({
+                              ...draft,
+                              defaults: { ...draft.defaults, [key]: value },
+                            }))
+                          }
+                          wrapperClassName="w-24"
+                        />
+                      )}
+                    </Field>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={
+                      !editDefault && !!projectId && !limitDraft.defaults && !limitDraft.projects
+                    }
+                    onClick={() => saveLimits.mutate()}
+                  >
+                    Save review limits
+                  </Button>
+                </fieldset>
               </div>
             )}
             {staleModel && member && provider && (

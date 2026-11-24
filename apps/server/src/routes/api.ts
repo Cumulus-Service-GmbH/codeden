@@ -10,16 +10,19 @@ import {
   type Snapshot,
   SnapshotQuery,
   summarizeActivity,
+  TeamReviewLimitSettings,
 } from "@codeden/contracts";
 import { eq, inArray } from "drizzle-orm";
 import { Hono } from "hono";
 import { rowToAutomation } from "../db/rows";
 import { automations, inboxItems, sessions } from "../db/schema";
+import { isRemoteRequest } from "../security";
 import type { AppServices } from "../services/container";
-import { badRequest } from "../services/errors";
+import { badRequest, forbidden } from "../services/errors";
 import { archivedSessionCounts, snapshotSessions } from "../services/sessions/archived";
 import { sessionSnapshot } from "../services/sessions/snapshot";
 import { listTeamRuns } from "../services/sessions/team-run-projection";
+import { deepMerge } from "../settings-store";
 import { agentConfigRoutes, sessionAgentConfigRoutes } from "./agent-config";
 import { automationRoutes, projectAutomationRoutes } from "./automations";
 import { browserRoutes, sessionBrowserRoutes } from "./browser";
@@ -125,10 +128,40 @@ export function createApi(ctx: ApiContext) {
         if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
           throw badRequest("Expected a JSON object");
         }
-        const before = s.settings.get().providers;
+        const { teamReviewLimits: reviewPatch, ...settingsPatch } = patch;
+        const before = s.settings.get();
+        if (reviewPatch !== undefined) {
+          if (isRemoteRequest(c)) {
+            throw forbidden("Changing Team review limits requires the local install token");
+          }
+          if (Object.keys(settingsPatch).length) {
+            throw badRequest(
+              "Save Team review limits separately from other settings",
+              "invalid_settings",
+            );
+          }
+          const oldValue = before.teamReviewLimits;
+          const reviewed = TeamReviewLimitSettings.safeParse(
+            reviewPatch && deepMerge(oldValue, reviewPatch),
+          );
+          if (!reviewed.success) {
+            throw badRequest(String(reviewed.error), "invalid_settings");
+          }
+          const newValue = reviewed.data;
+          const settings = { ...before, teamReviewLimits: newValue };
+          s.store.append([
+            {
+              type: "team_review_limits.updated",
+              sessionId: null,
+              payload: { actor: "owner", oldValue, newValue },
+            },
+            { type: "settings.updated", sessionId: null, payload: { settings } },
+          ]);
+          return c.json(settings);
+        }
         let settings: ReturnType<typeof s.settings.update>;
         try {
-          settings = s.settings.update(patch);
+          settings = s.settings.update(settingsPatch);
         } catch (error) {
           return c.json({ error: { code: "invalid_settings", message: String(error) } }, 400);
         }
@@ -137,7 +170,7 @@ export function createApi(ctx: ApiContext) {
         // A role moved to another provider gets a fresh session there (§8.1). Stopping the old
         // one can take the runner a while, so the response doesn't wait for it; failures are
         // logged by the role sessions.
-        if (patch.providers) void s.orchestration.roles.applyProviderSettings(before);
+        if (patch.providers) void s.orchestration.roles.applyProviderSettings(before.providers);
         return c.json(settings);
       })
       .post("/shutdown", async (c) => {

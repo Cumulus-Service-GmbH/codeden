@@ -12,7 +12,14 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Session, Settings, TEAM_FILE_ENV, type Team, TeamFile } from "@codeden/contracts";
+import {
+  type Session,
+  Settings,
+  TEAM_FILE_ENV,
+  type Team,
+  TeamFile,
+  TeamReviewLimitSettings,
+} from "@codeden/contracts";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { type Database, openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
@@ -34,6 +41,7 @@ let dir: string;
 let database: Database;
 let projects: ProjectService;
 let defaults: Team;
+let reviewLimits: TeamReviewLimitSettings;
 let projectTeams: Map<string, Team>;
 let sessions: Map<string, Session>;
 // Sessions whose pins came from the Team (not their starter's own choice).
@@ -61,6 +69,7 @@ beforeEach(() => {
     projectsDir: join(dir, "clones"),
   });
   defaults = [];
+  reviewLimits = TeamReviewLimitSettings.parse({});
   projectTeams = new Map();
   sessions = new Map();
 });
@@ -80,6 +89,7 @@ const deps = (): TeamFileDeps => ({
   home: join(dir, "home"),
   worktreesDir: join(dir, "wt"),
   defaults: () => defaults,
+  reviewLimits: () => reviewLimits,
   projectTeam: (id) => projectTeams.get(id) ?? [],
   project: (id) => projects.get(id),
   session: (id) => sessions.get(id),
@@ -145,6 +155,16 @@ it("keeps live sessions' files current, retries failures and repairs files at st
   // At creation every live project session's file is written (a restart repairs missing ones).
   const refresh = createTeamFileRefresher(deps());
   expect(read(path).team).toEqual([]);
+  expect(read(path)).toMatchObject({
+    arbiterLimits: { totalRounds: 8, reviewFixRounds: 2 },
+    arbiterSettingsSource: TEAM_FILE_ENV,
+  });
+  reviewLimits = TeamReviewLimitSettings.parse({
+    defaults: { totalRounds: 12 },
+    projects: { [id]: { reviewerRounds: 4 } },
+  });
+  refresh([event("settings.updated", {})]);
+  expect(read(path).arbiterLimits).toEqual({ totalRounds: 12, reviewFixRounds: 4 });
   projectTeams.set(id, [opus]);
   refresh([event("factory.loop.updated", { loop: { projectId: "other" } })]);
   expect(read(path).team).toEqual([]);

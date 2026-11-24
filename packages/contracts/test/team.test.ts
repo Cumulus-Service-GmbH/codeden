@@ -3,6 +3,7 @@ import {
   FactoryTuning,
   FactoryTuningPatch,
   resolveTeam,
+  resolveTeamReviewLimits,
   Settings,
   sessionTeamMember,
   TEAM_FILE_ENV,
@@ -11,6 +12,27 @@ import {
   TeamRole,
   teamRoleOfTitle,
 } from "../src";
+
+it("round-trips Team review limits and resolves each project field independently", () => {
+  const settings = Settings.parse({
+    teamReviewLimits: { defaults: { totalRounds: 10 }, projects: { p1: { reviewerRounds: 4 } } },
+  });
+  expect(Settings.parse(JSON.parse(JSON.stringify(settings)))).toEqual(settings);
+  expect(resolveTeamReviewLimits(settings.teamReviewLimits, "p1")).toEqual({
+    limits: { totalRounds: 10, reviewerRounds: 4 },
+    sources: { totalRounds: "default", reviewerRounds: "project" },
+  });
+  expect(resolveTeamReviewLimits(Settings.parse({}).teamReviewLimits, "other").limits).toEqual({
+    totalRounds: 8,
+    reviewerRounds: 2,
+  });
+  for (const defaults of [{ totalRounds: 0 }, { totalRounds: 13 }, { reviewerRounds: 1.5 }]) {
+    expect(Settings.safeParse({ teamReviewLimits: { defaults } }).success).toBe(false);
+  }
+  expect(
+    Settings.safeParse({ teamReviewLimits: { projects: { p1: { reviewerRounds: 6 } } } }).success,
+  ).toBe(false);
+});
 
 it("fills Team defaults in old records while keeping tuning patches sparse", () => {
   expect(FactoryTuning.parse({})).toMatchObject({ team: [], resultSummaryBytes: null });

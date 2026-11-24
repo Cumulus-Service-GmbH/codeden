@@ -8,11 +8,14 @@ import {
   ReorderProjectsResponse,
   SecretsStatus,
   SessionDetail,
+  Settings,
   SetupStatus,
   StartSessionResponse,
   TranscriptSearchResponse,
 } from "@codeden/contracts";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type RunningServer, startServer } from "../src";
 import type { Exec } from "../src/services/exec";
 import { removeTree } from "./support/remove-tree";
@@ -70,6 +73,100 @@ const call = async (method: string, path: string, body?: unknown) => {
     json: () => JSON.parse(text) as unknown,
   };
 };
+
+it("commits owner review limits with an audit and refuses agent and PM writes", async () => {
+  const project = await server.services.projects.create({
+    source: { type: "local", path: join(home, "user", "work", "app") },
+  });
+  const projectId = project.project.id;
+  const before = server.services.settings.get();
+  expect(
+    (
+      await call("PATCH", "/settings", {
+        teamSetup: { remembered: true },
+        teamReviewLimits: { defaults: { totalRounds: 10 } },
+      })
+    ).status,
+  ).toBe(400);
+  expect(server.services.settings.get()).toEqual(before);
+  expect(server.services.store.listTypes(["team_review_limits.updated"])).toHaveLength(0);
+  expect(
+    (
+      await call("PATCH", "/settings", {
+        teamReviewLimits: { defaults: before.teamReviewLimits.defaults },
+      })
+    ).status,
+  ).toBe(200);
+  expect(server.services.settings.teamReviewLimitsFor(projectId)).toEqual(
+    before.teamReviewLimits.defaults,
+  );
+  const defaults = { totalRounds: 12, reviewerRounds: 2 };
+  const patch = {
+    teamReviewLimits: { defaults, projects: { [projectId]: { reviewerRounds: 4 } } },
+  };
+  const patchResponse = await call("PATCH", "/settings", patch);
+  expect(patchResponse.status).toBe(200);
+  expect(Settings.parse(patchResponse.json()).teamReviewLimits).toEqual(patch.teamReviewLimits);
+  expect(server.services.settings.teamReviewLimitsFor(projectId)).toEqual({
+    totalRounds: 12,
+    reviewerRounds: 4,
+  });
+  expect((await call("GET", `/projects/${projectId}/factory`)).json()).toMatchObject({
+    tuning: { reviewPolicy: { totalRounds: 12, reviewerRounds: 4 } },
+  });
+  const audit = server.services.store.listTypes(["team_review_limits.updated"]);
+  expect(audit).toHaveLength(2);
+  expect(audit[1]?.ts).toEqual(expect.any(String));
+  expect(audit[1]?.payload).toEqual({
+    actor: "owner",
+    oldValue: { defaults: { totalRounds: 8, reviewerRounds: 2 }, projects: {} },
+    newValue: patch.teamReviewLimits,
+  });
+
+  for (const role of ["agent", "pm"] as const) {
+    const token = server.services.mcpTokens.mint({ role, projectId, sessionId: `${role}-session` });
+    const headers = { authorization: `Bearer ${token}` };
+    const body = { teamReviewLimits: { defaults: { totalRounds: 6 } } };
+    const denied = await fetch(`${server.url}/api/settings`, {
+      method: "PATCH",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    expect(denied.status).toBe(401);
+    const client = new Client({ name: "test", version: "0" });
+    try {
+      await client.connect(
+        new StreamableHTTPClientTransport(new URL(`${server.url}/mcp`), {
+          requestInit: { headers },
+        }),
+      );
+      for (const name of ["update_settings", "update_project", "set_autonomy_mode"]) {
+        const result = await client.callTool({ name, arguments: { projectId, ...body } });
+        expect(result.isError).toBe(true);
+      }
+    } finally {
+      await client.close();
+    }
+  }
+
+  expect(
+    (await call("PATCH", "/settings", { teamReviewLimits: { defaults: { totalRounds: 13 } } }))
+      .status,
+  ).toBe(400);
+  const reset = { teamReviewLimits: { projects: { [projectId]: { reviewerRounds: null } } } };
+  const append = vi.spyOn(server.services.store, "append").mockImplementationOnce(() => {
+    throw new Error("audit unavailable");
+  });
+  try {
+    expect((await call("PATCH", "/settings", reset)).status).toBe(500);
+  } finally {
+    append.mockRestore();
+  }
+  expect(server.services.settings.teamReviewLimitsFor(projectId)?.reviewerRounds).toBe(4);
+  expect(server.services.store.listTypes(["team_review_limits.updated"])).toHaveLength(2);
+  expect((await call("PATCH", "/settings", reset)).status).toBe(200);
+  expect(server.services.settings.teamReviewLimitsFor(projectId)).toEqual(defaults);
+});
 
 describe("api routes", () => {
   it("validates bodies and maps service errors", async () => {

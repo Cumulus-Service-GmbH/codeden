@@ -42,6 +42,13 @@ export function reviewEscalation(
   );
 }
 
+export function factoryReviewPolicy(ctx: FactoryContext, loop: FactoryLoop): ReviewPolicy {
+  return ReviewPolicy.parse({
+    ...loop.tuning.reviewPolicy,
+    ...ctx.settings.teamReviewLimitsFor?.(loop.projectId),
+  });
+}
+
 export function reviewBudgetReached(ctx: FactoryContext, loop: FactoryLoop): boolean {
   const limit = loop.tuning.reviewPolicy?.dailyBudgetUsd;
   if (limit === undefined) return false;
@@ -92,7 +99,7 @@ export async function advanceArbiter(
     return;
   }
   if (current && current.state !== "queued") return;
-  const policy = ReviewPolicy.parse(loop.tuning.reviewPolicy ?? {});
+  const policy = factoryReviewPolicy(ctx, loop);
   const used = item.arbiterRoundsUsed ?? current?.round ?? 0;
   if (used >= policy.arbiterRounds) {
     block(ctx, item, head, "The Arbiter round limit has been reached.", current?.ruling);

@@ -110,6 +110,7 @@ export function hasBudget(limits: FactoryLimits): boolean {
  * Optionally the merge-check tuning and, for a dark factory, the scout's limits.
  */
 export function LimitsEditor({
+  projectId,
   limits,
   onChange,
   tuning,
@@ -117,6 +118,7 @@ export function LimitsEditor({
   githubLogin,
   dark = false,
 }: {
+  projectId?: string;
   limits: FactoryLimits;
   onChange: (l: FactoryLimits) => void;
   tuning?: TuningDraft;
@@ -461,7 +463,7 @@ export function LimitsEditor({
       {tuning && onTuningChange && (
         <>
           <AgentsTuning value={tuning} onChange={(a) => onTuningChange({ ...tuning, ...a })} />
-          <TeamEditor tuning={tuning} onChange={onTuningChange} />
+          <TeamEditor projectId={projectId} tuning={tuning} onChange={onTuningChange} />
         </>
       )}
     </div>
