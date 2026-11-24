@@ -19,7 +19,7 @@ type Tool = Partial<
 
 const path = /^(?:[a-zA-Z0-9_][a-zA-Z0-9_.-]*\/)*[a-zA-Z0-9_][a-zA-Z0-9_.-]*\/?$/;
 const sensitive =
-  /(?:secret|credential|password|token|keyvault|(?:^|[/.\s'"])(?:env|pem|key|p12|pfx|kdbx)(?:[/.\s'"]|$))/i;
+  /(?:secret|credential|password|token|keyvault|(?:^|[/.\s'":])(?:env|pem|key|p12|pfx|kdbx)(?:[/.\s'"]|$))/i;
 const flags = {
   cat: /^-[benstuv]+$/,
   ls: /^-[aAldh1]+$/,
@@ -71,7 +71,11 @@ export function plainReadTargets(tool: Tool): string[] | undefined {
     const [sub, ...rest] = args;
     if (sub !== "show" || rest.length !== 1) return;
     const [ref = "", file, extra] = (rest[0] ?? "").split(":");
-    return extra === undefined && /^(?:HEAD|[a-f0-9]{4,64})$/.test(ref) && file && path.test(file)
+    return extra === undefined &&
+      /^(?:HEAD|[a-f0-9]{4,64})$/.test(ref) &&
+      file &&
+      !sensitive.test(file) &&
+      path.test(file)
       ? [file]
       : undefined;
   }

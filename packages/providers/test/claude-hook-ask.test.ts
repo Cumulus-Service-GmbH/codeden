@@ -303,6 +303,7 @@ describe("Claude settings hooks that require approval", () => {
     const next = run.permission("Bash", forcePush, forcePushReason);
     const nextCard = await run.card(2);
     expect(nextCard.options).toEqual(once);
+    expect(nextCard.hookAsk).toBeUndefined();
     await run.answer(nextCard, "deny");
     await expect(next).resolves.toMatchObject({ behavior: "deny" });
   });

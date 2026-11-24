@@ -550,7 +550,9 @@ export class ClaudeSession implements ProviderSession {
         : undefined;
       const hookDisplay = hookReason?.trimStart() || "A hook asked for approval";
       const reason =
-        gate.ask && gate.reason !== hookDisplay ? `${gate.reason}. ${hookDisplay}` : hookDisplay;
+        gate.ask && !gate.rememberedCommand && gate.reason !== hookDisplay
+          ? `${gate.reason}. ${hookDisplay}`
+          : hookDisplay;
       const item = this.approvalItem(toolName, input, options, {
         action: gate.ask ? gate.action : defaultApprovalAction(toolName),
         cwd: dir ?? this.opts.cwd,
