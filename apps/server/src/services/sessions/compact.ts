@@ -3,6 +3,7 @@ import { conflict, type ServiceError } from "../errors";
 import { type RunnerPort, runnerErrorCode, toServiceError } from "../runner-port";
 import type { SessionLauncher } from "./launcher";
 import { isTurnRunningError } from "./outbox-holds";
+import { applyPendingConfig, assertConfigRevision } from "./reconfigure";
 import type { SessionRepo } from "./repo";
 
 /**
@@ -102,8 +103,12 @@ export interface CompactContext {
  */
 export async function startCompaction(ctx: CompactContext, session: Session): Promise<void> {
   const previous = session.status;
-  const request = () =>
-    ctx.runnerOf(session.id).request({ name: "session.compact", sessionId: session.id });
+  const request = async () => {
+    const runner = ctx.runnerOf(session.id);
+    const revision = await applyPendingConfig(ctx.repo, runner, session);
+    assertConfigRevision(ctx.repo, session.id, revision);
+    return runner.request({ name: "session.compact", sessionId: session.id, revision });
+  };
   ctx.repo.update(session.id, (s) => ({ ...s, status: "running", endedAt: null }));
   try {
     try {

@@ -99,7 +99,7 @@ describe("Compact now (SessionService.compact)", () => {
   it("asks the session's runner to compact and marks the session running", async () => {
     const s = session({ status: "stopped", endedAt: new Date().toISOString() });
     expect(await service.compact(s.id)).toEqual({ status: "compacting" });
-    expect(commands).toEqual([{ name: "session.compact", sessionId: s.id }]);
+    expect(commands).toEqual([{ name: "session.compact", sessionId: s.id, revision: 0 }]);
     expect(repo.get(s.id)).toMatchObject({ status: "running", endedAt: null });
     expect(resume).not.toHaveBeenCalled();
   });

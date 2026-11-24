@@ -139,6 +139,7 @@ it.each([
     name: "session.steer",
     sessionId: "s1",
     input: input("priority"),
+    revision: 0,
     waitForShell: true,
   };
   const sending = sessions.send("s1", { input: steer.input, whenBusy: "steer" });

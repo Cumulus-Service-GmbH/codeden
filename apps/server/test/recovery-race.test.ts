@@ -420,7 +420,7 @@ describe("admission during restart recovery", () => {
     });
     const liveBefore = live && env.repo.get(live.id);
     const hosted = new Set(live ? [live.id] : []);
-    const starts: RunnerCommandOf<"session.start">[] = [];
+    const sent: RunnerCommandOf<"session.send">[] = [];
     const runner: RunnerPort = {
       isConnected: () => true,
       runnerId: () => "r1",
@@ -439,10 +439,13 @@ describe("admission during restart recovery", () => {
           case "runner.status":
             return { sessions: [...hosted].map((sessionId) => ({ sessionId })) };
           case "session.send":
-            throw Object.assign(new Error("Unknown session"), { code: "unknown_session" });
+            if (!hosted.has(command.sessionId)) {
+              throw Object.assign(new Error("Unknown session"), { code: "unknown_session" });
+            }
+            sent.push(command);
+            return {};
           case "session.start":
             expect(env.repo.get(compact.id).status).toBe("idle");
-            starts.push(command);
             hosted.add(command.sessionId);
             return { resumeToken: command.options.resumeToken };
           default:
@@ -463,7 +466,7 @@ describe("admission during restart recovery", () => {
       userHome: env.dir,
     });
     const reserve = vi.spyOn(admission, "tryReserve");
-    const delivered = () => starts.map(({ sessionId, input }) => [sessionId, input?.text]);
+    const delivered = () => sent.map(({ sessionId, input }) => [sessionId, input.text]);
     const continuation = ({ id }: Session) => [id, RESTART_CONTINUE_MESSAGE];
     const immediate = live ? 3 : 4;
 
@@ -489,7 +492,7 @@ describe("admission during restart recovery", () => {
     for (const [index, { id }] of candidates.slice(0, 2).entries()) {
       env.repo.update(id, (s) => ({ ...s, status: "idle" }));
       lifecycle.drainQueue();
-      await waitUntil(() => starts.length >= immediate + index + 1);
+      await waitUntil(() => sent.length >= immediate + index + 1);
       expect(delivered()).toEqual(candidates.slice(0, immediate + index + 1).map(continuation));
     }
     expect(admission.status().waiting).toEqual([]);

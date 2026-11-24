@@ -293,7 +293,7 @@ it("raises a running agent to supervised, audits the reason, and refuses a later
       ),
     ).resolves.toEqual({ sessionId: session.id, autonomy: "supervised" });
     expect(request).toHaveBeenCalledWith(
-      { name: "session.configure", sessionId: session.id, autonomy: "supervised" },
+      { name: "session.configure", sessionId: session.id, autonomy: "supervised", revision: 1 },
       expect.any(Number),
     );
     expect(store.listAfter(0)).toContainEqual(

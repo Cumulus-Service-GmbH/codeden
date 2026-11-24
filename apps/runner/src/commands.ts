@@ -193,14 +193,13 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
       await host.interrupt(command.sessionId);
       return {};
     case "session.compact":
-      await host.compact(command.sessionId);
+      await host.compact(command.sessionId, command.revision);
       return {};
     case "session.respond":
       await host.respond(command);
       return {};
     case "session.configure":
-      await host.configure(command);
-      return {};
+      return host.configure(command);
     case "session.stop": {
       core.checks.cancel(command.sessionId);
       const ctx = { home: core.home, supervisor: core.supervisor, cwds: () => host.cwds() };

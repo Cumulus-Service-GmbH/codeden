@@ -155,7 +155,7 @@ describe("updateSession with planMode", () => {
         request: async (command: RunnerCommand) => {
           commands.push(command);
           if (fail) throw Object.assign(new Error("timeout"), { code: "timeout" });
-          return {};
+          return command.name === "session.configure" ? { revision: command.revision } : {};
         },
       } as unknown as RunnerPort;
       await updateSession(repo, runner, s.id, { planMode: true, autonomy: "full" });
@@ -165,10 +165,18 @@ describe("updateSession with planMode", () => {
         (repo.find(s.id)?.startMeta as { pendingConfig?: unknown } | null)?.pendingConfig;
       expect(pending()).toEqual({ planMode: true, autonomy: "full" });
       expect(commands).toEqual([
-        { name: "session.configure", sessionId: s.id, autonomy: "full", planMode: true },
+        {
+          name: "session.configure",
+          sessionId: s.id,
+          autonomy: "full",
+          planMode: true,
+          revision: 1,
+        },
       ]);
-      // Still refused before the next turn: it stays pending and comes with a warning.
-      expect(await applyPendingConfig(repo, runner, repo.get(s.id))).toMatch(/not applied live/);
+      // Still refused before the next turn, with the settings kept for a retry.
+      await expect(applyPendingConfig(repo, runner, repo.get(s.id))).rejects.toMatchObject({
+        code: "config_unconfirmed",
+      });
       expect(pending()).toEqual({ planMode: true, autonomy: "full" });
       fail = false;
       await applyPendingConfig(repo, runner, repo.get(s.id));

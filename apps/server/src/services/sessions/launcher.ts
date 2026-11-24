@@ -36,6 +36,12 @@ import { slugWords } from "./conflicts";
 import type { ForkStart } from "./fork";
 import { withHandoffBrief } from "./handoff";
 import { ownBranch } from "./own-branch";
+import {
+  applyPendingConfig,
+  assertConfigRevision,
+  configRevision,
+  confirmOpenedConfig,
+} from "./reconfigure";
 import type { SessionRepo } from "./repo";
 import { withSetupNote } from "./setup-failure";
 import { seenSetups, settleSetup } from "./setup-gate";
@@ -341,8 +347,9 @@ export class SessionLauncher {
     this.markVendorHistory(runner, session);
     const turnsBefore = this.deps.repo.turnCount(session.id);
     let options: SessionOptions;
+    const revision = configRevision(this.deps.repo, session.id);
     try {
-      options = this.sessionOptions(session, token);
+      options = this.sessionOptions(this.deps.repo.get(session.id), token);
     } catch (error) {
       // Nothing reached the runner (e.g. the Team file could not be written): retire the token.
       if (token) this.deps.tokens.revoke(token);
@@ -355,11 +362,20 @@ export class SessionLauncher {
           sessionId: session.id,
           providerId: session.provider,
           options,
-          input,
+          revision,
         },
         START_TIMEOUT_MS,
       );
       if (token) this.deps.tokens.revokeSession(session.id, token);
+      confirmOpenedConfig(this.deps.repo, session.id, revision);
+      const confirmed = await applyPendingConfig(this.deps.repo, runner, session);
+      assertConfigRevision(this.deps.repo, session.id, confirmed);
+      if (input) {
+        await runner.request(
+          { name: "session.send", sessionId: session.id, input, revision: confirmed },
+          START_TIMEOUT_MS,
+        );
+      }
       setUnanswered(this.deps.repo, session.id, null);
       return result;
     } catch (error) {

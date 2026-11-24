@@ -231,7 +231,9 @@ describe("global session admission", () => {
     idle(idOf(second));
     await drain();
     expect(sessions.hasOutbox(target.id)).toBe(false);
-    expect(call("session.send")).toMatchObject({ sessionId: target.id, input });
+    expect(
+      calls.filter((command) => command.name === "session.send" && command.sessionId === target.id),
+    ).toEqual([{ name: "session.send", sessionId: target.id, input, revision: 0 }]);
     expect(env.repo.get(fork.sessionId).status).toBe("queued");
     idle(target.id);
     await drain();

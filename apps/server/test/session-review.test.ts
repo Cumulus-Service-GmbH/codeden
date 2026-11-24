@@ -248,6 +248,7 @@ describe("reviewing a session with another agent", () => {
       "git.diff",
       "workspace.prepare",
       "session.start",
+      "session.send",
     ]);
     expect(call("checkpoint.list")).toMatchObject({ sessionId: src.id, settled: true });
     expect(call("workspace.prepare")).toMatchObject({
@@ -261,8 +262,8 @@ describe("reviewing a session with another agent", () => {
     expect(start.options).toMatchObject({ autonomy: "read_only", cwd: review.worktreePath });
     expect(start.options.cwd).not.toBe(src.worktreePath);
     expect(start.options.resumeToken).toBeUndefined();
-    expect(start.input?.from).toBe("codeden");
-    const brief = start.input?.text ?? "";
+    expect(call("session.send").input.from).toBe("codeden");
+    const brief = call("session.send").input.text;
     expect(brief).toContain('another CodeDen session made, "Add login" (Claude Code · opus)');
     expect(brief).toContain("its branch `codeden/add-login-s1ab`");
     expect(brief).toContain("## The task\n\nAdd a login page");
@@ -307,7 +308,7 @@ describe("reviewing a session with another agent", () => {
       round: 2,
       spec: firstReview?.spec,
     });
-    expect(all("session.start").at(-1)?.input?.text).toContain("Review only the delta");
+    expect(all("session.send").at(-1)?.input.text).toContain("Review only the delta");
   });
 
   it("reviews a session again without a checkpoint or a self-diff", async () => {
@@ -444,7 +445,7 @@ describe("reviewing a session with another agent", () => {
       whenBusy: "queue",
     });
     await settle(sessions);
-    const retried = all("session.start").at(-1);
+    const retried = all("session.send").at(-1);
     expect(retried?.input?.text).toContain("You are an independent reviewer.");
     expect(retried?.input?.text).toContain("## The latest message\n\ntry again");
     expect(env.repo.find(sessionId)?.startMeta?.handoffBrief).toBeNull();

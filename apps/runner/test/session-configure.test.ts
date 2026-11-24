@@ -7,7 +7,7 @@ import {
   ProviderRegistry,
   type ProviderSession,
 } from "@codeden/providers";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionHost } from "../src/session-host";
 
 const options: SessionOptions = {
@@ -75,6 +75,60 @@ describe("session.configure", () => {
     });
     expect(fake().autonomy).toBe("supervised");
     expect(fake().lastConfig).toEqual({ model: "fake-2" });
+  });
+
+  it("holds turns while the current autonomy revision is unconfirmed", async () => {
+    const sessions: ProviderSession[] = [];
+    const host = await start(fakeAs("fake", sessions));
+    const fake = sessions[0] as FakeSession;
+    const send = vi.spyOn(fake, "send");
+    const older = Promise.withResolvers<void>();
+    const entered = Promise.withResolvers<void>();
+    const original = fake.setAutonomy.bind(fake);
+    vi.spyOn(fake, "setAutonomy").mockImplementation(async (level) => {
+      if (level === "full") {
+        entered.resolve();
+        await older.promise;
+      }
+      await original(level);
+    });
+    const input = {
+      name: "session.send" as const,
+      sessionId: "s1",
+      input: { text: "next", attachments: [] },
+    };
+    const full = host.configure({
+      name: "session.configure",
+      sessionId: "s1",
+      revision: 1,
+      autonomy: "full",
+    });
+    await entered.promise;
+    const supervised = host.configure({
+      name: "session.configure",
+      sessionId: "s1",
+      revision: 2,
+      autonomy: "supervised",
+    });
+    try {
+      for (const revision of [undefined, 1, 2]) {
+        await expect(host.send({ ...input, revision })).rejects.toMatchObject({
+          code: "config_unconfirmed",
+        });
+      }
+      expect(send).not.toHaveBeenCalled();
+    } finally {
+      older.resolve();
+      await full;
+      await supervised;
+    }
+    expect(await supervised).toEqual({ revision: 2 });
+    await expect(
+      host.configure({ name: "session.configure", sessionId: "s1", revision: 1, autonomy: "full" }),
+    ).rejects.toMatchObject({ code: "config_unconfirmed" });
+    expect(fake.autonomy).toBe("supervised");
+    await host.send({ ...input, revision: 2 });
+    expect(send).toHaveBeenCalledOnce();
   });
 
   it("refuses what the provider cannot change live, before applying anything", async () => {

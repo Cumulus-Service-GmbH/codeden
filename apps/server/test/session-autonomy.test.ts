@@ -13,15 +13,21 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from
 import { type Database, openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
 import type { RunnerPort } from "../src/services/runner-port";
+import { startCompaction } from "../src/services/sessions/compact";
+import { Outbox } from "../src/services/sessions/outbox";
 import { readOnlyUnsupported } from "../src/services/sessions/permissions";
 import { applyPendingConfig, updateSession } from "../src/services/sessions/reconfigure";
 import { SessionRepo } from "../src/services/sessions/repo";
+import { SessionService, type SessionServiceDeps } from "../src/services/sessions/session-service";
 import { sampleSession } from "./helpers";
 import { type Harness, startHarness, waitUntil } from "./support/harness";
 import { removeTree } from "./support/remove-tree";
 
 /** A runner stand-in that records commands and fails with `failWith` when set. */
-function stubRunner() {
+function stubRunner(
+  handle: (command: RunnerCommand) => Promise<object> = async (command) =>
+    command.name === "session.configure" ? { revision: command.revision } : {},
+) {
   const commands: RunnerCommand[] = [];
   const state: { failWith?: string } = {};
   const port: RunnerPort = {
@@ -33,7 +39,7 @@ function stubRunner() {
     request: (async (command: RunnerCommand) => {
       commands.push(command);
       if (state.failWith) throw Object.assign(new Error(state.failWith), { code: state.failWith });
-      return {};
+      return handle(command);
     }) as RunnerPort["request"],
   };
   return { port, commands, state };
@@ -72,7 +78,7 @@ describe("updateSession with autonomy", () => {
     expect(updated.autonomy).toBe("full");
     expect(repo.get(session.id).autonomy).toBe("full");
     expect(runner.commands).toEqual([
-      { name: "session.configure", sessionId: session.id, autonomy: "full" },
+      { name: "session.configure", sessionId: session.id, autonomy: "full", revision: 1 },
     ]);
     expect(pending()).toBeUndefined();
     // Recorded in the event log, so projections rebuilt after a restart keep it.
@@ -88,13 +94,14 @@ describe("updateSession with autonomy", () => {
     const runner = stubRunner();
     await updateSession(repo, runner.port, session.id, { autonomy: "supervised", effort: "high" });
     expect(runner.commands).toEqual([
-      { name: "session.configure", sessionId: session.id, autonomy: "supervised" },
+      { name: "session.configure", sessionId: session.id, autonomy: "supervised", revision: 1 },
     ]);
     expect(pending()).toEqual({ effort: "high" });
     await applyPendingConfig(repo, runner.port, repo.get(session.id));
     expect(runner.commands.at(-1)).toEqual({
       name: "session.configure",
       sessionId: session.id,
+      revision: 1,
       effort: "high",
     });
     expect(pending()).toBeUndefined();
@@ -112,9 +119,94 @@ describe("updateSession with autonomy", () => {
     expect(runner.commands.at(-1)).toEqual({
       name: "session.configure",
       sessionId: session.id,
+      revision: 1,
       autonomy: "full",
     });
     expect(pending()).toBeUndefined();
+  });
+
+  function service(runner: RunnerPort) {
+    return new SessionService({
+      repo,
+      runner,
+      outbox: new Outbox(database.db, store),
+      artifacts: {
+        externalizeAttachments: (input: unknown) => input,
+        resolveAttachments: (input: unknown) => input,
+      },
+    } as unknown as SessionServiceDeps);
+  }
+
+  it("keeps Supervised enforced before input after an older Full configure fails", async () => {
+    const older = Promise.withResolvers<void>();
+    let applied: Session["autonomy"] = "auto";
+    const runner = stubRunner(async (command) => {
+      if (command.name === "session.configure") {
+        if (command.autonomy === "full" && applied === "auto") await older.promise;
+        applied = command.autonomy ?? applied;
+        return { revision: "revision" in command ? command.revision : undefined };
+      }
+      if (command.name === "session.send") expect(applied).toBe("supervised");
+      return {};
+    });
+    const full = updateSession(repo, runner.port, session.id, { autonomy: "full" });
+    await updateSession(repo, runner.port, session.id, { autonomy: "supervised" });
+    older.reject(new Error("late configure failure"));
+    await full;
+    repo.update(session.id, (s) => ({ ...s, status: "idle" }));
+
+    await expect(
+      service(runner.port).send(session.id, {
+        input: { text: "next", attachments: [] },
+        whenBusy: "reject",
+      }),
+    ).resolves.toEqual({ status: "sent" });
+    expect(
+      runner.commands.filter(
+        (command) => command.name === "session.configure" && command.autonomy === "full",
+      ),
+    ).toHaveLength(1);
+    expect(repo.get(session.id).autonomy).toBe("supervised");
+  });
+
+  it("holds input when the runner does not acknowledge the current autonomy revision", async () => {
+    const runner = stubRunner(async () => ({}));
+    await updateSession(repo, runner.port, session.id, { autonomy: "supervised" });
+    repo.update(session.id, (s) => ({ ...s, status: "idle" }));
+
+    await expect(
+      service(runner.port).send(session.id, {
+        input: { text: "hold", attachments: [] },
+        whenBusy: "reject",
+      }),
+    ).rejects.toThrow(/autonomy/i);
+    expect(runner.commands.some((command) => command.name === "session.send")).toBe(false);
+    expect(repo.get(session.id).autonomy).toBe("supervised");
+  });
+
+  it("holds compaction when the current autonomy downgrade is refused", async () => {
+    const runner = stubRunner();
+    await updateSession(repo, runner.port, session.id, { autonomy: "full" });
+    runner.state.failWith = "unsupported";
+    await updateSession(repo, runner.port, session.id, { autonomy: "supervised" });
+    const idle = repo.update(session.id, (s) => ({ ...s, status: "idle" }));
+
+    await expect(
+      startCompaction(
+        {
+          repo,
+          launcher: {
+            resume: async () => {
+              throw new Error("Must not resume after a refused configure");
+            },
+          },
+          runnerOf: () => runner.port,
+        },
+        idle,
+      ),
+    ).rejects.toMatchObject({ code: "config_unconfirmed" });
+    expect(runner.commands.some((command) => command.name === "session.compact")).toBe(false);
+    expect(repo.get(session.id)).toMatchObject({ autonomy: "supervised", status: "idle" });
   });
 
   it("drops the retry once a later change reaches the runner", async () => {

@@ -20,7 +20,7 @@ function packageVersion(): string | undefined {
 }
 
 /** Version of the server <-> runner WebSocket protocol (§4.3). Bump on breaking changes. */
-export const RUNNER_PROTOCOL_VERSION = 1;
+export const RUNNER_PROTOCOL_VERSION = 2;
 
 /** Version of the server <-> UI WebSocket protocol. Bump on breaking changes. */
 export const UI_PROTOCOL_VERSION = 1;

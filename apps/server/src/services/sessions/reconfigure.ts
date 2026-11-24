@@ -1,54 +1,68 @@
-import type { AutonomyLevel, Session, UpdateSessionRequest } from "@codeden/contracts";
+import type { Session, UpdateSessionRequest } from "@codeden/contracts";
+import { conflict } from "../errors";
 import { type RunnerPort, runnerErrorCode } from "../runner-port";
 import { withLoopSetting } from "./checks";
-import type { AutonomyAudit, SessionRepo, StoredStartMeta } from "./repo";
+import { type AutonomyAudit, emptyStartMeta, type PendingConfig, type SessionRepo } from "./repo";
 
-/**
- * Settings waiting for the runner: model/effort for the session's next turn, and an autonomy
- * or plan mode change the runner could not take when it was made.
- */
-export type PendingConfig = {
-  model?: string | null;
-  effort?: Session["effort"];
-  autonomy?: AutonomyLevel;
-  planMode?: boolean;
-};
-
-/** The settings pushed to the live provider session at once. */
-type LiveConfig = Pick<PendingConfig, "autonomy" | "planMode">;
-
-type MetaWithPending = StoredStartMeta & { pendingConfig?: PendingConfig };
-
-/** How long `PATCH` waits for the runner to take an autonomy or plan mode change. */
-const LIVE_TIMEOUT_MS = 10_000;
-
-function fallbackMeta(): StoredStartMeta {
-  return { workspaceMode: "worktree", workspaceFallback: null, forced: null, queuedBehind: [] };
+/** The recorded revision also survives a failed or delayed configure. */
+export function configRevision(repo: SessionRepo, id: string): number {
+  return repo.find(id)?.startMeta?.configRevision ?? 0;
 }
 
-/** Merge `change` into the pending config (keys set to undefined are removed). */
-function setPending(repo: SessionRepo, id: string, change: Partial<PendingConfig>): void {
+function unconfirmed() {
+  return conflict(
+    "The runner has not confirmed the current session autonomy and settings.",
+    "config_unconfirmed",
+  );
+}
+
+/** Recheck after awaiting a configure and immediately before starting provider work. */
+export function assertConfigRevision(repo: SessionRepo, id: string, revision: number): void {
+  if (configRevision(repo, id) !== revision) throw unconfirmed();
+}
+
+function clearPending(repo: SessionRepo, id: string, revision: number, applied?: PendingConfig) {
+  if (configRevision(repo, id) !== revision) return;
   repo.setStartMeta(id, (m) => {
-    const { pendingConfig, ...meta } = (m ?? fallbackMeta()) as MetaWithPending;
-    const next: Record<string, unknown> = { ...pendingConfig, ...change };
-    for (const key of Object.keys(next)) if (next[key] === undefined) delete next[key];
-    return (
-      Object.keys(next).length > 0 ? { ...meta, pendingConfig: next } : meta
-    ) as StoredStartMeta;
+    const { pendingConfig, ...meta } = m ?? emptyStartMeta();
+    if (!applied || !pendingConfig) return meta;
+    const rest = { ...pendingConfig };
+    for (const key of Object.keys(applied) as (keyof PendingConfig)[]) delete rest[key];
+    return Object.keys(rest).length === 0 ? meta : { ...meta, pendingConfig: rest };
   });
 }
 
-/**
- * `PATCH /api/sessions/:id`: update model, effort, autonomy, plan mode, the checks loop or
- * title. Every change
- * is saved on the session (`session.updated`), so it survives a restart and later starts and
- * resumes use it.
- * - Model and effort are remembered as pending and applied right before the next turn
- *   (`applyPendingConfig`), so a running turn keeps its settings.
- * - Autonomy and plan mode are pushed to the live provider session at once: from the next
- *   tool call where the provider supports it, otherwise from the next turn. If the runner
- *   cannot take them now, they are retried before the next turn.
- */
+/** A successful open used the recorded settings for this revision. */
+export function confirmOpenedConfig(repo: SessionRepo, id: string, revision: number): void {
+  if (repo.find(id)?.startMeta?.pendingConfig) clearPending(repo, id, revision);
+}
+
+async function configure(
+  repo: SessionRepo,
+  runner: RunnerPort,
+  id: string,
+  revision: number,
+  change: PendingConfig,
+  timeout?: number,
+): Promise<void> {
+  const row = repo.get(id);
+  const result = await runner.request(
+    {
+      name: "session.configure",
+      sessionId: id,
+      revision,
+      ...change,
+      // Older rows may contain stale values left by the previous retry path.
+      ...(change.autonomy !== undefined && { autonomy: row.autonomy }),
+      ...(change.planMode !== undefined && { planMode: row.planMode ?? false }),
+    },
+    timeout,
+  );
+  if (result?.revision !== revision) throw unconfirmed();
+  clearPending(repo, id, revision, change);
+}
+
+/** Record settings and their pending revision together before issuing live configuration. */
 export async function updateSession(
   repo: SessionRepo,
   runner: RunnerPort,
@@ -56,76 +70,68 @@ export async function updateSession(
   req: UpdateSessionRequest,
   audit?: AutonomyAudit,
 ): Promise<Session> {
-  const change: PendingConfig = {};
-  if (req.model !== undefined) change.model = req.model;
-  if (req.effort !== undefined) change.effort = req.effort;
+  const change: PendingConfig = {
+    ...(req.model !== undefined && { model: req.model }),
+    ...(req.effort !== undefined && { effort: req.effort }),
+    ...(req.autonomy !== undefined && { autonomy: req.autonomy }),
+    ...(req.planMode !== undefined && { planMode: req.planMode }),
+  };
+  const updatesConfig = Object.keys(change).length > 0;
   const session = repo.update(
     id,
     (s) => ({
       ...s,
-      ...(change.model !== undefined ? { model: change.model } : {}),
-      ...(change.effort !== undefined ? { effort: change.effort } : {}),
-      ...(req.autonomy !== undefined ? { autonomy: req.autonomy } : {}),
-      ...(req.planMode !== undefined ? { planMode: req.planMode } : {}),
-      // The loop setting only: the frozen commands never change (§9 Project checks).
+      ...change,
       ...((req.untilChecksPass !== undefined || req.checkRounds !== undefined) && s.checks
         ? { checks: withLoopSetting(s.checks, req) }
         : {}),
       ...(req.title !== undefined ? { title: req.title } : {}),
     }),
     audit,
+    updatesConfig
+      ? (m) => ({
+          ...(m ?? emptyStartMeta()),
+          configRevision: (m?.configRevision ?? 0) + 1,
+          pendingConfig: { ...m?.pendingConfig, ...change },
+        })
+      : undefined,
   );
-  if (Object.keys(change).length > 0) setPending(repo, id, change);
-  const live: LiveConfig = {};
-  if (req.autonomy !== undefined) live.autonomy = session.autonomy;
-  if (req.planMode !== undefined) live.planMode = session.planMode ?? false;
-  if (Object.keys(live).length > 0) await applyLive(repo, runner, session.id, live);
-  return session;
+  const meta = repo.find(id)?.startMeta;
+  if (change.autonomy === undefined && change.planMode === undefined) return session;
+  const pending = meta?.pendingConfig;
+  const live: PendingConfig = {
+    ...(pending?.autonomy !== undefined && { autonomy: pending.autonomy }),
+    ...(pending?.planMode !== undefined && { planMode: pending.planMode }),
+  };
+  // Refusal or timeout leaves the already-recorded settings pending, at their own revision.
+  await configure(repo, runner, id, meta?.configRevision ?? 0, live, 10_000).catch(() => {});
+  return repo.get(id);
 }
 
-/**
- * Tell the runner about the session's autonomy and/or plan mode. When the runner does not
- * host the session, or cannot be reached, the change stays pending; a later start or resume
- * reads it from the session anyway.
- */
-async function applyLive(repo: SessionRepo, runner: RunnerPort, id: string, live: LiveConfig) {
-  try {
-    await runner.request({ name: "session.configure", sessionId: id, ...live }, LIVE_TIMEOUT_MS);
-    const done = Object.fromEntries(Object.keys(live).map((key) => [key, undefined]));
-    setPending(repo, id, done);
-  } catch {
-    setPending(repo, id, live);
-  }
-}
-
-/**
- * Apply pending settings on the runner before the next turn. When the runner no longer hosts
- * the session, the resume that follows opens it with the new settings anyway. Returns a
- * warning when the provider cannot change them live (they apply on the next resume).
- */
+/** Confirm the latest pending configuration before sending input or compacting. */
 export async function applyPendingConfig(
   repo: SessionRepo,
   runner: RunnerPort,
   session: Session,
-): Promise<string | undefined> {
-  const meta = repo.find(session.id)?.startMeta as MetaWithPending | null | undefined;
-  const pending = meta?.pendingConfig;
-  if (!pending) return undefined;
-  const clear = () =>
-    repo.setStartMeta(session.id, (m) => {
-      const { pendingConfig: _done, ...rest } = (m ?? fallbackMeta()) as MetaWithPending;
-      return rest;
-    });
-  try {
-    await runner.request({ name: "session.configure", sessionId: session.id, ...pending });
-    clear();
-    return undefined;
-  } catch (error) {
-    const code = runnerErrorCode(error);
-    if (code === "unknown_session") {
-      clear();
-      return undefined;
+  liveOnly = false,
+): Promise<number> {
+  for (;;) {
+    const meta = repo.find(session.id)?.startMeta;
+    const revision = meta?.configRevision ?? 0;
+    const pending = meta?.pendingConfig;
+    if (!pending) return revision;
+    const change = liveOnly
+      ? {
+          ...(pending.autonomy !== undefined && { autonomy: pending.autonomy }),
+          ...(pending.planMode !== undefined && { planMode: pending.planMode }),
+        }
+      : pending;
+    if (Object.keys(change).length === 0) return revision;
+    try {
+      await configure(repo, runner, session.id, revision, change);
+    } catch (error) {
+      if (runnerErrorCode(error) === "unknown_session") throw error;
+      if (configRevision(repo, session.id) === revision) throw unconfirmed();
     }
-    return `Session settings not applied live (${code ?? "error"}); they apply when the session is resumed.`;
   }
 }

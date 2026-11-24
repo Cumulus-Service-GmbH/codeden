@@ -45,6 +45,9 @@ const PriorityShellCall = z.object({ threadId: Id, turnId: Id, itemId: Id, rootT
  * Each has a matching result schema in `RunnerCommandResults`.
  */
 
+/** Monotonic per-session revision of the recorded configuration. */
+const ConfigRevision = z.int().nonnegative();
+
 export const RunnerCommand = z.discriminatedUnion("name", [
   /** Report sessions, terminals and journal state. */
   z.object({ name: z.literal("runner.status") }),
@@ -196,16 +199,23 @@ export const RunnerCommand = z.discriminatedUnion("name", [
     sessionId: Id,
     providerId: ProviderId,
     options: SessionOptions,
+    revision: ConfigRevision.optional(),
     input: UserInput.optional(),
     /** Snapshot the cwd at session start and every turn end (§9). Default true in git repos. */
     checkpoints: z.boolean().optional(),
   }),
   /** Start a new turn. */
-  z.object({ name: z.literal("session.send"), sessionId: Id, input: UserInput }),
+  z.object({
+    name: z.literal("session.send"),
+    sessionId: Id,
+    input: UserInput,
+    revision: ConfigRevision.optional(),
+  }),
   /** Inject input into the running turn (requires `capabilities.steer`). */
   z.object({
     name: z.literal("session.steer"),
     sessionId: Id,
+    revision: ConfigRevision.optional(),
     input: UserInput,
     /** Ask the runner to defer steering until active shell calls finish. */
     waitForShell: z.literal(true).optional(),
@@ -220,7 +230,11 @@ export const RunnerCommand = z.discriminatedUnion("name", [
    * summarizes its history to free up context. `turn_running` while a turn runs, `unsupported`
    * when the provider can't compact on demand.
    */
-  z.object({ name: z.literal("session.compact"), sessionId: Id }),
+  z.object({
+    name: z.literal("session.compact"),
+    sessionId: Id,
+    revision: ConfigRevision.optional(),
+  }),
   /** Answer an approval request or user question. */
   z.object({
     name: z.literal("session.respond"),
@@ -239,6 +253,7 @@ export const RunnerCommand = z.discriminatedUnion("name", [
   z.object({
     name: z.literal("session.configure"),
     sessionId: Id,
+    revision: ConfigRevision.optional(),
     model: z.string().nullable().optional(),
     effort: ReasoningEffort.nullable().optional(),
     autonomy: AutonomyLevel.optional(),
@@ -497,7 +512,8 @@ export const RunnerCommandResults = {
   "session.compact": Empty,
   "session.respond": Empty,
   "session.stop": Empty,
-  "session.configure": Empty,
+  /** Revision the runner applied; absent on unversioned commands. */
+  "session.configure": z.object({ revision: ConfigRevision.optional() }),
   "pty.open": z.object({ pid: z.int() }),
   "pty.input": Empty,
   "pty.resize": Empty,

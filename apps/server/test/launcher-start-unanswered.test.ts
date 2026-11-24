@@ -12,6 +12,7 @@ import { RunnerCommandError } from "../src/runner/client";
 import type { ProjectService } from "../src/services/projects/project-service";
 import type { RunnerPort } from "../src/services/runner-port";
 import { SessionLauncher } from "../src/services/sessions/launcher";
+import { updateSession } from "../src/services/sessions/reconfigure";
 import { createGithubEnv, type GithubEnv } from "./support/github-env";
 
 // Issue #492: a `session.start` the runner didn't answer in time may still have opened the
@@ -22,8 +23,10 @@ type Command = RunnerCommandOf<RunnerCommandName>;
 
 let env: GithubEnv;
 let launcher: SessionLauncher;
+let runner: RunnerPort;
+let commands: Command[];
 /** What `session.start` does on the runner; returns normally when it opened the session. */
-let onStart: (sessionId: string) => void;
+let onStart: (sessionId: string) => void | Promise<void>;
 
 const timedOut = () => {
   throw new RunnerCommandError("timeout", "Runner command session.start timed out");
@@ -32,16 +35,18 @@ const timedOut = () => {
 beforeEach(() => {
   env = createGithubEnv();
   onStart = () => {};
-  const runner = {
+  commands = [];
+  runner = {
     isConnected: () => true,
     runnerId: () => "r1",
     providers: () => [],
     mcpProxyUrl: () => null,
     waitForConnection: async () => true,
     request: (async (command: Command) => {
+      commands.push(command);
       if (command.name === "workspace.prepare") return { cwd: env.dir, branch: null };
       if (command.name !== "session.start") return {};
-      onStart(command.sessionId);
+      await onStart(command.sessionId);
       return { resumeToken: "resume-1" };
     }) as RunnerPort["request"],
   } as unknown as RunnerPort;
@@ -101,6 +106,25 @@ describe("a session start the runner didn't answer (#492)", () => {
     turn(session.id, "u1", true);
     onStart = timedOut;
     await expect(launcher.resume(env.repo.get(session.id), input)).rejects.toThrow(/timed out/);
+  });
+
+  it("holds the first prompt when autonomy changes during open without acknowledgement", async () => {
+    const session = env.addSession({ status: "starting", autonomy: "full" });
+    onStart = async (id) => {
+      await updateSession(env.repo, runner, id, { autonomy: "supervised" });
+    };
+
+    await launcher.launch(session.id, { workspace: { ...workspace, path: env.dir }, input });
+
+    expect(commands.find((command) => command.name === "session.start")).toMatchObject({
+      options: { autonomy: "full" },
+      revision: 0,
+    });
+    const open = commands.find((command) => command.name === "session.start");
+    expect(open?.input).toBeUndefined();
+    expect(commands.some((command) => command.name === "session.send")).toBe(false);
+    expect(env.repo.get(session.id)).toMatchObject({ autonomy: "supervised", status: "failed" });
+    expect(env.inbox.find(`inbox:${session.id}:start`)?.body).toMatch(/has not confirmed/i);
   });
 
   it("forgets an unanswered start once a later start is answered", async () => {

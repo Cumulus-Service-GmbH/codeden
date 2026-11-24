@@ -66,6 +66,13 @@ export interface PendingStart {
  * feedback already sent per PR number (`PrFeedbackService`) and, for the orchestrator and PMs,
  * whether their latest turn carries the user's request (`LoopGuard`).
  */
+export type PendingConfig = {
+  model?: Session["model"];
+  effort?: Session["effort"];
+  autonomy?: AutonomyLevel;
+  planMode?: boolean;
+};
+
 export type StoredStartMeta = SessionStartMeta & {
   /** The new Claude agent session was explicitly titled as a Browser Operator. */
   chromeOptIn?: true;
@@ -93,6 +100,11 @@ export type StoredStartMeta = SessionStartMeta & {
    * next changes.
    */
   roleProvider?: string;
+  roleModel?: RoleDefaults["model"];
+  roleEffort?: RoleDefaults["effort"];
+  /** Revision of the last configuration change, retained after its pending settings clear. */
+  configRevision?: number;
+  pendingConfig?: PendingConfig;
   /** A fork's workspace plan (§9): prepared before any start until the worktree exists. */
   forkStart?: ForkStart | null;
   /**
@@ -100,8 +112,6 @@ export type StoredStartMeta = SessionStartMeta & {
    * it, and the next start (a message, a restart) prepares it first. A session never runs in the
    * project folder in place of the worktree it asked for. Absent on sessions started before it
    * existed, and on forks, which keep `forkStart`.
-  roleModel?: RoleDefaults["model"];
-  roleEffort?: RoleDefaults["effort"];
    */
   workspaceStart?: WorkspaceRequest | null;
   /**
@@ -232,7 +242,12 @@ export class SessionRepo {
    * Apply `change` to the current row and append `session.updated` when it changed. Synchronous
    * end to end, so there is no read-modify-write race with event ingestion.
    */
-  update(id: string, change: (s: Session) => Session, audit?: AutonomyAudit): Session {
+  update(
+    id: string,
+    change: (s: Session) => Session,
+    audit?: AutonomyAudit,
+    changeMeta?: (meta: StoredStartMeta | null) => StoredStartMeta,
+  ): Session {
     const current = this.get(id);
     const next = change(current);
     if (next === current) return current;
@@ -254,7 +269,15 @@ export class SessionRepo {
         });
       }
     }
-    this.store.append(events);
+    const meta = changeMeta?.(this.find(id)?.startMeta ?? null);
+    this.store.append(
+      events,
+      meta
+        ? (tx) => {
+            tx.update(sessions).set({ startMeta: meta }).where(eq(sessions.id, id)).run();
+          }
+        : undefined,
+    );
     return session;
   }
 

@@ -274,6 +274,7 @@ describe("handing a session off", () => {
       "checkpoint.list",
       "workspace.prepare",
       "session.start",
+      "session.send",
     ]);
     expect(call("checkpoint.list")).toMatchObject({ sessionId: src.id, settled: true });
     expect(call("workspace.prepare")).toMatchObject({
@@ -288,8 +289,8 @@ describe("handing a session off", () => {
     expect(start.providerId).toBe("codex");
     expect(start.options).toMatchObject({ model: "gpt-5.5", cwd: next.worktreePath });
     expect(start.options.resumeToken).toBeUndefined();
-    expect(start.input?.from).toBe("codeden");
-    const brief = start.input?.text ?? "";
+    expect(call("session.send").input.from).toBe("codeden");
+    const brief = call("session.send").input.text;
     expect(brief).toContain('another CodeDen session, "Add login" (Claude Code · opus)');
     expect(brief).toContain("## The task\n\nAdd a login page");
     expect(brief).toContain("- Built the login form\n- The redirect test still fails");
@@ -334,7 +335,7 @@ describe("handing a session off", () => {
       forkedFrom: { sessionId: src.id, checkpoint: null, kind: "handoff" },
     });
     expect(call("workspace.prepare").restoreCheckpoint).toBeUndefined();
-    const brief = call("session.start").input?.text ?? "";
+    const brief = all("session.send").at(-1)?.input.text ?? "";
     expect(brief).toContain("Its last reply:\n\n> The form is in; the redirect test fails.");
     expect(brief).toContain("## What to do next\n\nContinue the work where it left off.");
   });
@@ -456,8 +457,7 @@ describe("a handoff whose first start fails", () => {
 
   /** The brief went out with the start that finally opened the session, and only then. */
   function expectBriefWith(text: string) {
-    const starts = all("session.start");
-    const input = starts.at(-1)?.input;
+    const input = all("session.send").at(-1)?.input;
     expect(input?.from).toBe("codeden");
     expect(input?.text).toMatch(/^You are taking over a coding task/);
     expect(input?.text).toContain(
@@ -481,6 +481,7 @@ describe("a handoff whose first start fails", () => {
       "session.send",
       "workspace.prepare",
       "session.start",
+      "session.send",
     ]);
     expectBriefWith("try again");
     expect(env.repo.find(id)?.startMeta?.handoffBrief).toBeNull();
@@ -497,7 +498,7 @@ describe("a handoff whose first start fails", () => {
     const { sessions } = services();
     calls = [];
     await sessions.send(id, carryOn);
-    expect(calls.map((c) => c.name)).toEqual(["session.send", "session.start"]);
+    expect(calls.map((c) => c.name)).toEqual(["session.send", "session.start", "session.send"]);
     expectBriefWith("try again");
     expect(call("session.start").options.resumeToken).toBeUndefined();
 
@@ -506,7 +507,7 @@ describe("a handoff whose first start fails", () => {
     calls = [];
     env.repo.update(id, (s) => ({ ...s, status: "idle" }));
     await sessions.send(id, { ...carryOn, input: { text: "and now?", attachments: [] } });
-    expect(call("session.start").input?.text).toBe("and now?");
+    expect(all("session.send").at(-1)?.input.text).toBe("and now?");
   });
 
   it("drops a brief the provider already got, once the session has had a turn", async () => {
@@ -527,7 +528,7 @@ describe("a handoff whose first start fails", () => {
     const { sessions } = services();
     calls = [];
     await sessions.send(id, carryOn);
-    expect(call("session.start").input?.text).toBe("try again");
+    expect(all("session.send").at(-1)?.input.text).toBe("try again");
     expect(env.repo.find(id)?.startMeta?.handoffBrief).toBeNull();
   });
 });

@@ -276,7 +276,12 @@ describe("autonomy changes on a running session (§11.2)", () => {
   });
 
   it("round-trips autonomy in the runner's session.configure", () => {
-    const command = { name: "session.configure" as const, sessionId: "s1", autonomy: "full" };
+    const command = {
+      name: "session.configure" as const,
+      sessionId: "s1",
+      autonomy: "full",
+      revision: 2,
+    };
     expect(RunnerCommand.parse(command)).toEqual(command);
     expect(RunnerCommand.parse(JSON.parse(JSON.stringify(command)))).toEqual(command);
     expect(() => RunnerCommand.parse({ ...command, autonomy: "never" })).toThrow();

@@ -31,6 +31,9 @@ interface Hosted {
   checkpoints: boolean;
   /** Serializes checkpoint writes for this session. */
   checkpointChain: Promise<void>;
+  requestedRevision?: number;
+  appliedRevision?: number;
+  configChain: Promise<void>;
   /** Why the session is closing, reported with its exit event. */
   closeReason?: "stopped" | "runner_exit";
   /** A running turn was interrupted by a drain: report it as a runner restart. */
@@ -41,6 +44,15 @@ interface Hosted {
   compactPending?: boolean;
   /** The root turn compacting the conversation now, if one is. */
   compactTurnId?: string;
+}
+
+function requireConfigRevision(hosted: Hosted, revision: number | undefined): void {
+  if (hosted.requestedRevision !== revision || hosted.appliedRevision !== revision) {
+    throw new CommandError(
+      "config_unconfirmed",
+      "The current session autonomy has not been confirmed",
+    );
+  }
 }
 
 /** A steer during a compaction (the server answers the same when it knows first). */
@@ -163,6 +175,9 @@ export class SessionHost {
         cwd: cmd.options.cwd,
         checkpoints,
         checkpointChain: Promise.resolve(),
+        requestedRevision: cmd.revision,
+        appliedRevision: cmd.revision,
+        configChain: Promise.resolve(),
         drainInterrupted: false,
         turnCutOff: false,
       };
@@ -177,6 +192,7 @@ export class SessionHost {
     if (cmd.input) {
       // The baseline must capture the tree before the first turn touches it.
       await hosted.checkpointChain;
+      requireConfigRevision(hosted, cmd.revision);
       await session.send(cmd.input);
     }
     return { resumeToken: session.resumeToken() ?? null };
@@ -185,6 +201,7 @@ export class SessionHost {
   async send(cmd: RunnerCommandOf<"session.send">): Promise<void> {
     const hosted = this.get(cmd.sessionId);
     await hosted.checkpointChain;
+    requireConfigRevision(hosted, cmd.revision);
     // A message's turn is work, never a compaction.
     const compactPending = hosted.compactPending;
     hosted.compactPending = false;
@@ -203,6 +220,7 @@ export class SessionHost {
   async steer(cmd: RunnerCommandOf<"session.steer">) {
     const hosted = this.get(cmd.sessionId);
     const { session } = hosted;
+    requireConfigRevision(hosted, cmd.revision);
     if (!session.steer) throw new CommandError("unsupported", "This provider cannot steer turns");
     // A compaction has no conversation turn to fold a message into (Codex refuses outright).
     if (hosted.compactPending || hosted.compactTurnId) {
@@ -235,12 +253,13 @@ export class SessionHost {
    * Compact the conversation now, as a turn of its own (`capabilities.compact`). The turn it
    * starts goes out marked `kind: "compact"`, whichever provider runs it.
    */
-  async compact(sessionId: string): Promise<void> {
+  async compact(sessionId: string, revision?: number): Promise<void> {
     const hosted = this.get(sessionId);
     if (!hosted.session.compact) {
       throw new CommandError("unsupported", "This provider cannot compact a conversation");
     }
     await hosted.checkpointChain;
+    requireConfigRevision(hosted, revision);
     hosted.compactPending = true;
     try {
       await hosted.session.compact();
@@ -264,8 +283,30 @@ export class SessionHost {
    * Model/effort for the next turn, the autonomy level and plan mode, when the provider can
    * change them live. Checks every requested setting before applying any.
    */
-  async configure(cmd: RunnerCommandOf<"session.configure">): Promise<void> {
-    const { session } = this.get(cmd.sessionId);
+  async configure(cmd: RunnerCommandOf<"session.configure">): Promise<{ revision?: number }> {
+    const hosted = this.get(cmd.sessionId);
+    const { revision } = cmd;
+    if (
+      hosted.requestedRevision !== undefined &&
+      (revision === undefined || revision < hosted.requestedRevision)
+    ) {
+      throw new CommandError("config_unconfirmed", "The session configuration revision is stale");
+    }
+    hosted.requestedRevision = revision;
+    const apply = hosted.configChain.then(async () => {
+      if (hosted.requestedRevision !== revision) {
+        throw new CommandError("config_unconfirmed", "The session configuration revision is stale");
+      }
+      hosted.appliedRevision = undefined;
+      await this.applyConfig(hosted.session, cmd);
+      hosted.appliedRevision = revision;
+    });
+    hosted.configChain = apply.catch(() => {});
+    await apply;
+    return revision === undefined ? {} : { revision };
+  }
+
+  private async applyConfig(session: ProviderSession, cmd: RunnerCommandOf<"session.configure">) {
     const change: { model?: string | null; effort?: typeof cmd.effort } = {};
     if (cmd.model !== undefined) change.model = cmd.model;
     if (cmd.effort !== undefined) change.effort = cmd.effort;

@@ -56,7 +56,7 @@ it("the owner raises a protected running session to Full and it applies at once"
   });
   expect(repo.get(id).autonomy).toBe("full");
   expect(request).toHaveBeenCalledWith(
-    { name: "session.configure", sessionId: id, autonomy: "full" },
+    { name: "session.configure", sessionId: id, autonomy: "full", revision: 1 },
     expect.any(Number),
   );
 });

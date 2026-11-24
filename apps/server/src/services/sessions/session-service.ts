@@ -64,7 +64,7 @@ import {
 } from "./permissions";
 import { deliverPriority } from "./priority-delivery";
 import type { Answerer, QuestionBroker } from "./questions";
-import { applyPendingConfig, updateSession } from "./reconfigure";
+import { applyPendingConfig, assertConfigRevision, updateSession } from "./reconfigure";
 import { type AutonomyAudit, emptyStartMeta, type SessionRepo, type StoredStartMeta } from "./repo";
 import { planReview } from "./review";
 import { retireRoleSession } from "./role-retire";
@@ -672,7 +672,10 @@ export class SessionService {
     try {
       await deliverPriority(
         async (attempt) => {
-          const result = await this.runnerOf(id).request({
+          const runner = this.runnerOf(id);
+          const revision = await applyPendingConfig(this.deps.repo, runner, session, true);
+          assertConfigRevision(this.deps.repo, id, revision);
+          const result = await runner.request({
             name: "session.steer",
             sessionId: id,
             input,
@@ -683,6 +686,7 @@ export class SessionService {
             result?.waitingFor &&
             !pending &&
             typeof source === "string" &&
+            revision,
             !wait.controller.signal.aborted
           ) {
             pending = outbox.push(id, stored, source);
@@ -1047,7 +1051,6 @@ export class SessionService {
   private async deliver(session: Session, input: UserInput): Promise<void> {
     this.assertForcedProvider(session);
     const runner = this.runnerOf(session.id);
-    await applyPendingConfig(this.deps.repo, runner, session);
     const previous = session.status;
     // Messaging an archived session brings it back.
     this.deps.repo.update(session.id, (s) => ({
@@ -1064,7 +1067,9 @@ export class SessionService {
         return;
       }
       try {
-        await runner.request({ name: "session.send", sessionId: session.id, input });
+        const revision = await applyPendingConfig(this.deps.repo, runner, session);
+        assertConfigRevision(this.deps.repo, session.id, revision);
+        await runner.request({ name: "session.send", sessionId: session.id, input, revision });
       } catch (error) {
         // The runner no longer hosts it (restart, stopped): resume through the provider.
         if (runnerErrorCode(error) !== "unknown_session") throw error;
@@ -1187,11 +1192,6 @@ export class SessionService {
   }
 
   private buildSession(
-    req: StartSessionRequest,
-    project: ReturnType<ProjectService["get"]> | null,
-    work: { purpose: string; workKey: string; scope: Session["scope"]; queued: boolean },
-  ): Session {
-    const settings = this.deps.settings.get();
     if (role !== "agent" && roleDefault !== "auto") {
       if (connected && !available.includes(roleDefault)) {
         throw badRequest(
@@ -1201,6 +1201,11 @@ export class SessionService {
       }
       return roleDefault;
     }
+    req: StartSessionRequest,
+    project: ReturnType<ProjectService["get"]> | null,
+    work: { purpose: string; workKey: string; scope: Session["scope"]; queued: boolean },
+  ): Session {
+    const settings = this.deps.settings.get();
     const now = new Date().toISOString();
     const provider = this.resolveProvider(req, project ? projectDefaultProvider(project) : null);
     const defaults = roleModelDefaults(
@@ -1214,13 +1219,13 @@ export class SessionService {
     this.assertReadOnlySupported(req.role, provider, autonomy);
     // Either value is refused where plan mode doesn't exist, as for PATCH.
     if (req.planMode !== undefined) this.assertPlanModeSupported(req.role, provider);
+      req.role,
+      this.deps.forceFakeProvider,
     return {
       id: randomUUID(),
       projectId: req.projectId,
       role: req.role,
       parentSessionId: req.parentSessionId ?? null,
-      req.role,
-      this.deps.forceFakeProvider,
       startedBy: req.startedBy,
       purpose: work.purpose,
       workKey: work.workKey,
@@ -1276,6 +1281,8 @@ function roleModelDefaults(
         `The ${role} role model or effort is configured for ${defaults.provider} and cannot be used with ${provider}.`,
         "role_model_provider_mismatch",
       );
+  role: Session["role"],
+  forceFake?: boolean,
     }
     return { model: null, effort: null };
   }
@@ -1289,5 +1296,3 @@ function assertRoleWritable(session: Session): void {
     throw conflict("This conversation is archived", "role_session_archived");
   }
 }
-  role: Session["role"],
-  forceFake?: boolean,

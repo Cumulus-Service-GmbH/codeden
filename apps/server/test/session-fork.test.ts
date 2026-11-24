@@ -98,7 +98,14 @@ const runner = {
       case "session.start":
         return { resumeToken: command.options.resumeToken ?? null };
       case "session.send":
-        // The runner never started the fork (its first start failed).
+        if (
+          calls.some(
+            (entry) => entry.name === "session.start" && entry.sessionId === command.sessionId,
+          )
+        ) {
+          return {};
+        }
+        // The runner has not opened the fork yet.
         throw new RunnerCommandError(
           "unknown_session",
           `Session ${command.sessionId} is not running`,
@@ -451,6 +458,7 @@ describe("a fork whose worktree could not be made", () => {
       "session.send",
       "workspace.prepare",
       "session.start",
+      "session.send",
     ]);
     expect(call("workspace.prepare")).toMatchObject({
       strategy: "worktree",
@@ -464,7 +472,7 @@ describe("a fork whose worktree could not be made", () => {
     const start = call("session.start");
     expect(start.options.cwd).toBe(after.worktreePath);
     expect(start.options.resumeToken).toBe("claude-source:fork");
-    expect(start.input?.text).toBe("carry on");
+    expect(all("session.send").at(-1)?.input.text).toBe("carry on");
   });
 
   it("never runs in the project root when the worktree still can't be made", async () => {
