@@ -367,9 +367,19 @@ export class SessionLauncher {
         START_TIMEOUT_MS,
       );
       if (token) this.deps.tokens.revokeSession(session.id, token);
-      confirmOpenedConfig(this.deps.repo, session.id, revision);
-      const confirmed = await applyPendingConfig(this.deps.repo, runner, session);
-      assertConfigRevision(this.deps.repo, session.id, confirmed);
+      let confirmed: number;
+      try {
+        confirmOpenedConfig(this.deps.repo, session.id, revision);
+        confirmed = await applyPendingConfig(this.deps.repo, runner, session);
+        assertConfigRevision(this.deps.repo, session.id, confirmed);
+      } catch (error) {
+        // The freshly opened host has received no input. Leave retry to the launcher so a
+        // pending handoff brief is delivered on the next safe open.
+        await runner
+          .request({ name: "session.stop", sessionId: session.id }, 15_000)
+          .catch(() => {});
+        throw error;
+      }
       if (input) {
         await runner.request(
           { name: "session.send", sessionId: session.id, input, revision: confirmed },

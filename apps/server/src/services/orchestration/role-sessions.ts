@@ -146,7 +146,9 @@ export class RoleSessions {
     if (
       target &&
       (setting.provider !== session.provider ||
-        setting.model !== session.model ||
+        (setting.model === null
+          ? typeof meta.roleModel === "string"
+          : setting.model !== session.model) ||
         (target.capabilities.reasoningEffort ? setting.effort : null) !== session.effort)
     ) {
       return true;

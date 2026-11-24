@@ -123,6 +123,7 @@ describe("a session start the runner didn't answer (#492)", () => {
     const open = commands.find((command) => command.name === "session.start");
     expect(open?.input).toBeUndefined();
     expect(commands.some((command) => command.name === "session.send")).toBe(false);
+    expect(commands.at(-1)).toEqual({ name: "session.stop", sessionId: session.id });
     expect(env.repo.get(session.id)).toMatchObject({ autonomy: "supervised", status: "failed" });
     expect(env.inbox.find(`inbox:${session.id}:start`)?.body).toMatch(/has not confirmed/i);
   });

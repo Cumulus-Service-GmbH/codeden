@@ -201,6 +201,21 @@ describe("role sessions: what does not move a role session (§8.1)", () => {
   }
 
   it(
+    "keeps the PM when pinning its current provider with a resolved default model",
+    withRoles(async ({ roles, repo, set, settle, projectDefault }) => {
+      projectDefault("codex");
+      const pm = await roles.ensure("pm", "p1");
+      settle(pm.id);
+      // The provider reports its default model once the conversation starts.
+      repo.update(pm.id, (session) => ({ ...session, model: "gpt-default" }));
+      await set({ providers: { pm: { provider: "codex" } } });
+
+      expect((await roles.ensure("pm", "p1")).id).toBe(pm.id);
+      expect(repo.get(pm.id)).toMatchObject({ model: "gpt-default", archivedAt: null });
+    }),
+  );
+
+  it(
     "keeps a legacy PM conversation with a session-only model override",
     withRoles(async ({ roles, repo, set, settle }) => {
       await set({ providers: { pm: { provider: "codex" } } });
