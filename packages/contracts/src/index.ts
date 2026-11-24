@@ -10,6 +10,7 @@ export * from "./agent-config-mcp-test";
 export * from "./agent-config-skills";
 export * from "./agent-events";
 export * from "./api";
+export * from "./approval-policy";
 export * from "./automations-api";
 export * from "./automations-sharing";
 export * from "./browser-api";

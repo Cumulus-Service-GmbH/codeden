@@ -1,10 +1,11 @@
 import type { PermissionMode } from "@anthropic-ai/claude-agent-sdk";
 import type { ApprovalAction, AutonomyLevel } from "@codeden/contracts";
 import { asksAtEveryLevel, touchesCodeden } from "../policy/assessment";
+import { guardedReadCommand } from "../policy/delegated-read";
 import { isInNotes } from "../policy/paths";
 import { readOnlyCommandDenial } from "../policy/read-only";
 import type { RiskContext } from "../policy/risk";
-import { str } from "../util/text";
+import { str, toJson } from "../util/text";
 import {
   assessClaudeTool,
   COMMAND_TOOLS,
@@ -16,11 +17,26 @@ import {
 } from "./tools";
 
 const FINISH_PLAN = "Finish the plan and present it with ExitPlanMode; once the user approves it";
+const CHROME_PREFIX = "mcp__claude-in-chrome__";
+const CHROME_OBSERVATION_TOOLS = new Set([
+  "tabs_context_mcp",
+  "read_page",
+  "find",
+  "get_page_text",
+  "read_console_messages",
+  "read_network_requests",
+]);
 
 /** The decision for one tool call. */
 export type Gate =
-  | { ask: false }
-  | { ask: true; action: ApprovalAction; reason: string; singleUse?: true };
+  | { ask: false; command?: string }
+  | {
+      ask: true;
+      action: ApprovalAction;
+      reason: string;
+      singleUse?: true;
+      rememberedCommand?: string;
+    };
 
 /**
  * Native permission mode per autonomy level (§11.2):
@@ -47,8 +63,6 @@ export function permissionModeFor(autonomy: AutonomyLevel, planMode: boolean): P
  */
 export class ClaudePolicy {
   private readonly sessionAllow = new Set<string>();
-  /** `allow_session` decisions on calls that touched CodeDen's own credentials (`credentialKey`). */
-  private readonly credentialAllow = new Set<string>();
   /** Plan mode: edits outside Claude's notes and writing commands are refused. */
   private planning = false;
 
@@ -91,6 +105,17 @@ export class ClaudePolicy {
    * shell's current directory, as for `gate`.
    */
   denial(toolName: string, input: Record<string, unknown>, dir?: string): string | undefined {
+    if (toolName.startsWith(CHROME_PREFIX)) {
+      const name = toolName.slice(CHROME_PREFIX.length);
+      const url = str(input, "url");
+      if (
+        !CHROME_OBSERVATION_TOOLS.has(name) &&
+        !(name === "navigate" && url && /^https?:\/\//i.test(url)) &&
+        !(name === "computer" && input.action === "screenshot")
+      ) {
+        return "Claude in Chrome cannot enter input when CodeDen cannot verify the target field.";
+      }
+    }
     // Read-only roles call no MCP tool but CodeDen's own, whatever server offers it.
     if (this.readOnly && toolName.startsWith("mcp__")) {
       const server = toolName.slice("mcp__".length).split("__")[0] ?? "";
@@ -149,7 +174,7 @@ export class ClaudePolicy {
    * earlier `cd` persists between Bash calls); relative paths resolve from it.
    */
   gate(toolName: string, input: Record<string, unknown>, dir?: string): Gate {
-    if (toolName.startsWith("mcp__claude-in-chrome__")) {
+    if (toolName.startsWith(CHROME_PREFIX)) {
       return {
         ask: true,
         action: "tool",
@@ -164,13 +189,23 @@ export class ClaudePolicy {
       return { ask: true, action: "plan", reason: "The agent finished planning" };
     }
     const risk = this.assess(toolName, input, dir);
-    // CodeDen's own credentials are covered only by an approval given for them, in the same
-    // directory: approving `cat runner/runner.json` in the worktree, or the whole Read tool,
-    // doesn't approve reading the runner's token after a `cd` into CodeDen's home.
-    const remembered = touchesCodeden(risk)
-      ? this.credentialAllow.has(this.credentialKey(toolName, input, dir))
-      : this.sessionAllow.has(this.key(toolName, input));
-    if (remembered) return { ask: false };
+    if (!risk.risky && this.sessionAllow.has(this.readKey(toolName, input, dir))) {
+      const tool = {
+        action: "command" as const,
+        toolName,
+        command: str(input, "command"),
+        toolInput: toJson(input),
+      };
+      const command = guardedReadCommand(tool, dir ?? this.ctx.cwd, this.ctx.cwd);
+      if (command) {
+        return {
+          ask: true,
+          action: "command",
+          reason: "Checking remembered read approval",
+          rememberedCommand: command,
+        };
+      }
+    }
     if (this.autonomy === "supervised") {
       if (risk.risky) return { ask: true, action: risk.action, reason: risk.reason };
       if (COMMAND_TOOLS.has(toolName) || EDIT_TOOLS.has(toolName)) {
@@ -199,8 +234,8 @@ export class ClaudePolicy {
    */
   needsUser(toolName: string, input: Record<string, unknown>, dir?: string): Gate {
     const gate = this.gate(toolName, input, dir);
+    if (gate.ask && gate.rememberedCommand) return { ask: false, command: gate.rememberedCommand };
     if (gate.ask || this.autonomy !== "supervised") return gate;
-    if (this.sessionAllow.has(this.key(toolName, input))) return gate;
     return {
       ask: true,
       action: defaultApprovalAction(toolName),
@@ -208,27 +243,13 @@ export class ClaudePolicy {
     };
   }
 
-  /**
-   * Remember an `allow_session` decision. Commands and edits match exactly; others by name. A
-   * call that touches CodeDen's own credentials is remembered only as itself, in `dir`.
-   */
+  /** Remember a read grant only for its exact input and working directory. */
   allowForSession(toolName: string, input: Record<string, unknown>, dir?: string): void {
-    this.sessionAllow.add(this.key(toolName, input));
-    if (touchesCodeden(this.assess(toolName, input, dir))) {
-      this.credentialAllow.add(this.credentialKey(toolName, input, dir));
-    }
+    this.sessionAllow.add(this.readKey(toolName, input, dir));
   }
 
   /** The exact call, in the directory its relative paths resolve from. */
-  private credentialKey(toolName: string, input: Record<string, unknown>, dir?: string): string {
+  private readKey(toolName: string, input: Record<string, unknown>, dir?: string): string {
     return `${toolName}\n${dir ?? this.ctx.cwd}\n${JSON.stringify(input)}`;
-  }
-
-  private key(toolName: string, input: Record<string, unknown>): string {
-    if (COMMAND_TOOLS.has(toolName)) return `${toolName}:${str(input, "command") ?? ""}`;
-    if (EDIT_TOOLS.has(toolName)) {
-      return `edit:${str(input, "file_path") ?? str(input, "notebook_path") ?? ""}`;
-    }
-    return toolName;
   }
 }

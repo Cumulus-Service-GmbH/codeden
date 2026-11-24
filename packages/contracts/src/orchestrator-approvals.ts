@@ -47,6 +47,7 @@ const ApprovalChoice = z.enum(["approve", "deny"]);
 
 /**
  * An open approval and the server's decision about whether the orchestrator can answer it.
+ * Plain read-only shell approvals can also be delegated.
  * A delegable plan-mode tool approval has no command or listed paths. Its tool input is absent
  * or a plain object with only the optional `plan` key. Hook, URL, single-use, Chrome consent,
  * and sensitive-text restrictions also apply. PM plan cards are delegable only when every step
@@ -109,5 +110,11 @@ export const OrchestratorApprovalDecision = z.strictObject({
   reason: z.string(),
   title: z.string(),
   at: Timestamp,
+  /** The provider tool and SHA-256 of the input recorded on its approval request. */
+  toolName: z.string().optional(),
+  inputDigest: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
 });
 export type OrchestratorApprovalDecision = z.infer<typeof OrchestratorApprovalDecision>;

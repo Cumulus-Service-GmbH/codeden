@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   type DecideApprovalInput,
   type DecideApprovalOutput,
@@ -11,6 +11,7 @@ import {
   type PendingApproval,
   redactSecrets,
 } from "@codeden/contracts";
+import { guardedReadCommand } from "@codeden/providers";
 import type { ProjectionReader } from "../events/reducer/types";
 import type { EventStore } from "../events/store";
 import { classifyApproval } from "./classify-approval";
@@ -29,6 +30,7 @@ interface Entry {
   approval: PendingApproval;
   request?: { sessionId: string; requestId: string };
   cardId?: string;
+  inputDigest?: string;
 }
 
 function redactText(text: string | undefined): string | undefined {
@@ -102,6 +104,8 @@ export class OrchestratorApprovals {
           reason,
           title: approval.title,
           at: decidedAt,
+          toolName: approval.toolName,
+          inputDigest: entry.inputDigest,
         },
         responseDecision,
       );
@@ -224,13 +228,26 @@ export class OrchestratorApprovals {
     ) {
       return { approval: { ...this.context(inbox), kind, ...classifyApproval({ kind }) } };
     }
+    const classification = classifyApproval({ ...item, kind });
+    const session = this.repo.find(sessionId)?.session;
+    const root = session?.worktreePath ?? session?.cwd;
+    const verified =
+      !classification.delegable ||
+      item.action !== "command" ||
+      (session?.provider === "claude" &&
+        item.toolInput !== undefined &&
+        root &&
+        guardedReadCommand(item, item.cwd, root));
     return {
       request: { sessionId, requestId },
+      inputDigest: createHash("sha256")
+        .update(JSON.stringify(item.toolInput ?? item.command ?? null))
+        .digest("hex"),
       approval: {
         ...this.context(inbox),
         kind,
         ...this.toolDetails(item),
-        ...classifyApproval({ ...item, kind }),
+        ...(verified ? classification : classifyApproval({ ...item, singleUse: true, kind })),
       },
     };
   }

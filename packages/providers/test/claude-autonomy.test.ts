@@ -122,6 +122,22 @@ const settle = () => new Promise((r) => setTimeout(r, 20));
 const forcePush = { command: "git push --force" };
 const writeOutside = { file_path: outside, content: "x" };
 
+it.each([
+  ["computer", { action: "type", text: "example" }],
+  ["computer", { action: "key", text: "a" }],
+  ["form_input", { ref: "ref_1", value: "example" }],
+  ["javascript_tool", { text: "example" }],
+] as const)(
+  "refuses Chrome input through %s at both permission boundaries",
+  async (name, input) => {
+    const { preToolUse, permission, approvals } = open(stubSdk(), { chrome: true });
+    const tool = `mcp__claude-in-chrome__${name}`;
+    expect(await preToolUse(tool, input)).toBe("deny");
+    expect(await permission(tool, input)).toMatchObject({ behavior: "deny" });
+    expect(approvals()).toHaveLength(0);
+  },
+);
+
 it.each(["supervised", "auto", "full", "read_only"] as const)(
   "requires single-use Chrome tool approval in %s",
   async (autonomy) => {

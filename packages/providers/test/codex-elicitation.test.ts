@@ -112,9 +112,9 @@ describe("Codex MCP tool approvals", () => {
       toolInput: { sql: "DELETE FROM users" },
       options: ["allow_once", "allow_session", "deny"],
     });
-    expect(await answer({ kind: "approval", decision: "allow_session" })).toMatchObject({
+    expect(await answer({ kind: "approval", decision: "allow_once" })).toMatchObject({
       action: "accept",
-      _meta: { persist: "session" },
+      _meta: null,
     });
   });
 

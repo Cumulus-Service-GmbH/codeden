@@ -1,4 +1,9 @@
-import type { AgentEvent, ItemOf, RuntimeResponse } from "@codeden/contracts";
+import {
+  type AgentEvent,
+  type ItemOf,
+  type RuntimeResponse,
+  sessionApprovalBlockReason,
+} from "@codeden/contracts";
 import { ProviderSessionError } from "./adapter";
 
 /** Where an approval or question item lives. */
@@ -79,7 +84,13 @@ export class ApprovalBroker {
   respond(requestId: string, response: RuntimeResponse): void {
     const pending = this.pending.get(requestId);
     if (!pending) throw new ProviderSessionError("unknown_request", `Unknown request ${requestId}`);
-    const problem = pending.review?.problem?.(response);
+    const problem =
+      pending.review?.problem?.(response) ??
+      (pending.item.kind === "approval_request" &&
+      response.kind === "approval" &&
+      response.decision === "allow_session"
+        ? sessionApprovalBlockReason(pending.item)
+        : undefined);
     if (problem) throw new ProviderSessionError("invalid_answer", problem);
     pending.resolve(response);
   }

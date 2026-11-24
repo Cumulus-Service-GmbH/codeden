@@ -265,16 +265,16 @@ describe("OpenCode session", () => {
     });
   });
 
-  it("asks for every edit in supervised mode and remembers allow_session (never OpenCode's always)", async () => {
+  it("asks separately for each edit in supervised mode", async () => {
     const { reader } = await open({ autonomy: "supervised" });
     let asked = 0;
     reader.answer = () => {
       asked += 1;
-      return { kind: "approval", decision: "allow_session" };
+      return { kind: "approval", decision: "allow_once" };
     };
     await reader.turn("edit");
     await reader.turn("edit");
-    expect(asked).toBe(1);
+    expect(asked).toBe(2);
     const replies = requests(/permission\/.+\/reply$/).map((r) => r.body?.decision);
     expect(replies).toEqual(["once", "once"]);
   });

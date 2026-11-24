@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { linkSync, mkdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import {
@@ -32,6 +33,83 @@ const actor = caller("orchestrator");
 const decision = { decision: "approve", reason: "Reviewed." } as const;
 const ordinary = { kind: "tool_approval", action: "plan" } as const;
 type Entry = Parameters<typeof classifyApproval>[0];
+
+it.each([
+  "cat package.json",
+  "ls -la",
+  'rg -n "requires the owner" apps/server/src',
+  "git show HEAD:package.json",
+  "git status --short --branch",
+  "pnpm --version",
+  "node --version",
+])("delegates a plain read-only command: %s", (command) => {
+  expect(classifyApproval({ ...ordinary, action: "command", command, toolName: "Bash" })).toEqual({
+    delegable: true,
+  });
+});
+
+it.each([
+  "cat package.json > out",
+  "cat package.json | sh",
+  "cat .env",
+  "cat ../package.json",
+  "rg --pre sh source",
+  "git show --output=out HEAD",
+  "git merge HEAD",
+  "node -e 'process.exit()'",
+])("keeps a command per-card: %s", (command) => {
+  expect(
+    classifyApproval({ ...ordinary, action: "command", command, toolName: "Bash" }).delegable,
+  ).toBe(false);
+});
+
+it("audits the exact input digest when a plain shell approval is delegated", async () => {
+  const { service, add, store, runnerCalls } = setup();
+  const command = "ls -la";
+  const toolInput = { command };
+  const target = add(
+    "plain-shell",
+    { action: "command", toolName: "Bash", command, toolInput },
+    { provider: "claude" },
+  );
+  const result = await service.decide(actor, { id: target.id, ...decision });
+  expect(runnerCalls).toContainEqual(
+    expect.objectContaining({
+      name: "session.respond",
+      sessionId: target.sessionId,
+      response: expect.objectContaining({ decision: "allow_once", decidedBy: "orchestrator" }),
+    }),
+  );
+  expect(store.listTypes(["approval.decided_by_orchestrator"])).toContainEqual(
+    expect.objectContaining({
+      payload: expect.objectContaining({
+        sessionId: target.sessionId,
+        orchestratorSessionId: actor.sessionId,
+        at: result.decidedAt,
+        toolName: "Bash",
+        inputDigest: createHash("sha256").update(JSON.stringify(toolInput)).digest("hex"),
+      }),
+    }),
+  );
+});
+
+it("requires the owner for a plain read through a symlink outside the worktree", async () => {
+  const { service, add, runnerCalls } = setup();
+  const command = "cat linked.txt";
+  const target = add(
+    "linked-shell",
+    { action: "command", toolName: "Bash", command, toolInput: { command } },
+    { provider: "claude" },
+  );
+  const cwd = target.item.cwd as string;
+  const outside = join(cwd, "..", "outside.txt");
+  writeFileSync(outside, "fixture");
+  symlinkSync(outside, join(cwd, "linked.txt"));
+  await expect(service.decide(actor, { id: target.id, ...decision })).rejects.toMatchObject({
+    code: "owner_only_approval",
+  });
+  expect(runnerCalls).toEqual([]);
+});
 
 it.each([
   ["prd_write", "az containerapp update"],

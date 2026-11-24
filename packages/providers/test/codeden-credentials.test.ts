@@ -442,30 +442,24 @@ describe("CodeDen's own credential files: every level", () => {
     }
   });
 
-  it("a session approval covers them only as given: same call, same directory", () => {
+  it("requires per-call approval for CodeDen credentials even after a session grant", () => {
     const worktree = posix.cwd;
     const home = "/home/me/.codeden";
     const p = new ClaudePolicy("supervised", posix);
-    // A harmless read of the repository's own file, approved for the session...
     const repoRead = { command: "cat runner/runner.json" };
-    expect(p.gate("Bash", repoRead, worktree).ask).toBe(true);
     p.allowForSession("Bash", repoRead, worktree);
-    expect(p.gate("Bash", repoRead, worktree).ask).toBe(false);
-    // ...doesn't approve the same words once the shell is in CodeDen's home.
     expect(p.gate("Bash", repoRead, home)).toMatchObject({ ask: true, action: "secrets" });
     expect(p.needsUser("Bash", repoRead, home).ask).toBe(true);
-    // Approving the credential read itself covers that call, there.
     p.allowForSession("Bash", repoRead, home);
-    expect(p.gate("Bash", repoRead, home).ask).toBe(false);
-    expect(p.gate("Bash", repoRead, worktree).ask).toBe(false);
+    expect(p.gate("Bash", repoRead, home)).toMatchObject({ ask: true, action: "secrets" });
+    expect(p.needsUser("Bash", repoRead, home).ask).toBe(true);
 
-    // Approving the Read tool for the session doesn't cover them; approving one does.
     const auto = new ClaudePolicy("auto", posix);
     auto.allowForSession("Read", { file_path: ".env" });
-    expect(auto.gate("Read", { file_path: ".env.local" }).ask).toBe(false);
+    expect(auto.gate("Read", { file_path: ".env.local" }).ask).toBe(true);
     expect(auto.gate("Read", read).ask).toBe(true);
     auto.allowForSession("Read", read);
-    expect(auto.gate("Read", read).ask).toBe(false);
+    expect(auto.gate("Read", read).ask).toBe(true);
     expect(auto.gate("Read", { file_path: "/home/me/.codeden/remote-access.json" }).ask).toBe(true);
   });
 

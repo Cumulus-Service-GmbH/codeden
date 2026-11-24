@@ -177,11 +177,12 @@ describe("Claude settings hooks that require approval", () => {
 
   it("asks even after the ordinary card was allowed for the session", async () => {
     const run = open("supervised");
-    const unmarkedCall = run.permission("Bash", echo);
+    const read = { command: "ls -la" };
+    const unmarkedCall = run.permission("Bash", read);
     await run.answer(await run.card(), "allow_session");
     await expect(unmarkedCall).resolves.toMatchObject({ behavior: "allow" });
 
-    const markedCall = run.permission("Bash", echo, marked);
+    const markedCall = run.permission("Bash", read, marked);
     const card = await run.card(2);
     expect(card.options).toEqual(once);
     await run.answer(card, "deny");

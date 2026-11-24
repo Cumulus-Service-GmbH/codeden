@@ -1,6 +1,7 @@
 import {
   type DecisionCard,
   type ItemOf,
+  isPlainReadApproval,
   type OwnerOnlyCategory,
   type PendingApproval,
   parseCardToken,
@@ -103,6 +104,7 @@ export function classifyApproval(entry: Entry): Classification {
   const text = `${entry.command ?? ""}\n${JSON.stringify(entry.toolInput ?? null)}\n${entry.paths?.join("\n") ?? ""}`;
   const category = sensitiveText(text);
   if (category) return ownerOnly(category);
+  if (isPlainReadApproval(entry)) return { delegable: true };
   if (
     entry.action !== "plan" ||
     entry.command !== undefined ||

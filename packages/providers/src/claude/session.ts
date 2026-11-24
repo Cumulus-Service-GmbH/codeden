@@ -12,6 +12,7 @@ import {
   HOOK_ASK_MARKER,
   type ItemOf,
   isMarkedHookAsk,
+  isPlainReadApproval,
   type RuntimeResponse,
   type SessionOptions,
   type UserInput,
@@ -19,6 +20,7 @@ import {
 import { type ProviderSession, ProviderSessionError, type SessionConfigChange } from "../adapter";
 import { type AnswerReview, ApprovalBroker } from "../approvals";
 import { AsyncQueue } from "../async-queue";
+import { guardedReadCommand } from "../policy/delegated-read";
 import type { ResolvedCommand } from "../util/exec";
 import { interruptWithDeadline } from "../util/interrupt";
 import { explicitModel } from "../util/model";
@@ -537,7 +539,7 @@ export class ClaudeSession implements ProviderSession {
     // Let the pump consume a hook_response read in the same chunk.
     await new Promise((resolve) => setImmediate(resolve));
     if (this.closed || this.q !== q || this.interrupts !== interrupts) {
-      return this.toPermissionResult(toolName, input, dir, { kind: "cancel" });
+      return this.toPermissionResult(input, { kind: "cancel" });
     }
 
     const decisionReason = options.decisionReason;
@@ -561,11 +563,16 @@ export class ClaudeSession implements ProviderSession {
       const ctx = this.mapper.ctxForTool(options.toolUseID);
       const review = gate.ask && gate.singleUse ? markedSingleUseReview : markedHookReview;
       const response = await this.broker.request(ctx, item, options.signal, review);
-      return this.toPermissionResult(toolName, input, dir, response, false);
+      return this.toPermissionResult(input, response);
     }
 
     const gate = this.policy.needsUser(toolName, input, dir);
-    if (!gate.ask) return { behavior: "allow", updatedInput: input };
+    if (!gate.ask) {
+      return {
+        behavior: "allow",
+        updatedInput: gate.command ? { ...input, command: gate.command } : input,
+      };
+    }
     const ctx = this.mapper.ctxForTool(options.toolUseID);
     const item = this.approvalItem(toolName, input, options, {
       action: gate.action,
@@ -578,9 +585,33 @@ export class ClaudeSession implements ProviderSession {
       ...(decisionReason && decisionReason !== gate.reason ? { hookAsk: true } : {}),
       options: gate.singleUse ? ["allow_once", "deny"] : ["allow_once", "allow_session", "deny"],
     });
-    const review = gate.singleUse ? singleUseReview : undefined;
+    const guard = () => guardedReadCommand(item, item.cwd, this.opts.cwd);
+    if (isPlainReadApproval(item) && !guard()) {
+      item.options = item.options.filter((option) => option !== "allow_session");
+    }
+    const review = gate.singleUse
+      ? singleUseReview
+      : {
+          problem: (response: RuntimeResponse) =>
+            response.kind === "approval" &&
+            (response.decision === "allow_session" ||
+              (response.decision === "allow_once" && response.decidedBy === "orchestrator")) &&
+            !guard()
+              ? "This approval requires the owner."
+              : undefined,
+        };
     const response = await this.broker.request(ctx, item, options.signal, review);
-    return this.toPermissionResult(toolName, input, dir, response);
+    if (
+      response.kind === "approval" &&
+      (response.decision === "allow_session" ||
+        (response.decision === "allow_once" && response.decidedBy === "orchestrator"))
+    ) {
+      const command = guard();
+      if (!command) return { behavior: "deny", message: "The read target could not be verified." };
+      if (response.decision === "allow_session") this.policy.allowForSession(toolName, input, dir);
+      return { behavior: "allow", updatedInput: { ...input, command } };
+    }
+    return this.toPermissionResult(input, response);
   };
 
   private approvalItem(
@@ -609,17 +640,10 @@ export class ClaudeSession implements ProviderSession {
   }
 
   private toPermissionResult(
-    toolName: string,
     input: Record<string, unknown>,
-    dir: string | undefined,
     response: RuntimeResponse,
-    allowSession = true,
   ): PermissionResult {
     if (response.kind === "approval" && response.decision === "allow_once") {
-      return { behavior: "allow", updatedInput: input };
-    }
-    if (response.kind === "approval" && response.decision === "allow_session" && allowSession) {
-      this.policy.allowForSession(toolName, input, dir);
       return { behavior: "allow", updatedInput: input };
     }
     if (response.kind === "approval" && response.decision === "deny") {

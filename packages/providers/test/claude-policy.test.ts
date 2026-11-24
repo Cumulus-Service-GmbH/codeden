@@ -1,5 +1,28 @@
 import { describe, expect, it } from "vitest";
 import { ClaudePolicy, permissionModeFor } from "../src/claude/permissions";
+import { guardedReadCommand } from "../src/policy/delegated-read";
+
+it("excludes known credential files from delegated recursive searches", () => {
+  const cwd = import.meta.dirname;
+  const command = guardedReadCommand(
+    { action: "command", toolName: "Bash", command: "rg needle" },
+    cwd,
+    cwd,
+  );
+  expect(command).toContain("--iglob '!**/service-account.json'");
+  expect(command).toContain("--iglob '!**/*.key'");
+});
+
+it("does not delegate a Git blob read of a provider login file", () => {
+  const cwd = import.meta.dirname;
+  expect(
+    guardedReadCommand(
+      { action: "command", toolName: "Bash", command: "git show HEAD:opencode/auth.json" },
+      cwd,
+      cwd,
+    ),
+  ).toBeUndefined();
+});
 
 describe("ClaudePolicy", () => {
   const ctx = {
@@ -17,7 +40,7 @@ describe("ClaudePolicy", () => {
   });
 
   it("supervised asks for every edit and command", () => {
-    const p = new ClaudePolicy("supervised", ctx);
+    const p = new ClaudePolicy("supervised", { ...ctx, cwd: import.meta.dirname });
     expect(p.gate("Bash", { command: "ls" })).toMatchObject({ ask: true, action: "command" });
     expect(p.gate("Edit", { file_path: "a.ts" })).toMatchObject({
       ask: true,
@@ -26,7 +49,7 @@ describe("ClaudePolicy", () => {
     expect(p.gate("Read", { file_path: "a.ts" }).ask).toBe(false);
     expect(p.needsUser("mcp__x__y", {}).ask).toBe(true);
     p.allowForSession("Bash", { command: "ls" });
-    expect(p.gate("Bash", { command: "ls" }).ask).toBe(false);
+    expect(p.needsUser("Bash", { command: "ls" })).toEqual({ ask: false, command: "command ls" });
     expect(p.gate("Bash", { command: "pwd" }).ask).toBe(true);
   });
 
@@ -138,11 +161,11 @@ describe("ClaudePolicy", () => {
   });
 
   it("switches level for the next call and keeps allow_session decisions", () => {
-    const p = new ClaudePolicy("auto", ctx);
+    const p = new ClaudePolicy("auto", { ...ctx, cwd: import.meta.dirname });
     const outside = { command: "cp build/app /usr/local/bin/app" };
     const push = { command: "git push --force" };
     expect(p.gate("Bash", push).ask).toBe(true);
-    p.allowForSession("Bash", { command: "pnpm test" });
+    p.allowForSession("Bash", { command: "ls -la" });
 
     p.setAutonomy("full");
     expect(p.level).toBe("full");
@@ -152,7 +175,10 @@ describe("ClaudePolicy", () => {
 
     p.setAutonomy("supervised");
     expect(p.gate("Bash", { command: "ls" }).ask).toBe(true);
-    expect(p.gate("Bash", { command: "pnpm test" }).ask).toBe(false);
+    expect(p.needsUser("Bash", { command: "ls -la" })).toEqual({
+      ask: false,
+      command: "command ls -la",
+    });
 
     p.setAutonomy("auto");
     expect(p.gate("Bash", { command: "ls" }).ask).toBe(false);

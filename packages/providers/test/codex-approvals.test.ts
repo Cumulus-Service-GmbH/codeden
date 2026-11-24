@@ -49,14 +49,14 @@ describe("Codex approvals", () => {
           environmentId: null,
         },
       },
-      { kind: "approval", decision: "allow_session" },
+      { kind: "approval", decision: "allow_once" },
     );
-    expect(result).toEqual({ decision: "acceptForSession" });
+    expect(result).toEqual({ decision: "accept" });
     expect(events[0]).toMatchObject({
       item: { kind: "approval_request", action: "git_destructive", command: "git push --force" },
     });
     expect(events[1]).toMatchObject({
-      item: { status: "completed", decision: "allow_session", decidedBy: "user" },
+      item: { status: "completed", decision: "allow_once", decidedBy: "user" },
     });
   });
 
