@@ -20,6 +20,9 @@ export function isOwnerConfirmation(item: QuestionItem): boolean {
 /** Who answers a question: the user, or the project manager of the session's project. */
 export type Answerer = "user" | "pm";
 
+/** Policy can answer provider-native questions only. */
+export type ResponseActor = Answerer | "policy";
+
 /** Outcome of `ask`: answered in time, dismissed, or still waiting in the inbox. */
 export type AskOutcome =
   | { status: "answered"; answers: Answers; text: string; by: Answerer }
@@ -105,7 +108,7 @@ export class QuestionBroker {
     sessionId: string,
     requestId: string,
     response: RuntimeResponse,
-    by: Answerer = "user",
+    by: ResponseActor = "user",
   ): Promise<boolean> {
     const record = this.find(sessionId, requestId);
     if (!record) return false;
@@ -116,6 +119,9 @@ export class QuestionBroker {
     const confirmation = isOwnerConfirmation(item);
     if (confirmation && by !== "user") {
       throw conflict("Only the user can answer this confirmation", "user_confirmation_required");
+    }
+    if (by === "policy") {
+      throw conflict("Policy can only answer provider questions", "policy_answer_forbidden");
     }
     if (confirmation && !waiter) {
       this.put(sessionId, record, { ...item, status: "cancelled" });

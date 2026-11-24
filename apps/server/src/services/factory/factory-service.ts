@@ -1068,7 +1068,7 @@ export class FactoryService {
           () =>
             void answerProviderQuestion(
               this.ctx,
-              (id, req) => this.deps.sessions.respond(id, req),
+              (id, req) => this.deps.sessions.respond(id, req, "policy"),
               e,
             ),
         );

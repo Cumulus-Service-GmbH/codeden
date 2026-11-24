@@ -63,7 +63,7 @@ import {
   supervisedUnsupported,
 } from "./permissions";
 import { deliverPriority } from "./priority-delivery";
-import type { Answerer, QuestionBroker } from "./questions";
+import type { QuestionBroker, ResponseActor } from "./questions";
 import { applyPendingConfig, assertConfigRevision, updateSession } from "./reconfigure";
 import { type AutonomyAudit, emptyStartMeta, type SessionRepo, type StoredStartMeta } from "./repo";
 import { planReview } from "./review";
@@ -774,11 +774,11 @@ export class SessionService {
     return { status: "compacting" };
   }
 
-  /** Answer a question or approval; `by` is who answered a question (the user or the PM). */
+  /** Answer a question or approval; `by` records who answered a question. */
   async respond(
     id: string,
     req: RespondRequest,
-    by: Answerer = "user",
+    by: ResponseActor = "user",
     options: { closeInbox?: boolean } = {},
   ): Promise<void> {
     const session = this.deps.repo.get(id);

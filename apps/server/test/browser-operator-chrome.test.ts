@@ -153,6 +153,12 @@ describe("PM Chrome confirmation cards", () => {
     ],
     ["handles Chrome consent for user answering Cancel", "user", "Cancel", "skipped"],
     ["a PM's answer leaves the Chrome launch confirmation open", "pm", "Allow Chrome", "started"],
+    [
+      "a policy answer leaves the Chrome launch confirmation open",
+      "policy",
+      "Allow Chrome",
+      "started",
+    ],
     ["handles Chrome consent timeout", "timeout", "", "skipped"],
     ["handles Chrome consent abort", "abort", "", "skipped"],
     ["handles Chrome consent when already aborted", "already aborted", "", "skipped"],
@@ -281,18 +287,23 @@ describe("PM Chrome confirmation cards", () => {
         expect(sessionRepo.item(sampleSession.id, card.id)?.item.status).toBe("in_progress");
       }
       const response = { kind: "answer" as const, answers: { q1: [answer || "Allow Chrome"] } };
-      if (answerer === "pm" || answerer === "unattended") {
+      if (answerer === "pm" || answerer === "policy" || answerer === "unattended") {
         await expect(
           questions.respond(
             sampleSession.id,
             card.requestId,
             { kind: "answer", answers: { q1: ["Allow Chrome"] } },
-            "pm",
+            answerer === "policy" ? "policy" : "pm",
           ),
         ).rejects.toMatchObject({ code: "user_confirmation_required" });
         expect(sessionRepo.item(sampleSession.id, card.id)?.item.status).toBe("in_progress");
       }
-      if (answerer === "pm" || answerer === "user" || answerer === "unattended") {
+      if (
+        answerer === "pm" ||
+        answerer === "policy" ||
+        answerer === "user" ||
+        answerer === "unattended"
+      ) {
         await expect(
           questions.respond(sampleSession.id, card.requestId, response, "user"),
         ).resolves.toBe(true);

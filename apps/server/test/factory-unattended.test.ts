@@ -5,7 +5,7 @@ import type {
   RawEventEnvelope,
   Session,
 } from "@codeden/contracts";
-import { FactoryLimits } from "@codeden/contracts";
+import { agentEventToNewEvent, FactoryLimits } from "@codeden/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { buildDigest } from "../src/services/factory/digest";
 import { builderPrompt, reviewerPrompt } from "../src/services/factory/prompts";
@@ -24,6 +24,8 @@ import {
   isUnattended,
   UNATTENDED_ANSWER,
 } from "../src/services/factory/unattended";
+import { sampleSession } from "./helpers";
+import { createFactoryEnv } from "./support/factory-env";
 
 const project = (autonomyMode: Project["autonomyMode"]) => ({ autonomyMode }) as Project;
 const session = (over: Partial<Session>): Session =>
@@ -99,6 +101,55 @@ describe("answerProviderQuestion", () => {
       requestId: "req-1",
       response: { kind: "answer", answers: { a: [UNATTENDED_ANSWER], b: [UNATTENDED_ANSWER] } },
     });
+  });
+
+  it("forwards the policy actor from the factory event listener", async () => {
+    vi.useFakeTimers({ toFake: ["setImmediate"] });
+    const env = createFactoryEnv();
+    try {
+      env.updateProject({ autonomyMode: "dark_factory" });
+      env.store.append([
+        {
+          type: "session.created",
+          sessionId: sampleSession.id,
+          payload: { session: { ...sampleSession, role: "pm", projectId: env.project.id } },
+        },
+      ]);
+      const respond = vi.fn(async () => {});
+      env.sessions.respond = respond;
+      env.factory.start();
+      env.store.append([
+        agentEventToNewEvent(sampleSession.id, {
+          type: "item.started",
+          threadId: "t1",
+          turnId: "u1",
+          item: {
+            id: "provider-question",
+            kind: "user_question",
+            status: "in_progress",
+            requestId: "req-1",
+            questions: [
+              {
+                id: "q1",
+                question: "Which stack?",
+                options: [],
+                multiSelect: false,
+                allowFreeText: true,
+              },
+            ],
+          },
+        }),
+      ]);
+      await vi.runAllTimersAsync();
+      expect(respond).toHaveBeenCalledWith(
+        sampleSession.id,
+        { requestId: "req-1", response: { kind: "answer", answers: { q1: [UNATTENDED_ANSWER] } } },
+        "policy",
+      );
+    } finally {
+      vi.useRealTimers();
+      await env.close();
+    }
   });
 
   it("never sends the guidance to an MCP server as form data", async () => {
