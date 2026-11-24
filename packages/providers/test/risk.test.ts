@@ -2,13 +2,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { isSecretPath, osTempRoots, tempRootsFrom } from "../src/policy/paths";
-import {
-  classifyCommand,
-  classifyFetch,
-  classifyRead,
-  classifyWrite,
-  type RiskContext,
-} from "../src/policy/risk";
+import { classifyFetch, classifyRead, classifyWrite, type RiskContext } from "../src/policy/risk";
+import { classifyCommandAndCheckApproval as classifyCommand } from "./support/classify-command";
 
 const posix: RiskContext = {
   cwd: "/work/repo",

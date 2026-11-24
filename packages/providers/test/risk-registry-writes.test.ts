@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { classifyCommand, classifyWrite, type RiskContext } from "../src/policy/risk";
+import { classifyWrite, type RiskContext } from "../src/policy/risk";
+import { classifyCommandAndCheckApproval as classifyCommand } from "./support/classify-command";
 
 /**
  * Writes to the Windows registry and to files outside the worktree made by PowerShell's item

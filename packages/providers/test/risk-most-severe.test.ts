@@ -5,7 +5,8 @@ import { ClaudePolicy } from "../src/claude/permissions";
 import { commandRisk, levelAllows, patchRisk } from "../src/codex/policy";
 import { OpenCodePolicy, type PermissionCall } from "../src/opencode/policy";
 import { mostSevere, type RiskAssessment, risky } from "../src/policy/assessment";
-import { classifyCommand, type RiskContext } from "../src/policy/risk";
+import type { RiskContext } from "../src/policy/risk";
+import { classifyCommandAndCheckApproval as classifyCommand } from "./support/classify-command";
 
 /**
  * Every part of a command is weighed, and the most severe verdict wins (#627): at Full, a risk the

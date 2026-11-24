@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { levelAllows } from "../src/codex/policy";
-import { classifyCommand, type RiskContext } from "../src/policy/risk";
+import type { RiskContext } from "../src/policy/risk";
+import { classifyCommandAndCheckApproval as classifyCommand } from "./support/classify-command";
 
 /**
  * Paths and scripts a command line only shows when it is read the way its shell reads it:

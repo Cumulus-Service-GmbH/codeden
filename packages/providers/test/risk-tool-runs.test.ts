@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { levelAllows } from "../src/codex/policy";
-import { classifyCommand, type RiskContext } from "../src/policy/risk";
+import type { RiskContext } from "../src/policy/risk";
 import { gitWrites, toolWrites } from "../src/policy/write-tools";
+import { classifyCommandAndCheckApproval as classifyCommand } from "./support/classify-command";
 
 /**
  * Commands and writes that go through something else: PowerShell without a cmdlet, the commands

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { levelAllows } from "../src/codex/policy";
-import { classifyCommand, type RiskContext } from "../src/policy/risk";
+import type { RiskContext } from "../src/policy/risk";
 import { parseShell } from "../src/policy/shell";
+import { classifyCommandAndCheckApproval as classifyCommand } from "./support/classify-command";
 
 /**
  * Commands inside script blocks and function bodies are classified like the commands around them,

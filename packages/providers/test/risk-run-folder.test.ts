@@ -4,8 +4,9 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 import { ClaudePolicy } from "../src/claude/permissions";
 import { levelAllows } from "../src/codex/policy";
-import { classifyCommand, type RiskContext } from "../src/policy/risk";
+import type { RiskContext } from "../src/policy/risk";
 import { workdirRisk } from "../src/policy/workdir";
+import { classifyCommandAndCheckApproval as classifyCommand } from "./support/classify-command";
 
 /**
  * Commands that change something in the folder they run in, without naming a path (#614): after a

@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 import { levelAllows } from "../src/codex/policy";
 import { unwrap } from "../src/policy/command-words";
 import { inlineCodeWrites } from "../src/policy/inline-code";
-import { classifyCommand, type RiskContext } from "../src/policy/risk";
+import type { RiskContext } from "../src/policy/risk";
 import { gitWrites, toolWrites } from "../src/policy/write-tools";
+import { classifyCommandAndCheckApproval as classifyCommand } from "./support/classify-command";
 
 /**
  * The command a wrapper, `sudo` or `eval` runs is classified, and so are the files that tools, git

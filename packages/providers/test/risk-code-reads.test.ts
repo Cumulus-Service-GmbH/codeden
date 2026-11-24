@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { levelAllows } from "../src/codex/policy";
 import { inlineCodePaths } from "../src/policy/inline-code";
-import { classifyCommand, type RiskContext } from "../src/policy/risk";
+import type { RiskContext } from "../src/policy/risk";
+import { classifyCommandAndCheckApproval as classifyCommand } from "./support/classify-command";
 
 /**
  * Files an interpreter's one-liner or a script written out on its input reads (§11.2): each path
