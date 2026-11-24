@@ -130,6 +130,7 @@ describe("decision approvals", () => {
 describe("post_github_approval", () => {
   const ownerWords = "  Ship this head, please! (QA/CI) - thanks.  ";
   const postTime = "2026-11-10T14:23:45.678Z";
+  const createdAt = "2026-11-10T14:23:45Z";
 
   function setupMergeApproval() {
     const env = createGithubEnv();
@@ -169,7 +170,7 @@ describe("post_github_approval", () => {
     };
   }
 
-  it("posts exactly one byte-exact comment on the author's own PR", async () => {
+  it("posts one byte-exact approval with a timestamp no later than GitHub creation", async () => {
     const env = setupMergeApproval();
     vi.useFakeTimers({ toFake: ["Date"] });
     try {
@@ -182,7 +183,7 @@ describe("post_github_approval", () => {
           path: `/repos/acme/widgets/issues/${env.pr.number}/comments`,
           status: 201,
           body: {
-            body: `OWNER-APPROVED via CodeDen orchestrator: ${target.headSha} ${postTime} "${ownerWords}"`,
+            body: `OWNER-APPROVED via CodeDen orchestrator: ${target.headSha} ${createdAt} "${ownerWords}"`,
           },
         },
       ]);

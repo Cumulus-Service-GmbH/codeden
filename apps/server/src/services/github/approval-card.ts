@@ -58,7 +58,7 @@ export function githubApprovalPort(client: GithubClient) {
             octokit.rest.issues.createComment({
               ...repo,
               issue_number: target.pullNumber,
-              body: `OWNER-APPROVED via CodeDen orchestrator: ${target.headSha} ${new Date().toISOString()} "${ownerWords}"`,
+              body: `OWNER-APPROVED via CodeDen orchestrator: ${target.headSha} ${new Date().toISOString().replace(/\.\d{3}Z$/, "Z")} "${ownerWords}"`,
               request: { redirect: "error", signal: AbortSignal.timeout(30_000) },
             }),
           );
