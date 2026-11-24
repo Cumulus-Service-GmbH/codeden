@@ -8,7 +8,7 @@ import type {
   Query,
 } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentEvent, SessionOptions } from "@codeden/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { KEEP_PLANNING } from "../src/claude/plan-review";
 import { ClaudeSession } from "../src/claude/session";
 
@@ -20,6 +20,7 @@ import { ClaudeSession } from "../src/claude/session";
 function stubSdk() {
   const launches: Options[] = [];
   const modes: PermissionMode[] = [];
+  const beforeMode = vi.fn(async (_mode: PermissionMode) => {});
   const refuse = new Set<PermissionMode>();
   let deliver: (message: unknown) => void = () => {};
   let exit = () => {};
@@ -45,9 +46,11 @@ function stubSdk() {
         },
       }),
       setPermissionMode: async (mode: PermissionMode) => {
+        await beforeMode(mode);
         if (refuse.has(mode)) throw new Error(`Cannot set permission mode to ${mode}`);
         modes.push(mode);
       },
+      setModel: async () => undefined,
       interrupt: async () => undefined,
       supportedModels: async () => [],
       supportedCommands: async () => [],
@@ -59,6 +62,7 @@ function stubSdk() {
     query,
     launches,
     modes,
+    beforeMode,
     refuse,
     deliver: (m: unknown) => deliver(m),
     exit: () => exit(),
@@ -103,9 +107,19 @@ function open(sdk: ReturnType<typeof stubSdk>, opts: Partial<SessionOptions> = {
   const options = sdk.launches[0] as Options;
   const hook = options.hooks?.PreToolUse?.[0]?.hooks[0] as HookCallback;
   const canUseTool = options.canUseTool as CanUseTool;
-  const preToolUse = async (tool: string, input: Record<string, unknown>) => {
+  const preToolUse = async (
+    tool: string,
+    input: Record<string, unknown>,
+    permission_mode?: PermissionMode,
+  ) => {
     const out = (await hook(
-      { hook_event_name: "PreToolUse", tool_name: tool, tool_input: input, cwd } as never,
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: tool,
+        tool_input: input,
+        cwd,
+        permission_mode,
+      } as never,
       "t",
       { signal: new AbortController().signal },
     )) as { hookSpecificOutput?: { permissionDecision?: string } };
@@ -146,7 +160,7 @@ describe("Claude plan mode", () => {
       allowDangerouslySkipPermissions: true,
     });
     await session.setAutonomy("supervised");
-    expect(sdk.modes).toEqual([]);
+    expect(sdk.modes).toEqual(["plan"]);
   });
 
   it("refuses edits and writing commands while planning, even under Full", async () => {
@@ -284,6 +298,89 @@ describe("Claude plan mode", () => {
     // Out of plan mode, level changes reach the CLI again.
     await session.setAutonomy("supervised");
     expect(sdk.modes).toEqual(["acceptEdits", "default"]);
+  });
+
+  it("drops a delayed Full fallback from the post-plan reset after switching to Supervised", async () => {
+    const sdk = stubSdk();
+    const { session, permission, items } = open(sdk, { autonomy: "full" });
+    const exitPlan = permission("ExitPlanMode", { plan: "Change x" }, "exit");
+    await vi.waitFor(() => expect(items("approval_request")).toHaveLength(1));
+    await session.respond("r-exit", { kind: "approval", decision: "allow_once" });
+    await exitPlan;
+
+    const refusal = Promise.withResolvers<void>();
+    sdk.beforeMode.mockImplementationOnce(() => refusal.promise);
+    sdk.deliver(toolResult("exit"));
+    await vi.waitFor(() => expect(sdk.beforeMode).toHaveBeenCalledWith("bypassPermissions"));
+    const switched = session.setAutonomy("supervised");
+    refusal.reject(new Error("Full unavailable"));
+    await switched;
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(sdk.modes).toEqual(["default"]);
+  });
+
+  it("reasserts default after approving a plan in Supervised", async () => {
+    const sdk = stubSdk();
+    const { session, permission, items } = open(sdk, { autonomy: "supervised" });
+    const exitPlan = permission("ExitPlanMode", { plan: "Change x" }, "exit");
+    await vi.waitFor(() => expect(items("approval_request")).toHaveLength(1));
+    await session.respond("r-exit", { kind: "approval", decision: "allow_once" });
+    await expect(exitPlan).resolves.toMatchObject({
+      behavior: "allow",
+      updatedPermissions: [{ type: "setMode", mode: "default", destination: "session" }],
+    });
+    sdk.deliver(toolResult("exit"));
+    await vi.waitFor(() => expect(sdk.modes.at(-1)).toBe("default"));
+  });
+
+  it("keeps a Supervised allow_session grant inside CodeDen", async () => {
+    const sdk = stubSdk();
+    const { session, permission, items } = open(sdk, { autonomy: "supervised", planMode: false });
+    const decision = permission("Bash", { command: "ls -la" }, "read");
+    await vi.waitFor(() => expect(items("approval_request")).toHaveLength(1));
+    await session.respond("r-read", { kind: "approval", decision: "allow_session" });
+    const result = await decision;
+    expect(result).toMatchObject({ behavior: "allow" });
+    expect(result).not.toHaveProperty("updatedPermissions");
+    expect(sdk.modes.at(-1)).toBe("default");
+  });
+
+  it.each(["init", "status", "hook"] as const)(
+    "warns and corrects native mode drift from %s",
+    async (source) => {
+      const sdk = stubSdk();
+      const { session, items, preToolUse } = open(sdk, { autonomy: "supervised", planMode: false });
+      await session.send({ text: "Check mode", attachments: [] });
+      if (source === "hook") {
+        expect(await preToolUse("Write", inWorktree, "acceptEdits")).toBe("ask");
+      } else {
+        sdk.deliver({ type: "system", subtype: source, permissionMode: "acceptEdits" });
+      }
+      await vi.waitFor(() =>
+        expect(items("notice")).toMatchObject([
+          { level: "warning", code: "claude_permission_mode_drift" },
+        ]),
+      );
+      await vi.waitFor(() => expect(sdk.modes).toEqual(["default", "default"]));
+    },
+  );
+
+  it("reasserts default at resume, after configuration and on query restart", async () => {
+    const sdk = stubSdk();
+    const { session } = open(sdk, {
+      autonomy: "supervised",
+      planMode: false,
+      resumeToken: "prior",
+    });
+    expect(sdk.launches[0]).toMatchObject({ resume: "prior", permissionMode: "default" });
+    await vi.waitFor(() => expect(sdk.modes).toEqual(["default"]));
+    await session.configure({ model: "claude-sonnet" });
+    expect(sdk.modes).toEqual(["default", "default"]);
+    sdk.exit();
+    await settle();
+    await session.send({ text: "Continue", attachments: [] });
+    expect(sdk.launches[1]).toMatchObject({ resume: "prior", permissionMode: "default" });
+    await vi.waitFor(() => expect(sdk.modes).toEqual(["default", "default", "default"]));
   });
 
   it("declining keeps it planning, with the user's feedback", async () => {

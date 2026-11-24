@@ -116,6 +116,9 @@ export class ClaudeSession implements ProviderSession {
   private readonly broker: ApprovalBroker;
   private readonly policy: ClaudePolicy;
   private q: Query | undefined;
+  private modeUpdate = Promise.resolve();
+  private modeRevision = 0;
+  private correctingMode = false;
   private prompts: AsyncQueue<SDKUserMessage> | undefined;
   private abort: AbortController | undefined;
   private stderrTail = "";
@@ -212,9 +215,10 @@ export class ClaudeSession implements ProviderSession {
    * again.
    */
   async setAutonomy(level: AutonomyLevel): Promise<void> {
+    if (this.autonomy !== level) this.modeRevision++;
     this.autonomy = level;
     this.policy.setAutonomy(level);
-    if (!this.planMode) await this.applyPermissionMode();
+    if (!this.planMode || level === "supervised") await this.applyPermissionMode();
   }
 
   /**
@@ -223,6 +227,7 @@ export class ClaudeSession implements ProviderSession {
    * skipped as already done, so sending it again (CodeDen keeps it pending) retries the CLI.
    */
   async setPlanMode(on: boolean): Promise<void> {
+    if (this.planMode !== on) this.modeRevision++;
     this.planMode = on;
     this.policy.setPlanning(on);
     await this.applyPermissionMode();
@@ -236,6 +241,7 @@ export class ClaudeSession implements ProviderSession {
     if (change.effort !== undefined) {
       await q.applyFlagSettings({ effortLevel: claudeEffort(change.effort ?? undefined) ?? null });
     }
+    if (this.q === q && this.autonomy === "supervised") await this.applyPermissionMode();
   }
 
   async send(input: UserInput): Promise<void> {
@@ -336,12 +342,65 @@ export class ClaudeSession implements ProviderSession {
   private async applyPermissionMode(): Promise<void> {
     const q = this.q;
     if (!q) return;
-    const mode = permissionModeFor(this.autonomy, this.planMode);
+    // Serialize writes to this query, and read current state when each write is dispatched.
+    const active = () => this.q === q && !this.closed;
+    const update = this.modeUpdate.then(async () => {
+      if (!active()) return;
+      const revision = this.modeRevision;
+      const mode = permissionModeFor(this.autonomy, this.planMode);
+      try {
+        await q.setPermissionMode(mode);
+      } catch (error) {
+        if (!active() || revision !== this.modeRevision) return;
+        if (mode !== "bypassPermissions") throw error;
+        await q.setPermissionMode("acceptEdits");
+      }
+    });
+    this.modeUpdate = update.catch(() => {});
+    await update;
+  }
+
+  private warnPermissionMode(code: string, message: string): void {
+    const turnId = this.mapper.turnId;
+    if (!turnId) {
+      process.emitWarning(`Claude session ${this.opts.sessionId}: ${message}`, { code });
+      return;
+    }
+    this.mapper.item({ threadId: this.mapper.rootThreadId, turnId }, "item.completed", {
+      id: randomUUID(),
+      kind: "notice",
+      status: "completed",
+      level: "warning",
+      code,
+      message,
+    });
+  }
+
+  private checkPermissionMode(q: Query, reported: string | undefined, source: string): void {
+    if (this.q !== q || this.closed || !reported || this.correctingMode) return;
+    const expected = permissionModeFor(this.autonomy, this.planMode);
+    if (reported === expected) return;
+    const mode = /^[a-zA-Z]{1,32}$/.test(reported) ? reported : "unrecognized";
+    this.warnPermissionMode(
+      "claude_permission_mode_drift",
+      `Claude reported permission mode ${mode} via ${source}. Expected ${expected}. Reapplying the session's mode.`,
+    );
+    this.correctingMode = true;
+    void this.applyPermissionModeInBackground().finally(() => {
+      if (this.q === q) this.correctingMode = false;
+    });
+  }
+
+  private async applyPermissionModeInBackground(): Promise<void> {
+    const q = this.q;
     try {
-      await q.setPermissionMode(mode);
-    } catch (error) {
-      if (mode !== "bypassPermissions") throw error;
-      await q.setPermissionMode("acceptEdits");
+      await this.applyPermissionMode();
+    } catch {
+      if (this.q !== q || this.closed) return;
+      this.warnPermissionMode(
+        "claude_permission_mode_update_failed",
+        "Claude refused to reapply the session's permission mode.",
+      );
     }
   }
 
@@ -349,6 +408,7 @@ export class ClaudeSession implements ProviderSession {
   private leavePlanMode(toolUseId: string): void {
     this.planExitToolUseId = toolUseId;
     if (!this.planMode) return;
+    this.modeRevision++;
     this.planMode = false;
     this.policy.setPlanning(false);
     this.events.push({ type: "session.updated", planMode: false });
@@ -363,7 +423,7 @@ export class ClaudeSession implements ProviderSession {
     if (!id || !carriesToolResult(message, id)) return;
     this.planExitToolUseId = undefined;
     // Only a guard: the CLI already took the level's mode with the approval.
-    if (!this.planMode) void this.applyPermissionMode().catch(() => {});
+    if (!this.planMode) void this.applyPermissionModeInBackground();
   }
 
   /** Say in the transcript when a Stop dropped steered messages the agent never read. */
@@ -411,7 +471,18 @@ export class ClaudeSession implements ProviderSession {
           },
           executable: this.config.executable,
           canUseTool: this.canUseTool,
-          hooks: { PreToolUse: [{ hooks: [preToolUse] }] },
+          hooks: {
+            PreToolUse: [
+              {
+                hooks: [
+                  (input, id, context) => {
+                    this.checkPermissionMode(q, input.permission_mode, "PreToolUse");
+                    return preToolUse(input, id, context);
+                  },
+                ],
+              },
+            ],
+          },
           abortController: abort,
           resume: this.resumeToken(),
           mcpConfigFile: this.mcpConfig.file(),
@@ -425,9 +496,12 @@ export class ClaudeSession implements ProviderSession {
       throw error;
     }
     this.q = q;
+    this.modeUpdate = Promise.resolve();
+    this.correctingMode = false;
     this.prompts = prompts;
     this.abort = abort;
     void this.pump(q);
+    if (this.autonomy === "supervised") void this.applyPermissionModeInBackground();
     // The composer's `/` menu lists what Claude Code would run (built-in commands included).
     q.supportedCommands().then(
       (commands) => this.mapper.reportCommands(commands),
@@ -461,6 +535,16 @@ export class ClaudeSession implements ProviderSession {
         const type = str(message, "type");
         if (type === "rate_limit_event") this.planUsage.noteEvent(message);
         if (type === "system" && !this.closed) this.noteMarkedHookAsk(message);
+        if (type === "system") {
+          const subtype = str(message, "subtype");
+          if (subtype === "init" || subtype === "status") {
+            this.checkPermissionMode(
+              q,
+              str(message, "permissionMode") ?? str(message, "permission_mode"),
+              subtype,
+            );
+          }
+        }
         if (type === "result") {
           this.markedHookAsks.clear();
           this.reportPlanUsage(q);
@@ -476,6 +560,7 @@ export class ClaudeSession implements ProviderSession {
       if (this.q === q) {
         this.markedHookAsks.clear();
         this.q = undefined;
+        this.planExitToolUseId = undefined;
         this.prompts = undefined;
       }
     }
