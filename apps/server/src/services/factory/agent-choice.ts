@@ -23,6 +23,7 @@ export interface AgentWanted {
   /** Null: the provider's default. Applies only to a chosen provider, never to `auto`. */
   model: string | null;
   effort?: ReasoningEffort;
+  teamPinned?: true;
 }
 
 /** Where a session starts: `auto` lets the session service pick, as it always has. */
@@ -53,6 +54,7 @@ export function builderWanted(
   const member = docsMember ?? teamMember(tuning.team, "writer");
   if (member) {
     return {
+      teamPinned: true,
       provider: member.provider,
       model: member.model,
       ...(member.effort ? { effort: member.effort } : {}),
@@ -76,8 +78,9 @@ export function scoutAgent(
     Partial<Pick<FactoryTuning, "team">>,
 ): ScoutAgent {
   const member = teamMember(tuning.team, "architect");
-  const wanted = member
+  const wanted: AgentWanted = member
     ? {
+        teamPinned: true,
         provider: member.provider,
         model: member.model,
         ...(member.effort ? { effort: member.effort } : {}),
@@ -106,6 +109,11 @@ export function chooseAgent(
 ): AgentChoice | AgentWait {
   const available = ctx.sessions.providers();
   const blocked = ctx.sessions.unavailable();
+  if (wanted.teamPinned && !available.includes(wanted.provider)) {
+    return {
+      waiting: `Waiting: ${ctx.sessions.displayName(wanted.provider)} is unavailable for ${what}${untilText(earliestUntil(blocked.filter(({ provider }) => provider === wanted.provider)))}`,
+    };
+  }
   if (blocked.length === 0) {
     return wanted.provider === "auto" ? { provider: "auto", model: null } : wanted;
   }

@@ -323,7 +323,7 @@ async function startBuilder(
   const choice = chooseAgent(
     ctx,
     project,
-    builderWanted(item, teamTuning(ctx, loop.tuning)),
+    builderWanted(item, teamTuning(ctx, loop.tuning, project)),
     "build",
   );
   if ("waiting" in choice) {

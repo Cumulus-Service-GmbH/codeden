@@ -37,7 +37,7 @@ export async function startIntegrator(
   const agent = chooseAgent(
     ctx,
     project,
-    builderWanted(item, teamTuning(ctx, loop.tuning)),
+    builderWanted(item, teamTuning(ctx, loop.tuning, project)),
     "integration",
   );
   if ("waiting" in agent) {

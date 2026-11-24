@@ -54,7 +54,7 @@ export function revertAgent(
   return chooseAgent(
     ctx,
     project,
-    builderWanted({ type: "bug" }, teamTuning(ctx, loop.tuning)),
+    builderWanted({ type: "bug" }, teamTuning(ctx, loop.tuning, project)),
     "revert",
   );
 }

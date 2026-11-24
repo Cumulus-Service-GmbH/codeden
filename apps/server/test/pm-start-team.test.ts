@@ -58,6 +58,7 @@ async function start(
     const services = {
       db: database.db,
       projects: { get: () => ({ kind: "local", archivedAt: null, path: process.cwd() }) },
+      projectTeam: () => opts.project ?? [],
       factory: {
         isUnattended: () => false,
         providerChoices: async () => [{ id: "claude", runnable: true }],

@@ -1,4 +1,4 @@
-import { type AutonomyLevel, defaultTeam, resolveTeam } from "@codeden/contracts";
+import type { AutonomyLevel } from "@codeden/contracts";
 import { FolderX, MessageSquareDashed } from "lucide-react";
 import { useEffect, useMemo } from "react";
 import { EmptyState } from "@/components/common/bits";
@@ -7,9 +7,14 @@ import { DraftOptions } from "@/components/composer/draft-options";
 import { ConflictCard } from "@/components/project/conflict-card";
 import { NewSessionHeader } from "@/components/project/new-session-header";
 import { useStartDraft } from "@/components/project/use-start-draft";
-import { useFactoryStatus } from "@/lib/factory";
 import { resolveDraftChoice } from "@/lib/new-session";
-import { useProject, useProjectChecks, useSnapshot, useSnapshotData } from "@/lib/queries";
+import {
+  useProject,
+  useProjectChecks,
+  useSnapshot,
+  useSnapshotData,
+  useTeamDiagnostics,
+} from "@/lib/queries";
 import { newSessionDraftKey, useComposerStore } from "@/stores/composer";
 import { getNewSessionDraft, useNewSessionStore } from "@/stores/new-session";
 
@@ -30,14 +35,7 @@ export function NewSessionPage({ projectId }: { projectId: string }) {
   const agent = useSnapshotData((s) => s.settings.providers.agent, null);
   const draft = useNewSessionStore((s) => getNewSessionDraft(s, projectId));
   // The Team a chosen Team role runs as: the project's Team over the default Team.
-  const fallbackTeam = useSnapshotData((s) => defaultTeam(s.settings), []);
-  const projectTeam = useFactoryStatus(projectId, Boolean(draft.choice.teamRole)).data?.tuning.team;
-  const team = useMemo(
-    // Unknown until the project's Team has loaded: the start then leaves the pins to the server.
-    () =>
-      projectTeam ? resolveTeam({ defaults: fallbackTeam, project: projectTeam }).team : undefined,
-    [fallbackTeam, projectTeam],
-  );
+  const team = useTeamDiagnostics(projectId, Boolean(draft.choice.teamRole)).data?.team;
   const { setChoice, setWorkKey } = useNewSessionStore.getState();
   const resolved = useMemo(
     () =>

@@ -20,11 +20,19 @@ import type {
   SessionDetail,
   StartSessionRequest,
   StartSessionResponse,
+  Team,
+  TeamMember,
   UpdateSessionRequest,
   UserInput,
   WorkspaceRequest,
 } from "@codeden/contracts";
-import { AT_CAPACITY_CODE, teamRoleOfTitle } from "@codeden/contracts";
+import {
+  AT_CAPACITY_CODE,
+  defaultTeam,
+  resolveTeam,
+  teamMember,
+  teamRoleOfTitle,
+} from "@codeden/contracts";
 import type { SandboxService } from "../../execution/sandboxes";
 import type { McpTokenStore } from "../../mcp/tokens";
 import type { SettingsStore } from "../../settings-store";
@@ -71,12 +79,14 @@ import { type AutonomyAudit, emptyStartMeta, type SessionRepo, type StoredStartM
 import { planReview } from "./review";
 import { retireRoleSession } from "./role-retire";
 import { startWorkspace } from "./start-workspace";
+import { withTeamRole } from "./team-start";
 
 export interface SessionServiceDeps extends RunnerDeps {
   forceFakeProvider?: boolean;
   repo: SessionRepo;
   admission?: SessionAdmission;
   projects: ProjectService;
+  projectTeam?: (projectId: string, teamId?: string) => Team;
   checklist?: Pick<ChecklistService, "get">;
   inbox: InboxService;
   artifacts: ArtifactService;
@@ -271,15 +281,18 @@ export class SessionService {
        * then is it the session's own layer of its Team (`sessionTeamMember`).
        */
       ownTeamPins?: boolean;
-      runTeam?: import("@codeden/contracts").Team;
+      runTeam?: Team;
+      teamId?: string;
+      teamSession?: TeamMember | null;
       autonomyFloor?: AutonomyLevel;
       teamArchitect?: boolean;
     } = {},
   ): Promise<StartSessionResponse> {
     const { repo, projects } = this.deps;
-    if (this.deps.forceFakeProvider && req.provider !== "fake") {
-      req = { ...req, provider: "fake", model: undefined, effort: undefined, chrome: undefined };
-    }
+    const ownTeamPins =
+      options.ownTeamPins ??
+      (req.startedBy.kind === "user" &&
+        Boolean((req.provider && req.provider !== "auto") || req.model || req.effort));
     assertAutonomy(req.autonomy, options.autonomyFloor);
     if (req.autonomy === undefined && options.autonomyFloor) {
       req = { ...req, autonomy: options.autonomyFloor };
@@ -302,18 +315,44 @@ export class SessionService {
         );
       }
     }
+    const roleSettings = this.roleSettings(req.role, req.projectId);
+    const selectedRole = req.teamRole ?? teamRoleOfTitle(req.title);
+    if (selectedRole) {
+      req = withTeamRole(req, {
+        defaults: defaultTeam(this.deps.settings.get()),
+        project: project ? (this.deps.projectTeam?.(project.id, options.teamId) ?? []) : [],
+        session: options.teamSession,
+        approved: options.runTeam,
+      });
+    } else if (
+      req.role !== "agent" &&
+      roleSettings.provider !== "auto" &&
+      (!req.provider || req.provider === "auto")
+    ) {
+      req = {
+        ...req,
+        provider: roleSettings.provider,
+        model: req.model ?? roleSettings.model ?? undefined,
+        effort: req.effort ?? roleSettings.effort ?? undefined,
+      };
+    }
+    if (this.deps.forceFakeProvider && req.provider !== "fake") {
+      req = { ...req, provider: "fake", model: undefined, effort: undefined, chrome: undefined };
+    }
     const previous = options.replacesRoleId
       ? this.roleToArchive(options.replacesRoleId)
       : undefined;
-    if (previous) req = { ...req, provider: this.deps.settings.get().providers[req.role].provider };
     // Refused before the conflict check: a worktree that can't be made is never queued either.
     const workspace = startWorkspace(req.workspace, project);
+    const browserOperator =
+      req.role === "agent" && req.startedBy.kind === "pm" && selectedRole === "browserOperator";
+    const browserProvider = browserOperator
+      ? this.resolveProvider(req, project ? projectDefaultProvider(project) : null)
+      : undefined;
     if (
-      req.role === "agent" &&
-      req.startedBy.kind === "pm" &&
-      teamRoleOfTitle(req.title) === "browserOperator" &&
-      !options.chromeApproved &&
-      this.resolveProvider(req, project ? projectDefaultProvider(project) : null) === "claude"
+      browserProvider &&
+      this.provider(browserProvider)?.capabilities.chrome &&
+      !options.chromeApproved
     ) {
       const confirmation = await options.confirmChrome?.();
       if (confirmation !== true) {
@@ -325,7 +364,7 @@ export class SessionService {
       }
       // Recheck the project and conflicts after waiting for the user, with the provider fixed.
       return this.start(
-        { ...req, provider: "claude" },
+        { ...req, provider: browserProvider, chrome: req.chrome ?? true },
         {
           ...options,
           chromeApproved: true,
@@ -398,13 +437,14 @@ export class SessionService {
         chromeRequested: req.chrome,
         ...(options.teamArchitect ? { teamArchitect: true } : {}),
         ...(options.autonomyFloor ? { autonomyFloor: options.autonomyFloor } : {}),
-        ...(options.ownTeamPins ? { ownTeamPins: true as const } : {}),
+        ...(ownTeamPins ? { ownTeamPins: true as const } : {}),
+        ...(options.teamId ? { teamId: options.teamId } : {}),
         ...(options.runTeam ? { runTeam: options.runTeam } : {}),
         ...(req.tokenSaver ? { tokenSaver: req.tokenSaver } : {}),
         ...(req.role !== "agent" && {
-          roleProvider: this.deps.settings.get().providers[req.role].provider,
-          roleModel: this.deps.settings.get().providers[req.role].model,
-          roleEffort: this.deps.settings.get().providers[req.role].effort,
+          roleProvider: roleSettings.provider,
+          roleModel: roleSettings.model,
+          roleEffort: roleSettings.effort,
         }),
       },
       workspace,
@@ -1195,7 +1235,27 @@ export class SessionService {
     }
     const configured = this.configuredProvider(req.role, projectDefault);
     if (configured) return configured;
-    return autoOrder(available)[0] ?? "claude";
+    const auto = autoOrder(available)[0];
+    if (!auto)
+      throw badRequest(
+        "No provider is available. Choose a provider in Settings.",
+        "unknown_provider",
+      );
+    return auto;
+  }
+
+  /** PMs use the project's effective Architect when one is configured. */
+  roleSettings(role: Session["role"], projectId: string | null): RoleDefaults {
+    const settings = this.deps.settings.get();
+    if (role === "pm" && projectId) {
+      const { team } = resolveTeam({
+        defaults: defaultTeam(settings),
+        project: this.deps.projectTeam?.(projectId) ?? [],
+      });
+      const architect = teamMember(team, "architect");
+      if (architect) return architect;
+    }
+    return settings.providers[role];
   }
 
   /** PM and orchestrator choices take precedence over the project default. */
@@ -1226,13 +1286,16 @@ export class SessionService {
     const settings = this.deps.settings.get();
     const now = new Date().toISOString();
     const provider = this.resolveProvider(req, project ? projectDefaultProvider(project) : null);
-    const defaults = roleModelDefaults(
-      settings.providers[req.role],
-      provider,
-      this.provider(provider),
-      req.role,
-      this.deps.forceFakeProvider,
-    );
+    const defaults =
+      teamRoleOfTitle(req.title) || (isFactorySession(req) && req.provider !== "auto")
+        ? { model: null, effort: null }
+        : roleModelDefaults(
+            this.roleSettings(req.role, req.projectId),
+            provider,
+            this.provider(provider),
+            req.role,
+            this.deps.forceFakeProvider,
+          );
     const autonomy = req.autonomy ?? project?.autonomy ?? settings.autonomy.default;
     // A `docker` project's sessions run in containers, which no provider credentials reach yet.
     this.deps.sandboxes?.assertStartable(req.role, project, this.provider(provider));
@@ -1252,7 +1315,10 @@ export class SessionService {
       title: req.title ?? null,
       provider,
       model: req.model ?? defaults.model,
-      effort: req.effort ?? defaults.effort,
+      effort:
+        this.provider(provider)?.capabilities.reasoningEffort === false
+          ? null
+          : (req.effort ?? defaults.effort),
       autonomy,
       planMode: req.planMode ?? false,
       // Frozen now, from the project's own folder (§9 Project checks).

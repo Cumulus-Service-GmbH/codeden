@@ -84,8 +84,9 @@ export interface TeamFileDeps {
   /** The audited defaults and overrides that apply to the session's project. */
   reviewLimits: () => TeamReviewLimitSettings;
   /** The project's default Team. */
-  projectTeam: (projectId: string) => Team;
-  project: (projectId: string) => Pick<Project, "path" | "slug">;
+  projectTeam: (projectId: string, teamId?: string) => Team;
+  teamId?: (sessionId: string) => string | undefined;
+  project: (projectId: string) => Pick<Project, "path" | "slug" | "teams">;
   session: (sessionId: string) => Session | undefined;
   /** Whether the session's provider or model was its starter's own choice (its own Team layer). */
   ownTeamPins?: (sessionId: string) => boolean;
@@ -104,7 +105,8 @@ export function writeTeamFile(deps: TeamFileDeps, session: Session, now = new Da
   const path = teamFilePath(deps.home, session.id);
   const { team, sources } = resolveTeam({
     defaults: deps.defaults(),
-    project: deps.runTeam?.(session.id) ?? deps.projectTeam(session.projectId),
+    project: deps.projectTeam(session.projectId, deps.teamId?.(session.id)),
+    approved: deps.runTeam?.(session.id),
     // Only pins the starter chose are the session's own; ones filled from the Team follow the Team.
     session: deps.ownTeamPins?.(session.id) ? sessionTeamMember(session) : null,
   });
@@ -305,7 +307,7 @@ export function createTeamFileRefresher(deps: TeamFileDeps) {
     }
     for (const projectId of projects) {
       try {
-        const key = JSON.stringify(deps.projectTeam(projectId));
+        const key = JSON.stringify([deps.projectTeam(projectId), deps.project(projectId).teams]);
         if (seenProjects.get(projectId) !== key) pendingProjects.add(projectId);
         seenProjects.set(projectId, key);
       } catch (error) {

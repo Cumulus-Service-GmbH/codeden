@@ -1,5 +1,8 @@
 import {
+  countTeamOverrides,
+  defaultTeam,
   type MessageSender,
+  resolveTeam,
   Settings,
   type SettingsPatch,
   utf8ByteLength,
@@ -488,6 +491,29 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
     factory: mockFactoryApi(world),
     techDebt: mockTechDebtApi(() => world.snapshot.projects),
 
+    async teamDiagnostics(projectId) {
+      const layer = (id: string) => {
+        const teams = world.snapshot.projects.find((project) => project.id === id)?.teams;
+        return (
+          teams?.teams.find((team) => team.id === teams.defaultTeamId)?.team ??
+          world.factory.get(id)?.tuning.team ??
+          []
+        );
+      };
+      return {
+        ...resolveTeam({
+          defaults: defaultTeam(world.snapshot.settings),
+          project: projectId ? layer(projectId) : [],
+        }),
+        overrides: projectId
+          ? {}
+          : countTeamOverrides(
+              world.snapshot.projects
+                .filter((project) => !project.archivedAt)
+                .map(({ id }) => layer(id)),
+            ),
+      };
+    },
     async updateSettings(patch: SettingsPatch) {
       const settings = Settings.parse(deepMerge(world.snapshot.settings, patch));
       world.emitDomain({ type: "settings.updated", sessionId: null, payload: { settings } });

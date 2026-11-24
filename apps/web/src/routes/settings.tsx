@@ -16,6 +16,7 @@ import {
   SlidersHorizontal,
   Smartphone,
   Sparkles,
+  Users,
 } from "lucide-react";
 import type { ReactNode } from "react";
 import {
@@ -31,6 +32,7 @@ import { NotificationSettings } from "@/components/settings/sections-media";
 import { NetworkSettings } from "@/components/settings/sections-network";
 import { VoiceSettings } from "@/components/settings/sections-voice";
 import { SettingsSection } from "@/components/settings/settings-ui";
+import { TeamSettings } from "@/components/settings/team-settings";
 import { UpdateCheck } from "@/components/settings/update-check";
 import { Logo } from "@/components/shell/logo";
 import { ShortcutList } from "@/components/shell/shortcuts";
@@ -76,6 +78,7 @@ function About() {
 const SECTIONS: { id: string; label: string; icon: LucideIcon; render: () => ReactNode }[] = [
   { id: "general", label: "General", icon: Settings2, render: () => <GeneralSettings /> },
   { id: "providers", label: "Providers", icon: Bot, render: () => <ProviderSettings /> },
+  { id: "team", label: "Team", icon: Users, render: () => <TeamSettings /> },
   { id: "autonomy", label: "Autonomy", icon: ShieldCheck, render: () => <AutonomySettings /> },
   { id: "github", label: "GitHub", icon: GitPullRequest, render: () => <GithubSettings /> },
   { id: "voice", label: "Voice", icon: Mic, render: () => <VoiceSettings /> },

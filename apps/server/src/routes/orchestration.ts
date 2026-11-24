@@ -76,7 +76,7 @@ export function conflictRoutes(s: AppServices) {
       if (start?.teamRole && start.chrome !== undefined) {
         request.start = withTeamRole(start, {
           defaults: defaultTeam(s.settings.get()),
-          project: start.projectId ? (s.factory.data.loop(start.projectId)?.tuning.team ?? []) : [],
+          project: start.projectId ? s.projectTeam(start.projectId) : [],
         });
       }
       return c.json(await conflicts.resolve(c.req.param("id"), request));

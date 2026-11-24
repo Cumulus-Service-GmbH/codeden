@@ -3,7 +3,6 @@ import {
   ArchiveSessionRequest,
   type ChildRunList,
   type CompactSessionResponse,
-  defaultTeam,
   EditQueuedMessageRequest,
   ForkSessionRequest,
   type ForkSessionResponse,
@@ -28,7 +27,6 @@ import type { AppServices } from "../services/container";
 import { badRequest, notFound } from "../services/errors";
 import { readChildRuns } from "../services/sessions/child-runs";
 import { clientItemRecord } from "../services/sessions/client-items";
-import { withTeamRole } from "../services/sessions/team-start";
 import { exportSessionTranscript } from "../services/sessions/transcript-export";
 import { asUserResponse } from "./user-response";
 import { jsonBody, queryOf } from "./validate";
@@ -48,14 +46,8 @@ export function sessionRoutes(s: AppServices, installToken: string) {
         "/",
         jsonBody(StartSessionRequest.extend({ input: PublicInput.optional() })),
         async (c) => {
-          const asked = c.req.valid("json");
-          // A Team role chosen in the composer: its tag, and the resolved Team's pins where the user set none.
-          const req = withTeamRole(asked, {
-            defaults: defaultTeam(s.settings.get()),
-            project: asked.teamRole && asked.projectId ? s.projectTeam(asked.projectId) : [],
-          });
-          const own = (asked.provider && asked.provider !== "auto") || Boolean(asked.model);
-          const result = await s.sessions.start(req, own ? { ownTeamPins: true } : {});
+          const req = c.req.valid("json");
+          const result = await s.sessions.start(req);
           if (result.status !== "conflict") {
             // A new version of a request that had an open conflict: that conflict is done.
             s.orchestration.conflicts.closeReplaced(req, result);

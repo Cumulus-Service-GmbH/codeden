@@ -29,6 +29,7 @@ import {
   type TeamFileDeps,
   teamFileChanges,
   teamFilePath,
+  writeTeamFile,
 } from "../src/services/factory/team-file";
 import { ProjectService } from "../src/services/projects/project-service";
 import { type LauncherDeps, SessionLauncher } from "../src/services/sessions/launcher";
@@ -392,4 +393,19 @@ it("keeps the approved run Team in the session's Team file when the project defa
     },
   ]);
   expect(read(path).team).toContainEqual(opus);
+});
+
+it("exports the Team selected for the session, including sibling role pins", async () => {
+  const projectId = await addProject();
+  const session = { ...sampleSession, projectId };
+  const selected = { ...opus, model: "selected-reviewer" };
+  const path = writeTeamFile(
+    {
+      ...deps(),
+      projectTeam: (_id, teamId) => (teamId === "selected" ? [selected] : [opus]),
+      teamId: () => "selected",
+    },
+    session,
+  );
+  expect(read(path)).toMatchObject({ team: [selected], sources: { reviewer: "project" } });
 });

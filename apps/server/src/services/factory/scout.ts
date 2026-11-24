@@ -125,7 +125,7 @@ export async function advanceScout(
   // At the work-in-progress limit the factory finishes open work before it finds more.
   if (wipOf(ctx, project, loop).holding) return loop;
   // The scout comes last for a free agent: after reviews, fixes, rebases and builds.
-  const agent = scoutAgent(ctx, project, teamTuning(ctx, loop.tuning));
+  const agent = scoutAgent(ctx, project, teamTuning(ctx, loop.tuning, project));
   const { reuse, replaces } = scoutSessionPlan(ctx, loop.scout.sessionId, agent);
   if (!claimSlot(ctx, project, "scout", SCOUT_SLOT, { wake: reuse?.id })) return loop;
   retireScoutSession(ctx, replaces);
@@ -215,7 +215,7 @@ export async function runScoutNow(
 ): Promise<FactoryLoop> {
   const blocked = scoutNowBlocker(project, loop, scoutNowFacts(ctx, project, loop));
   if (blocked) throw conflict(blocked, SCOUT_UNAVAILABLE);
-  const agent = scoutAgent(ctx, project, teamTuning(ctx, loop.tuning));
+  const agent = scoutAgent(ctx, project, teamTuning(ctx, loop.tuning, project));
   const { reuse, replaces } = scoutSessionPlan(ctx, loop.scout.sessionId, agent);
   if (!reuse && "waiting" in agent.choice) {
     const why = agent.choice.waiting.replace(/^Waiting: /, "");
@@ -327,7 +327,7 @@ async function advanceRound(
 
   // Planned area reviewers start as agents free up; the round reviews once one has started.
   if (pending()) {
-    const agent = scoutAgent(ctx, project, teamTuning(ctx, loop.tuning));
+    const agent = scoutAgent(ctx, project, teamTuning(ctx, loop.tuning, project));
     const started = await startPlannedLenses(
       ctx,
       project,

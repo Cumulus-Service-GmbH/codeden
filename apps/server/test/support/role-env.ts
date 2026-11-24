@@ -9,6 +9,7 @@ import {
   type Session,
   Settings,
   type SettingsInput,
+  type Team,
 } from "@codeden/contracts";
 import { vi } from "vitest";
 import { openDatabase } from "../../src/db/client";
@@ -67,6 +68,7 @@ export interface RoleEnv {
   connected(value: boolean): void;
   /** The project's own default provider (its "Default agent"). */
   projectDefault(provider: string | null): void;
+  setProjectTeam(team: Team): void;
   logged: string[];
 }
 
@@ -94,6 +96,7 @@ export function withRoles(run: (env: RoleEnv) => Promise<void>) {
       const inbox = new InboxService(database.db, store, () => async () => {});
       const outbox = new Outbox(database.db, store);
       let settings = Settings.parse({});
+      let team: Team = [];
       let connected = true;
       const stopped: string[] = [];
       const holds = new Map<number, Promise<void>>();
@@ -123,6 +126,7 @@ export function withRoles(run: (env: RoleEnv) => Promise<void>) {
         projects,
         runner,
         settings: settingsStore,
+        projectTeam: () => team,
         launcher: { launch: vi.fn(async () => {}) },
         outbox,
         artifacts: { externalizeAttachments: (input: unknown) => input },
@@ -197,6 +201,9 @@ export function withRoles(run: (env: RoleEnv) => Promise<void>) {
         holdStop: (nth, until) => holds.set(nth, until),
         connected: (value) => {
           connected = value;
+        },
+        setProjectTeam: (next) => {
+          team = next;
         },
         projectDefault: (provider) => {
           project.defaultProvider = provider;

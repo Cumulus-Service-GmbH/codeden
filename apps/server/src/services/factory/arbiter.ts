@@ -109,7 +109,10 @@ export async function advanceArbiter(
     ? ctx.repo.find(item.reviewerSessionId)?.session
     : undefined;
   if (reviewer && isBusy(reviewer)) return;
-  const arbiter = teamMember(teamTuning(ctx, loop.tuning).team, "arbiter");
+  const arbiter = teamMember(
+    teamTuning(ctx, loop.tuning, ctx.projects.get(item.projectId)).team,
+    "arbiter",
+  );
   if (!arbiter?.model?.trim() || arbiter.model.trim().toLowerCase() === "default") {
     block(ctx, item, head, "Set the Arbiter in Settings → Team");
     return;
@@ -199,7 +202,10 @@ async function requestConfirmation(
   head: string,
   ruling: string,
 ) {
-  const member = teamMember(teamTuning(ctx, loop.tuning).team, "reviewer");
+  const member = teamMember(
+    teamTuning(ctx, loop.tuning, ctx.projects.get(item.projectId)).team,
+    "reviewer",
+  );
   if (!member?.model?.trim() || member.model.trim().toLowerCase() === "default") {
     block(ctx, item, head, "Set the Code Reviewer in Settings → Team", ruling);
     return;

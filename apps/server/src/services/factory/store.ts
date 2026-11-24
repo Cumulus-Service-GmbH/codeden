@@ -198,9 +198,9 @@ export class FactoryStore {
     return next;
   }
 
-  private rememberedSetup(): Pick<FactoryTuning, "team" | "resultSummaryBytes"> | undefined {
-    const { remembered, team, resultSummaryBytes } = this.settings().teamSetup;
-    return remembered ? { team, resultSummaryBytes } : undefined;
+  private rememberedSetup(): Pick<FactoryTuning, "resultSummaryBytes"> | undefined {
+    const { remembered, resultSummaryBytes } = this.settings().teamSetup;
+    return remembered ? { resultSummaryBytes } : undefined;
   }
 
   /**

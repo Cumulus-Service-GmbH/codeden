@@ -128,7 +128,7 @@ export class RoleSessions {
   /** A role choice changed and the runner can start its replacement. */
   private moveTarget(session: Session): boolean {
     const meta = this.deps.repo.find(session.id)?.startMeta;
-    const setting = this.deps.settings.get().providers[session.role];
+    const setting = this.deps.sessions.roleSettings(session.role, session.projectId);
     if (meta?.roleProvider === undefined) return false;
     if (meta.roleProvider === setting.provider) {
       if (meta.roleModel === undefined || meta.roleEffort === undefined) {

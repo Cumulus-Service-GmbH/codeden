@@ -265,3 +265,29 @@ describe("role sessions: what does not move a role session (§8.1)", () => {
     }),
   );
 });
+
+it(
+  "runs the PM on its configured Architect instead of the legacy PM provider setting",
+  withRoles(async ({ roles, set, setProjectTeam, settle }) => {
+    await set({
+      providers: { pm: { provider: "claude", model: "legacy", effort: "low" } },
+      teamSetup: {
+        remembered: true,
+        team: [{ role: "architect", provider: "codex", model: "team-model", effort: "high" }],
+      },
+    });
+    expect(await roles.ensure("pm", "p1")).toMatchObject({
+      provider: "codex",
+      model: "team-model",
+      effort: "high",
+    });
+    const inherited = await roles.ensure("pm", "p1");
+    settle(inherited.id);
+    setProjectTeam([{ role: "architect", provider: "claude", model: null, effort: null }]);
+    expect(await roles.ensure("pm", "p1")).toMatchObject({
+      provider: "claude",
+      model: null,
+      effort: null,
+    });
+  }),
+);

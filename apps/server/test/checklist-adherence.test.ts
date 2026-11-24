@@ -301,7 +301,10 @@ function sessionService() {
     checklist,
     repo: env.repo,
     projects: services.projects,
-    runner: { providers: () => [], isConnected: () => false },
+    runner: {
+      providers: () => [{ id: "fake", capabilities: { enforcesSecurityRules: true } }],
+      isConnected: () => false,
+    },
     settings: env.settings,
     launcher: { launch: async () => undefined },
     artifacts: {

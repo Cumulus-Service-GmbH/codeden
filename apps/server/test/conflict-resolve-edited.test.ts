@@ -127,6 +127,7 @@ describe("deciding a conflict after editing a draft with an implicit work key (#
     const api = conflictRoutes({
       orchestration: { conflicts: { resolve } },
       settings: { get: () => Settings.parse({}) },
+      projectTeam: () => [{ role: "browserOperator", provider: "fake", model: null, effort: null }],
       factory: {
         data: {
           loop: () => ({ tuning: { team: [{ role: "browserOperator", provider: "fake" }] } }),

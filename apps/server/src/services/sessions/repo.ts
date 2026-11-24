@@ -82,6 +82,8 @@ export type StoredStartMeta = SessionStartMeta & {
   ownTeamPins?: true;
   /** The approved Team layer for a session created by a Team run. */
   runTeam?: import("@codeden/contracts").Team;
+  /** Named project Team selected at launch. */
+  teamId?: string;
   autonomyFloor?: AutonomyLevel;
   /** The PM delegated session starts to this Team Architect. */
   teamArchitect?: true;

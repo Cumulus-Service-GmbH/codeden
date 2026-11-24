@@ -5,7 +5,7 @@ import { TokenSaverSettings } from "./token-saver";
 import { UpdateMode } from "./updates";
 import { DictationEngine, WhisperModelId } from "./voice-api";
 
-/** `auto` lets CodeDen pick the first ready provider (Claude, then Codex, then OpenCode). */
+/** `auto` lets CodeDen pick a provider from those the runner reports. */
 export const ProviderChoice = z.union([z.literal("auto"), ProviderId]);
 export type ProviderChoice = z.infer<typeof ProviderChoice>;
 

@@ -185,6 +185,9 @@ describe("PM Chrome confirmation cards", () => {
       const services = {
         db: database.db,
         projects: { get: () => ({ kind: "local", archivedAt: null }) },
+        projectTeam: () => [
+          { role: "browserOperator", provider: "claude", model: null, effort: null },
+        ],
         factory: {
           // The project's Team sets the Browser Operator: a tagged PM start needs it.
           data: {

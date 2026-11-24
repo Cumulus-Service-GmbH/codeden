@@ -320,7 +320,7 @@ export function wireTeamRuns(
                 : `Coordinate Team run ${run.id} for approved revision ${run.revision}.\n${run.items.map((entry) => entry.text).join("\n")}`,
             },
           }),
-          { runTeam: run.team },
+          { teamId: run.teamId, runTeam: run.team },
         );
         if (result.status === "queued") await sessions.stop(result.sessionId);
         if (result.status !== "started") {

@@ -99,7 +99,10 @@ export async function advanceJev(
     }));
 
   const startReviewer = async (receipt: JevReceipt, prompt: string) => {
-    const member = teamMember(teamTuning(ctx, tuning).team, "reviewer");
+    const member = teamMember(
+      teamTuning(ctx, tuning, ctx.projects.get(item.projectId)).team,
+      "reviewer",
+    );
     const reason =
       !member?.model?.trim() || member.model.trim().toLowerCase() === "default"
         ? "Set the Jev completion-check reviewer in Settings → Team"

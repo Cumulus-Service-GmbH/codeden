@@ -14,6 +14,8 @@ export const TeamRole = z.enum([
   "investigator",
   "browserTester",
   "browserOperator",
+  /** Selects a model for card-gated work. Existing permission rules still apply. */
+  "operator",
 ]);
 export type TeamRole = z.infer<typeof TeamRole>;
 
@@ -58,7 +60,17 @@ export const TEAM_ROLE_TAGS: Record<string, TeamRole> = {
   "[Investigator]": "investigator",
   "[Browser Tester]": "browserTester",
   "[Browser Operator]": "browserOperator",
+  "[Operator]": "operator",
 };
+
+/** Display name from the role's canonical title tag. */
+export function teamRoleName(role: TeamRole): string {
+  return (
+    Object.keys(TEAM_ROLE_TAGS)
+      .find((tag) => TEAM_ROLE_TAGS[tag] === role)
+      ?.slice(1, -1) ?? role
+  );
+}
 
 /** Only the first bracketed tag at the start of the title selects a role. */
 export function teamRoleOfTitle(title: string | undefined): TeamRole | null {
@@ -139,10 +151,16 @@ export function resolveTeam(layers: {
   defaults: readonly TeamMember[];
   project: readonly TeamMember[];
   session?: TeamMember | null;
+  /** The effective Team captured at run admission. Later Settings edits do not change it. */
+  approved?: readonly TeamMember[];
 }): { team: Team; sources: Partial<Record<TeamRole, TeamSource>> } {
   const byRole = new Map<TeamRole, { member: TeamMember; source: TeamSource }>();
-  for (const member of layers.defaults) byRole.set(member.role, { member, source: "default" });
-  for (const member of layers.project) byRole.set(member.role, { member, source: "project" });
+  if (!layers.approved) {
+    for (const member of layers.defaults) byRole.set(member.role, { member, source: "default" });
+  }
+  // Approved snapshots historically record only the members, without their original sources.
+  for (const member of layers.approved ?? layers.project)
+    byRole.set(member.role, { member, source: "project" });
   if (layers.session)
     byRole.set(layers.session.role, { member: layers.session, source: "session" });
   const entries = TeamRole.options.flatMap((role) => {
@@ -196,3 +214,20 @@ export const TeamFile = z.object({
   updatedAt: z.string(),
 });
 export type TeamFile = z.infer<typeof TeamFile>;
+
+/** Live Team pins, their source, and the count of projects overriding each Default Team role. */
+export const TeamDiagnostics = z.object({
+  team: Team,
+  sources: z.partialRecord(TeamRole, TeamSource),
+  overrides: z.partialRecord(TeamRole, z.int().nonnegative()),
+});
+export type TeamDiagnostics = z.infer<typeof TeamDiagnostics>;
+
+/** Count each project's effective override once per role. */
+export function countTeamOverrides(projects: readonly Team[]): TeamDiagnostics["overrides"] {
+  const counts: TeamDiagnostics["overrides"] = {};
+  for (const project of projects) {
+    for (const { role } of project) counts[role] = (counts[role] ?? 0) + 1;
+  }
+  return counts;
+}
