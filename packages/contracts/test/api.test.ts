@@ -331,12 +331,13 @@ describe("api schemas", () => {
     for (const value of [
       { status: "started", sessionId: "s1" },
       { status: "queued", sessionId: "s1", behind: ["s0"] },
-      { status: "skipped" },
+      { status: "skipped", reason: "Chrome requires owner approval." },
       { status: "joined", sessionId: "s0" },
     ]) {
       roundTrip(StartSessionResponse, value);
     }
     expect(() => StartSessionResponse.parse({ status: "conflict", existing: [] })).toThrow();
+    expect(() => StartSessionResponse.parse({ status: "skipped" })).toThrow();
   });
 
   it("round-trips fork requests and responses", () => {

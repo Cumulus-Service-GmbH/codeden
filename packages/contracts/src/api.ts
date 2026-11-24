@@ -245,7 +245,7 @@ export const StartSessionResponse = z.discriminatedUnion("status", [
     /** Work this session waits for. */
     behind: z.array(Id),
   }),
-  z.object({ status: z.literal("skipped") }),
+  z.object({ status: z.literal("skipped"), reason: z.string().min(1) }),
   z.object({ status: z.literal("joined"), sessionId: Id }),
 ]);
 export type StartSessionResponse = z.infer<typeof StartSessionResponse>;

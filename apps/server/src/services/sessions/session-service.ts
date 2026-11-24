@@ -262,7 +262,7 @@ export class SessionService {
   async start(
     req: StartSessionRequest,
     options: {
-      confirmChrome?: () => Promise<boolean>;
+      confirmChrome?: () => Promise<boolean | string>;
       chromeApproved?: true;
       checklistItemId?: string;
       /** A role conversation this one replaces ("Start fresh"): archived as this one starts. */
@@ -315,7 +315,14 @@ export class SessionService {
       !options.chromeApproved &&
       this.resolveProvider(req, project ? projectDefaultProvider(project) : null) === "claude"
     ) {
-      if (!(await options.confirmChrome?.())) return { status: "skipped" };
+      const confirmation = await options.confirmChrome?.();
+      if (confirmation !== true) {
+        return {
+          status: "skipped",
+          reason:
+            typeof confirmation === "string" ? confirmation : "Chrome requires owner approval.",
+        };
+      }
       // Recheck the project and conflicts after waiting for the user, with the provider fixed.
       return this.start(
         { ...req, provider: "claude" },
@@ -341,7 +348,7 @@ export class SessionService {
       if (!decision) return { status: "conflict", existing: conflicts };
       switch (decision.resolution) {
         case "skip":
-          return { status: "skipped" };
+          return { status: "skipped", reason: "The conflicting session start was skipped." };
         case "join": {
           const target = repo.get(decision.sessionId);
           if (target.projectId !== req.projectId) {
@@ -395,6 +402,8 @@ export class SessionService {
         ...(req.tokenSaver ? { tokenSaver: req.tokenSaver } : {}),
         ...(req.role !== "agent" && {
           roleProvider: this.deps.settings.get().providers[req.role].provider,
+          roleModel: this.deps.settings.get().providers[req.role].model,
+          roleEffort: this.deps.settings.get().providers[req.role].effort,
         }),
       },
       workspace,
@@ -402,8 +411,6 @@ export class SessionService {
       undefined,
       previous,
     );
-          roleModel: this.deps.settings.get().providers[req.role].model,
-          roleEffort: this.deps.settings.get().providers[req.role].effort,
     if (previous) {
       // Archived with the new one's creation: it doesn't run on, even while that one waits.
       void retireRoleSession(
@@ -679,6 +686,7 @@ export class SessionService {
             name: "session.steer",
             sessionId: id,
             input,
+            revision,
             waitForShell: true,
             ...attempt,
           });
@@ -686,7 +694,6 @@ export class SessionService {
             result?.waitingFor &&
             !pending &&
             typeof source === "string" &&
-            revision,
             !wait.controller.signal.aborted
           ) {
             pending = outbox.push(id, stored, source);
@@ -1185,13 +1192,6 @@ export class SessionService {
     const available = this.deps.runner.providers().map((p) => p.id);
     const connected = this.deps.runner.isConnected();
     const roleDefault = this.deps.settings.get().providers[role].provider;
-    for (const choice of [projectDefault, roleDefault === "auto" ? null : roleDefault]) {
-      if (choice && (!connected || available.includes(choice))) return choice;
-    }
-    return null;
-  }
-
-  private buildSession(
     if (role !== "agent" && roleDefault !== "auto") {
       if (connected && !available.includes(roleDefault)) {
         throw badRequest(
@@ -1201,6 +1201,13 @@ export class SessionService {
       }
       return roleDefault;
     }
+    for (const choice of [projectDefault, roleDefault === "auto" ? null : roleDefault]) {
+      if (choice && (!connected || available.includes(choice))) return choice;
+    }
+    return null;
+  }
+
+  private buildSession(
     req: StartSessionRequest,
     project: ReturnType<ProjectService["get"]> | null,
     work: { purpose: string; workKey: string; scope: Session["scope"]; queued: boolean },
@@ -1212,6 +1219,8 @@ export class SessionService {
       settings.providers[req.role],
       provider,
       this.provider(provider),
+      req.role,
+      this.deps.forceFakeProvider,
     );
     const autonomy = req.autonomy ?? project?.autonomy ?? settings.autonomy.default;
     // A `docker` project's sessions run in containers, which no provider credentials reach yet.
@@ -1219,8 +1228,6 @@ export class SessionService {
     this.assertReadOnlySupported(req.role, provider, autonomy);
     // Either value is refused where plan mode doesn't exist, as for PATCH.
     if (req.planMode !== undefined) this.assertPlanModeSupported(req.role, provider);
-      req.role,
-      this.deps.forceFakeProvider,
     return {
       id: randomUUID(),
       projectId: req.projectId,
@@ -1274,6 +1281,8 @@ function roleModelDefaults(
   defaults: RoleDefaults,
   provider: string,
   info: ProviderInfo | undefined,
+  role: Session["role"],
+  forceFake?: boolean,
 ): Pick<Session, "model" | "effort"> {
   if (defaults.provider !== provider) {
     if (role !== "agent" && !forceFake && (defaults.model !== null || defaults.effort !== null)) {
@@ -1281,8 +1290,6 @@ function roleModelDefaults(
         `The ${role} role model or effort is configured for ${defaults.provider} and cannot be used with ${provider}.`,
         "role_model_provider_mismatch",
       );
-  role: Session["role"],
-  forceFake?: boolean,
     }
     return { model: null, effort: null };
   }

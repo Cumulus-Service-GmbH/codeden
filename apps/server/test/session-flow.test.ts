@@ -205,6 +205,7 @@ describe("project -> Fake session through a real runner", () => {
       (await api("POST", "/sessions", { ...dup, conflict: { resolution: "skip" } })).body,
     ).toEqual({
       status: "skipped",
+      reason: "The conflicting session start was skipped.",
     });
 
     const forced = StartSessionResponse.parse(

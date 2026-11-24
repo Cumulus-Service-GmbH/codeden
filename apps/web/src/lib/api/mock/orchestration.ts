@@ -140,7 +140,10 @@ export function mockOrchestration(world: MockWorld, deps: Deps): OrchestrationPa
       // Like the server: `start` replaces the saved request; only the decision is kept.
       const decision = ConflictDecision.parse(request);
       const text = request.start?.input?.text || record.request.purpose;
-      let result: StartSessionResponse = { status: "skipped" };
+      let result: StartSessionResponse = {
+        status: "skipped",
+        reason: "The conflicting session start was skipped.",
+      };
       if (decision.resolution === "join") {
         await deps.sendMessage(decision.sessionId, { text }, "queue");
         result = { status: "joined", sessionId: decision.sessionId };

@@ -191,7 +191,7 @@ export const startSession = defineTool({
           ? { ownTeamPins: true }
           : {}),
         confirmChrome: async () => {
-          if (!sessionId || services.factory.isUnattended(sessionId)) return false;
+          if (!sessionId) return "Chrome approval requires an active project manager session.";
           const approve = "Allow Chrome";
           const outcome = await services.questions.ask(
             sessionId,
@@ -206,13 +206,13 @@ export const startSession = defineTool({
             signal,
             { waitOnly: true },
           );
-          return (
-            !signal.aborted &&
-            outcome.status === "answered" &&
-            outcome.by === "user" &&
-            outcome.answers.q1?.length === 1 &&
-            outcome.answers.q1[0] === approve
-          );
+          if (signal.aborted || outcome.status !== "answered" || outcome.by !== "user") {
+            return "The owner did not approve the Chrome launch.";
+          }
+          const answers = outcome.answers.q1;
+          return answers?.length === 1 && answers[0] === approve
+            ? true
+            : "The owner cancelled the Chrome launch.";
         },
       });
       let note = itemId && !item ? { note: `Unknown checklistItemId ${itemId} was ignored.` } : {};
@@ -242,7 +242,7 @@ export const startSession = defineTool({
         case "queued":
           return { status: "queued", sessionId: result.sessionId, behind: result.behind, ...note };
         case "skipped":
-          return { status: "skipped", message: "Nothing was started.", ...note };
+          return { status: "skipped", message: result.reason, ...note };
         case "joined":
           return {
             status: "joined",

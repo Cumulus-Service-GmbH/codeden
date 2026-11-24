@@ -154,6 +154,12 @@ describe("PM Chrome confirmation cards", () => {
     ["handles Chrome consent timeout", "timeout", "", "skipped"],
     ["handles Chrome consent abort", "abort", "", "skipped"],
     ["handles Chrome consent when already aborted", "already aborted", "", "skipped"],
+    [
+      "unattended PM Chrome start waits for the owner and reports Cancel",
+      "unattended",
+      "Cancel",
+      "skipped",
+    ],
   ] as const)("%s", async (_name, answerer, answer, status) => {
     const database = openDatabase(":memory:");
     const controller = new AbortController();
@@ -172,7 +178,7 @@ describe("PM Chrome confirmation cards", () => {
         db: database.db,
         projects: { get: () => ({ kind: "local", archivedAt: null }) },
         factory: {
-          isUnattended: () => false,
+          isUnattended: () => answerer === "unattended",
           // The project's Team sets the Browser Operator: a tagged PM start needs it.
           data: {
             loop: () => ({
@@ -188,14 +194,20 @@ describe("PM Chrome confirmation cards", () => {
         sessions: {
           start: async (
             _req: StartSessionRequest,
-            opts?: { confirmChrome?: () => Promise<boolean> },
-          ) =>
-            (await opts?.confirmChrome?.())
+            opts?: { confirmChrome?: () => Promise<boolean | string> },
+          ) => {
+            const confirmation = await opts?.confirmChrome?.();
+            return confirmation === true
               ? { status: "started", sessionId: "operator" }
-              : { status: "skipped" },
+              : { status: "skipped", reason: confirmation };
+          },
         },
       } as unknown as AppServices;
       if (answerer === "already aborted") controller.abort();
+      const inboxCreated = Promise.withResolvers<void>();
+      const unsubscribe = store.subscribe((events) => {
+        if (events.some((event) => event.type === "inbox.created")) inboxCreated.resolve();
+      });
       const started = startSession.handler(
         startSession.input.parse({
           title: "[Browser Operator] Open the documentation",
@@ -217,24 +229,32 @@ describe("PM Chrome confirmation cards", () => {
         expect(store.listAfter(0).some((event) => event.type === "inbox.created")).toBe(false);
         return;
       }
-      const card = await vi.waitFor(() => {
-        const item = store
-          .listAfter(0)
-          .filter((event) => event.type === "agent.item.started")
-          .map((event) => (event.payload as { item: Item }).item)
-          .find((item) => item.kind === "user_question");
-        if (!item) throw new Error("Expected the Chrome confirmation card");
-        return item;
-      });
+      await Promise.race([
+        inboxCreated.promise,
+        started.then(() => {
+          throw new Error("Expected the Chrome confirmation card before the start result");
+        }),
+      ]).finally(unsubscribe);
+      const card = store
+        .listAfter(0)
+        .filter((event) => event.type === "agent.item.started")
+        .map((event) => (event.payload as { item: Item }).item)
+        .find((item) => item.kind === "user_question");
+      if (!card) throw new Error("Expected the Chrome confirmation card");
       expect(card.questions[0]?.allowFreeText).toBe(false);
       const response = { kind: "answer" as const, answers: { q1: [answer || "Allow Chrome"] } };
-      if (answerer === "pm") {
+      if (answerer === "pm" || answerer === "unattended") {
         await expect(
-          questions.respond(sampleSession.id, card.requestId, response, "pm"),
+          questions.respond(
+            sampleSession.id,
+            card.requestId,
+            { kind: "answer", answers: { q1: ["Allow Chrome"] } },
+            "pm",
+          ),
         ).rejects.toMatchObject({ code: "user_confirmation_required" });
         expect(sessionRepo.item(sampleSession.id, card.id)?.item.status).toBe("in_progress");
       }
-      if (answerer === "pm" || answerer === "user") {
+      if (answerer === "pm" || answerer === "user" || answerer === "unattended") {
         await expect(
           questions.respond(sampleSession.id, card.requestId, response, "user"),
         ).resolves.toBe(true);
@@ -246,7 +266,10 @@ describe("PM Chrome confirmation cards", () => {
       } else if (answerer === "abort") {
         controller.abort();
       }
-      await expect(started).resolves.toMatchObject({ status });
+      await expect(started).resolves.toMatchObject({
+        status,
+        ...(answerer === "unattended" && { message: "The owner cancelled the Chrome launch." }),
+      });
       if (answerer === "timeout" || answerer === "abort") {
         expect(sessionRepo.item(sampleSession.id, card.id)?.item.status).toBe("cancelled");
         await expect(questions.respond(sampleSession.id, card.requestId, response)).rejects.toThrow(

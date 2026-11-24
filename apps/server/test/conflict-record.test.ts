@@ -203,9 +203,24 @@ describe("a new version of a request replaces its open conflict (#169)", () => {
     });
     expect(openConflictItems()).toEqual([]);
     // Closed already, unknown or absent: nothing to do.
-    expect(() => conflicts.closeReplaced(resent, { status: "skipped" })).not.toThrow();
+    expect(() =>
+      conflicts.closeReplaced(resent, {
+        status: "skipped",
+        reason: "The conflicting session start was skipped.",
+      }),
+    ).not.toThrow();
     const unknown = request("x", PROJECT, { replacesConflict: "conflict:none" });
-    expect(() => conflicts.closeReplaced(unknown, { status: "skipped" })).not.toThrow();
-    expect(() => conflicts.closeReplaced(request("x"), { status: "skipped" })).not.toThrow();
+    expect(() =>
+      conflicts.closeReplaced(unknown, {
+        status: "skipped",
+        reason: "The conflicting session start was skipped.",
+      }),
+    ).not.toThrow();
+    expect(() =>
+      conflicts.closeReplaced(request("x"), {
+        status: "skipped",
+        reason: "The conflicting session start was skipped.",
+      }),
+    ).not.toThrow();
   });
 });

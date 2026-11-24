@@ -113,7 +113,10 @@ describe("PM Browser Operator launch consent", () => {
   it(
     "does not allow an unconfirmed PM launch",
     withService({}, async (_start, repo, service) => {
-      expect(await service.start(request)).toEqual({ status: "skipped" });
+      expect(await service.start(request)).toEqual({
+        status: "skipped",
+        reason: "Chrome requires owner approval.",
+      });
       expect(repo.list({ projectId: "p1" })).toHaveLength(0);
     }),
   );
