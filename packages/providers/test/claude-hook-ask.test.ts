@@ -13,12 +13,13 @@ import { ClaudeSession } from "../src/claude/session";
 
 function stubSdk() {
   const launches: Options[] = [];
+  const setPermissionMode = vi.fn(async () => undefined);
   const messages = new AsyncQueue<Record<string, unknown>>();
   const query = ((params: { options: Options }) => {
     launches.push(params.options);
     return {
       [Symbol.asyncIterator]: () => messages[Symbol.asyncIterator](),
-      setPermissionMode: async () => undefined,
+      setPermissionMode,
       supportedModels: async () => [],
       supportedCommands: async () => [],
       mcpServerStatus: async () => [],
@@ -26,7 +27,7 @@ function stubSdk() {
       close: () => messages.close(),
     } as unknown as Query;
   }) as ConstructorParameters<typeof ClaudeSession>[1]["query"];
-  return { query, launches, messages };
+  return { query, launches, messages, setPermissionMode };
 }
 
 const cwd = path.resolve(import.meta.dirname, "..");
@@ -101,6 +102,7 @@ function open(autonomy: SessionOptions["autonomy"], interruptTimeoutMs = 10_000)
       toolUseID: `t${n}`,
       requestId: `r${n}`,
       decisionReason,
+      suggestions: [{ type: "setMode", mode: "acceptEdits", destination: "session" }],
     } as never) as Promise<PermissionResult>;
   };
   const card = async (count = 1) => {
@@ -129,6 +131,7 @@ function open(autonomy: SessionOptions["autonomy"], interruptTimeoutMs = 10_000)
     answer,
     pushAsk,
     messages: sdk.messages,
+    setPermissionMode: sdk.setPermissionMode,
     events,
   };
 }
@@ -147,7 +150,16 @@ describe("Claude settings hooks that require approval", () => {
       expect(card.hookReason).toBe(" Review this call");
       expect(card.reason).not.toContain("[approval-required]");
       await run.answer(card, "allow_once");
-      await expect(first).resolves.toEqual({ behavior: "allow", updatedInput: input });
+      await expect(first).resolves.toEqual({
+        behavior: "allow",
+        updatedInput: input,
+        updatedPermissions: [],
+      });
+      if (autonomy === "supervised") {
+        expect(run.setPermissionMode.mock.calls).toEqual([["default"], ["default"]]);
+      } else {
+        expect(run.setPermissionMode).not.toHaveBeenCalled();
+      }
 
       const second = run.permission(tool, input, marked);
       const next = await run.card(2);
@@ -222,8 +234,8 @@ describe("Claude settings hooks that require approval", () => {
         await run.answer(card, "allow_once");
       }
       await expect(Promise.all([first, second])).resolves.toEqual([
-        { behavior: "allow", updatedInput: firstInput },
-        { behavior: "allow", updatedInput: secondInput },
+        { behavior: "allow", updatedInput: firstInput, updatedPermissions: [] },
+        { behavior: "allow", updatedInput: secondInput, updatedPermissions: [] },
       ]);
     },
   );

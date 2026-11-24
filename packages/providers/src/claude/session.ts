@@ -623,7 +623,7 @@ export class ClaudeSession implements ProviderSession {
     // Let the pump consume a hook_response read in the same chunk.
     await new Promise((resolve) => setImmediate(resolve));
     if (this.closed || this.q !== q || this.interrupts !== interrupts) {
-      return this.toPermissionResult(input, { kind: "cancel" });
+      return this.toPermissionResult(q, input, { kind: "cancel" });
     }
 
     const decisionReason = options.decisionReason;
@@ -649,7 +649,7 @@ export class ClaudeSession implements ProviderSession {
       const ctx = this.mapper.ctxForTool(options.toolUseID);
       const review = gate.ask && gate.singleUse ? markedSingleUseReview : markedHookReview;
       const response = await this.broker.request(ctx, item, options.signal, review);
-      return this.toPermissionResult(input, response);
+      return this.toPermissionResult(q, input, response);
     }
 
     const gate = this.policy.needsUser(toolName, input, dir);
@@ -702,9 +702,9 @@ export class ClaudeSession implements ProviderSession {
       const command = guard();
       if (!command) return { behavior: "deny", message: "The read target could not be verified." };
       if (response.decision === "allow_session") this.policy.allowForSession(toolName, input, dir);
-      return { behavior: "allow", updatedInput: { ...input, command } };
+      return this.approveTool(q, { ...input, command });
     }
-    return this.toPermissionResult(input, response);
+    return this.toPermissionResult(q, input, response);
   };
 
   private approvalItem(
@@ -732,12 +732,24 @@ export class ClaudeSession implements ProviderSession {
     };
   }
 
-  private toPermissionResult(
+  private async approveTool(
+    q: Query | undefined,
+    input: Record<string, unknown>,
+  ): Promise<PermissionResult> {
+    if (this.q === q && this.autonomy === "supervised") {
+      await this.applyPermissionModeInBackground();
+    }
+    // A CodeDen tool approval carries no SDK permission updates. Session grants live in policy.
+    return { behavior: "allow", updatedInput: input, updatedPermissions: [] };
+  }
+
+  private async toPermissionResult(
+    q: Query | undefined,
     input: Record<string, unknown>,
     response: RuntimeResponse,
-  ): PermissionResult {
+  ): Promise<PermissionResult> {
     if (response.kind === "approval" && response.decision === "allow_once") {
-      return { behavior: "allow", updatedInput: input };
+      return this.approveTool(q, input);
     }
     if (response.kind === "approval" && response.decision === "deny") {
       return { behavior: "deny", message: response.message ?? "The user denied this action." };

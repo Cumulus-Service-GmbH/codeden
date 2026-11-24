@@ -130,6 +130,7 @@ function open(sdk: ReturnType<typeof stubSdk>, opts: Partial<SessionOptions> = {
       signal: new AbortController().signal,
       toolUseID: id,
       requestId: `r-${id}`,
+      suggestions: [{ type: "setMode", mode: "acceptEdits", destination: "session" }],
     } as never) as Promise<PermissionResult>;
   const items = (kind: string) =>
     events.flatMap((e) =>
@@ -333,17 +334,24 @@ describe("Claude plan mode", () => {
     await vi.waitFor(() => expect(sdk.modes.at(-1)).toBe("default"));
   });
 
-  it("keeps a Supervised allow_session grant inside CodeDen", async () => {
-    const sdk = stubSdk();
-    const { session, permission, items } = open(sdk, { autonomy: "supervised", planMode: false });
-    const decision = permission("Bash", { command: "ls -la" }, "read");
-    await vi.waitFor(() => expect(items("approval_request")).toHaveLength(1));
-    await session.respond("r-read", { kind: "approval", decision: "allow_session" });
-    const result = await decision;
-    expect(result).toMatchObject({ behavior: "allow" });
-    expect(result).not.toHaveProperty("updatedPermissions");
-    expect(sdk.modes.at(-1)).toBe("default");
-  });
+  it.each(["allow_once", "allow_session"] as const)(
+    "keeps a Supervised %s approval in default mode",
+    async (approval) => {
+      const sdk = stubSdk();
+      const { session, permission, items } = open(sdk, { autonomy: "supervised", planMode: false });
+      const input = approval === "allow_once" ? { command: "pwd" } : { command: "ls -la" };
+      const decision = permission("Bash", input, "read");
+      await vi.waitFor(() => expect(items("approval_request")).toHaveLength(1));
+      expect(sdk.modes).toEqual(["default"]);
+      await session.respond("r-read", { kind: "approval", decision: approval, decidedBy: "user" });
+      await expect(decision).resolves.toEqual({
+        behavior: "allow",
+        updatedInput: { command: expect.any(String) },
+        updatedPermissions: [],
+      });
+      expect(sdk.modes).toEqual(["default", "default"]);
+    },
+  );
 
   it.each(["init", "status", "hook"] as const)(
     "warns and corrects native mode drift from %s",
