@@ -169,7 +169,7 @@ describe("Claude settings hooks that require approval", () => {
 
     const unmarkedCall = run.permission("Bash", echo);
     const next = await run.card(2);
-    expect(next.options).toEqual(ordinary);
+    expect(next.options).toEqual(once);
     expect(next.hookReason).toBeUndefined();
     await run.answer(next, "deny");
     await expect(unmarkedCall).resolves.toMatchObject({ behavior: "deny" });
@@ -179,7 +179,9 @@ describe("Claude settings hooks that require approval", () => {
     const run = open("supervised");
     const read = { command: "ls -la" };
     const unmarkedCall = run.permission("Bash", read);
-    await run.answer(await run.card(), "allow_session");
+    const unmarked = await run.card();
+    expect(unmarked.options).toEqual(ordinary);
+    await run.answer(unmarked, "allow_session");
     await expect(unmarkedCall).resolves.toMatchObject({ behavior: "allow" });
 
     const markedCall = run.permission("Bash", read, marked);
@@ -248,7 +250,7 @@ describe("Claude settings hooks that require approval", () => {
     ["missing tool name", { hook_name: "PreToolUse:" }, ordinary],
     ["PostToolUse event", { hook_event: "PostToolUse" }, ordinary],
   ] as const)("uses the expected card options for %s", async (_label, fields, options) => {
-    const run = open("auto");
+    const run = open("supervised");
     run.messages.push({
       type: "system",
       subtype: "hook_response",
@@ -258,7 +260,7 @@ describe("Claude settings hooks that require approval", () => {
       stdout: hookOutput(),
       ...fields,
     });
-    const call = run.permission("Bash", forcePush, forcePushReason);
+    const call = run.permission("Bash", { command: "ls -la" });
     const card = await run.card();
     expect(card.options).toEqual(options);
     await run.answer(card, "deny");
@@ -300,7 +302,7 @@ describe("Claude settings hooks that require approval", () => {
     run.messages.push({ type: "result", subtype: "success", usage: {} });
     const next = run.permission("Bash", forcePush, forcePushReason);
     const nextCard = await run.card(2);
-    expect(nextCard.options).toEqual(ordinary);
+    expect(nextCard.options).toEqual(once);
     await run.answer(nextCard, "deny");
     await expect(next).resolves.toMatchObject({ behavior: "deny" });
   });
@@ -370,7 +372,7 @@ describe("Claude settings hooks that require approval", () => {
     const run = open(autonomy);
     const call = run.permission(tool, input);
     const card = await run.card();
-    expect(card.options).toEqual(ordinary);
+    expect(card.options).toEqual(once);
     await run.answer(card, "deny");
     await expect(call).resolves.toMatchObject({ behavior: "deny" });
   });

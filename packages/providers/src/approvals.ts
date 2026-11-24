@@ -23,6 +23,8 @@ interface Pending {
 
 /** How the asker takes a response, when it has rules of its own (an MCP server's form). */
 export interface AnswerReview {
+  /** The provider independently verified a scoped read and can enforce its session grant. */
+  allowSession?: true;
   /**
    * What doesn't fit in the response, if anything: `respond` rejects it with this message
    * (`invalid_answer`) and the request stays open, so nothing is sent until it fits.
@@ -53,6 +55,13 @@ export class ApprovalBroker {
     signal?: AbortSignal,
     review?: AnswerReview,
   ): Promise<RuntimeResponse> {
+    if (
+      item.kind === "approval_request" &&
+      item.options.includes("allow_session") &&
+      (!review?.allowSession || sessionApprovalBlockReason(item))
+    ) {
+      item = { ...item, options: item.options.filter((option) => option !== "allow_session") };
+    }
     return new Promise((resolve) => {
       const finish = (response: RuntimeResponse) => {
         if (!this.pending.delete(item.requestId)) return;

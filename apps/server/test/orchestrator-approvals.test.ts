@@ -39,9 +39,6 @@ it.each([
   "ls -la",
   'rg -n "requires the owner" apps/server/src',
   "git show HEAD:package.json",
-  "git status --short --branch",
-  "pnpm --version",
-  "node --version",
 ])("delegates a plain read-only command: %s", (command) => {
   expect(classifyApproval({ ...ordinary, action: "command", command, toolName: "Bash" })).toEqual({
     delegable: true,
@@ -56,6 +53,9 @@ it.each([
   "rg --pre sh source",
   "git show --output=out HEAD",
   "git merge HEAD",
+  "git status --short --branch",
+  "pnpm --version",
+  "node --version",
   "node -e 'process.exit()'",
 ])("keeps a command per-card: %s", (command) => {
   expect(

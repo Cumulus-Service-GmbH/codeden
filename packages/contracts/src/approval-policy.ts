@@ -24,7 +24,6 @@ const flags = {
   cat: /^-[benstuv]+$/,
   ls: /^-[aAldh1]+$/,
   rg: /^(?:-[nHilFSiwcl]+|--no-config|--files)$/,
-  status: /^(?:-[sb]+|--short|--branch|--porcelain)$/,
 };
 
 /** Only simple shell words and explicitly listed argument forms may be delegated. */
@@ -54,6 +53,7 @@ export function plainReadTargets(tool: Tool): string[] | undefined {
       typeof input !== "object" ||
       Array.isArray(input) ||
       input.command !== command ||
+      (input.run_in_background !== undefined && input.run_in_background !== false) ||
       Object.keys(input).some(
         (key) => !["command", "description", "timeout", "run_in_background"].includes(key),
       ))
@@ -67,12 +67,8 @@ export function plainReadTargets(tool: Tool): string[] | undefined {
   if (matches.map(([word]) => word).join("") !== source) return;
   const words = matches.map(([, word]) => word ?? "");
   const [name, ...args] = words;
-  if (name === "node" || name === "pnpm") {
-    return args.length === 1 && args[0] === "--version" ? [] : undefined;
-  }
   if (name === "git") {
     const [sub, ...rest] = args;
-    if (sub === "status") return rest.every((word) => flags.status.test(word)) ? [] : undefined;
     if (sub !== "show" || rest.length !== 1) return;
     const [ref = "", file, extra] = (rest[0] ?? "").split(":");
     return extra === undefined && /^(?:HEAD|[a-f0-9]{4,64})$/.test(ref) && file && path.test(file)

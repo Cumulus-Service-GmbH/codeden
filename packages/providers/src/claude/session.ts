@@ -12,7 +12,6 @@ import {
   HOOK_ASK_MARKER,
   type ItemOf,
   isMarkedHookAsk,
-  isPlainReadApproval,
   type RuntimeResponse,
   type SessionOptions,
   type UserInput,
@@ -585,20 +584,27 @@ export class ClaudeSession implements ProviderSession {
       ...(decisionReason && decisionReason !== gate.reason ? { hookAsk: true } : {}),
       options: gate.singleUse ? ["allow_once", "deny"] : ["allow_once", "allow_session", "deny"],
     });
-    const guard = () => guardedReadCommand(item, item.cwd, this.opts.cwd);
-    if (isPlainReadApproval(item) && !guard()) {
-      item.options = item.options.filter((option) => option !== "allow_session");
-    }
-    const review = gate.singleUse
+    const guard = () =>
+      item.cwd === (this.shell.dir ?? this.opts.cwd)
+        ? guardedReadCommand(item, item.cwd, this.opts.cwd)
+        : undefined;
+    const review: AnswerReview = gate.singleUse
       ? singleUseReview
       : {
-          problem: (response: RuntimeResponse) =>
-            response.kind === "approval" &&
-            (response.decision === "allow_session" ||
-              (response.decision === "allow_once" && response.decidedBy === "orchestrator")) &&
-            !guard()
-              ? "This approval requires the owner."
-              : undefined,
+          ...(guard() ? { allowSession: true } : {}),
+          problem: (response) => {
+            if (response.kind !== "approval") return;
+            if (response.decision === "allow_session" && !guard()) {
+              return "This action requires a separate approval each time.";
+            }
+            if (
+              response.decision === "allow_once" &&
+              response.decidedBy === "orchestrator" &&
+              !guard()
+            ) {
+              return "This approval requires the owner.";
+            }
+          },
         };
     const response = await this.broker.request(ctx, item, options.signal, review);
     if (

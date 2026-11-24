@@ -4,7 +4,8 @@ import { ApprovalBroker } from "../src/approvals";
 
 describe("ApprovalBroker", () => {
   it("keeps a dangerous approval pending after a session-wide response", async () => {
-    const broker = new ApprovalBroker(() => {});
+    const events: AgentEvent[] = [];
+    const broker = new ApprovalBroker((event) => events.push(event));
     const answer = broker.request(
       { threadId: "t1", turnId: "u1" },
       {
@@ -17,6 +18,7 @@ describe("ApprovalBroker", () => {
         options: ["allow_once", "allow_session", "deny"],
       },
     );
+    expect(events[0]).toMatchObject({ item: { options: ["allow_once", "deny"] } });
     expect(() => broker.respond("r1", { kind: "approval", decision: "allow_session" })).toThrow(
       "This action requires a separate approval each time.",
     );

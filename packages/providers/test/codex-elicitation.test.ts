@@ -110,7 +110,7 @@ describe("Codex MCP tool approvals", () => {
       title: "Use postgres: run_query",
       toolName: "mcp__postgres__run_query",
       toolInput: { sql: "DELETE FROM users" },
-      options: ["allow_once", "allow_session", "deny"],
+      options: ["allow_once", "deny"],
     });
     expect(await answer({ kind: "approval", decision: "allow_once" })).toMatchObject({
       action: "accept",

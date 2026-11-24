@@ -251,7 +251,7 @@ describe("OpenCode session", () => {
     expect(seen[0]).toMatchObject({
       action: "git_destructive",
       command: "git push --force origin main",
-      options: ["allow_once", "allow_session", "deny"],
+      options: ["allow_once", "deny"],
     });
     expect(completed(events, "approval_request")[0]?.item).toMatchObject({
       status: "declined",

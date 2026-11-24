@@ -1,4 +1,4 @@
-import { realpathSync, statSync } from "node:fs";
+import { lstatSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { plainReadTargets } from "@codeden/contracts";
 import { isInsidePath } from "../util/workspace-guard";
@@ -12,10 +12,16 @@ export function guardedReadCommand(
 ): string | undefined {
   const targets = plainReadTargets(tool);
   if (!targets || !tool.command || !cwd || !isAbsolute(cwd) || !isAbsolute(root)) return;
+  const command = tool.command.trim();
   try {
     const realRoot = realpathSync(root);
     const realCwd = realpathSync(cwd);
     if (!isInsidePath(realRoot, realCwd) || !statSync(realCwd).isDirectory()) return;
+    if (command.startsWith("git ")) {
+      if (realCwd !== realRoot) return;
+      const gitEntry = lstatSync(resolve(realRoot, ".git"));
+      if (!gitEntry.isFile() && !gitEntry.isDirectory()) return;
+    }
     for (const read of targets) {
       const target = resolve(realCwd, read);
       if (
@@ -31,16 +37,15 @@ export function guardedReadCommand(
     return;
   }
 
-  const command = tool.command.trim();
   if (command.startsWith("rg ")) {
     const exclusions = SECRET_SEARCH_GLOBS.map((glob) => `--iglob '!**/${glob}'`).join(" ");
     return `command rg --no-config ${exclusions} ${command.slice(3)}`;
   }
   if (command.startsWith("git ")) {
-    const prefix = "command git --no-pager --no-optional-locks -c core.fsmonitor=false";
-    return /^git +show /.test(command)
-      ? command.replace(/^git +show\b/, `${prefix} show --no-ext-diff --no-textconv`)
-      : command.replace(/^git +status\b/, `${prefix} status --ignore-submodules=all`);
+    return command.replace(
+      /^git +show\b/,
+      "command git --no-pager show --no-ext-diff --no-textconv",
+    );
   }
   return `command ${command}`;
 }

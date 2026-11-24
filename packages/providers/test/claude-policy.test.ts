@@ -1,3 +1,6 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ClaudePolicy, permissionModeFor } from "../src/claude/permissions";
 import { guardedReadCommand } from "../src/policy/delegated-read";
@@ -14,14 +17,23 @@ it("excludes known credential files from delegated recursive searches", () => {
 });
 
 it("does not delegate a Git blob read of a provider login file", () => {
-  const cwd = import.meta.dirname;
-  expect(
-    guardedReadCommand(
-      { action: "command", toolName: "Bash", command: "git show HEAD:opencode/auth.json" },
-      cwd,
-      cwd,
-    ),
-  ).toBeUndefined();
+  const cwd = mkdtempSync(join(tmpdir(), "codeden-read-approval-"));
+  try {
+    mkdirSync(join(cwd, ".git"));
+    mkdirSync(join(cwd, "opencode"));
+    writeFileSync(join(cwd, "opencode", "auth.json"), "{}");
+    writeFileSync(join(cwd, "opencode", "notes.json"), "{}");
+    const commandFor = (file: string) =>
+      guardedReadCommand(
+        { action: "command", toolName: "Bash", command: `git show HEAD:opencode/${file}` },
+        cwd,
+        cwd,
+      );
+    expect(commandFor("notes.json")).toContain("show --no-ext-diff --no-textconv");
+    expect(commandFor("auth.json")).toBeUndefined();
+  } finally {
+    rmSync(cwd, { recursive: true, force: true });
+  }
 });
 
 describe("ClaudePolicy", () => {
