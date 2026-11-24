@@ -313,24 +313,7 @@ const SECRET_BASENAMES = new Set([
   "service-account.json",
 ]);
 const SAFE_ENV_SUFFIXES = [".example", ".sample", ".template", ".dist", ".defaults"];
-const SECRET_EXTENSIONS = [".pem", ".key", ".p12", ".pfx", ".keystore", ".jks"];
-
-/** Globs to exclude from searches that may discover files beyond their explicit operands. */
-export const SECRET_SEARCH_GLOBS = [
-  ...SECRET_BASENAMES,
-  ...SECRET_EXTENSIONS.map((extension) => `*${extension}`),
-  ".env*",
-  "*.env",
-  ".claude.json*",
-  "oauth_creds.json",
-  "google_accounts.json",
-  "mcp-oauth-tokens*",
-  "auth.json*",
-  "mcp-auth.json*",
-  "opencode.db*",
-  "hosts.yml",
-  "hosts.yaml",
-];
+const SECRET_EXTENSIONS = [".pem", ".key", ".p12", ".pfx", ".keystore", ".jks", ".kdbx"];
 
 /** A process's environment on Linux: `/proc/self/environ`, `/proc/1/environ`, a thread's. */
 const PROC_ENVIRON = /^\/proc\/[^/]+\/(task\/[^/]+\/)?environ$/;

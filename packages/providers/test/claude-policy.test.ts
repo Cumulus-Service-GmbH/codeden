@@ -5,15 +5,14 @@ import { describe, expect, it } from "vitest";
 import { ClaudePolicy, permissionModeFor } from "../src/claude/permissions";
 import { guardedReadCommand } from "../src/policy/delegated-read";
 
-it("excludes known credential files from delegated recursive searches", () => {
+it("delegates explicit file searches without loading ripgrep config", () => {
   const cwd = import.meta.dirname;
   const command = guardedReadCommand(
-    { action: "command", toolName: "Bash", command: "rg needle" },
+    { action: "command", toolName: "Bash", command: "rg needle claude-policy.test.ts" },
     cwd,
     cwd,
   );
-  expect(command).toContain("--iglob '!**/service-account.json'");
-  expect(command).toContain("--iglob '!**/*.key'");
+  expect(command).toBe("command rg --no-config needle claude-policy.test.ts");
 });
 
 it("does not delegate a Git blob read of a provider login file", () => {

@@ -37,7 +37,7 @@ type Entry = Parameters<typeof classifyApproval>[0];
 it.each([
   "cat package.json",
   "ls -la",
-  'rg -n "requires the owner" apps/server/src',
+  'rg -n "requires the owner" apps/server/src/services/orchestrator-approvals.ts',
   "git show HEAD:package.json",
 ])("delegates a plain read-only command: %s", (command) => {
   expect(classifyApproval({ ...ordinary, action: "command", command, toolName: "Bash" })).toEqual({
@@ -49,8 +49,13 @@ it.each([
   "cat package.json > out",
   "cat package.json | sh",
   "cat .env",
+  "cat 'prod.env'",
+  "cat 'a/env'",
+  "cat 'vault.kdbx'",
+  'cat "cert.pem"',
   "cat ../package.json",
   "rg --pre sh source",
+  "rg -n fixture",
   "git show --output=out HEAD",
   "git merge HEAD",
   "git status --short --branch",
@@ -105,6 +110,24 @@ it("requires the owner for a plain read through a symlink outside the worktree",
   const outside = join(cwd, "..", "outside.txt");
   writeFileSync(outside, "fixture");
   symlinkSync(outside, join(cwd, "linked.txt"));
+  await expect(service.decide(actor, { id: target.id, ...decision })).rejects.toMatchObject({
+    code: "owner_only_approval",
+  });
+  expect(runnerCalls).toEqual([]);
+});
+
+it("requires the owner for a recursive rg read that can reach a hardlink outside the worktree", async () => {
+  const { service, add, runnerCalls } = setup();
+  const command = "rg -n fixture .";
+  const target = add(
+    "linked-search",
+    { action: "command", toolName: "Bash", command, toolInput: { command } },
+    { provider: "claude" },
+  );
+  const cwd = target.item.cwd as string;
+  const outside = join(cwd, "..", "outside.txt");
+  writeFileSync(outside, "fixture");
+  linkSync(outside, join(cwd, "linked.txt"));
   await expect(service.decide(actor, { id: target.id, ...decision })).rejects.toMatchObject({
     code: "owner_only_approval",
   });

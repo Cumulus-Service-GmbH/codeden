@@ -19,11 +19,11 @@ type Tool = Partial<
 
 const path = /^(?:[a-zA-Z0-9_][a-zA-Z0-9_.-]*\/)*[a-zA-Z0-9_][a-zA-Z0-9_.-]*\/?$/;
 const sensitive =
-  /(?:secret|credential|password|token|keyvault|(?:^|[/.])(?:env|pem|key|p12|pfx|kdbx)(?:[/.\s]|$))/i;
+  /(?:secret|credential|password|token|keyvault|(?:^|[/.\s'"])(?:env|pem|key|p12|pfx|kdbx)(?:[/.\s'"]|$))/i;
 const flags = {
   cat: /^-[benstuv]+$/,
   ls: /^-[aAldh1]+$/,
-  rg: /^(?:-[nHilFSiwcl]+|--no-config|--files)$/,
+  rg: /^(?:-[nHilFSiwcl]+|--no-config)$/,
 };
 
 /** Only simple shell words and explicitly listed argument forms may be delegated. */
@@ -77,22 +77,23 @@ export function plainReadTargets(tool: Tool): string[] | undefined {
   }
   if (name !== "cat" && name !== "ls" && name !== "rg") return;
   const targets: string[] = [];
-  let positional = 0;
+  let patternSeen = false;
   for (const word of args) {
     if (word.startsWith("-")) {
       if (!flags[name].test(word)) return;
       continue;
     }
     const value = word.replace(/^['"]|['"]$/g, "");
-    if (name === "rg" && positional++ === 0 && !args.includes("--files")) {
+    if (sensitive.test(value)) return;
+    if (name === "rg" && !patternSeen) {
       if (value.startsWith("-")) return;
+      patternSeen = true;
       continue;
     }
     if (!path.test(value) && value !== ".") return;
     targets.push(value);
   }
-  if (name === "cat" && targets.length === 0) return;
-  if (name === "rg" && !args.includes("--files") && positional === 0) return;
+  if (name !== "ls" && targets.length === 0) return;
   return targets;
 }
 

@@ -2,7 +2,7 @@ import { lstatSync, realpathSync, statSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
 import { plainReadTargets } from "@codeden/contracts";
 import { isInsidePath } from "../util/workspace-guard";
-import { isSecretPath, SECRET_SEARCH_GLOBS } from "./paths";
+import { isSecretPath } from "./paths";
 
 /** Worktree-scoped plain reads only. Recheck paths every time a grant is used. */
 export function guardedReadCommand(
@@ -13,6 +13,7 @@ export function guardedReadCommand(
   const targets = plainReadTargets(tool);
   if (!targets || !tool.command || !cwd || !isAbsolute(cwd) || !isAbsolute(root)) return;
   const command = tool.command.trim();
+  const listsDirectories = command === "ls" || command.startsWith("ls ");
   try {
     const realRoot = realpathSync(root);
     const realCwd = realpathSync(cwd);
@@ -31,16 +32,14 @@ export function guardedReadCommand(
       )
         return;
       const stat = statSync(target);
-      if (!stat.isDirectory() && (!stat.isFile() || stat.nlink !== 1)) return;
+      if (listsDirectories && stat.isDirectory()) continue;
+      if (!stat.isFile() || stat.nlink !== 1) return;
     }
   } catch {
     return;
   }
 
-  if (command.startsWith("rg ")) {
-    const exclusions = SECRET_SEARCH_GLOBS.map((glob) => `--iglob '!**/${glob}'`).join(" ");
-    return `command rg --no-config ${exclusions} ${command.slice(3)}`;
-  }
+  if (command.startsWith("rg ")) return `command rg --no-config ${command.slice(3)}`;
   if (command.startsWith("git ")) {
     return command.replace(
       /^git +show\b/,
