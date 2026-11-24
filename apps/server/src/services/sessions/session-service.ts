@@ -402,6 +402,8 @@ export class SessionService {
       undefined,
       previous,
     );
+          roleModel: this.deps.settings.get().providers[req.role].model,
+          roleEffort: this.deps.settings.get().providers[req.role].effort,
     if (previous) {
       // Archived with the new one's creation: it doesn't run on, even while that one waits.
       void retireRoleSession(
@@ -1157,14 +1159,15 @@ export class SessionService {
     if (this.deps.forceFakeProvider) return "fake";
     const available = this.deps.runner.providers().map((p) => p.id);
     const connected = this.deps.runner.isConnected();
-    if (req.provider && req.provider !== "auto") {
-      if (connected && !available.includes(req.provider)) {
+    const explicit = req.provider && req.provider !== "auto" ? req.provider : null;
+    if (explicit) {
+      if (connected && !available.includes(explicit)) {
         throw badRequest(
-          `Provider ${req.provider} is not available. Loaded providers: ${available.join(", ") || "none"}`,
+          `Provider ${explicit} is not available. Loaded providers: ${available.join(", ") || "none"}`,
           "unknown_provider",
         );
       }
-      return req.provider;
+      return explicit;
     }
     const configured = this.configuredProvider(req.role, projectDefault);
     if (configured) return configured;
@@ -1172,11 +1175,7 @@ export class SessionService {
     return auto ?? "claude";
   }
 
-  /**
-   * The provider that settings name for a role's new sessions: the project's default, else the
-   * role's (`settings.providers.<role>`). Null when both leave it to Auto, or name a provider
-   * the connected runner doesn't have.
-   */
+  /** PM and orchestrator choices take precedence over the project default. */
   configuredProvider(role: Session["role"], projectDefault: string | null): string | null {
     const available = this.deps.runner.providers().map((p) => p.id);
     const connected = this.deps.runner.isConnected();
@@ -1193,6 +1192,15 @@ export class SessionService {
     work: { purpose: string; workKey: string; scope: Session["scope"]; queued: boolean },
   ): Session {
     const settings = this.deps.settings.get();
+    if (role !== "agent" && roleDefault !== "auto") {
+      if (connected && !available.includes(roleDefault)) {
+        throw badRequest(
+          `Provider ${roleDefault} is not available. Loaded providers: ${available.join(", ") || "none"}`,
+          "unknown_provider",
+        );
+      }
+      return roleDefault;
+    }
     const now = new Date().toISOString();
     const provider = this.resolveProvider(req, project ? projectDefaultProvider(project) : null);
     const defaults = roleModelDefaults(
@@ -1211,6 +1219,8 @@ export class SessionService {
       projectId: req.projectId,
       role: req.role,
       parentSessionId: req.parentSessionId ?? null,
+      req.role,
+      this.deps.forceFakeProvider,
       startedBy: req.startedBy,
       purpose: work.purpose,
       workKey: work.workKey,
@@ -1260,7 +1270,15 @@ function roleModelDefaults(
   provider: string,
   info: ProviderInfo | undefined,
 ): Pick<Session, "model" | "effort"> {
-  if (defaults.provider !== provider) return { model: null, effort: null };
+  if (defaults.provider !== provider) {
+    if (role !== "agent" && !forceFake && (defaults.model !== null || defaults.effort !== null)) {
+      throw badRequest(
+        `The ${role} role model or effort is configured for ${defaults.provider} and cannot be used with ${provider}.`,
+        "role_model_provider_mismatch",
+      );
+    }
+    return { model: null, effort: null };
+  }
   // An unknown provider (runner not connected yet) is let through, as for plan mode.
   const hasEffort = info?.capabilities.reasoningEffort ?? true;
   return { model: defaults.model, effort: hasEffort ? defaults.effort : null };
@@ -1271,3 +1289,5 @@ function assertRoleWritable(session: Session): void {
     throw conflict("This conversation is archived", "role_session_archived");
   }
 }
+  role: Session["role"],
+  forceFake?: boolean,

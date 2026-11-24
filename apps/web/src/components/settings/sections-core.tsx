@@ -218,7 +218,7 @@ export function ProviderSettings() {
       </SettingsSection>
       <SettingsSection
         title="Defaults per role"
-        description="Each role can run on any provider. Changing the provider of the orchestrator or of project managers starts a fresh conversation for them on their next message."
+        description="Each role can run on any provider. Changing the provider, model or effort for the orchestrator or project managers starts a fresh conversation on their next message."
       >
         {roles.map(({ role, label, help }) => {
           const current = settings.providers[role];

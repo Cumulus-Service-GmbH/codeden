@@ -1,4 +1,4 @@
-import type { SettingsInput } from "@codeden/contracts";
+import { type SettingsInput, StartSessionRequest } from "@codeden/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { withRoles } from "./support/role-env";
 
@@ -75,7 +75,7 @@ describe("role sessions: moving the orchestrator or a PM to another provider (§
       expect(repo.get(first.id).archivedAt).not.toBeNull();
       expect(inbox.get(failed.id)).toMatchObject({
         status: "dismissed",
-        resolution: { reason: "moved to another provider" },
+        resolution: { reason: "role provider, model or effort changed" },
       });
     }),
   );
@@ -136,19 +136,69 @@ describe("role sessions: what does not move a role session (§8.1)", () => {
   );
 
   it(
-    "starts the PM's new session on the project's default when the role setting changes",
-    withRoles(async ({ roles, set, settle, projectDefault }) => {
-      const pm = await roles.ensure("pm", "p1");
-      settle(pm.id);
+    "starts the PM on its configured provider, model and effort before the project default",
+    withRoles(async ({ roles, set, projectDefault }) => {
       projectDefault("claude");
-      // New sessions in this project start on its default, the one the PM already runs on.
-      await set({ providers: { pm: { provider: "codex" } } });
-      expect((await roles.ensure("pm", "p1")).id).toBe(pm.id);
-      // The setting was seen: a later change of the project's default moves nothing.
-      projectDefault(null);
-      expect((await roles.ensure("pm", "p1")).id).toBe(pm.id);
+      await set({ providers: { pm: { provider: "codex", model: "gpt-test", effort: "high" } } });
+      expect(await roles.ensure("pm", "p1")).toMatchObject({
+        provider: "codex",
+        model: "gpt-test",
+        effort: "high",
+      });
     }),
   );
+
+  it(
+    "refuses a PM provider that cannot use the configured role model",
+    withRoles(async ({ sessions, set }) => {
+      await set({ providers: { pm: { provider: "codex", model: "gpt-test" } } });
+      await expect(
+        sessions.start(
+          StartSessionRequest.parse({
+            role: "pm",
+            projectId: "p1",
+            provider: "claude",
+            startedBy: { kind: "user" },
+          }),
+        ),
+      ).rejects.toThrow(/role.*codex.*claude/i);
+    }),
+  );
+
+  it(
+    "refuses a new PM when its configured provider is unavailable",
+    withRoles(async ({ roles, set, projectDefault }) => {
+      projectDefault("claude");
+      await set({ providers: { pm: { provider: "gemini" } } });
+      await expect(roles.ensure("pm", "p1")).rejects.toThrow(/gemini.*not available/i);
+    }),
+  );
+
+  for (const role of ["pm", "orchestrator"] as const) {
+    it(
+      `moves the ${role} to its new model and effort after its active turn`,
+      withRoles(async ({ roles, set, settle }) => {
+        const projectId = role === "pm" ? "p1" : null;
+        const choice = { provider: "codex", model: "first", effort: "low" } as const;
+        await set({ providers: { [role]: choice } });
+        const first = await roles.ensure(role, projectId);
+        settle(first.id, "running");
+
+        await set({ providers: { [role]: { ...choice, model: "second" } } });
+        expect((await roles.ensure(role, projectId)).id).toBe(first.id);
+        settle(first.id);
+        const second = await roles.ensure(role, projectId);
+        expect(second).toMatchObject({ model: "second", effort: "low" });
+        expect(second.id).not.toBe(first.id);
+
+        settle(second.id);
+        await set({ providers: { [role]: { ...choice, model: "second", effort: "high" } } });
+        const third = await roles.ensure(role, projectId);
+        expect(third).toMatchObject({ model: "second", effort: "high" });
+        expect(third.id).not.toBe(second.id);
+      }),
+    );
+  }
 
   it(
     "keeps a session from before the setting was recorded, until the setting next changes",

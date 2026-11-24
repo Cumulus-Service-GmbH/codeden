@@ -6,6 +6,7 @@ import {
   type ItemRecord,
   type ListSessionsQuery,
   type NewEvent,
+  type RoleDefaults,
   type Session,
   type SessionAutonomyChanged,
   SessionStartMeta,
@@ -99,6 +100,8 @@ export type StoredStartMeta = SessionStartMeta & {
    * it, and the next start (a message, a restart) prepares it first. A session never runs in the
    * project folder in place of the worktree it asked for. Absent on sessions started before it
    * existed, and on forks, which keep `forkStart`.
+  roleModel?: RoleDefaults["model"];
+  roleEffort?: RoleDefaults["effort"];
    */
   workspaceStart?: WorkspaceRequest | null;
   /**

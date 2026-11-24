@@ -201,11 +201,8 @@ describe("SessionService.start: the role's default model and effort", () => {
           model: "gpt-5.5",
           effort: "medium",
         });
-        const pmOnClaude = await start({ role: "pm", provider: "claude" });
-        expect(repo.get(pmOnClaude)).toMatchObject({
-          provider: "claude",
-          model: null,
-          effort: null,
+        await expect(start({ role: "pm", provider: "claude" })).rejects.toMatchObject({
+          code: "role_model_provider_mismatch",
         });
       },
     ),

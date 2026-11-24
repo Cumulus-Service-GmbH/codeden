@@ -32,6 +32,7 @@ const info = (id: string): ProviderInfo =>
     models: [],
     capabilities: {
       readOnly: true,
+      reasoningEffort: true,
       enforcesSecurityRules: true,
       ...(id === "claude" ? { securityRulesWorktreesOnly: true } : {}),
     },

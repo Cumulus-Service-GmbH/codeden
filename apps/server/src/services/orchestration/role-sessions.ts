@@ -1,5 +1,6 @@
 import {
   type QueuedMessage,
+  type RoleDefaults,
   type RoleSessionsRef,
   type Session,
   type Settings,
@@ -12,7 +13,6 @@ import { sessions } from "../../db/schema";
 import type { SettingsStore } from "../../settings-store";
 import { ServiceError } from "../errors";
 import type { InboxService } from "../inbox-service";
-import { projectDefaultProvider } from "../projects/project-config";
 import type { ProjectService } from "../projects/project-service";
 import type { RunnerPort } from "../runner-port";
 import type { SessionRepo, StoredStartMeta } from "../sessions/repo";
@@ -127,45 +127,49 @@ export class RoleSessions {
     return ids.flatMap((id) => this.deps.repo.find(id)?.session ?? []);
   }
 
-  /**
-   * The provider this role session moves to, or null while it stays. Only a change of the role's
-   * own setting (`settings.providers.<role>.provider`) moves a session: it is compared with the
-   * value the session was started under (`StoredStartMeta.roleProvider`). A project's default
-   * provider changing, or a session from before that value was recorded, moves nothing.
-   *
-   * A changed setting that doesn't move the session is settled (recorded as seen) when it
-   * leaves the choice to Auto, or when a new session would start on the provider this one
-   * already runs on. It stays open while it can't be judged: the runner is away, so its
-   * providers aren't known, or it doesn't have the named provider (yet).
-   */
-  private moveTarget(session: Session): string | null {
-    const under = this.deps.repo.find(session.id)?.startMeta?.roleProvider;
-    const setting = this.deps.settings.get().providers[session.role].provider;
-    if (under === undefined || under === setting) return null;
+  /** A role choice changed and the runner can start its replacement. */
+  private moveTarget(session: Session): boolean {
+    const meta = this.deps.repo.find(session.id)?.startMeta;
+    const setting = this.deps.settings.get().providers[session.role];
+    if (meta?.roleProvider === undefined) return false;
+    const model = meta.roleModel === undefined ? session.model : meta.roleModel;
+    const effort = meta.roleEffort === undefined ? session.effort : meta.roleEffort;
+    if (
+      meta.roleProvider === setting.provider &&
+      model === setting.model &&
+      effort === setting.effort
+    ) {
+      return false;
+    }
     const { runner } = this.deps;
-    if (!runner.isConnected()) return null;
-    if (setting !== "auto" && !runner.providers().some((p) => p.id === setting)) return null;
-    const project = session.projectId ? this.deps.projects.get(session.projectId) : null;
-    const target =
-      setting === "auto"
-        ? null
-        : this.deps.sessions.configuredProvider(
-            session.role,
-            project ? projectDefaultProvider(project) : null,
-          );
-    if (target && target !== session.provider) return target;
+    if (!runner.isConnected()) return false;
+    const target = runner.providers().find((p) => p.id === setting.provider);
+    if (setting.provider !== "auto" && !target) return false;
+    if (
+      target &&
+      (setting.provider !== session.provider ||
+        setting.model !== session.model ||
+        (target.capabilities.reasoningEffort ? setting.effort : null) !== session.effort)
+    ) {
+      return true;
+    }
     this.recordSetting(session.id, setting);
-    return null;
+    return false;
   }
 
-  private recordSetting(sessionId: string, roleProvider: string): void {
-    this.deps.repo.setStartMeta(sessionId, (meta) => ({ ...(meta ?? EMPTY_META), roleProvider }));
+  private recordSetting(sessionId: string, setting: RoleDefaults): void {
+    this.deps.repo.setStartMeta(sessionId, (meta) => ({
+      ...(meta ?? EMPTY_META),
+      roleProvider: setting.provider,
+      roleModel: setting.model,
+      roleEffort: setting.effort,
+    }));
   }
 
   /** Whether the session is to be retired now: its role moved, and no turn is under way. */
   private shouldRetire(session: Session): boolean {
     const underWay = BUSY.has(session.status) || this.deps.sessions.isDelivering(session.id);
-    return !underWay && this.moveTarget(session) !== null;
+    return !underWay && this.moveTarget(session);
   }
 
   /**
@@ -179,7 +183,9 @@ export class RoleSessions {
     const queued = await this.deps.sessions.stopKeepingQueue(session.id);
     for (const item of this.deps.inbox.list({ sessionId: session.id })) {
       if (item.kind !== "run_failed") continue;
-      this.deps.inbox.close(item, "dismissed", { reason: "moved to another provider" });
+      this.deps.inbox.close(item, "dismissed", {
+        reason: "role provider, model or effort changed",
+      });
     }
     this.deps.repo.update(session.id, (s) =>
       s.archivedAt ? s : { ...s, archivedAt: new Date().toISOString() },
@@ -250,8 +256,17 @@ export class RoleSessions {
   applyProviderSettings(previous?: Settings["providers"]): Promise<void> {
     if (previous) {
       for (const session of this.current()) {
-        if (this.deps.repo.find(session.id)?.startMeta?.roleProvider !== undefined) continue;
-        this.recordSetting(session.id, previous[session.role].provider);
+        const meta = this.deps.repo.find(session.id)?.startMeta;
+        if (
+          meta?.roleProvider !== undefined &&
+          meta.roleModel !== undefined &&
+          meta.roleEffort !== undefined
+        )
+          continue;
+        this.recordSetting(session.id, {
+          ...previous[session.role],
+          provider: meta?.roleProvider ?? previous[session.role].provider,
+        });
       }
     }
     const run = this.applying.then(() => this.retireMoved());
