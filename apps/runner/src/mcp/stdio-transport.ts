@@ -1,6 +1,7 @@
 /// <reference path="../types/cross-spawn.d.ts" />
 import type { ChildProcess, spawn as nodeSpawn } from "node:child_process";
-import { ReadBuffer, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
+import { readStdioLines, STDIO_LINE_LIMIT } from "@codeden/providers";
+import { deserializeMessage, serializeMessage } from "@modelcontextprotocol/sdk/shared/stdio.js";
 import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
 import type { JSONRPCMessage } from "@modelcontextprotocol/sdk/types.js";
 import crossSpawn from "cross-spawn";
@@ -38,7 +39,7 @@ export class McpStdioTransport implements Transport {
   /** The server process, from spawn on; null when it could not be started. */
   pid: number | null = null;
   private child: ChildProcess | null = null;
-  private readonly buffer = new ReadBuffer();
+  private stopReading?: () => void;
 
   constructor(private readonly params: McpStdioParams) {}
 
@@ -63,10 +64,21 @@ export class McpStdioTransport implements Transport {
         resolve();
       });
       child.once("close", () => {
+        this.stopReading?.();
         this.child = null;
         this.onclose?.();
       });
-      child.stdout?.on("data", (chunk: Buffer) => this.read(chunk));
+      if (child.stdout) {
+        this.stopReading = readStdioLines(
+          child.stdout,
+          (line) => this.read(line),
+          () => {
+            const message = `MCP stdout line truncated at ${STDIO_LINE_LIMIT} bytes`;
+            this.params.onStderr(`Warning: ${message}\n`);
+            this.onerror?.(new Error(message));
+          },
+        );
+      }
       child.stderr?.on("data", (chunk: Buffer) => this.params.onStderr(chunk.toString("utf8")));
       for (const stream of [child.stdin, child.stdout, child.stderr]) {
         stream?.on("error", (error) => this.onerror?.(error));
@@ -85,27 +97,18 @@ export class McpStdioTransport implements Transport {
   /** Detach from the process; stopping it is the caller's job (see the class comment). */
   async close(): Promise<void> {
     this.child = null;
-    this.buffer.clear();
+    this.stopReading?.();
   }
 
-  private read(chunk: Buffer): void {
+  private read(line: string): void {
+    let message: JSONRPCMessage;
     try {
-      this.buffer.append(chunk);
+      message = deserializeMessage(line);
     } catch (error) {
+      // A log line on stdout is reported and skipped.
       this.onerror?.(error as Error);
       return;
     }
-    for (;;) {
-      let message: JSONRPCMessage | null;
-      try {
-        message = this.buffer.readMessage();
-      } catch (error) {
-        // A line that isn't JSON-RPC (a log line on stdout) is reported and skipped.
-        this.onerror?.(error as Error);
-        continue;
-      }
-      if (message === null) return;
-      this.onmessage?.(message);
-    }
+    this.onmessage?.(message);
   }
 }

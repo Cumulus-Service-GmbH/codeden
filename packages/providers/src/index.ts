@@ -58,6 +58,7 @@ export {
   shellSyntax,
 } from "./util/shell-command";
 export { inspectFile, shimTarget } from "./util/shim";
+export { readStdioLines, STDIO_LINE_LIMIT } from "./util/stdio-lines";
 export {
   expandWindowsVars,
   parseRegQuery,

@@ -2,12 +2,12 @@ import { type ChildProcess, type SpawnOptions, spawn } from "node:child_process"
 import { isInside } from "../util/paths";
 import { childEnv } from "./env";
 import {
-  isAlive,
   killProcess,
   killTree,
   killTreeAndOrphans,
   listDescendants,
   type ProcessLife,
+  waitForExit,
 } from "./tree";
 
 /** A process the runner started (or adopted, like a pty shell). */
@@ -188,7 +188,7 @@ export class ProcessSupervisor {
 
   async kill(pid: number): Promise<void> {
     await killTree(pid);
-    if (!isAlive(pid)) this.tracked.delete(pid);
+    if (await waitForExit(pid, 2_000)) this.tracked.delete(pid);
   }
 
   /**
@@ -205,5 +205,6 @@ export class ProcessSupervisor {
     await Promise.all(
       rest.map((pid) => (process.platform === "win32" ? killProcess(pid) : killTree(pid, 500))),
     );
+    await Promise.all(rest.map((pid) => waitForExit(pid, 2_000)));
   }
 }

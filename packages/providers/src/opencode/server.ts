@@ -1,8 +1,8 @@
 import type { ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { createInterface } from "node:readline";
 import { agentEnv } from "../util/agent-env";
-import { killTree, type ResolvedCommand, spawnResolved } from "../util/exec";
+import { type ResolvedCommand, spawnResolved, stopStdioChild } from "../util/exec";
+import { readStdioLines, STDIO_LINE_LIMIT } from "../util/stdio-lines";
 import { OpenCodeClient } from "./client";
 import { guardPluginDir, HIDDEN_ENV_VARS } from "./plugin";
 
@@ -76,7 +76,7 @@ export class OpenCodeServer {
       opts.signal?.addEventListener("abort", () => void server.close(), { once: true });
       return server;
     } catch (error) {
-      stop(child);
+      await stopStdioChild(child);
       throw error;
     }
   }
@@ -100,8 +100,7 @@ export class OpenCodeServer {
    * user's MCP servers run as its children) if it lingers. Resolves once it has exited.
    */
   close(): Promise<void> {
-    if (this.exitedFlag) return Promise.resolve();
-    return stop(this.child);
+    return stopStdioChild(this.child);
   }
 
   private handleExit(code: number | null): void {
@@ -117,31 +116,14 @@ export class OpenCodeServer {
   }
 }
 
-function stop(child: ChildProcess): Promise<void> {
-  if (child.exitCode !== null || child.signalCode !== null) return Promise.resolve();
-  const exited = new Promise<void>((resolve) => {
-    child.once("exit", () => resolve());
-    setTimeout(resolve, 5000).unref();
-  });
-  try {
-    child.stdin?.end();
-  } catch {
-    // ignore
-  }
-  setTimeout(() => {
-    if (child.exitCode === null && child.signalCode === null) killTree(child);
-  }, 1500).unref();
-  return exited;
-}
-
 function readUrl(child: ChildProcess, timeoutMs: number, signal?: AbortSignal): Promise<string> {
   return new Promise((resolve, reject) => {
     let stderr = "";
-    const lines = child.stdout ? createInterface({ input: child.stdout }) : undefined;
+    let stopReading: (() => void) | undefined;
     const done = (error?: Error, url?: string) => {
       clearTimeout(timer);
       signal?.removeEventListener("abort", onAbort);
-      lines?.removeAllListeners("line");
+      stopReading?.();
       if (error) reject(error);
       else resolve(url as string);
     };
@@ -151,7 +133,6 @@ function readUrl(child: ChildProcess, timeoutMs: number, signal?: AbortSignal): 
       timeoutMs,
     );
     signal?.addEventListener("abort", onAbort, { once: true });
-    if (signal?.aborted) onAbort();
     child.stderr?.setEncoding("utf8").on("data", (d: string) => {
       stderr = (stderr + d).slice(-2000);
     });
@@ -163,16 +144,25 @@ function readUrl(child: ChildProcess, timeoutMs: number, signal?: AbortSignal): 
         ),
       ),
     );
-    lines?.on("line", (line) => {
-      try {
-        const url = (JSON.parse(line) as { url?: unknown }).url;
-        if (typeof url === "string" && /^http:\/\/127\.0\.0\.1:\d+$/.test(url.replace(/\/$/, ""))) {
-          done(undefined, url.replace(/\/$/, ""));
-        }
-      } catch {
-        // Not the URL line; keep waiting.
-      }
-    });
+    if (child.stdout)
+      stopReading = readStdioLines(
+        child.stdout,
+        (line) => {
+          try {
+            const url = (JSON.parse(line) as { url?: unknown }).url;
+            if (
+              typeof url === "string" &&
+              /^http:\/\/127\.0\.0\.1:\d+$/.test(url.replace(/\/$/, ""))
+            ) {
+              done(undefined, url.replace(/\/$/, ""));
+            }
+          } catch {
+            // Not the URL line; keep waiting.
+          }
+        },
+        () => console.warn(`OpenCode stdout line truncated at ${STDIO_LINE_LIMIT} bytes`),
+      );
+    if (signal?.aborted) onAbort();
   });
 }
 

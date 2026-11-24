@@ -316,7 +316,8 @@ export class ClaudeSession implements ProviderSession {
     this.mapper.closeAll();
     this.prompts?.close();
     try {
-      this.q?.close();
+      if (this.q?.[Symbol.asyncDispose]) await this.q[Symbol.asyncDispose]();
+      else this.q?.close();
     } catch {
       this.abort?.abort();
     }
