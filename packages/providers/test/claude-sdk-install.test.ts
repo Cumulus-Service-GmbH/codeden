@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   CLAUDE_SDK_PACKAGE,
   CLAUDE_SDK_VERSION,
@@ -33,6 +33,7 @@ const calls = (dir: string): string[][] =>
     : [];
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   delete process.env.FAKE_NPM_FAIL;
   delete process.env.FAKE_NPM_DELAY_MS;
   delete process.env.FAKE_NPM_VERSION;
@@ -67,6 +68,20 @@ describe("Claude SDK on-demand install", () => {
     // Already installed: npm is not run again.
     await installClaudeSdk({ depsDir: dir, npm: fakeNpm });
     expect(calls(dir)).toHaveLength(1);
+  });
+
+  it("keeps on-demand installs local while retaining the configured registry", async () => {
+    const dir = depsDir();
+    vi.stubEnv("FAKE_NPM_RECORD_CONFIG", "1");
+    vi.stubEnv("npm_config_global", "true");
+    vi.stubEnv("npm_config_dry_run", "true");
+    vi.stubEnv("npm_config_registry", "https://registry.example.invalid");
+    await installClaudeSdk({ depsDir: dir, npm: fakeNpm });
+    expect(JSON.parse(readFileSync(join(dir, "config.json"), "utf8"))).toEqual({
+      global: "false",
+      location: "project",
+      registry: "https://registry.example.invalid",
+    });
   });
 
   it("runs npm once for concurrent callers", async () => {

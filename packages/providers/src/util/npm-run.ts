@@ -1,11 +1,25 @@
 import { killTree, type ResolvedCommand, spawnResolved } from "./exec";
 
+const npmConfigPrefix = "npm_config_";
+const inheritedNpmConfig = new Set([
+  "registry",
+  "proxy",
+  "http_proxy",
+  "https_proxy",
+  "noproxy",
+  "no_proxy",
+  "cafile",
+  "ca",
+  "strict_ssl",
+  "userconfig",
+]);
+
 export interface RunNpmOptions {
   cwd: string;
   timeoutMs: number;
   /** Each non-empty output line (trimmed, at most 300 characters), for progress UIs. */
   onLine: (line: string) => void;
-  /** Base environment. Defaults to `process.env`. */
+  /** Base environment. Defaults to `process.env`; only connection-related npm config is inherited. */
   baseEnv?: NodeJS.ProcessEnv;
   /** Extra environment on top of the base environment. */
   env?: Record<string, string>;
@@ -21,7 +35,19 @@ export function runNpm(npm: ResolvedCommand, args: string[], opts: RunNpmOptions
     const child = spawnResolved(npm, args, {
       cwd: opts.cwd,
       env: {
-        ...(opts.baseEnv ?? process.env),
+        ...Object.fromEntries(
+          Object.entries(opts.baseEnv ?? process.env).filter(([key]) => {
+            const name = key.toLowerCase();
+            if (!name.startsWith(npmConfigPrefix)) return true;
+            const setting = name.slice(npmConfigPrefix.length);
+            return (
+              inheritedNpmConfig.has(setting.replaceAll("-", "_")) ||
+              /^@[^/:]+:registry$/.test(setting)
+            );
+          }),
+        ),
+        npm_config_global: "false",
+        npm_config_location: "project",
         npm_config_update_notifier: "false",
         npm_config_progress: "false",
         ...opts.env,
