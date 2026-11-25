@@ -11,7 +11,7 @@ import {
   runningChecklistItemsFirst,
   type Session,
 } from "@codeden/contracts";
-import { and, desc, eq, gt, inArray, or } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import type { Db } from "../../db/client";
 import { rowToSession } from "../../db/rows";
 import { projectChecklists, projects, sessions, turns } from "../../db/schema";
@@ -106,9 +106,28 @@ export class ChecklistService {
       text: string,
       status: ChecklistStatus,
       metadata: ItemMetadata & LaneLinks,
+      explicitStatus?: ChecklistStatus,
     ): ChecklistItem => {
       const old = oldById.get(id);
-      const entry = { ...old, id, text, status, updatedAt, ...itemMetadata(old, metadata) };
+      if (
+        !old &&
+        current.state === "approved" &&
+        (metadata.sessionIds?.length || metadata.workKeys?.length)
+      ) {
+        throw badRequest("Link this item after its addition is approved");
+      }
+      const entry = {
+        ...old,
+        id,
+        text,
+        status,
+        updatedAt,
+        ...itemMetadata(old, metadata),
+        manuallyCompleted:
+          explicitStatus === undefined
+            ? old?.manuallyCompleted
+            : explicitStatus === "done" || undefined,
+      };
       const next = this.editLinks(projectId, entry, metadata);
       return old?.text === text && sameProgress(old, next) ? old : next;
     };
@@ -121,6 +140,7 @@ export class ChecklistService {
           text,
           status ?? (id ? oldById.get(id)?.status : undefined) ?? "todo",
           metadata,
+          status,
         ),
       );
     } else {
@@ -132,7 +152,7 @@ export class ChecklistService {
         const old = oldById.get(id);
         const nextText = text ?? old?.text;
         if (nextText === undefined) throw badRequest(`New checklist item ${id} needs text`);
-        next.set(id, makeItem(id, nextText, status ?? old?.status ?? "todo", metadata));
+        next.set(id, makeItem(id, nextText, status ?? old?.status ?? "todo", metadata, status));
       }
       for (const id of op.remove ?? []) next.delete(id);
       items = [...next.values()];
@@ -452,6 +472,10 @@ export class ChecklistService {
           ...entry,
           status: change.status ?? entry.status,
           note: change.note ?? entry.note,
+          manuallyCompleted:
+            change.status === undefined
+              ? entry.manuallyCompleted
+              : change.status === "done" || undefined,
           ...itemMetadata(entry, change),
         },
         change,
@@ -566,7 +590,11 @@ export class ChecklistService {
     const linked = checklist.items.filter(
       (item) =>
         (itemId === undefined || item.id === itemId) &&
-        (checklistLinked(item, session) || item.workKeys?.includes(session.workKey)),
+        (checklistLinked(item, session) ||
+          item.workKeys?.includes(session.workKey) ||
+          (session.parentSessionId &&
+            item.workKeys?.length &&
+            this.lanes(projectId, item).some((lane) => lane?.id === session.parentSessionId))),
     );
     if (!linked.length) return false;
     this.changeItems(checklist, linked, (item) =>
@@ -611,7 +639,9 @@ export class ChecklistService {
     if (
       eventSession &&
       !checklistLinked(item, eventSession) &&
-      !lanes.some((lane) => lane?.id === eventSession.id)
+      !lanes.some(
+        (lane) => lane && (lane.id === eventSession.id || lane.id === eventSession.parentSessionId),
+      )
     ) {
       return item;
     }
@@ -625,67 +655,104 @@ export class ChecklistService {
       ),
     );
     const next = { ...item, liveSessionIds };
-    const state = lanes.map((lane) => {
-      if (!lane) return { status: "todo" as const };
-      if (liveSessionIds?.includes(lane.id)) return { status: "done" as const };
-      return {
-        status: this.laneStatus(lane) ?? "todo",
-        reason: this.laneReason(lane),
-      };
-    });
+    const state = lanes.map<{ status: ChecklistStatus; reason?: string; waiting?: boolean }>(
+      (lane) => {
+        if (!lane) return { status: "todo" as const };
+        if (liveSessionIds?.includes(lane.id)) return { status: "done" as const };
+        return {
+          status: this.laneStatus(lane) ?? "todo",
+          reason: this.laneReason(lane),
+          waiting: lane.status === "waiting",
+        };
+      },
+    );
 
-    // A child working on the only linked session may signal progress on its parent's behalf.
+    // A child may report progress for a linked parent. Only direct lanes count toward completion.
     const delegated =
       eventSession?.parentSessionId &&
-      item.sessionIds?.length === 1 &&
-      !item.workKeys?.length &&
-      checklistLinked(item, eventSession);
-    const blocked = state.find((lane) => lane.status === "blocked");
+      lanes.some((lane) => lane?.id === eventSession.parentSessionId);
+    const waitingOwnerId =
+      this.waitingOwnerId(projectId, lanes, liveSessionIds) ??
+      (waiting ? eventSession?.id : undefined);
+    const blocked =
+      state.find((lane) => lane.status === "blocked" && !lane.waiting) ??
+      state.find((lane) => lane.status === "blocked");
     const allDone = state.length > 0 && state.every((lane) => lane.status === "done");
-    if (blocked || (delegated && signal === "blocked" && !allDone)) {
+    if (blocked || (!allDone && (waitingOwnerId || (delegated && signal === "blocked")))) {
       next.status = "blocked";
+      next.manuallyCompleted = undefined;
       next.note =
-        blocked?.reason ?? (eventSession && this.laneReason(eventSession)) ?? "Linked work blocked";
+        blocked?.reason ??
+        (waitingOwnerId ? WAITING_FOR_OWNER : undefined) ??
+        (eventSession && this.laneReason(eventSession)) ??
+        "Linked work blocked";
     } else if (allDone) {
       next.status = "done";
-      next.note = liveSessionIds?.length ? "All linked work done or LIVE" : "All linked work done";
-    } else if (
-      state.some((lane) => lane.status === "doing" || lane.status === "done") ||
-      (delegated && signal === "doing") ||
-      (signal === "doing" && item.status !== "done")
-    ) {
-      next.status = "doing";
-      next.note = "Linked work in progress";
-    } else if (lanes.length && (item.autoUpdatedAt || item.status !== "todo")) {
-      next.status = "todo";
-      next.note = "Waiting for linked work to start";
+      if (!item.manuallyCompleted || liveSessionIds?.length) {
+        next.note = liveSessionIds?.length
+          ? "All linked work done or LIVE"
+          : "All linked work done";
+      }
+    } else if (!item.manuallyCompleted) {
+      if (
+        state.some((lane) => lane.status === "doing" || lane.status === "done") ||
+        (delegated && signal === "doing") ||
+        (signal === "doing" && item.status !== "done")
+      ) {
+        if (item.status !== "doing") {
+          next.status = "doing";
+          next.note = "Linked work in progress";
+        }
+      } else if (
+        lanes.length &&
+        (!eventSession || waiting === false) &&
+        (item.autoUpdatedAt || item.status !== "todo")
+      ) {
+        next.status = "todo";
+        next.note = "Waiting for linked work to start";
+      }
     }
 
     if (!next.needsOwner || next.needsOwner.source === "work") {
-      const owner =
-        lanes.find(
-          (lane) =>
-            lane?.status === "waiting" && !lane.archivedAt && !liveSessionIds?.includes(lane.id),
-        ) ?? (delegated && waiting ? eventSession : undefined);
-      if (owner) {
-        next.needsOwner = { reason: WAITING_FOR_OWNER, sessionId: owner.id, source: "work" };
-      } else if (
-        !eventSession ||
-        (waiting === false && next.needsOwner?.sessionId === eventSession.id)
-      ) {
-        next.needsOwner = undefined;
-      }
+      next.needsOwner = waitingOwnerId
+        ? { reason: WAITING_FOR_OWNER, sessionId: waitingOwnerId, source: "work" }
+        : undefined;
     }
     if (
       next.status !== item.status ||
       next.note !== item.note ||
       next.liveSessionIds !== item.liveSessionIds ||
-      (next.needsOwner?.source === "work" &&
-        next.needsOwner.sessionId !== item.needsOwner?.sessionId)
+      ((next.needsOwner?.source === "work" || item.needsOwner?.source === "work") &&
+        next.needsOwner?.sessionId !== item.needsOwner?.sessionId)
     ) {
       next.autoUpdatedAt = new Date().toISOString();
     }
     return next;
+  }
+
+  private waitingOwnerId(projectId: string, lanes: (Session | undefined)[], liveIds?: string[]) {
+    const activeLanes = lanes.filter(
+      (lane): lane is Session => !!lane && !lane.archivedAt && !liveIds?.includes(lane.id),
+    );
+    const waiting = activeLanes.find((lane) => lane.status === "waiting");
+    if (waiting) return waiting.id;
+    if (!activeLanes.length) return;
+    return this.db
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.projectId, projectId),
+          inArray(
+            sessions.parentSessionId,
+            activeLanes.map((lane) => lane.id),
+          ),
+          eq(sessions.status, "waiting"),
+          isNull(sessions.archivedAt),
+        ),
+      )
+      .orderBy(sessions.id)
+      .get()?.id;
   }
 
   private laneStatus(session: Session): ChecklistStatus | undefined {
@@ -884,6 +951,7 @@ function sameProgress(old: ChecklistItem, next: ChecklistItem): boolean {
     old.workKeys === next.workKeys &&
     old.liveSessionIds === next.liveSessionIds &&
     old.autoUpdatedAt === next.autoUpdatedAt &&
+    old.manuallyCompleted === next.manuallyCompleted &&
     old.eta === next.eta &&
     old.needsOwner?.reason === next.needsOwner?.reason &&
     old.needsOwner?.sessionId === next.needsOwner?.sessionId &&
@@ -927,7 +995,7 @@ export function checklistWorkStatus(
   includeArchived = false,
 ): ChecklistStatus | undefined {
   if (session.archivedAt && !includeArchived) return;
-  if (session.status === "waiting") return "blocked";
+  if (session.status === "waiting") return session.archivedAt ? undefined : "blocked";
   if (session.status === "failed") return "blocked";
   switch (session.result?.outcome) {
     case "success":

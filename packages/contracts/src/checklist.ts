@@ -22,6 +22,8 @@ export const ChecklistItem = z.object({
   liveSessionIds: z.array(Id).max(400).optional(),
   /** When linked work last changed this item's progress. */
   autoUpdatedAt: Timestamp.optional(),
+  /** An explicit completion remains done when work restarts. A failure can still block it. */
+  manuallyCompleted: z.literal(true).optional(),
   startPurpose: singleLine.max(300).optional(),
   /** Estimated completion time. */
   eta: Timestamp.optional(),

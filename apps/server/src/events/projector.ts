@@ -130,7 +130,7 @@ export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
           {
             type: "checklist.updated",
             sessionId: null,
-            payload: { checklist: { ...checklist, items, updatedAt, changes: [] } },
+            payload: { checklist: { ...checklist, items, updatedAt } },
           },
         ];
       });

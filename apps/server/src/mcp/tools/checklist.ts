@@ -32,7 +32,7 @@ export const readChecklist = defineTool({
 export const updateChecklistItem = defineTool({
   name: "update_checklist_item",
   description:
-    "Update a checklist item's status, note, ETA, or owner action. Use null to clear ETA or owner action. PMs can update their project's items, replace sessionIds or workKeys (empty arrays unlink), or report a linked session LIVE after a healthy install. Agents can update items linked to their session or their parent session.",
+    "Update a checklist item's status, note, ETA, or owner action. Use null to clear ETA or owner action. PMs can update their project's items, replace sessionIds or workKeys (empty arrays unlink), or report a linked session LIVE after a healthy install. An install report updates all items linked to that session. Agents can update items linked to their session or their parent session.",
   roles: ["pm", "agent"],
   scope: "session",
   isAvailable: hasChecklist,

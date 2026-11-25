@@ -121,6 +121,15 @@ it("preserves manual status when an existing session receives an unrelated updat
     repo.update(session.id, (entry) => ({ ...entry, title: "Renamed" }));
     await Promise.resolve();
     expect(checklist.get(projectId)?.items[0]?.status).toBe("blocked");
+    checklist.updateItem(projectId, "linked", { status: "done", note: "Verified" }, session);
+    for (const status of ["idle", "running"] as const) {
+      repo.update(session.id, (entry) => ({ ...entry, status }));
+      await Promise.resolve();
+      expect(checklist.get(projectId)?.items[0]).toMatchObject({
+        status: "done",
+        note: "Verified",
+      });
+    }
   } finally {
     listener.stop();
     database.close();
@@ -134,12 +143,15 @@ it("marks an item when a linked child is created already waiting", async () => {
   const repo = new SessionRepo(database.db, store);
   const projectId = sampleProject.id;
   const session = { ...sampleSession, projectId };
+  const second = { ...session, id: "second-parent", workKey: "issue:2" };
   store.append([
     { type: "project.created", sessionId: null, payload: { project: sampleProject } },
     { type: "session.created", sessionId: session.id, payload: { session } },
+    { type: "session.created", sessionId: second.id, payload: { session: second } },
   ]);
   checklist.update(projectId, { items: [{ id: "linked", text: "Work" }] });
   checklist.link(projectId, "linked", session);
+  checklist.update(projectId, { patch: [{ id: "linked", workKeys: [second.workKey] }] });
   const listener = new ChecklistListener(store, repo, checklist);
   try {
     const child = {
@@ -150,6 +162,8 @@ it("marks an item when a linked child is created already waiting", async () => {
     };
     store.append([{ type: "session.created", sessionId: child.id, payload: { session: child } }]);
     await Promise.resolve();
+    checklist.reportInstallHealthy(projectId, second.id);
+    expect(checklist.get(projectId)?.items[0]?.status).toBe("blocked");
     expect(checklist.get(projectId)?.items[0]?.needsOwner).toEqual({
       reason: "Waiting for your answer",
       sessionId: child.id,
@@ -228,9 +242,16 @@ it("audits linked session and work-key progress within the project", async () =>
     });
     await transition(two.id, "waiting");
     expect(item()).toMatchObject({ status: "blocked", note: expect.stringMatching(/waiting/i) });
+    repo.update(two.id, (entry) => ({ ...entry, archivedAt: entry.updatedAt }));
+    await Promise.resolve();
+    expect(item()?.status).toBe("doing");
+    expect(item()?.needsOwner).toBeUndefined();
+
+    await transition(one.id, "waiting");
     repo.update(two.id, (entry) => ({
       ...entry,
       status: "failed",
+      archivedAt: null,
       result: { outcome: "failed", summary: "Build check failed", at: entry.updatedAt },
     }));
     await Promise.resolve();
