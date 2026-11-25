@@ -3,6 +3,7 @@ import type {
   ConflictRecord,
   EventEnvelope,
   FactoryStatus,
+  FactoryTuning,
   Item,
   ItemRecord,
   ServerToClientMessage,
@@ -45,6 +46,7 @@ export class MockWorld {
   transcripts = new Map<string, TranscriptState>();
   conflicts: ConflictRecord[] = structuredClone(conflicts);
   factory = new Map<string, FactoryStatus>();
+  factoryTeams = new Map<string, Pick<FactoryTuning, "team" | "resultSummaryBytes">>();
   files = new Map<string, string>();
   private log: EventEnvelope[] = [];
   private listeners = new Set<Listener>();

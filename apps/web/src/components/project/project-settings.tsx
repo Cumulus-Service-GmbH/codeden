@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { PickerFooterChoice } from "@/components/composer/model-picker/footer";
 import { ModelPicker } from "@/components/composer/model-picker/model-picker";
 import { Segmented, SettingRow, SettingsSection } from "@/components/settings/settings-ui";
+import { EffectiveTeam } from "@/components/settings/team-settings";
 import { ProjectTokenSaverRow } from "@/components/settings/token-saver";
 import { AUTONOMY, AUTONOMY_LEVELS } from "@/components/thread/autonomy";
 import { useProjectActions } from "@/lib/project-actions";
@@ -108,6 +109,7 @@ export function ProjectSettings({ project }: { project: Project }) {
         </SettingRow>
         <ProjectTokenSaverRow project={project} />
       </SettingsSection>
+      <EffectiveTeam projectId={project.id} />
       {project.teams && (
         <SettingsSection
           title="Teams"

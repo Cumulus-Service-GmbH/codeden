@@ -45,6 +45,7 @@ import {
   Snapshot,
   SpeechSummaryResponse,
   StartSessionResponse,
+  TeamDiagnostics,
   ToolOutputResponse,
   TranscriptSearchResponse,
   UpdateStatus,
@@ -240,6 +241,11 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
     factory: httpFactoryApi(http),
     techDebt: httpTechDebtApi(http),
 
+    teamDiagnostics: (projectId) =>
+      get(
+        projectId ? `/settings/team?${new URLSearchParams({ projectId })}` : "/settings/team",
+        (value) => TeamDiagnostics.parse(value),
+      ),
     updateSettings: (patch) => call("PATCH", "/settings", patch, (v) => Settings.parse(v)),
     secrets: httpSecretsApi(http),
     network: httpNetworkApi(http),

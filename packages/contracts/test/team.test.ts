@@ -1,5 +1,6 @@
 import { expect, it } from "vitest";
 import {
+  countTeamOverrides,
   FactoryTuning,
   FactoryTuningPatch,
   resolveTeam,
@@ -8,6 +9,7 @@ import {
   sessionTeamMember,
   TEAM_FILE_ENV,
   Team,
+  TeamDiagnostics,
   TeamFile,
   TeamRole,
   teamRoleOfTitle,
@@ -64,6 +66,7 @@ it.each([
   ["Investigator", "investigator"],
   ["Browser Tester", "browserTester"],
   ["Browser Operator", "browserOperator"],
+  ["Operator", "operator"],
   ["Unknown", null],
 ])("reads only the first leading tag [%s]", (tag, role) => {
   expect(teamRoleOfTitle(`[${tag}] [Writer] Work`)).toBe(role);
@@ -81,8 +84,11 @@ it("round-trips a Team file", () => {
     sessionId: "s1",
     projectId: "p1",
     roots: ["/work/app", "/home/.codeden/wt/app"],
-    team: [{ role: "reviewer", provider: "claude", model: "claude-opus-5-5", effort: "high" }],
-    sources: { reviewer: "project" },
+    team: [
+      { role: "reviewer", provider: "claude", model: "claude-opus-5-5", effort: "high" },
+      { role: "operator", provider: "codex", model: "operator-model", effort: "high" },
+    ],
+    sources: { reviewer: "project", operator: "default" },
     updatedAt: "2026-11-22T19:00:00.000Z",
   });
   expect(TeamFile.parse(JSON.parse(JSON.stringify(file)))).toEqual(file);
@@ -171,4 +177,18 @@ it("round-trips the owner's autonomy override and its event envelope", async () 
     payload,
   };
   expect(EventEnvelope.parse(JSON.parse(JSON.stringify(envelope)))).toEqual(envelope);
+});
+
+it("round-trips diagnostics with sources and counts each project override", () => {
+  const writer = { role: "writer", provider: "codex", model: null, effort: null } as const;
+  const defaults = [{ ...writer, model: "default-writer" }];
+  const data = TeamDiagnostics.parse({
+    ...resolveTeam({ defaults, project: [writer] }),
+    overrides: countTeamOverrides([[writer], [], [{ ...writer, model: "other" }]]),
+  });
+  expect(TeamDiagnostics.parse(JSON.parse(JSON.stringify(data)))).toEqual({
+    team: [writer],
+    sources: { writer: "project" },
+    overrides: { writer: 2 },
+  });
 });

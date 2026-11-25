@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { type ChecklistProposal, ProjectChecklist } from "@codeden/contracts";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { sampleProject, sampleSession } from "../../../packages/contracts/test/fixtures";
@@ -5,6 +6,7 @@ import { type Database, openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
 import { ToolRegistry } from "../src/mcp/registry";
 import { allTools } from "../src/mcp/tools";
+import { updateChecklistItem } from "../src/mcp/tools/checklist";
 import { updateChecklist } from "../src/mcp/tools/orchestrator/checklist";
 import { ChecklistService, WAITING_FOR_OWNER } from "../src/services/checklist/checklist-service";
 import { InboxService } from "../src/services/inbox-service";
@@ -117,7 +119,7 @@ it("scopes item edits in MCP and exposes no owner decision tool", async () => {
   const agentCaller = { ...caller, sessionId: agent.id, role: agent.role };
   const pmCaller = { ...caller, sessionId: pm.id, role: pm.role };
   const edit = allTools.find((tool) => tool.name === "update_checklist_item");
-  expect(edit?.isAvailable?.({ checklist: service } as never, pmCaller)).toBe(false);
+  expect(edit?.isAvailable?.({ checklist: service } as never, agentCaller, "agent")).toBe(false);
   const draft = service.update(
     projectId,
     { items: [{ id: "a", text: "A" }] },
@@ -128,12 +130,19 @@ it("scopes item edits in MCP and exposes no owner decision tool", async () => {
     await tools.call("update_checklist_item", { itemId: "a", status: "doing" }, agentCaller),
   ).toMatchObject({ isError: true, text: expect.stringContaining("not linked") });
   expect(
-    await tools.call("update_checklist_item", { itemId: "a", text: "B", status: "done" }, pmCaller),
+    await tools.call(
+      "update_checklist_item",
+      { itemId: "a", text: "B", status: "done" },
+      agentCaller,
+    ),
   ).toMatchObject({ isError: true });
   expect(
-    await tools.call("update_checklist_item", { itemId: "a", note: "Reviewing" }, pmCaller),
+    await tools.call("update_checklist_item", { itemId: "a", status: "done" }, pmCaller),
   ).toMatchObject({ isError: false });
   service.link(projectId, "a", agent);
+  expect(
+    await tools.call("update_checklist_item", { itemId: "a", text: "B" }, agentCaller),
+  ).toMatchObject({ isError: true });
   expect(
     await tools.call("update_checklist_item", { itemId: "a", status: "doing" }, agentCaller),
   ).toMatchObject({ isError: false });
@@ -144,6 +153,141 @@ it("scopes item edits in MCP and exposes no owner decision tool", async () => {
     });
   }
   expect(service.get(projectId)?.pending?.inboxItemId).toBe(card);
+});
+
+function pmChecklistTools() {
+  const session = { ...sampleSession, projectId, role: "pm" as const };
+  const tools = new ToolRegistry([updateChecklistItem], {
+    checklist: service,
+    sessionRepo: { find: () => ({ session }) },
+  } as never);
+  const caller = {
+    caller: "mcp" as const,
+    projectId,
+    sessionId: session.id,
+    role: session.role,
+    signal: new AbortController().signal,
+  };
+  return { tools, caller };
+}
+
+it("shows the saved PM progress note and updates task text only when explicit", async () => {
+  const { tools, caller } = pmChecklistTools();
+  service.update(projectId, { items: [{ id: "a", text: "A" }] });
+  const note = "Reviewing\nresults";
+  expect(
+    await tools.call("update_checklist_item", { itemId: "a", note, status: "doing" }, caller),
+  ).toMatchObject({ isError: false, text: expect.stringContaining(JSON.stringify(note)) });
+  expect(service.get(projectId)?.items[0]).toMatchObject({
+    text: "A",
+    note,
+    status: "doing",
+  });
+  expect(
+    await tools.call("update_checklist_item", { itemId: "a", text: "B", note: "Checked" }, caller),
+  ).toMatchObject({ isError: false });
+  expect(service.get(projectId)?.items[0]).toMatchObject({ text: "B", note: "Checked" });
+});
+
+it.each(["pending", "pinned"])("accepts PM progress on a %s reviewed plan", async (state) => {
+  const { tools, caller } = pmChecklistTools();
+  const tasks = [{ id: "a", text: "A" }];
+  service.update(projectId, { items: tasks });
+  const reviewed = service.proposePlan(projectId, {
+    tasks,
+    sha: createHash("sha256").update(JSON.stringify(tasks)).digest("hex"),
+    reviewRef: "review-1",
+  });
+  if (state === "pinned") service.decide(proposal(reviewed).inboxItemId, "resolved");
+  const before = ProjectChecklist.parse(service.get(projectId));
+  expect(
+    await tools.call(
+      "update_checklist_item",
+      { itemId: "a", note: "Reviewed results", status: "done" },
+      caller,
+    ),
+  ).toMatchObject({ isError: false });
+  const after = ProjectChecklist.parse(service.get(projectId));
+  expect(after.items[0]).toMatchObject({ text: "A", note: "Reviewed results", status: "done" });
+  expect(after.plan).toEqual(before.plan);
+  expect(after.pending).toEqual(before.pending);
+  expect(
+    await tools.call("update_checklist_item", { itemId: "a", text: "New scope" }, caller),
+  ).toMatchObject({ isError: true, text: expect.stringContaining("reviewed plan revision") });
+  expect(service.get(projectId)).toEqual(after);
+});
+
+it.each([
+  { itemId: "a", text: "Renamed" },
+  { itemId: "b", text: "Added" },
+])("rejects a PM structural edit of $itemId while draft approval is open", async (edit) => {
+  const { tools, caller } = pmChecklistTools();
+  const before = service.update(
+    projectId,
+    { items: [{ id: "a", text: "A" }] },
+    { requestApproval: true },
+  );
+  const { inboxItemId } = proposal(before);
+  const inbox = new InboxService(database.db, store, () => async () => {});
+
+  expect(await tools.call("update_checklist_item", edit, caller)).toEqual({
+    isError: true,
+    text: `Checklist card ${inboxItemId} is already open. Wait for the owner to decide.`,
+  });
+  expect(service.get(projectId)).toEqual(before);
+  expect(inbox.get(inboxItemId).status).toBe("open");
+
+  expect(
+    await tools.call("update_checklist_item", { itemId: "a", text: "A", status: "doing" }, caller),
+  ).toMatchObject({ isError: false });
+  expect(service.get(projectId)?.items[0]?.status).toBe("doing");
+  expect(service.get(projectId)?.pending).toEqual(before.pending);
+  expect(inbox.get(inboxItemId).status).toBe("open");
+});
+
+it("creates the first checklist item and uses owner approval for additions to approved lists", async () => {
+  const { tools, caller } = pmChecklistTools();
+  expect(
+    await tools.call("update_checklist_item", { itemId: "a", text: "A" }, caller),
+  ).toMatchObject({
+    isError: false,
+  });
+  expect(service.get(projectId)?.items[0]).toMatchObject({ id: "a", text: "A", status: "todo" });
+  const approval = proposal(service.update(projectId, {}, { requestApproval: true }));
+  service.decide(approval.inboxItemId, "resolved");
+  expect(
+    await tools.call("update_checklist_item", { itemId: "b", text: "B", note: "Ready" }, caller),
+  ).toMatchObject({ isError: false, text: expect.stringContaining("owner card") });
+  const checklist = ProjectChecklist.parse(service.get(projectId));
+  expect(checklist.items).toHaveLength(1);
+  service.decide(proposal(checklist).inboxItemId, "resolved");
+  expect(service.get(projectId)?.items[1]).toMatchObject({ id: "b", text: "B", note: "Ready" });
+});
+
+it("refuses PM checklist writes outside the session project", async () => {
+  const { tools, caller } = pmChecklistTools();
+  const other = { ...sampleProject, id: "other-project", slug: "other-project", path: "/other" };
+  store.append([{ type: "project.created", sessionId: null, payload: { project: other } }]);
+  const original = service.update(other.id, { items: [{ id: "a", text: "Private" }] });
+  expect(
+    await tools.call(
+      "update_checklist_item",
+      { itemId: "a", note: "Changed" },
+      {
+        ...caller,
+        projectId: other.id,
+      },
+    ),
+  ).toMatchObject({ isError: true, text: "This tool needs a session in your project" });
+  expect(
+    await tools.call(
+      "update_checklist_item",
+      { itemId: "b", text: "New", projectId: other.id },
+      caller,
+    ),
+  ).toMatchObject({ isError: true });
+  expect(service.get(other.id)).toEqual(original);
+  expect(service.get(projectId)).toBeUndefined();
 });
 
 it("keeps a start expansion open until the orchestrator explicitly replaces it", async () => {

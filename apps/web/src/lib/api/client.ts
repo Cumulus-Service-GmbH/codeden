@@ -273,6 +273,7 @@ export interface CodeDenClient {
   readonly techDebt: TechDebtApi;
 
   // Settings.
+  teamDiagnostics(projectId?: string): Promise<import("@codeden/contracts").TeamDiagnostics>;
   updateSettings(patch: SettingsPatch): Promise<Settings>;
   /** OS keychain secrets (API keys). Values are never echoed back. */
   readonly secrets: SecretsApi;

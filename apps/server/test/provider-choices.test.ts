@@ -50,7 +50,7 @@ async function listedStates(): Promise<string[]> {
 }
 
 const START_SESSION_HEAD =
-  "Provider id. Leave it out to use the project's default provider when it is ready, else the default provider for agents in Settings when it is ready (when that is auto, the first ready provider in a fixed order); when none of them is ready, the call is refused with this list. Loaded providers when this list was made: ";
+  "Provider id. For a tagged role, leave it out to use its effective Team. Otherwise leave it out to use the project's default provider when it is ready, else the default provider for agents in Settings when it is ready (when that is auto, the first ready provider in a fixed order); when none of them is ready, the call is refused with this list. Loaded providers when this list was made: ";
 const START_SESSION_TAIL =
   ". An id that isn't loaded is refused while the runner is connected. A provider you name isn't checked for readiness: on one that isn't ready the session is created and then fails to start or fails its first turn, so pick one that is ready. The states are from the last check and may have changed since.";
 

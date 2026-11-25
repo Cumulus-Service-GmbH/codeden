@@ -427,18 +427,21 @@ it("commits worker changes before review and handles a runner completion conflic
         verify: async () => {},
       },
     });
-    const startSession = vi.spyOn(services.sessions, "start").mockResolvedValue({
-      status: "started",
-      sessionId: "role-session",
-    });
     const response = await sessionRoutes(services, "token").request("/", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectId: project.id, teamRole: "writer" }),
+      body: JSON.stringify({
+        projectId: project.id,
+        teamRole: "writer",
+        purpose: "Composer smoke",
+      }),
     });
     expect(response.status).toBe(200);
-    expect(startSession.mock.calls[0]?.[0].model).toBe("build-writer");
-    startSession.mockRestore();
+    const { sessionId: composerSessionId } = (await response.json()) as { sessionId: string };
+    await services.sessions.launching.get(composerSessionId);
+    expect(services.sessionRepo.get(composerSessionId)).toMatchObject({ model: "build-writer" });
+    prepared.length = 0;
+    opened.length = 0;
 
     const start = (teamId?: string) =>
       services.tools.call(

@@ -108,6 +108,7 @@ describe("CodeDen MCP endpoint", () => {
     const pm = await connect(pmToken);
     const pmTools = (await pm.listTools()).tools;
     expect(pmTools.map((t) => t.name)).toEqual([
+      "update_checklist_item",
       "ask_user",
       "share_to_chat",
       "list_tech_debt",

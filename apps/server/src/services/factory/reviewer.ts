@@ -87,7 +87,7 @@ function chooseReviewer(
   const skipped = skippedProviders(item, ctx.now());
   return pickReviewer({
     author: { provider: reviewAuthorProvider(ctx, item) },
-    tuning: teamTuning(ctx, loop.tuning),
+    tuning: teamTuning(ctx, loop.tuning, ctx.projects.get(item.projectId)),
     available: ctx.sessions.providers().filter((p) => !skipped.some((s) => s.provider === p)),
     unavailable: [...ctx.sessions.unavailable(), ...skipped],
     name: (id) => ctx.sessions.displayName(id),

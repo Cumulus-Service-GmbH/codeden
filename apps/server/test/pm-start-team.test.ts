@@ -29,6 +29,7 @@ async function start(
     project?: Team;
     defaults?: Team;
     callerTitle?: string;
+    runTeam?: Team;
     architect?: boolean;
     pmPolicy?: AutonomyPolicy;
     roleFloors?: RoleAutonomyFloors;
@@ -52,6 +53,7 @@ async function start(
           queuedBehind: [],
         }),
         ownTeamPins: true,
+        runTeam: opts.runTeam,
         ...(opts.architect ? { teamArchitect: true } : {}),
       }));
       sessionRepo.update(sampleSession.id, (s) => ({
@@ -75,6 +77,7 @@ async function start(
     const services = {
       db: database.db,
       projects: { get: () => project },
+      projectTeam: () => opts.project ?? [],
       factory: {
         isUnattended: () => false,
         providerChoices: async () => [{ id: "claude", runnable: true }],
@@ -190,6 +193,25 @@ it("fills an omitted pin from the project Team over the default Team", async () 
     { project: [writer], defaults: [{ ...writer, model: "default-model" }] },
   );
   expect(started[0]).toMatchObject({ provider: "claude", model: "project-model", effort: "high" });
+});
+
+it("starts delegated work on the approved run Team instead of the live ready fallback", async () => {
+  const approved = { ...writer, provider: "codex", model: "approved-writer" };
+  const { started } = await start(
+    { title: "[Writer] Fix it", provider: "auto" },
+    {
+      project: [writer],
+      defaults: [{ ...writer, model: "new-default" }],
+      runTeam: [approved],
+      callerTitle: "[Architect] Lead",
+      architect: true,
+    },
+  );
+  expect(started[0]).toMatchObject({
+    provider: approved.provider,
+    model: approved.model,
+    effort: approved.effort,
+  });
 });
 
 it("refuses a start whose calling session can't be read for its Team", async () => {

@@ -81,7 +81,7 @@ export function pickReviewer(input: ReviewerInput): ReviewerChoice | ReviewerWai
 
   const primary = teamMember(tuning.team, "reviewer");
   const wanted = primary?.provider ?? tuning.reviewerProvider;
-  if (wanted === "auto" || !eligible(wanted)) {
+  if (!primary && (wanted === "auto" || !eligible(wanted))) {
     const provider = preferred(other);
     const note =
       wanted === "auto" ? null : `${name(wanted)} has no verified distinct model vendor.`;
@@ -105,11 +105,15 @@ export function pickReviewer(input: ReviewerInput): ReviewerChoice | ReviewerWai
         },
       )
     : "no reviewer with a verified distinct model vendor is available.";
-  if (tuning.reviewerFallback === "any") {
-    const fallback = teamMember(tuning.team, "reviewerFallback");
-    if (fallback && other.includes(fallback.provider)) {
-      return choose(fallback.provider, fallback.model, reason, fallback.effort);
-    }
+  const fallback = teamMember(tuning.team, "reviewerFallback");
+  if (
+    fallback &&
+    other.includes(fallback.provider) &&
+    (tuning.reviewerFallback === "any" || (primary && !eligible(primary.provider)))
+  ) {
+    return choose(fallback.provider, fallback.model, reason, fallback.effort);
+  }
+  if (!primary && tuning.reviewerFallback === "any") {
     const provider = preferred(other);
     if (provider) return choose(provider, null, reason);
   }

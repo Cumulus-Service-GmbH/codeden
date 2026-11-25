@@ -26,6 +26,7 @@ import {
   TEAM_FILE_STATUSES,
   type TeamFileDeps,
 } from "./factory/team-file";
+import { projectTeamLayer } from "./factory/team-role";
 import { FILE_RESET_NOTICES, reportFileReset } from "./file-reset-notice";
 import { ConfigFiles } from "./files/config-files";
 import { createGitBroker, type GitBroker } from "./git-broker";
@@ -279,11 +280,10 @@ export function createServices(opts: ServicesOptions): AppServices {
     createGitBroker({ exec, token: async () => (await github.auth.token())?.value ?? null });
   // `factory` is created below; sessions start only after the container is built.
   const projectTeam: AppServices["projectTeam"] = (projectId, teamId) => {
-    const teams = projects.get(projectId).teams;
-    return (
-      teams?.teams.find(({ id }) => id === (teamId ?? teams.defaultTeamId))?.team ??
-      factory.data.loop(projectId)?.tuning.team ??
-      []
+    return projectTeamLayer(
+      projects.get(projectId),
+      factory.data.loop(projectId)?.tuning.team ?? [],
+      teamId,
     );
   };
   const teamFiles: TeamFileDeps = {
@@ -295,6 +295,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     project: (projectId) => projects.get(projectId),
     session: (sessionId) => sessionRepo.find(sessionId)?.session,
     runTeam: (sessionId) => sessionRepo.find(sessionId)?.startMeta?.runTeam,
+    teamId: (sessionId) => sessionRepo.find(sessionId)?.startMeta?.teamId,
     ownTeamPins: (sessionId) => sessionRepo.find(sessionId)?.startMeta?.ownTeamPins === true,
     liveSessions: (projectId) => sessionRepo.listInStatus(TEAM_FILE_STATUSES, projectId),
     log: opts.log,
@@ -343,6 +344,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     forceFakeProvider,
     admission,
     checklist,
+    projectTeam,
     repo: sessionRepo,
     projects,
     runner: opts.runner,

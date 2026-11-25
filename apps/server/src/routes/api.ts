@@ -1,15 +1,20 @@
 import {
   type ActivitySummary,
   CODEDEN_VERSION,
+  countTeamOverrides,
+  defaultTeam,
   type HealthResponse,
   type InboxItem,
   inboxKindVisible,
+  resolveTeam,
   type Session,
   SessionSnapshotQuery,
   type SettingsPatch,
   type Snapshot,
   SnapshotQuery,
+  sessionTeamMember,
   summarizeActivity,
+  TeamDiagnostics,
   TeamReviewLimitSettings,
 } from "@codeden/contracts";
 import { eq, inArray } from "drizzle-orm";
@@ -18,7 +23,7 @@ import { rowToAutomation } from "../db/rows";
 import { automations, inboxItems, sessions } from "../db/schema";
 import { isRemoteRequest } from "../security";
 import type { AppServices } from "../services/container";
-import { badRequest, forbidden } from "../services/errors";
+import { badRequest, forbidden, notFound } from "../services/errors";
 import { archivedSessionCounts, snapshotSessions } from "../services/sessions/archived";
 import { sessionSnapshot } from "../services/sessions/snapshot";
 import { listTeamRuns } from "../services/sessions/team-run-projection";
@@ -122,6 +127,27 @@ export function createApi(ctx: ApiContext) {
       .route("/network", networkRoutes(ctx.network))
       .route("/auth", authRoutes(ctx.network))
       .route("/", fileRoutes(s))
+      .get("/settings/team", (c) => {
+        const sessionId = c.req.query("sessionId");
+        const row = sessionId ? s.sessionRepo.find(sessionId) : undefined;
+        if (sessionId && !row) throw notFound("Session not found", "session_not_found");
+        const projectId = row ? row.session.projectId : c.req.query("projectId");
+        const resolved = resolveTeam({
+          defaults: defaultTeam(s.settings.get()),
+          project: projectId ? s.projectTeam(projectId, row?.startMeta?.teamId) : [],
+          approved: row?.startMeta?.runTeam,
+          session: row?.startMeta?.ownTeamPins ? sessionTeamMember(row.session) : null,
+        });
+        return c.json(
+          TeamDiagnostics.parse({
+            ...resolved,
+            overrides:
+              projectId || row
+                ? {}
+                : countTeamOverrides(s.projects.list().map(({ id }) => s.projectTeam(id))),
+          }),
+        );
+      })
       .get("/settings", (c) => c.json(s.settings.get()))
       .patch("/settings", async (c) => {
         const patch = (await c.req.json().catch(() => undefined)) as SettingsPatch | undefined;
@@ -181,7 +207,11 @@ export function createApi(ctx: ApiContext) {
         // A role moved to another provider gets a fresh session there (§8.1). Stopping the old
         // one can take the runner a while, so the response doesn't wait for it; failures are
         // logged by the role sessions.
-        if (patch.providers) void s.orchestration.roles.applyProviderSettings(before.providers);
+        if (patch.providers || patch.teamSetup) {
+          void s.orchestration.roles.applyProviderSettings(
+            patch.providers ? before.providers : undefined,
+          );
+        }
         return c.json(settings);
       })
       .post("/shutdown", async (c) => {

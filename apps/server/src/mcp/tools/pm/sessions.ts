@@ -10,6 +10,7 @@ import {
   StartSessionRequest,
   sessionTeamMember,
   teamMember,
+  teamRoleName,
   teamRoleOfTitle,
 } from "@codeden/contracts";
 import { z } from "zod";
@@ -76,7 +77,7 @@ export const startSession = defineTool({
   // The loaded providers and whether each is ready, as of this listing.
   describeInput: describeProviderParam(
     "provider",
-    "Leave it out to use the project's default provider when it is ready, else the default provider for agents in Settings when it is ready (when that is auto, the first ready provider in a fixed order); when none of them is ready, the call is refused with this list.",
+    "For a tagged role, leave it out to use its effective Team. Otherwise leave it out to use the project's default provider when it is ready, else the default provider for agents in Settings when it is ready (when that is auto, the first ready provider in a fixed order); when none of them is ready, the call is refused with this list.",
     "An id that isn't loaded is refused while the runner is connected. A provider you name isn't checked for readiness: on one that isn't ready the session is created and then fails to start or fails its first turn, so pick one that is ready.",
   ),
   input: PmStartSessionInput,
@@ -111,15 +112,16 @@ export const startSession = defineTool({
     }
     const settings = services.settings.get();
     const tuning = services.factory.data.loop(projectId)?.tuning;
+    const role = teamRoleOfTitle(input.title);
+    const { teamId, runTeam } = callerRow?.startMeta ?? {};
+    const callerPins =
+      callerSession && callerRow?.startMeta?.ownTeamPins ? sessionTeamMember(callerSession) : null;
     const { team } = resolveTeam({
       defaults: defaultTeam(settings),
-      project: tuning?.team ?? [],
-      session:
-        callerSession && callerRow?.startMeta?.ownTeamPins
-          ? sessionTeamMember(callerSession)
-          : null,
+      project: role ? services.projectTeam(projectId, teamId) : [],
+      session: callerPins,
+      approved: runTeam,
     });
-    const role = teamRoleOfTitle(input.title);
     const member = teamMember(team, role);
     const {
       floor: autonomyFloor,
@@ -142,9 +144,7 @@ export const startSession = defineTool({
     }
     // A tagged role the resolved Team does not set has no pin to start on: refused, as the guard refuses it.
     if (role && !member) {
-      throw new ToolError(
-        `TEAM_ROLE_UNSET: this project's Team (with the default Team) sets no ${input.title?.match(/^\[[^\]]+\]/)?.[0]}; set that role in CodeDen`,
-      );
+      throw new ToolError(`TEAM_ROLE_UNSET: Set the ${teamRoleName(role)} in Settings → Team`);
     }
     const models =
       member?.model && input.model ? services.factory.ctx.sessions.models(member.provider) : [];
@@ -198,11 +198,14 @@ export const startSession = defineTool({
         autonomyFloor,
         readOnlyScope,
         guardedInstall,
+        teamId,
+        runTeam,
+        teamSession: callerPins,
         // A PM grants the Architect delegation when choosing that role. A later title edit grants nothing.
         teamArchitect: callerRole === "pm" && role === "architect",
         ...(itemId ? { checklistItemId: itemId } : {}),
         // Pins the PM gave are this session's own; ones CodeDen filled from the Team are not.
-        ...((input.provider && input.provider !== "auto") || input.model
+        ...((input.provider && input.provider !== "auto") || input.model || input.effort
           ? { ownTeamPins: true }
           : {}),
         confirmChrome: async () => {

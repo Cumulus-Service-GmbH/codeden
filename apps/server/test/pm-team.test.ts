@@ -27,6 +27,7 @@ function start(
   return startSession.handler(startSession.input.parse({ ...input, ...overrides }), {
     services: {
       factory: env.factory,
+      projectTeam: () => env.factory.data.loop(env.project.id)?.tuning.team ?? [],
       projects: { get: () => env.project },
       settings: { get: () => Settings.parse({}) },
       sessions: { start: launch },
@@ -59,7 +60,7 @@ it("fills Team pins, keeps free choices for unpinned and untagged starts, refuse
   expect(launch.mock.lastCall?.[0]).toMatchObject({ provider: "codex" });
   // A tagged role the resolved Team does not set is refused, as the guard refuses it.
   setTeam([]);
-  await expect(start()).rejects.toThrow("TEAM_ROLE_UNSET");
+  await expect(start()).rejects.toThrow("Set the Writer in Settings → Team");
 });
 
 it.each([
@@ -86,4 +87,14 @@ it("accepts exact resolved model IDs for the Team provider", async () => {
   expect(launch.mock.lastCall?.[0]).toMatchObject({ model: "alias" });
   await expect(start({ model: "other" })).rejects.toThrow("got model other");
   await expect(start({ model: "Pinned" })).rejects.toThrow("got model Pinned");
+});
+
+it("accepts Auto as an omitted provider for a matching effective Team role", async () => {
+  setTeam([member]);
+  await start({ provider: "auto", model: member.model });
+  expect(launch.mock.lastCall?.[0]).toMatchObject({
+    provider: member.provider,
+    model: member.model,
+    effort: member.effort,
+  });
 });

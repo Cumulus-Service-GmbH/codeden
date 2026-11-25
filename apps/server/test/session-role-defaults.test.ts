@@ -37,7 +37,7 @@ const info = (id: string, reasoningEffort = true): ProviderInfo => ({
   id,
   displayName: id,
   models: [],
-  capabilities: { ...caps, reasoningEffort },
+  capabilities: { ...caps, reasoningEffort, chrome: id === "claude" },
 });
 
 type Start = (over: Partial<StartSessionRequestInit>) => Promise<string>;
@@ -46,6 +46,7 @@ type Start = (over: Partial<StartSessionRequestInit>) => Promise<string>;
 function withService(
   settings: SettingsInput,
   run: (start: Start, repo: SessionRepo, service: SessionService) => Promise<void>,
+  connected = true,
 ) {
   return async () => {
     const dir = mkdtempSync(join(tmpdir(), "codeden-role-defaults-"));
@@ -66,8 +67,8 @@ function withService(
         },
         runner: {
           // `plain` has no reasoning effort.
-          providers: () => [info("claude"), info("codex"), info("plain", false)],
-          isConnected: () => true,
+          providers: () => (connected ? [info("claude"), info("codex"), info("plain", false)] : []),
+          isConnected: () => connected,
         },
         settings: { get: () => parsed },
         launcher: { launch: vi.fn(async () => {}) },
@@ -87,7 +88,39 @@ function withService(
   };
 }
 
+it(
+  "keeps unpinned run model and effort through launch despite updated defaults",
+  withService(
+    {
+      teamSetup: {
+        remembered: true,
+        team: [{ role: "writer", provider: "codex", model: "updated", effort: "high" }],
+      },
+      providers: { agent: { provider: "codex", model: "legacy", effort: "medium" } },
+    },
+    async (_start, repo, service) => {
+      const approved = [{ role: "writer", provider: "codex", model: null, effort: null }] as const;
+      const result = await service.start(
+        StartSessionRequest.parse({
+          projectId: "p1",
+          title: "[Writer] Continue the assignment",
+          provider: "codex",
+          startedBy: { kind: "pm" },
+        }),
+        { teamId: "approved", runTeam: [...approved] },
+      );
+      if (result.status !== "started") throw new Error(result.status);
+      const row = repo.find(result.sessionId);
+      expect(row?.session).toMatchObject({ provider: "codex", model: null, effort: null });
+      expect(row?.startMeta).toMatchObject({ teamId: "approved", runTeam: approved });
+    },
+  ),
+);
+
 describe("PM Browser Operator launch consent", () => {
+  const teamSettings = (provider: string): SettingsInput => ({
+    teamSetup: { remembered: true, team: [{ role: "browserOperator", provider }] },
+  });
   const request = StartSessionRequest.parse({
     projectId: "p1",
     title: "[Browser Operator] Open the documentation",
@@ -96,7 +129,7 @@ describe("PM Browser Operator launch consent", () => {
   });
 
   it.each([true, false])("only dispatches the Claude launch after consent returns %s", (approved) =>
-    withService({}, async (_start, repo, service) => {
+    withService(teamSettings("claude"), async (_start, repo, service) => {
       const confirmChrome = vi.fn(async () => approved);
       const result = await service.start(request, { confirmChrome });
       expect(confirmChrome).toHaveBeenCalledOnce();
@@ -110,20 +143,23 @@ describe("PM Browser Operator launch consent", () => {
     })(),
   );
 
-  it(
-    "does not allow an unconfirmed PM launch",
-    withService({}, async (_start, repo, service) => {
-      expect(await service.start(request)).toEqual({
-        status: "skipped",
-        reason: "Chrome requires owner approval.",
-      });
-      expect(repo.list({ projectId: "p1" })).toHaveLength(0);
-    }),
+  it.each([true, false])("requires consent when the runner connection is %s", (connected) =>
+    withService(
+      teamSettings("claude"),
+      async (_start, repo, service) => {
+        expect(await service.start(request)).toEqual({
+          status: "skipped",
+          reason: "Chrome requires owner approval.",
+        });
+        expect(repo.list({ projectId: "p1" })).toHaveLength(0);
+      },
+      connected,
+    )(),
   );
 
   it(
     "does not prompt when the resolved provider is not Claude",
-    withService({ providers: { agent: { provider: "codex" } } }, async (_start, repo, service) => {
+    withService(teamSettings("codex"), async (_start, repo, service) => {
       const confirmChrome = vi.fn(async () => true);
       const result = await service.start(request, { confirmChrome });
       expect(confirmChrome).not.toHaveBeenCalled();

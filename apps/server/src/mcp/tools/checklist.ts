@@ -1,4 +1,4 @@
-import { ChecklistItem } from "@codeden/contracts";
+import { UpdateChecklistItemInput } from "@codeden/contracts";
 import { z } from "zod";
 import { formatChecklist } from "../../services/checklist/checklist-service";
 import type { AppServices } from "../../services/container";
@@ -32,32 +32,41 @@ export const readChecklist = defineTool({
 export const updateChecklistItem = defineTool({
   name: "update_checklist_item",
   description:
-    "Update a checklist item's status, note, ETA, or owner action. Use null to clear ETA or owner action. PMs can update their project's items. Agents can update items linked to their session or their parent session.",
+    "Update a checklist item's status, progress note, ETA, or owner action. Use null to clear ETA or owner action. PMs can set task text or create an item with a new itemId and text in their project. Structural edits to approved checklists require owner approval. Agents can update progress on items linked to their session or their parent session.",
   roles: ["pm", "agent"],
   scope: "session",
-  isAvailable: hasChecklist,
-  input: z
-    .strictObject({
-      itemId: ChecklistItem.shape.id,
-      status: ChecklistItem.shape.status.optional(),
-      note: ChecklistItem.shape.note,
-      eta: ChecklistItem.shape.eta.unwrap().nullable().optional(),
-      needsOwner: ChecklistItem.shape.needsOwner
-        .unwrap()
-        .omit({ source: true })
-        .nullable()
-        .optional(),
-    })
-    .refine(
-      ({ status, note, eta, needsOwner }) =>
-        status !== undefined || note !== undefined || eta !== undefined || needsOwner !== undefined,
-      "Provide a status, note, ETA, or owner action",
-    ),
-  handler: async ({ itemId, ...change }, { services, sessionId, projectId, role }) => {
+  isAvailable: (services, caller, role) =>
+    role === "pm" ? !caller || Boolean(caller.projectId) : hasChecklist(services, caller),
+  input: UpdateChecklistItemInput,
+  handler: async ({ itemId, text, ...change }, { services, sessionId, projectId, role }) => {
     const session = services.sessionRepo.find(sessionId)?.session;
     if (!projectId || !session || session.projectId !== projectId || session.role !== role) {
       throw new ToolError("This tool needs a session in your project");
     }
-    return formatChecklist(services.checklist.updateItem(projectId, itemId, change, session));
+    if (text !== undefined) {
+      if (role !== "pm") throw new ToolError("Only PMs can edit checklist text or add items");
+      const previous = services.checklist.get(projectId);
+      const pending = previous?.pending;
+      if (
+        pending &&
+        !pending.plan &&
+        previous.items.find(({ id }) => id === itemId)?.text !== text
+      ) {
+        throw new ToolError(
+          `Checklist card ${pending.inboxItemId} is already open. Wait for the owner to decide.`,
+        );
+      }
+      const checklist = services.checklist.update(projectId, {
+        patch: [{ id: itemId, text, ...change }],
+      });
+      const result = formatChecklist(checklist, session);
+      return checklist.pending && checklist.pending.id !== previous?.pending?.id
+        ? `${result}\nAn owner card is waiting for a decision (${checklist.pending.inboxItemId}).`
+        : result;
+    }
+    return formatChecklist(
+      services.checklist.updateItem(projectId, itemId, change, session),
+      session,
+    );
   },
 });

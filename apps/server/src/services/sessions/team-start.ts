@@ -1,10 +1,13 @@
 import {
+  type ReasoningEffort,
   resolveTeam,
   type StartSessionRequest,
-  TEAM_ROLE_TAGS,
-  type Team,
+  type TeamMember,
   teamMember,
+  teamRoleName,
+  teamRoleOfTitle,
 } from "@codeden/contracts";
+import { badRequest } from "../errors";
 import { derivePurpose } from "./conflicts";
 
 /**
@@ -15,20 +18,29 @@ import { derivePurpose } from "./conflicts";
  */
 export function withTeamRole(
   req: StartSessionRequest,
-  teams: { defaults: Team; project: Team },
+  teams: Parameters<typeof resolveTeam>[0],
 ): StartSessionRequest {
-  if (!req.teamRole) return req;
-  const tag = Object.keys(TEAM_ROLE_TAGS).find((t) => TEAM_ROLE_TAGS[t] === req.teamRole);
-  if (!tag) return req;
+  const role = req.teamRole ?? teamRoleOfTitle(req.title);
+  if (!role) return req;
+  const tag = `[${teamRoleName(role)}]`;
   const base = req.title ?? derivePurpose(req.purpose, req.input?.text);
   const title = (base.startsWith(tag) ? base : `${tag} ${base}`).slice(0, 200);
-  const member = teamMember(resolveTeam(teams).team, req.teamRole);
+  const member = teamMember(resolveTeam(teams).team, role);
+  if (!member && (!req.provider || req.provider === "auto")) {
+    throw badRequest(`Set the ${teamRoleName(role)} in Settings → Team`, "TEAM_ROLE_UNSET");
+  }
+  return member ? teamStartChoice({ ...req, title }, member) : { ...req, title };
+}
+
+/** Fill absent session pins only from a member on the selected provider. */
+export function teamStartChoice<
+  T extends { provider?: string; model?: string; effort?: ReasoningEffort },
+>(req: T, member: TeamMember): T {
   const unsetProvider = !req.provider || req.provider === "auto";
-  const fills = member && (unsetProvider || req.provider === member.provider);
+  const fills = unsetProvider || req.provider === member.provider;
   return {
     ...req,
-    title,
-    ...(member && unsetProvider ? { provider: member.provider } : {}),
+    ...(unsetProvider ? { provider: member.provider } : {}),
     ...(fills && !req.model && member.model ? { model: member.model } : {}),
     ...(fills && !req.effort && member.effort ? { effort: member.effort } : {}),
   };

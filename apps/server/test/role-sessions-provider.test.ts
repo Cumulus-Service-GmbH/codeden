@@ -265,3 +265,57 @@ describe("role sessions: what does not move a role session (§8.1)", () => {
     }),
   );
 });
+
+it(
+  "runs the PM on its configured Architect instead of the legacy PM provider setting",
+  withRoles(async ({ roles, set, setProjectTeam, settle }) => {
+    await set({
+      providers: { pm: { provider: "claude", model: "legacy", effort: "low" } },
+      teamSetup: {
+        remembered: true,
+        team: [{ role: "architect", provider: "codex", model: "team-model", effort: "high" }],
+      },
+    });
+    expect(await roles.ensure("pm", "p1")).toMatchObject({
+      provider: "codex",
+      model: "team-model",
+      effort: "high",
+    });
+    const inherited = await roles.ensure("pm", "p1");
+    settle(inherited.id);
+    setProjectTeam([{ role: "architect", provider: "claude", model: null, effort: null }]);
+    expect(await roles.ensure("pm", "p1")).toMatchObject({
+      provider: "claude",
+      model: null,
+      effort: null,
+    });
+  }),
+);
+
+it(
+  "uses the selected named Team for a PM and retains it when starting fresh",
+  withRoles(async ({ roles, sessions, repo, setProjectTeam, settle }) => {
+    setProjectTeam([
+      { role: "architect", provider: "claude", model: "project-default", effort: null },
+    ]);
+    setProjectTeam(
+      [{ role: "architect", provider: "codex", model: "named-team", effort: "low" }],
+      "named",
+    );
+    const started = await sessions.start(
+      StartSessionRequest.parse({
+        role: "pm",
+        projectId: "p1",
+        workspace: { mode: "repo_root" },
+      }),
+      { teamId: "named" },
+    );
+    if (started.status !== "started") throw new Error(started.status);
+    const first = repo.get(started.sessionId);
+    expect(first).toMatchObject({ provider: "codex", model: "named-team", effort: "low" });
+    settle(first.id);
+    const next = await roles.startFresh(first.id);
+    expect(next).toMatchObject({ provider: "codex", model: "named-team", effort: "low" });
+    expect(repo.find(next.id)?.startMeta?.teamId).toBe("named");
+  }),
+);

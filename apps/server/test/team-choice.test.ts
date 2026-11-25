@@ -62,17 +62,24 @@ it("keeps legacy choices with an empty team", () => {
 it("uses the Team choices and replaces a scout with a different pinned effort", () => {
   const tuning = FactoryTuning.parse({ ...legacy, team });
   expect(builderWanted({ type: "bug" }, tuning)).toEqual({
+    teamPinned: true,
     provider: "claude",
     model: "writer",
     effort: "high",
   });
   expect(builderWanted({ type: "docs" }, tuning)).toEqual({
+    teamPinned: true,
     provider: "claude",
     model: "agentsMdWriter",
     effort: "high",
   });
   const scout = scoutAgent(env.factory.ctx, env.project, tuning);
-  expect(scout.choice).toEqual({ provider: "claude", model: "architect", effort: "high" });
+  expect(scout.choice).toEqual({
+    teamPinned: true,
+    provider: "claude",
+    model: "architect",
+    effort: "high",
+  });
   expect(
     needsFreshSession(
       { provider: "claude", model: "architect", effort: "low" },
@@ -90,13 +97,16 @@ it("drops a pinned model and effort when its provider is unavailable", async () 
   env.factory.ctx.sessions.refreshAvailability();
   await new Promise((resolve) => setImmediate(resolve));
   const wanted = { provider: "claude", model: "writer", effort: "high" } as const;
+  expect(
+    chooseAgent(env.factory.ctx, env.project, { ...wanted, teamPinned: true }, "build"),
+  ).toMatchObject({ waiting: expect.stringMatching(/claude/i) });
   expect(chooseAgent(env.factory.ctx, env.project, wanted, "build")).toStrictEqual({
     provider: "codex",
     model: null,
   });
 });
 
-it("seeds only new loops when setup is remembered", () => {
+it("seeds the summary limit without copying the inherited Team", () => {
   const { data } = env.factory;
   const projectId = env.project.id;
   env.settings.update({ teamSetup: { remembered: false, team, resultSummaryBytes: 256 } });
@@ -104,10 +114,10 @@ it("seeds only new loops when setup is remembered", () => {
   expect(existing.tuning).toMatchObject({ team: [], resultSummaryBytes: null });
   env.settings.update({ teamSetup: { remembered: true } });
   const draft = data.loopOrNew("new-project");
-  expect(draft.tuning).toMatchObject({ team, resultSummaryBytes: 256 });
+  expect(draft.tuning).toMatchObject({ team: [], resultSummaryBytes: 256 });
   expect(data.loop("new-project")).toBeUndefined();
-  expect(data.saveLoop(draft).tuning).toMatchObject({ team, resultSummaryBytes: 256 });
-  expect(data.loop("new-project")?.tuning).toMatchObject({ team, resultSummaryBytes: 256 });
+  expect(data.saveLoop(draft).tuning).toMatchObject({ team: [], resultSummaryBytes: 256 });
+  expect(data.loop("new-project")?.tuning).toMatchObject({ team: [], resultSummaryBytes: 256 });
   expect(data.loopOrNew(projectId)).toEqual(existing);
 });
 
@@ -116,6 +126,7 @@ it("uses the legacy docs builder before the Team writer, then falls back to that
   const tuning = FactoryTuning.parse({ ...legacy, team: writers });
   expect(builderWanted({ type: "docs" }, tuning)).toEqual({ provider: "codex", model: "docs" });
   expect(builderWanted({ type: "docs" }, { ...tuning, docsBuilderProvider: null })).toEqual({
+    teamPinned: true,
     provider: "claude",
     model: "writer",
     effort: "high",
@@ -169,7 +180,7 @@ it("keeps a project's wait policy and never claims a cross-provider review for a
   expect(reviewer(builder, ["codex", "gemini"])).toMatchObject({ wait: true });
 });
 
-it("routes a Claude author to Codex even when the Team primary shares its vendor", () => {
+it("waits for an eligible Team reviewer when the primary shares the author’s vendor", () => {
   const input = {
     author: { provider: "claude" },
     tuning: {
@@ -182,7 +193,7 @@ it("routes a Claude author to Codex even when the Team primary shares its vendor
     unavailable: [],
     vendor,
   };
-  expect(pickReviewer(input)).toMatchObject({ wait: false, provider: "codex" });
+  expect(pickReviewer(input)).toMatchObject({ wait: true });
   expect(pickReviewer({ ...input, available: ["claudeAlias"] })).toMatchObject({ wait: true });
   expect(pickReviewer({ ...input, author: { provider: "unknown" } })).toMatchObject({
     wait: true,

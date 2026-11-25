@@ -271,7 +271,7 @@ describe("factory loop state machine (§10.1)", () => {
     expect(item(verifying.id).reviewerSessionId).not.toBe(formerReviewer);
   });
 
-  it("routes Claude-written work to Codex when the Team primary is Opus", async () => {
+  it("uses the configured cross-vendor fallback when the Team primary shares the author’s vendor", async () => {
     env = createFactoryEnv({
       providers: ["claude", "alternate", "codex"],
       modelVendors: { alternate: "anthropic" },
@@ -280,12 +280,21 @@ describe("factory loop state machine (§10.1)", () => {
     env.factory.setMode(env.project.id, {
       mode: "software_factory",
       tuning: {
-        team: [{ role: "reviewer", provider: "claude", model: "claude-opus-5-5", effort: "high" }],
+        team: [
+          { role: "reviewer", provider: "claude", model: "claude-opus-5-5", effort: "high" },
+          {
+            role: "reviewerFallback",
+            provider: "codex",
+            model: "fallback-model",
+            effort: "medium",
+          },
+        ],
       },
     });
     const verifying = await toVerifying(backlogItem());
     expect(verifying).toMatchObject({ builderProvider: "claude", reviewerProvider: "codex" });
     const reviewer = verifying.reviewerSessionId as string;
+    expect(env.repo.get(reviewer)).toMatchObject({ model: "fallback-model" });
     env.repo.update(reviewer, (session) => ({ ...session, provider: "alternate" }));
     expect(() => review(verifying)).toThrow("distinct model vendor");
   });

@@ -21,6 +21,9 @@ import { Switch } from "@/components/ui/switch";
 import { useClient } from "@/lib/api";
 import { useSnapshotData } from "@/lib/queries";
 import { AgentPicker } from "./agents-tuning";
+
+type TeamDraft = Pick<TuningDraft, "team" | "resultSummaryBytes" | "reviewPolicy">;
+
 import type { TuningDraft } from "./limits-editor";
 
 const ROLE_LABEL: Record<TeamRole, string> = {
@@ -34,6 +37,7 @@ const ROLE_LABEL: Record<TeamRole, string> = {
   reviewerFallback: "Code reviewer fallback",
   investigator: "Investigator",
   browserTester: "Browser tester",
+  operator: "Operator",
   browserOperator: "Browser operator",
 };
 
@@ -43,14 +47,14 @@ const REVIEW_FIELDS = [
   { key: "totalRounds", label: "Total review rounds per item", min: 1, max: 12 },
 ] as const;
 
-export function TeamEditor({
+export function TeamEditor<T extends TeamDraft>({
   projectId,
   tuning,
   onChange,
 }: {
   projectId?: string;
-  tuning: TuningDraft;
-  onChange: (next: TuningDraft) => void;
+  tuning: T;
+  onChange: (next: T) => void;
 }) {
   const id = useId();
   const client = useClient();
@@ -109,7 +113,7 @@ export function TeamEditor({
         <p className="text-3xs text-muted-foreground">
           Pin a provider, model and effort per role. The factory uses the writer, AGENTS.md writer,
           architect and code reviewer; the project manager uses each role when it starts a session
-          titled with its tag, such as [Writer]. Empty roles keep the settings above.
+          titled with its tag, such as [Writer].
         </p>
       </div>
       {TeamRole.options.map((role) => {
@@ -182,17 +186,19 @@ export function TeamEditor({
                 {(!arbiter?.model?.trim() || arbiter.model.trim().toLowerCase() === "default") && (
                   <p className="text-3xs text-status-waiting">Set the Arbiter in Settings → Team</p>
                 )}
-                <Field label="Arbiter rounds" htmlFor={`${id}-arbiter-rounds`}>
-                  <NumberField
-                    id={`${id}-arbiter-rounds`}
-                    min={1}
-                    value={reviewPolicy.arbiterRounds}
-                    onChange={(arbiterRounds) =>
-                      onChange({ ...tuning, reviewPolicy: { ...reviewPolicy, arbiterRounds } })
-                    }
-                    wrapperClassName="w-24"
-                  />
-                </Field>
+                {projectId && (
+                  <Field label="Arbiter rounds" htmlFor={`${id}-arbiter-rounds`}>
+                    <NumberField
+                      id={`${id}-arbiter-rounds`}
+                      min={1}
+                      value={reviewPolicy.arbiterRounds}
+                      onChange={(arbiterRounds) =>
+                        onChange({ ...tuning, reviewPolicy: { ...reviewPolicy, arbiterRounds } })
+                      }
+                      wrapperClassName="w-24"
+                    />
+                  </Field>
+                )}
                 <fieldset disabled={saveLimits.isPending} className="mt-2 space-y-2">
                   {projectId && (
                     <label className="flex items-center gap-2 text-xs">
@@ -316,8 +322,7 @@ export function TeamEditor({
             checked={useForNewProjects}
             onCheckedChange={setRemembered}
           />
-          Default Team: new projects start from it, and every project uses it for the roles it
-          doesn't set
+          Use this as the Default Team
         </label>
         {isSuccess && (
           <span role="status" className="text-muted-foreground">

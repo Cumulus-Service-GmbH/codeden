@@ -216,7 +216,7 @@ export function mockFactoryApi(world: MockWorld): FactoryApi {
     ];
   };
   let spotIssues = 0;
-  const teams = new Map<string, Pick<FactoryTuning, "team" | "resultSummaryBytes">>();
+  const teams = world.factoryTeams;
   const project = (id: string) => world.snapshot.projects.find((p) => p.id === id);
   const status = (projectId: string): FactoryStatus => {
     const cached = world.factory.get(projectId);

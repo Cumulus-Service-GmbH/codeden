@@ -150,9 +150,13 @@ describe("session admission", () => {
 it("PATCH /api/settings persists the session limit and remembered Team setup", async () => {
   const settings = new SettingsStore(join(env.dir, "settings.json"));
   const api = createApi({
-    services: { settings, store: env.store, orchestration: {} },
+    services: {
+      settings,
+      store: env.store,
+      orchestration: { roles: { applyProviderSettings: vi.fn() } },
+    },
     network: {},
-  } as ApiContext);
+  } as unknown as ApiContext);
   const patch = {
     limits: { maxActiveSessions: 3 },
     teamSetup: { remembered: true, resultSummaryBytes: 256 },

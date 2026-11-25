@@ -24,6 +24,7 @@ export const TEAM_ROLE_LABEL: Record<TeamRole, string> = {
   reviewerFallback: "Code Reviewer Fallback",
   investigator: "Investigator",
   browserTester: "Browser Tester",
+  operator: "Operator",
   browserOperator: "Browser Operator",
 };
 

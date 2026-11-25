@@ -322,6 +322,9 @@ export class AutomationExecutor {
       action.title?.trimStart().startsWith(BROWSER_OPERATOR_TAG);
     const res = await this.deps.sessions.start(start, {
       ...(chromeApproved ? { chromeApproved: true } : {}),
+      ownTeamPins: Boolean(
+        (action.provider && action.provider !== "auto") || action.model || action.effort,
+      ),
     });
     switch (res.status) {
       case "conflict":

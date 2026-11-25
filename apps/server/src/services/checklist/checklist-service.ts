@@ -17,7 +17,11 @@ import type { EventStore } from "../../events/store";
 import { badRequest, conflict, forbidden, notFound } from "../errors";
 import { closedItem, InboxService } from "../inbox-service";
 
-type ItemMetadata = { eta?: string | null; needsOwner?: ChecklistItem["needsOwner"] | null };
+type ItemMetadata = {
+  note?: string;
+  eta?: string | null;
+  needsOwner?: ChecklistItem["needsOwner"] | null;
+};
 type ReplaceItem = Pick<ChecklistItem, "text"> &
   Partial<Pick<ChecklistItem, "id" | "status">> &
   ItemMetadata;
@@ -149,12 +153,12 @@ export class ChecklistService {
     const liveItems = new Map<string, ChecklistItem>();
     const additionMetadata: NonNullable<ChecklistProposal["additionMetadata"]> = [];
     for (const item of items) {
-      const { id, text, status, eta, needsOwner } = item;
+      const { id, text, status, note, eta, needsOwner } = item;
       const old = oldById.get(id);
       if (!old) {
         structural.push({ itemId: id, text, from: null, to: status, at: updatedAt });
-        if (eta !== undefined || needsOwner !== undefined) {
-          additionMetadata.push({ id, eta, needsOwner });
+        if (note !== undefined || eta !== undefined || needsOwner !== undefined) {
+          additionMetadata.push({ id, note, eta, needsOwner });
         }
       } else {
         if (old.text !== text) {
@@ -420,7 +424,7 @@ export class ChecklistService {
   updateItem(
     projectId: string,
     itemId: string,
-    change: { status?: ChecklistStatus; note?: string } & ItemMetadata,
+    change: { status?: ChecklistStatus } & ItemMetadata,
     caller: Pick<Session, "id" | "parentSessionId" | "role">,
   ): ProjectChecklist {
     const checklist = this.get(projectId);
@@ -432,7 +436,6 @@ export class ChecklistService {
     return this.changeItems(checklist, [item], (entry) => ({
       ...entry,
       status: change.status ?? entry.status,
-      note: change.note ?? entry.note,
       ...itemMetadata(entry, change),
     }));
   }
@@ -674,6 +677,7 @@ function insertApprovedItems(
 }
 
 function itemMetadata(old: ChecklistItem | undefined, patch: ItemMetadata) {
+  const note = patch.note ?? old?.note;
   const eta = patch.eta === undefined ? old?.eta : (patch.eta ?? undefined);
   let needsOwner = old?.needsOwner;
   if (patch.needsOwner !== undefined) {
@@ -684,6 +688,7 @@ function itemMetadata(old: ChecklistItem | undefined, patch: ItemMetadata) {
     }
   }
   return {
+    ...(note !== undefined ? { note } : {}),
     ...(eta !== undefined || old?.eta !== undefined ? { eta } : {}),
     ...(needsOwner !== undefined || old?.needsOwner !== undefined ? { needsOwner } : {}),
   };
@@ -753,10 +758,10 @@ function workStatus(item: ChecklistItem, status: ChecklistStatus | undefined): C
     : status;
 }
 
-/** Render the same progress and item IDs for the orchestrator and the PM. */
+/** Render checklist progress and item IDs, including progress notes for the PM. */
 export function formatChecklist(
   checklist: ProjectChecklist | undefined,
-  caller?: Pick<Session, "id" | "parentSessionId">,
+  caller?: Pick<Session, "id" | "parentSessionId" | "role">,
 ): string {
   const items = checklist?.items ?? [];
   const done = items.filter((item) => item.status === "done").length;
@@ -764,9 +769,10 @@ export function formatChecklist(
   return [
     `${done}/${items.length} done · ${percent}%`,
     ...items.map((item) => {
-      const { id, text, status } = item;
+      const { id, text, status, note } = item;
       const linked = caller && checklistLinked(item, caller) ? " · linked to your session" : "";
-      return `- [${status}] ${text} (${id})${linked}`;
+      const progress = caller?.role === "pm" && note ? ` · note: ${JSON.stringify(note)}` : "";
+      return `- [${status}] ${text} (${id})${linked}${progress}`;
     }),
   ].join("\n");
 }

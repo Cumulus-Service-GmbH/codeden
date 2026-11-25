@@ -326,3 +326,15 @@ export function useEarlierTurns(sessionId: string): EarlierTurns {
 }
 
 export const decisionCardsKey = ["decision-cards"] as const;
+
+/** Effective pins from the same Team the server uses for session starts. */
+export function useTeamDiagnostics(projectId?: string, enabled = true) {
+  const client = useClient();
+  const setup = useSnapshot().data?.settings.teamSetup;
+  return useQuery({
+    queryKey: ["team-diagnostics", projectId, setup],
+    queryFn: () => client.teamDiagnostics(projectId),
+    enabled,
+    refetchInterval: 5_000,
+  });
+}
