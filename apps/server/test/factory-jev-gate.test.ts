@@ -89,6 +89,17 @@ it("fails closed when reviewer text claims passing tests without verified CI", a
   expect(env.gh.merges).toEqual([]);
 });
 
+it("waits within the attempt cap when GitHub CI verification is pending", async () => {
+  env = activeEnv = createFactoryEnv({ jevScript: fixtureJevScript });
+  installDoneFixture(env);
+  vi.spyOn(env.gh, "commitChecks").mockResolvedValueOnce("pending");
+  const { id } = await finishReview(true);
+  expect(item(id).jev?.status).toBe("unavailable");
+  expect(env.gh.merges).toEqual([]);
+  await tick();
+  expect(item(id).jev?.status).toBe("pass");
+});
+
 async function expectBlocked(done: (result: ExecResult) => ExecResult) {
   for (const autoMerge of [true, false]) {
     env = activeEnv = createFactoryEnv({ jevScript: fixtureJevScript });

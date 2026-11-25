@@ -29,6 +29,30 @@ export function jevNext(status: Receipt["status"], priorRefusals: number, rounds
   return status === "revise" && priorRefusals < rounds ? "reviewer" : "owner";
 }
 
+/** Run the installed verification helper with only its runtime and connection settings. */
+export function jevToolEnv(): NodeJS.ProcessEnv {
+  const keys = [
+    "PATH",
+    "HOME",
+    "USERPROFILE",
+    "SYSTEMROOT",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+    "NODE_EXTRA_CA_CERTS",
+    "TYPESAFE_API_KEY",
+    "JEV_API_KEY",
+    "JEV_KEY_FILE",
+  ];
+  return ownNodeEnv({
+    ...Object.fromEntries(keys.map((key) => [key, process.env[key]])),
+    NODE_OPTIONS: "",
+  });
+}
+
 /** The history path is part of the evidence, not an extra CLI flag. */
 export async function runJevDone(
   exec: Exec,
@@ -72,7 +96,8 @@ export async function runJevDone(
     const result = await exec(process.execPath, [script, "done", inputPath, "--log", logPath], {
       cwd: attempt,
       timeoutMs: 120_000,
-      env: ownNodeEnv({ NODE_OPTIONS: "" }),
+      inheritEnv: false,
+      env: jevToolEnv(),
     });
     if (result.timedOut || result.notFound || result.code === null) {
       return unavailable("The done gate was unreachable or timed out.", true);

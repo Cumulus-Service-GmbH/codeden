@@ -322,6 +322,12 @@ export class SessionService {
           if (target.projectId !== req.projectId) {
             throw badRequest("Can only join a session in the same project", "join_mismatch");
           }
+          if (!conflicts.some(({ sessionId }) => sessionId === target.id)) {
+            throw badRequest(
+              "Can only join a session that conflicts with this start",
+              "join_mismatch",
+            );
+          }
           assertAutonomy(target.autonomy, options.autonomyFloor);
           if (req.input) {
             await this.send(target.id, { input: req.input, whenBusy: "queue" }, req.startedBy.kind);
@@ -686,11 +692,8 @@ export class SessionService {
       ? outbox.push(id, this.externalize(session, req.input), from, place, messageId)
       : undefined;
     try {
-      if (submitted) {
-        outbox.steering.add(submitted.id);
-        outbox.markDelivery(submitted, true);
-      }
-      await this.sendNow(session, req.input, from);
+      if (submitted) outbox.steering.add(submitted.id);
+      await this.sendNow(session, req.input, from, submitted);
       if (submitted) outbox.remove(submitted, "sent");
       if (priority && !this.hasOutbox(id)) admission?.dequeue(id);
     } catch (error) {
@@ -705,7 +708,18 @@ export class SessionService {
         this.flushIfSettled(id);
         return queued;
       }
-      if (submitted) return { status: "queued" };
+      if (submitted) {
+        if (outbox.get(id, submitted.id)?.delivery === "uncertain") {
+          if (req.whenBusy === "reject") throw error;
+          return { status: "queued" };
+        }
+        if (req.whenBusy !== "reject" && isTransientRunnerError(error)) {
+          this.holds.hold(id, true);
+          return { status: "queued" };
+        }
+        outbox.remove(submitted, "dropped");
+        throw error;
+      }
       // CodeDen's own roles never lose a message to a runner restart: it waits in the queue.
       // The user sees the error instead; a wake (`reject`) is retried by its scheduler.
       if (from === "user" || req.whenBusy === "reject" || !isTransientRunnerError(error)) {
@@ -760,6 +774,7 @@ export class SessionService {
           const revision = await applyPendingConfig(this.deps.repo, runner, session, true);
           wait.controller.signal.throwIfAborted();
           assertConfigRevision(this.deps.repo, id, revision);
+          if (!runner.isConnected()) throw runnerUnavailable(runner);
           outbox.markDelivery(pending, true);
           awaitingAck = true;
           try {
@@ -778,7 +793,15 @@ export class SessionService {
             }
             return result;
           } catch (error) {
-            if (["compacting", "no_turn", "unsupported"].includes(runnerErrorCode(error) ?? "")) {
+            if (
+              [
+                "compacting",
+                "no_turn",
+                "unsupported",
+                "unknown_session",
+                "config_unconfirmed",
+              ].includes(runnerErrorCode(error) ?? "")
+            ) {
               awaitingAck = false;
               outbox.markDelivery(pending, false);
             }
@@ -998,13 +1021,9 @@ export class SessionService {
       const tracked = next.id.startsWith("submission:");
       try {
         if (session.archivedAt) admission?.dequeue(id);
-        if (tracked) {
-          outbox.steering.add(next.id);
-          outbox.markDelivery(next, true);
-        } else {
-          outbox.remove(next, "sent");
-        }
-        await this.sendNow(session, next.input, next.from);
+        if (tracked) outbox.steering.add(next.id);
+        else outbox.remove(next, "sent");
+        await this.sendNow(session, next.input, next.from, tracked ? next : undefined);
         if (tracked) outbox.remove(next, "sent");
       } catch (error) {
         if (isTurnRunningError(error)) {
@@ -1013,14 +1032,14 @@ export class SessionService {
           this.flushIfSettled(id);
           return;
         }
-        if (tracked) {
+        if (tracked && outbox.get(id, next.id)?.delivery === "uncertain") {
           // The runner may already have accepted this submission despite the error.
           this.flushIfSettled(id);
           return;
         }
         const transient = isTransientRunnerError(error);
         this.holds.hold(id, transient);
-        outbox.restore(next);
+        if (!tracked) outbox.restore(next);
         if (admissionHead && !transient) admission?.dequeue(id);
         if (!transient && session.status !== "failed") {
           this.deps.launcher.fail(id, `send-${Date.now()}`, error);
@@ -1117,7 +1136,12 @@ export class SessionService {
    * Start a turn. Marks the session `delivering` before anything is awaited; messages queued
    * meanwhile are delivered once it is settled again (`flushIfSettled`).
    */
-  private async sendNow(session: Session, raw: UserInput, from: QueueSender): Promise<void> {
+  private async sendNow(
+    session: Session,
+    raw: UserInput,
+    from: QueueSender,
+    tracked?: QueuedMessage,
+  ): Promise<void> {
     this.delivering.add(session.id);
     try {
       // A new message takes over from a check run; the loop's own message comes after its run.
@@ -1125,7 +1149,7 @@ export class SessionService {
       this.countChecksRound(session.id, raw, from);
       const decorated = this.inputDecorator?.(session, raw, from) ?? { input: raw };
       try {
-        await this.deliver(session, this.forRunner(session, decorated.input));
+        await this.deliver(session, this.forRunner(session, decorated.input), tracked);
       } catch (error) {
         decorated.failed?.(error);
         throw error;
@@ -1163,10 +1187,20 @@ export class SessionService {
   }
 
   /** Hand a turn's input to the runner, resuming the session when it no longer hosts it. */
-  private async deliver(session: Session, input: UserInput): Promise<void> {
+  private async deliver(
+    session: Session,
+    input: UserInput,
+    tracked?: QueuedMessage,
+  ): Promise<void> {
     this.assertForcedProvider(session);
     const runner = this.runnerOf(session.id);
     const previous = session.status;
+    const { outbox } = this.deps;
+    const markAttempt = (needsSandbox = false) => {
+      if (!tracked) return;
+      if (!needsSandbox && !runner.isConnected()) throw runnerUnavailable(runner);
+      outbox.markDelivery(tracked, true);
+    };
     // Messaging an archived session brings it back.
     this.deps.repo.update(session.id, (s) => ({
       ...s,
@@ -1177,17 +1211,25 @@ export class SessionService {
     try {
       // Cleanup removed the worktree (§9), or a container session's start failed and took its
       // container with it: make it again, then resume through the provider.
-      if (session.worktreeRemovedAt || this.needsSandbox(session)) {
+      const needsSandbox = this.needsSandbox(session);
+      if (session.worktreeRemovedAt || needsSandbox) {
+        markAttempt(needsSandbox);
         await this.deps.launcher.resume(this.deps.repo.get(session.id), input);
         return;
       }
       try {
         const revision = await applyPendingConfig(this.deps.repo, runner, session);
         assertConfigRevision(this.deps.repo, session.id, revision);
+        markAttempt();
         await runner.request({ name: "session.send", sessionId: session.id, input, revision });
       } catch (error) {
+        const code = runnerErrorCode(error);
+        if (tracked && (code === "config_unconfirmed" || code === "unknown_session")) {
+          outbox.markDelivery(tracked, false);
+        }
         // The runner no longer hosts it (restart, stopped): resume through the provider.
-        if (runnerErrorCode(error) !== "unknown_session") throw error;
+        if (code !== "unknown_session") throw error;
+        markAttempt();
         await this.deps.launcher.resume(this.deps.repo.get(session.id), input);
       }
     } catch (error) {

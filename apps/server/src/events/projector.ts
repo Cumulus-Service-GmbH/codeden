@@ -62,7 +62,7 @@ export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
       return [];
     }
     case "team_run.updated": {
-      const { run } = e.payload;
+      const run = { ...e.payload.run, updatedAt: e.ts };
       tx.insert(teamRuns)
         .values({ id: run.id, run })
         .onConflictDoUpdate({ target: teamRuns.id, set: { run } })

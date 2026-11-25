@@ -26,6 +26,9 @@ it("merges a legacy assembler only if its checkout belongs to the project's repo
       repoPath,
     } as const;
     const foreignHead = sh(other, "rev-parse", "HEAD");
+    expect(await mergeTeamWorker({ ...command, cwd: repoPath, assembler: "worker" })).toEqual({
+      conflict: "Team assembler is not a registered worktree of this project",
+    });
     expect(await mergeTeamWorker({ ...command, cwd: other })).toEqual({
       conflict: "Team assembler is not a registered worktree of this project",
     });

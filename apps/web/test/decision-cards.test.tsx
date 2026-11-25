@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/shell/sidebar/sidebar";
 import { createMockClient } from "@/lib/api/mock";
 import { InboxPage } from "@/routes/inbox";
 import { useLayoutStore } from "@/stores/layout";
+import { inboxItem } from "./attention-fixtures";
 import { renderWithClient } from "./utils";
 
 const headSha = "a".repeat(40);
@@ -35,6 +36,18 @@ it("counts a waiting decision on the sidebar Inbox badge", async () => {
   renderWithClient(<Sidebar width={240} />, client, { withRouter: true });
   const nav = await screen.findByRole("link", { name: /^Inbox/ });
   expect(await within(nav).findByText("1")).toBeTruthy();
+});
+
+it("marks a Team owner decision as urgent in the sidebar", async () => {
+  const client = createMockClient();
+  const snap = await client.getSnapshot();
+  vi.spyOn(client, "getSnapshot").mockResolvedValue({
+    ...snap,
+    inbox: [inboxItem("team-decision", "owner_decision")],
+  });
+  renderWithClient(<Sidebar width={240} />, client, { withRouter: true });
+  const nav = await screen.findByRole("link", { name: /^Inbox/ });
+  expect((await within(nav).findByText("1")).classList.contains("bg-status-waiting")).toBe(true);
 });
 
 it("shows a GitHub approval card in the inbox", async () => {

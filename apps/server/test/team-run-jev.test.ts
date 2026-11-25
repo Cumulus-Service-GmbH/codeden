@@ -1,25 +1,29 @@
 import { createHash } from "node:crypto";
-import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { pinTeamJevHelper, runJevDone } from "../src/services/sessions/team-run-jev";
 
-it("rejects changes to the pinned Team gate helper and sibling modules", async () => {
-  const dir = await mkdtemp(join(tmpdir(), "team-jev-pin-"));
-  const script = join(dir, "jev.mjs");
-  const sibling = join(dir, "sibling.mjs");
-  try {
-    await writeFile(script, 'import "./sibling.mjs";\n', { mode: 0o600 });
-    await writeFile(sibling, "export const version = 1;\n", { mode: 0o600 });
-    const resolve = pinTeamJevHelper(script);
-    expect(resolve()).toEqual(expect.stringContaining("jev.mjs"));
-    await writeFile(sibling, "export const version = 2;\n");
-    expect(resolve()).toBeNull();
-  } finally {
-    await rm(dir, { recursive: true, force: true });
-  }
-});
+it.each(["sibling.mjs", "nested/sibling.mjs"])(
+  "rejects changes to pinned module %s",
+  async (name) => {
+    const dir = await mkdtemp(join(tmpdir(), "team-jev-pin-"));
+    const script = join(dir, "jev.mjs");
+    const sibling = join(dir, name);
+    try {
+      await mkdir(join(dir, "nested"), { mode: 0o700 });
+      await writeFile(script, `import "./${name}";\n`, { mode: 0o600 });
+      await writeFile(sibling, "export const version = 1;\n", { mode: 0o600 });
+      const resolve = pinTeamJevHelper(script);
+      expect(resolve()).toEqual(expect.stringContaining("jev.mjs"));
+      await writeFile(sibling, "export const version = 2;\n");
+      expect(resolve()).toBeNull();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  },
+);
 
 it.each([
   [0, "proceed", "pass"],

@@ -14,9 +14,18 @@ export function listTeamRuns(db: Db): TeamRun[] {
 
 export function listTeamRunsForSnapshot(db: Db): TeamRun[] {
   const status = sql`json_extract(${teamRuns.run}, '$.status')`;
-  const rows = db.select({ run: teamRuns.run }).from(teamRuns);
-  const active = rows.where(sql`${status} <> 'ready'`).all();
-  const ready = rows.where(sql`${status} = 'ready'`).orderBy(sql`rowid desc`).limit(20).all();
+  const active = db
+    .select({ run: teamRuns.run })
+    .from(teamRuns)
+    .where(sql`${status} <> 'ready'`)
+    .all();
+  const ready = db
+    .select({ run: teamRuns.run })
+    .from(teamRuns)
+    .where(sql`${status} = 'ready'`)
+    .orderBy(sql`json_extract(${teamRuns.run}, '$.updatedAt') desc`, sql`rowid desc`)
+    .limit(20)
+    .all();
   return [...active, ...ready].map(({ run }) => run);
 }
 

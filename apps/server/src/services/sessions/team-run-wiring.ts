@@ -296,15 +296,22 @@ export function wireTeamRuns(
       freeAgentSlots: () => admission.free(),
       save: (run) => saveTeamRun(store, run),
       hasWorkerSession: (id) => {
-        const status = sessionRepo.find(id)?.session.status;
+        const session = sessionRepo.find(id)?.session;
+        if (!session || session.archivedAt) return false;
+        const { status } = session;
+        if (status === "idle" || status === "interrupted") {
+          const queued = services.queue.list(id).some((message) => !message.delivery);
+          return (
+            queued ||
+            (status === "idle" ? services.autoRetry.hasRetryPlan(id) : Boolean(session.resumeToken))
+          );
+        }
         return (
           status === "created" ||
           status === "queued" ||
           status === "starting" ||
           status === "running" ||
-          status === "waiting" ||
-          status === "idle" ||
-          status === "interrupted"
+          status === "waiting"
         );
       },
       prepareAssembler: async (run, coordinatorId) => {
@@ -408,8 +415,19 @@ export function wireTeamRuns(
       let failure: string | null;
       if (raw.type === "session.updated") {
         const session = sessionRepo.find(sessionId)?.session;
-        if (session?.status !== "failed" && session?.status !== "stopped") continue;
-        failure = `Team worker session ${session.status}`;
+        if (!session) continue;
+        if (session.archivedAt) {
+          queueMicrotask(() => {
+            void runs
+              .abandonWorker(sessionId, "Team worker session was archived")
+              .catch((error) => log?.(`Team run abandonment: ${String(error)}`));
+          });
+          continue;
+        }
+        if (session.status === "completed") failure = null;
+        else if (session.status === "failed" || session.status === "stopped") {
+          failure = `Team worker session ${session.status}`;
+        } else continue;
       } else {
         if (
           !["agent.turn.completed", "agent.turn.failed", "agent.turn.interrupted"].includes(

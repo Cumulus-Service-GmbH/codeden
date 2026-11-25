@@ -4,6 +4,7 @@ import { readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { TeamWorkerJev } from "@codeden/contracts";
 import type { Exec } from "../exec";
+import { jevToolEnv } from "../review-jev";
 import { historyDigest, recordTeamHistory } from "./team-run-history";
 
 export interface TeamReviewEvidence {
@@ -29,19 +30,30 @@ export function pinTeamJevHelper(configuredPath: string): () => string | null {
     const path = realpathSync(configuredPath);
     const directory = dirname(path);
     if (!secureSource(directory).isDirectory()) throw new Error("Missing helper directory");
-    const names = readdirSync(directory)
-      .filter((name) => /\.(?:[cm]?js|json)$/.test(name))
-      .sort();
-    if (names.length > 256) throw new Error("Helper installation is too large");
     const hash = createHash("sha256");
+    let entries = 0;
     let total = 0;
-    for (const name of names) {
-      const file = join(directory, name);
-      const stat = secureSource(file);
-      total += stat.size;
-      if (!stat.isFile() || total > 8 * 1024 * 1024) throw new Error("Unexpected helper source");
-      hash.update(name).update("\0").update(readFileSync(file)).update("\0");
-    }
+    const visit = (dir: string, prefix: string) => {
+      for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
+        a.name.localeCompare(b.name),
+      )) {
+        if (++entries > 256) throw new Error("Helper installation is too large");
+        if (entry.isSymbolicLink()) throw new Error("Unexpected helper symlink");
+        const file = join(dir, entry.name);
+        const name = `${prefix}${entry.name}`;
+        if (entry.isDirectory()) {
+          if (!secureSource(file).isDirectory()) throw new Error("Unexpected helper directory");
+          visit(file, `${name}/`);
+        } else if (/\.(?:[cm]?js|json)$/.test(entry.name)) {
+          const stat = secureSource(file);
+          total += stat.size;
+          if (!stat.isFile() || total > 8 * 1024 * 1024)
+            throw new Error("Unexpected helper source");
+          hash.update(name).update("\0").update(readFileSync(file)).update("\0");
+        }
+      }
+    };
+    visit(directory, "");
     return { path, digest: hash.digest("hex") };
   };
   try {
@@ -59,30 +71,6 @@ export function pinTeamJevHelper(configuredPath: string): () => string | null {
   } catch {
     return () => null;
   }
-}
-
-function teamGateEnv(): NodeJS.ProcessEnv {
-  const keys = [
-    "PATH",
-    "HOME",
-    "USERPROFILE",
-    "SYSTEMROOT",
-    "TMPDIR",
-    "TEMP",
-    "TMP",
-    "HTTPS_PROXY",
-    "HTTP_PROXY",
-    "NO_PROXY",
-    "NODE_EXTRA_CA_CERTS",
-    "TYPESAFE_API_KEY",
-    "JEV_API_KEY",
-    "JEV_KEY_FILE",
-  ];
-  return {
-    ...Object.fromEntries(keys.map((key) => [key, process.env[key]])),
-    NODE_OPTIONS: "",
-    ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
-  };
 }
 
 export async function runJevDone(
@@ -121,7 +109,7 @@ export async function runJevDone(
       {
         timeoutMs: 180_000,
         inheritEnv: false,
-        env: teamGateEnv(),
+        env: jevToolEnv(),
       },
     );
     const out = JSON.parse(result.stdout);

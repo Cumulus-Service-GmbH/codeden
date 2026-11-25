@@ -19,6 +19,7 @@ import { TechDebtBadge } from "@/components/project/tech-debt-badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { isBlockingKind } from "@/lib/attention/blocking";
 import { splitPinned } from "@/lib/project-order";
 import { useSnapshot } from "@/lib/queries";
 import { activeRoleSession } from "@/lib/snapshot-reducer";
@@ -87,7 +88,7 @@ export function Sidebar({ width, onClose }: { width: number | string; onClose?: 
   const { data: decisions } = useDecisionCards();
   const pending = decisions?.length ?? 0;
   const inboxCount = inbox.length + pending;
-  const urgent = pending > 0 || inbox.some((i) => i.kind === "approval" || i.kind === "question");
+  const urgent = pending > 0 || inbox.some((i) => isBlockingKind(i) || i.kind === "owner_decision");
   const orchestrator = data && activeRoleSession(data, "orchestrator", null);
   const waiting = data?.sessions.filter((s) => s.status === "waiting" && s.role === "agent") ?? [];
   const projectName = (id: string | null) => data?.projects.find((p) => p.id === id)?.name ?? "";

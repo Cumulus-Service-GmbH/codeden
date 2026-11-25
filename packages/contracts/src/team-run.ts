@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ReasoningEffort } from "./common";
+import { ReasoningEffort, Timestamp } from "./common";
 import { Team, TeamMember } from "./team";
 
 const id = z.string().min(1);
@@ -176,6 +176,8 @@ export const TeamRun = z.object({
   coordinatorId: id.nullable(),
   workers: z.array(TeamWorker),
   status: z.enum(["running", "waiting", "ready"]),
+  /** Time of the latest projected run event. Older snapshots may omit it. */
+  updatedAt: Timestamp.optional(),
   notice: z.string().nullable(),
 });
 export type TeamRun = z.infer<typeof TeamRun>;

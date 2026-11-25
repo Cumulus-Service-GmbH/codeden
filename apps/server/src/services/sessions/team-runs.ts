@@ -124,15 +124,7 @@ export class TeamRuns {
       const running = run.workers.filter((worker) => worker.status === "running");
       if (!running.length) {
         if (run.status !== "running") {
-          const blocked =
-            run.status === "waiting" &&
-            run.notice &&
-            run.workers.find(
-              (worker) =>
-                worker.jev?.status !== "owner decision" &&
-                (worker.status === "waiting" || worker.status === "failed"),
-            );
-          if (blocked) this.ports.ownerDecision(run, blocked);
+          this.notifyBlocked(run);
           continue;
         }
         if (run.coordinatorId && eligibleAssignments(run.workers, run.limits, 1).length) continue;
@@ -155,10 +147,7 @@ export class TeamRuns {
         run.notice = reason;
       }
       this.save(run);
-      if (run.status === "waiting") {
-        const blocked = running.find((worker) => worker.status === "waiting");
-        if (blocked) this.ports.ownerDecision(run, blocked);
-      }
+      this.notifyBlocked(run);
     }
   }
 
@@ -167,6 +156,40 @@ export class TeamRuns {
     const runId = this.runForWorker(sessionId);
     if (runId) await this.finish(runId, sessionId, failure);
     else await this.dispatchAvailable();
+  }
+
+  abandonWorker(sessionId: string, reason: string): Promise<void> {
+    return this.serialize(async () => {
+      const runId = this.runForWorker(sessionId);
+      const run = runId ? this.runs.get(runId) : undefined;
+      const worker = run?.workers.find((entry) => entry.sessionId === sessionId);
+      if (!run || !worker) return;
+      delete worker.reconciling;
+      checkpoint(worker, "waiting", reason);
+      run.status = "waiting";
+      run.notice = reason;
+      this.save(run);
+      this.notifyBlocked(run);
+    });
+  }
+
+  private blockers(run: TeamRun): TeamWorker[] {
+    return run.workers.filter(
+      (worker) =>
+        worker.status === "waiting" ||
+        (worker.status === "failed" &&
+          worker.attempt >= assignmentRoundLimit(worker, run.limits.maxRounds)),
+    );
+  }
+
+  private notifyBlocked(run: TeamRun, fallback?: TeamWorker): void {
+    const blockers = this.blockers(run);
+    for (const worker of blockers) {
+      if (worker.jev?.status !== "owner decision") this.ports.ownerDecision(run, worker);
+    }
+    if (fallback && !blockers.length && run.status === "waiting" && run.notice) {
+      this.ports.ownerDecision(run, fallback);
+    }
   }
 
   dispatchAvailable(): Promise<void> {
@@ -328,30 +351,14 @@ export class TeamRuns {
           run.notice = String(error);
         }
       } else {
-        const blocked = run.workers.find(
-          (entry) =>
-            entry.status === "waiting" ||
-            (entry.status === "failed" &&
-              entry.attempt >= assignmentRoundLimit(entry, run.limits.maxRounds)),
-        );
+        const [blocked] = this.blockers(run);
         if (blocked) {
           run.status = "waiting";
           run.notice = blocked.checkpoint?.blocker ?? null;
         }
       }
       this.save(run);
-      const blocker =
-        run.status === "waiting" &&
-        run.workers.find(
-          (entry) =>
-            entry.status === "waiting" ||
-            (entry.status === "failed" &&
-              entry.attempt >= assignmentRoundLimit(entry, run.limits.maxRounds)),
-        );
-      if (blocker && blocker.jev?.status !== "owner decision")
-        this.ports.ownerDecision(run, blocker);
-      else if (run.status === "waiting" && !blocker && run.notice)
-        this.ports.ownerDecision(run, worker);
+      this.notifyBlocked(run, worker);
       await this.ports.coordinate(coordinatorId, {
         type: "continue",
         itemId: worker.itemId,

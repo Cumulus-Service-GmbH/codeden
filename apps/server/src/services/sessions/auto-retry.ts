@@ -160,6 +160,11 @@ export class AutoRetry {
     return [...this.timers.keys()];
   }
 
+  /** Whether the persisted last failure can still be retried after restart. */
+  hasRetryPlan(sessionId: string): boolean {
+    return this.decide(sessionId).action === "retry";
+  }
+
   private onEvents(events: RawEventEnvelope[]): void {
     for (const e of events) {
       if (!e.sessionId) continue;
@@ -191,7 +196,7 @@ export class AutoRetry {
 
   private decide(sessionId: string): RetryDecision {
     const session = this.deps.repo.find(sessionId)?.session;
-    if (!session?.rootThreadId) return { action: "none" };
+    if (!session?.rootThreadId || session.archivedAt) return { action: "none" };
     const rootTurns = this.deps.db
       .select()
       .from(turns)

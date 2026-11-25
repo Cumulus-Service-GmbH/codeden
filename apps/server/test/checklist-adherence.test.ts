@@ -381,6 +381,33 @@ it("resolves actual join and skip conflicts without admitting unplanned new work
   expect(env.repo.list({ projectId: env.project.id })).toHaveLength(1);
 });
 
+it("refuses a pinned-checklist join targeting unrelated work in the same project", async () => {
+  const sessions = sessionService();
+  const req = StartSessionRequest.parse({
+    projectId: env.project.id,
+    purpose: "Previously started work",
+    workKey: "task:existing-work",
+  });
+  const match = await sessions.start(req);
+  const other = await sessions.start({
+    ...req,
+    purpose: "Unrelated work",
+    workKey: "task:unrelated",
+  });
+  if (match.status !== "started" || other.status !== "started") {
+    throw new Error("Expected both sessions");
+  }
+  pinPlan();
+  await expect(sessions.start(req)).resolves.toMatchObject({
+    status: "conflict",
+    existing: [{ sessionId: match.sessionId }],
+  });
+  await expect(
+    sessions.start({ ...req, conflict: { resolution: "join", sessionId: other.sessionId } }),
+  ).rejects.toMatchObject({ code: "join_mismatch" });
+  expect(env.repo.list({ projectId: env.project.id })).toHaveLength(2);
+});
+
 it("refuses a factory start outside the pinned plan", async () => {
   const factory = new FactorySessions({
     sessions: sessionService(),

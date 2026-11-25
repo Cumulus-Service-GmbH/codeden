@@ -171,6 +171,22 @@ it("raises an owner decision when the assignment exhausts its rounds", async () 
   );
 });
 
+it("announces each parallel hard blocker even after another worker reached owner decision", async () => {
+  const { runs, gate, ownerDecision } = setup();
+  gate.mockResolvedValue({
+    status: "revise",
+    receipt: { head: "a".repeat(40), historyPath: "/history", historySha256: "b".repeat(64) },
+  });
+  const first = await runs.start("project", { teamId: "release", checklistId: "approved" });
+  const owner = await runs.finish(first.id, first.workers[0]?.sessionId ?? "", null);
+  expect(owner.workers[0]?.jev?.status).toBe("owner decision");
+  const retry = await runs.finish(first.id, first.workers[1]?.sessionId ?? "", "Build failed");
+  const blocked = await runs.finish(first.id, retry.workers[1]?.sessionId ?? "", "Still failing");
+  expect(blocked.status).toBe("waiting");
+  expect(ownerDecision.mock.calls.map(([, worker]) => worker.itemId)).toEqual(["a", "b"]);
+  expect(setup(vi.fn(), [blocked]).ownerDecision).toHaveBeenCalledTimes(2);
+});
+
 it("retries a refused launch that left no worker session", async () => {
   const save = vi.fn();
   const { runs, launch } = setup(save, [], undefined, ["a"]);
@@ -207,6 +223,9 @@ it("limits ready Team history in snapshots while keeping all runs for recovery",
     expect(snapshot.map(({ id }) => id)).toContain(sample.id);
     expect(snapshot.map(({ id }) => id)).toContain("ready-23");
     expect(snapshot.map(({ id }) => id)).not.toContain("ready-0");
+    vi.setSystemTime(Date.now() + 1_000);
+    saveTeamRun(env.store, { ...sample, id: "ready-0", status: "ready" });
+    expect(listTeamRunsForSnapshot(env.db.db).slice(1)[0]?.id).toBe("ready-0");
     expect(listTeamRuns(env.db.db)).toHaveLength(25);
   } finally {
     await env.close();
@@ -327,11 +346,12 @@ it("rebuilds worker state and conflict notices from the event log", async () => 
     const { runs } = setup((run) => saveTeamRun(store, run));
     const run = await runs.start("project", { checklistId: "approved" });
     const result = await runs.finish(run.id, run.workers[0]?.sessionId ?? "", null);
-    for (const raw of store.listAfter(0)) {
+    const events = store.listAfter(0);
+    for (const raw of events) {
       rebuilt.db.transaction((tx) => applyProjection(tx, EventEnvelope.parse(raw)));
     }
-    expect(listTeamRuns(live.db)).toEqual([result]);
-    expect(listTeamRuns(rebuilt.db)).toEqual([result]);
+    expect(listTeamRuns(live.db)).toEqual([{ ...result, updatedAt: events.at(-1)?.ts }]);
+    expect(listTeamRuns(rebuilt.db)).toEqual(listTeamRuns(live.db));
   } finally {
     live.close();
     rebuilt.close();
@@ -635,9 +655,18 @@ it("commits worker changes before review and handles a runner completion conflic
       attempt: 1,
       sessionId: firstSessionId,
     });
-    const retried = await services.teamRuns.finish(run.id, firstSessionId, "Retry needed");
-    const retry = retried.workers[0];
-    expect(retry).toMatchObject({ status: "running", attempt: 2 });
+    options.settings.update({ sessions: { autoRetry: false } });
+    services.autoRetry.evaluate(firstSessionId);
+    const retry = await vi.waitFor(() => {
+      const worker = listTeamRuns(env.db.db).find(({ id }) => id === run.id)?.workers[0];
+      expect(worker).toMatchObject({
+        status: "running",
+        attempt: 2,
+        sessionId: expect.any(String),
+        worktree: expect.any(String),
+      });
+      return worker;
+    });
     const sessionId = retry?.sessionId;
     if (!sessionId) throw new Error("Retry was not launched");
     await services.sessions.launching.get(sessionId);
@@ -763,9 +792,14 @@ it("returns a product refusal to the reviewer once, then raises an owner decisio
   expect(merge).not.toHaveBeenCalled();
 });
 
-it.each(["idle", "interrupted"] as const)(
-  "preserves a restored writing worker whose session is %s",
-  async (status) => {
+it.each([
+  ["idle", true, "running"],
+  ["idle", false, "waiting"],
+  ["interrupted", true, "running"],
+  ["interrupted", false, "waiting"],
+] as const)(
+  "reconciles a restored %s worker with continuation proof %s",
+  async (status, proof, expected) => {
     const env = createGithubEnv();
     try {
       const { runs } = setup((run) => saveTeamRun(env.store, run));
@@ -773,9 +807,38 @@ it.each(["idle", "interrupted"] as const)(
       const worker = run.workers[0];
       expect(worker).toMatchObject({ step: "writing", status: "running" });
       if (!worker?.sessionId) throw new Error("Missing writing session");
-      env.addSession({ id: worker.sessionId, projectId: run.projectId, status });
+      env.addSession({
+        id: worker.sessionId,
+        projectId: run.projectId,
+        status,
+        resumeToken: status === "interrupted" && proof ? "worker-conversation" : null,
+      });
+      if (status === "idle" && proof) {
+        env.store.append([
+          {
+            type: "agent.thread.started",
+            sessionId: worker.sessionId,
+            payload: { type: "thread.started", thread: { id: "root" } },
+          },
+          {
+            type: "agent.turn.started",
+            sessionId: worker.sessionId,
+            payload: { type: "turn.started", threadId: "root", turnId: "failed-turn" },
+          },
+          {
+            type: "agent.turn.failed",
+            sessionId: worker.sessionId,
+            payload: {
+              type: "turn.failed",
+              threadId: "root",
+              turnId: "failed-turn",
+              error: { kind: "transient", message: "Temporary provider failure" },
+            },
+          },
+        ]);
+      }
       const paths = ensureHome(join(env.dir, "home"));
-      createServices({
+      const services = createServices({
         db: env.db.db,
         store: env.store,
         paths,
@@ -796,12 +859,30 @@ it.each(["idle", "interrupted"] as const)(
       });
 
       const [restored] = listTeamRuns(env.db.db);
-      expect(restored).toMatchObject({ status: "running", notice: null });
-      expect(restored?.workers[0]).toMatchObject({
-        status: "running",
-        sessionId: worker.sessionId,
-        reconciling: true,
-      });
+      expect(restored?.status).toBe(expected);
+      if (expected === "running") {
+        expect(restored?.workers[0]).toMatchObject({
+          status: "running",
+          sessionId: worker.sessionId,
+          reconciling: true,
+        });
+        try {
+          services.autoRetry.start();
+          services.autoRetry.evaluate(worker.sessionId);
+          if (status === "idle") expect(services.autoRetry.pending()).toContain(worker.sessionId);
+          services.sessionRepo.update(worker.sessionId, (session) => ({
+            ...session,
+            archivedAt: new Date().toISOString(),
+          }));
+          await new Promise<void>((resolve) => setImmediate(resolve));
+          expect(services.autoRetry.pending()).not.toContain(worker.sessionId);
+        } finally {
+          services.autoRetry.stop();
+        }
+      }
+      const [blocked] = listTeamRuns(env.db.db);
+      expect(blocked?.workers[0]).toMatchObject({ status: "waiting" });
+      expect(services.inbox.find(`team-owner-decision:${run.id}:${worker.itemId}`)).toBeDefined();
     } finally {
       await env.close();
     }

@@ -74,6 +74,7 @@ function providerLike(
   const state = { turn: opts.turnRunning ?? false, connected: true };
   const sent: string[] = [];
   const request = vi.fn(async (command: { name: string; input?: UserInput }) => {
+    if (!state.connected) throw new RunnerCommandError("runner_unavailable", "Runner disconnected");
     if (command.name !== "session.send") return {};
     if (state.turn) throw new RunnerCommandError("command_failed", "A turn is already running");
     state.turn = true;
@@ -291,6 +292,63 @@ it("keeps a timed-out steer visible without replaying it when the turn settles",
   expect(sent).toEqual([]);
   expect(request).toHaveBeenCalledTimes(1);
 });
+
+it("queues an unsent tracked submission and delivers it when the runner reconnects", async () => {
+  const { sessions, request, sent, state } = providerLike();
+  state.connected = false;
+  await expect(sessions.send("s1", submission)).resolves.toEqual({ status: "queued" });
+  expect(request).not.toHaveBeenCalled();
+  expect(outbox.list("s1")[0]?.delivery).toBeUndefined();
+
+  state.connected = true;
+  sessions.releaseOutboxes();
+  await sessions.flushOutbox("s1");
+  await expect(sessions.send("s1", submission)).resolves.toEqual({ status: "sent" });
+  expect(sent).toEqual(["priority"]);
+});
+
+it("retains a queued tracked submission if its first flush finds a disconnected runner", async () => {
+  const { sessions, request, sent, state, endTurn } = providerLike();
+  repo.update("s1", (s) => ({ ...s, status: "running" }));
+  await sessions.send("s1", { ...submission, whenBusy: "queue" });
+  state.connected = false;
+  await endTurn();
+  expect(request).not.toHaveBeenCalled();
+  expect(outbox.list("s1")[0]?.delivery).toBeUndefined();
+  expect(texts()).toEqual(["priority"]);
+
+  state.connected = true;
+  sessions.releaseOutboxes();
+  await sessions.flushOutbox("s1");
+  expect(sent).toEqual(["priority"]);
+  expect(texts()).toEqual([]);
+});
+
+it("refuses an unsent tracked request with reject semantics and leaves its ID reusable", async () => {
+  const { sessions, request, sent, state } = providerLike();
+  state.connected = false;
+  const rejecting = { ...submission, whenBusy: "reject" as const };
+  await expect(sessions.send("s1", rejecting)).rejects.toMatchObject({
+    code: "runner_unavailable",
+  });
+  expect(request).not.toHaveBeenCalled();
+  expect(texts()).toEqual([]);
+
+  state.connected = true;
+  await expect(sessions.send("s1", rejecting)).resolves.toEqual({ status: "sent" });
+  expect(sent).toEqual(["priority"]);
+});
+
+it.each(["unknown_session", "config_unconfirmed"])(
+  "does not retain a steer refused before delivery with %s",
+  async (code) => {
+    const { sessions, request } = providerLike({ steer: true });
+    repo.update("s1", (s) => ({ ...s, status: "running" }));
+    request.mockRejectedValueOnce(new RunnerCommandError(code, "Refused before send"));
+    await expect(sessions.steer("s1", submission.input)).rejects.toMatchObject({ code });
+    expect(texts()).toEqual([]);
+  },
+);
 
 it("rejects a new steer once shutdown suspends priority delivery", async () => {
   const { sessions, request } = providerLike({ steer: true });

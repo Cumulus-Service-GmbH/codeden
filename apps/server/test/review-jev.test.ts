@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type FactoryItem, FactoryLimits, ReviewVerdict } from "@codeden/contracts";
+import { type FactoryItem, FactoryLimits, ReviewPolicy, ReviewVerdict } from "@codeden/contracts";
 import { expect, it, vi } from "vitest";
 import type { Exec } from "../src/services/exec";
 import type { FactoryContext } from "../src/services/factory/context";
@@ -128,7 +128,10 @@ it("runs the done script using the bundled runtime in Electron", async () => {
     expect(exec).toHaveBeenCalledExactlyOnceWith(
       process.execPath,
       expect.any(Array),
-      expect.objectContaining({ env: { NODE_OPTIONS: "", ELECTRON_RUN_AS_NODE: "1" } }),
+      expect.objectContaining({
+        inheritEnv: false,
+        env: expect.objectContaining({ NODE_OPTIONS: "", ELECTRON_RUN_AS_NODE: "1" }),
+      }),
     );
   } finally {
     if (prior) Object.defineProperty(process.versions, "electron", prior);
@@ -137,7 +140,7 @@ it("runs the done script using the bundled runtime in Electron", async () => {
   }
 });
 
-it("sends a product refusal to the reviewer once and then to the owner inbox", async () => {
+it.each([1, 2])("permits %s configured reassessments of the same head", async (rounds) => {
   const dir = await mkdtemp(join(tmpdir(), "review-jev-"));
   try {
     const reviewer = {
@@ -218,12 +221,23 @@ it("sends a product refusal to the reviewer once and then to the owner inbox", a
       defaultBranch: "main",
       factoryLimits: FactoryLimits.parse({}),
     } as Parameters<typeof advanceJev>[1];
-    expect(await advanceJev(ctx, project, item, head, { team: [...tuning.team] })).toBe(false);
+    const policy = {
+      team: [...tuning.team],
+      reviewPolicy: ReviewPolicy.parse({ jevRounds: rounds }),
+    };
+    expect(await advanceJev(ctx, project, item, head, policy)).toBe(false);
     expect(startTurn).toHaveBeenCalledExactlyOnceWith(reviewer.id, expect.stringContaining(head));
     expect(put).not.toHaveBeenCalled();
     expect(submitJevReview(ctx, item, verdict)).toBe(true);
-    expect(await advanceJev(ctx, project, item, head, { team: [...tuning.team] })).toBe(false);
-    expect(startTurn).toHaveBeenCalledTimes(1);
+    if (rounds === 2) {
+      item = { ...item, jevReviewHead: head };
+      expect(await advanceJev(ctx, project, item, head, policy)).toBe(false);
+      expect(startTurn).toHaveBeenCalledTimes(2);
+      expect(put).not.toHaveBeenCalled();
+      expect(submitJevReview(ctx, item, verdict)).toBe(true);
+    }
+    expect(await advanceJev(ctx, project, item, head, policy)).toBe(false);
+    expect(startTurn).toHaveBeenCalledTimes(rounds);
     expect(put).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({
         kind: "owner_decision",
@@ -231,7 +245,7 @@ it("sends a product refusal to the reviewer once and then to the owner inbox", a
       }),
     );
     expect(item.jev?.status).toBe("owner decision");
-    expect(item.jevHistory?.map((entry) => entry.status)).toEqual(["revise", "revise"]);
+    expect(item.jevHistory?.map((entry) => entry.status)).toEqual(Array(rounds + 1).fill("revise"));
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

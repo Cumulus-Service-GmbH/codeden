@@ -165,10 +165,12 @@ export async function advanceJev(
 
   const policy = ReviewPolicy.parse(tuning.reviewPolicy ?? {});
   let attempts = receiptHistory(item).length;
+  let activeReviewHead = item.jevReviewHead;
   const shouldEvaluate =
     receipt?.status !== "revise" && (receipt?.status !== "unavailable" || receipt.retryable);
   if (shouldEvaluate && attempts < policy.jevAttempts) {
     save({ head, status: "pending", reasons: [] }, { jevReviewHead: undefined });
+    activeReviewHead = undefined;
     receipt = await evaluate(ctx, project, item, head);
     save(receipt, { jevHistory: [...receiptHistory(item), receipt] });
     attempts++;
@@ -183,7 +185,7 @@ export async function advanceJev(
   if (
     jevNext(receipt.status, priorRefusals, policy.jevRounds) === "reviewer" &&
     attempts < policy.jevAttempts &&
-    item.jevReviewHead !== head
+    activeReviewHead !== head
   ) {
     const started = await startReviewer(
       receipt,
@@ -214,10 +216,11 @@ async function evaluate(ctx: FactoryContext, project: Project, item: FactoryItem
   const cwd = reviewer?.worktreePath ?? builder?.worktreePath;
   const rounds = roundsOf(item);
   const heads = [...new Set([...rounds.map((round) => round.head), head])];
-  const unavailable = (reason: string): JevReceipt => ({
+  const unavailable = (reason: string, retryable?: true): JevReceipt => ({
     head,
     status: "unavailable",
     reasons: [reason],
+    retryable,
   });
   const alternative = usesVerificationEvidence(item);
   const exactRevert = item.source === "revert" && !item.reviewerSessionId;
@@ -289,8 +292,12 @@ async function evaluate(ctx: FactoryContext, project: Project, item: FactoryItem
         );
       }
       const verified = await ctx.github.commitChecks(project.id, head).catch(() => null);
-      if (verified !== "success")
-        return unavailable("Passing GitHub commit checks are unavailable at the current head.");
+      if (verified !== "success") {
+        return unavailable(
+          "Passing GitHub commit checks are unavailable at the current head.",
+          verified === null || verified === "pending" ? true : undefined,
+        );
+      }
       evidence = [
         `${criteria.map((_, i) => `criteria[${i}]`).join(" and ")}\n${JSON.stringify({
           source: "GitHub commit checks",
