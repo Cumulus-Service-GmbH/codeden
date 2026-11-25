@@ -15,7 +15,6 @@ it("offers a fix retry only after the prior fix session stops", async () => {
   const fixture = snapshot.sessions.find((session) => session.projectId !== null);
   if (!fixture?.projectId) throw new Error("Expected a project session");
   const session = { ...fixture, projectId: fixture.projectId, status: "running" as const };
-  client.getSnapshot = async () => ({ ...snapshot, sessions: [session] });
   const view = {
     projectId: session.projectId,
     issue: null,
@@ -42,6 +41,7 @@ it("offers a fix retry only after the prior fix session stops", async () => {
     client,
     { withRouter: true },
   );
+  act(() => queryClient.setQueryData(snapshotKey, { ...snapshot, sessions: [session] }));
   await screen.findByText("Reuse the helper");
   expect(screen.queryByRole("button", { name: "Retry fix" })).toBeNull();
 

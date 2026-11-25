@@ -203,13 +203,17 @@ describe("the right panel of a session without a worktree (#409)", () => {
     expect(getDiff).not.toHaveBeenCalled();
 
     // The folder gained git while the snapshot still says it is a plain folder.
-    gitStatus.mockImplementation(createMockClient().gitStatus);
+    const pendingGit = Promise.withResolvers<Awaited<ReturnType<CodeDenClient["gitStatus"]>>>();
+    gitStatus.mockImplementationOnce(() => pendingGit.promise);
     getDiff.mockImplementation(createMockClient().getDiff);
     fireEvent.click(screen.getByRole("button", { name: "Check for git" }));
 
-    await screen.findByRole("button", { name: "Refresh diff" });
     expect(gitStatus).toHaveBeenCalledWith(stopped.id);
     expect(getDiff).toHaveBeenCalledWith(stopped.id, { kind: "session" });
+    expect(screen.queryByRole("button", { name: "Refresh diff" })).toBeNull();
+    expect(screen.getByText("Not a git repository")).toBeTruthy();
+    await act(async () => pendingGit.resolve(await createMockClient().gitStatus(stopped.id)));
+    await screen.findByRole("button", { name: "Refresh diff" });
   });
 
   it("shows the right-panel toggle for an in-place session", async () => {

@@ -129,7 +129,8 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
   // A session running in place in a folder without git has no diff, changes or comparison.
   // Its git status and its diff both answer `not_a_repo`, whichever comes first.
   const git = useGitStatus(sessionId, !knownNonGit);
-  const notGitRepo = knownNonGit || isNotGitRepo(git.error) || isNotGitRepo(error);
+  const checkingGit = checkedSessionId === sessionId && git.isPending;
+  const notGitRepo = knownNonGit || checkingGit || isNotGitRepo(git.error) || isNotGitRepo(error);
   const restore = useMutation({
     mutationFn: (paths?: string[]) => {
       const target = restoreTarget(scope);
