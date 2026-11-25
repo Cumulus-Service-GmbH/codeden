@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "remote": "origin",
+  "defaultBranch": "main",
+  "targets": {
+    "qa": {
+      "type": "containerapp",
+      "agentAllowed": true,
+      "subscription": "<subscription id or name>",
+      "resourceGroup": "<resource group>",
+      "app": "<qa container app name>",
+      "container": null,
+      "registry": "<acr name>",
+      "image": "<repository name, e.g. webchat>",
+      "build": { "context": ".", "dockerfile": "<path/to/Dockerfile>", "buildArgs": { "BUILD_SHA": "{sha}" } },
+      "health": { "url": "https://<qa-host>/build-info", "shaField": "commit", "timeoutSeconds": 600 }
+    },
+    "prod": {
+      "type": "containerapp",
+      "agentAllowed": false,
+      "requireOnDefaultBranch": true,
+      "requireSameShaOn": "qa",
+      "subscription": "<subscription id or name>",
+      "resourceGroup": "<resource group>",
+      "app": "<prod container app name>",
+      "container": null,
+      "registry": "<acr name>",
+      "image": "<repository name>",
+      "build": { "context": ".", "dockerfile": "<path/to/Dockerfile>", "buildArgs": { "BUILD_SHA": "{sha}" } },
+      "health": { "url": "https://<prod-host>/build-info", "shaField": "commit", "timeoutSeconds": 600 }
+    }
+  }
+}

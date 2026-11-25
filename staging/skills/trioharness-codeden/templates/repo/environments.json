@@ -1,0 +1,12 @@
+{
+  "schema": 1,
+  "environments": {
+    "qa": {
+      "health": { "url": "https://<qa-host>/health", "shaField": "commit" },
+      "note": "optional free text, no secrets"
+    },
+    "prd": {
+      "health": { "url": "https://<prd-host>/health", "shaField": "commit" }
+    }
+  }
+}

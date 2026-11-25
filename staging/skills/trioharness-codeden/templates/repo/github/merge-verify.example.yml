@@ -1,0 +1,41 @@
+# TrioHarness Lean verified merge: the required status check "merge-verify".
+# Installed with `node <skill>/scripts/merge-verify.mjs install --repo .` into .github/workflows/merge-verify.yml and
+# .github/merge-verify/ (a reviewed PR; every one of those paths is sensitive, so a PR can never change its own check).
+# It runs from the DEFAULT branch (pull_request_target) and NEVER checks out the pull request: it only reads the PR
+# through the GitHub API, so a PR cannot run code in this job. Pin the action below to a full commit SHA after checking
+# its release notes (every version bump is validated first).
+# A PR that touches a sensitive path fails this check until a person approves it: when the owner (or a member or
+# collaborator, never a bot or the PR author) approves THIS head and only "a person's call" reasons remain, the check
+# passes. A review does not re-run it, and there is deliberately no pull_request_review trigger (that event runs the
+# workflow file from the PR, which the PR could rewrite). After approving, run
+# `node <skill>/scripts/merge-verify.mjs recheck --repo <owner/name> --pr <n>` (needs "Actions: Read and write" for the
+# app or token that runs it; the owner grants that) or press Re-run on this check in GitHub.
+name: merge-verify
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, edited]
+permissions:
+  contents: read
+  pull-requests: read
+  checks: read
+  statuses: read
+  actions: read
+concurrency:
+  group: merge-verify-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  merge-verify:
+    name: merge-verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - name: Verify the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node .github/merge-verify/merge-verify.mjs ci --repo "$GITHUB_REPOSITORY" --pr "$PR" --expect-sha "$HEAD_SHA"

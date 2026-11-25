@@ -1,0 +1,5 @@
+[
+  { "case": "Expected RED and successful final evidence", "scores": { "failing": 0.2, "unsupported": 0.3, "met_0": 0.8 }, "verdict": "proceed" },
+  { "case": "Credible final failure", "scores": { "failing": 0.21, "unsupported": 0.3, "met_0": 0.8 }, "verdict": "revise" },
+  { "case": "Criterion evidence falls short", "scores": { "failing": 0.2, "unsupported": 0.3, "met_0": 0.79 }, "verdict": "revise" }
+]

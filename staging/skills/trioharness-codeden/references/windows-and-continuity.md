@@ -1,0 +1,33 @@
+# Windows execution and run continuity
+
+Loaded on Windows hosts, after any tool/worker failure, or when a run is resumed. Binding when triggered.
+
+## Windows execution
+- Use PowerShell-native commands; never assume `grep`, `cat`, `head`, `tail`, `rm`, `cp`, `mv` or `sed`. Use `rg` and `git` for search.
+- Judge success by exit code (`$LASTEXITCODE` for native commands), not by stderr text: Git and Node write progress and warnings to stderr, which PowerShell may decorate as `NativeCommandError`. LF→CRLF warnings are harmless.
+- Force UTF-8 at every process boundary: `$OutputEncoding = [Console]::OutputEncoding = [Text.UTF8Encoding]::new()`, `PYTHONUTF8=1`, `PYTHONIOENCODING=utf-8`.
+- Quote absolute paths as separate arguments; never interpolate secrets into command strings; pass JSON through files.
+- Every long-running command gets a bound: tests via `node --test --test-timeout=<ms> --test-concurrency=1` (or the repo's own timeout flag), other commands via a timeout wrapper. A command that exceeds its bound is a failed gate with evidence, not a reason to wait indefinitely.
+- Writes outside the task worktree (for example `~/.codex`, `~/.config`) may need Bambooed Full access or an approval; if a command appears to hang, check for a pending approval before retrying.
+- Run `npm run test:quick` for harness self-checks inside agent sessions; the full launcher suite is for installs.
+
+- Keep backups of user config outside auto-scanned folders (for example `~/name.bak-<date>`, not inside `~/.claude` or `~/.codex`).
+
+## Concurrent runs and shared resources
+- Wrap every build, test, restore and install command (`npm install`, `dotnet restore`, `pip install` included): `node "<skill>/scripts/run-lock.mjs" run [--timeout 900] -- <command>`. The default lock is the current worktree (its `bin/`, `obj/` and `TestResults/` are shared by every worker of the task); other worktrees are not blocked.
+- Isolate what each invocation writes: set `TEMP`/`TMP` to `.trioharness-direct/runs/<run-id>/tmp/<invocation>` (scratch: reclaimed once the run is finished); for .NET pass `--results-directory` (and, for Microsoft.Testing.Platform, `--diagnostic-output-directory`) under `.trioharness-direct/runs/<run-id>/proof/<invocation>`, and tee any verbatim proof output a gate will cite by path into `proof/` or `logs/` — those are archived and never reclaimed; build with `--disable-build-servers` (or `-nodeReuse:false`) so a shared MSBuild or compiler server from another session does not hold files open.
+- Resources that cannot be isolated (a fixed port, a local database, a hard-coded log path) get a named lock: `run-lock.mjs run --name <resource> -- <command>`, and the repo AGENTS.md records the name under Proof commands.
+- Never terminate a process owned by another worker, task or session. `run-lock.mjs status` shows who holds a lock; exit 75 means it is still held by a live process: wait and retry, then report with the holder's details.
+
+## Cleanup
+`node "<skill>/scripts/cleanup.mjs" --repo <repo>` audits every worktree of the project and changes nothing. With `--apply` it deletes only regenerable artifacts, in every worktree, and only where all three hold: the directory name is on the allowlist (bin, obj, TestResults, coverage, .vite, .next, caches, plus node_modules with `--node-modules`), git tracks no file inside it, git ignores it, and it belongs to that worktree's own index (nested repositories are never entered). Tracked files, untracked source, ledgers and stashes are never touched. Extras: `--remote-branches` audits remote branches merged into the default branch — after a fresh fetch it re-verifies each branch's current SHA, excludes the default branch, protected name patterns, branches with an open pull request (via `gh`; if `gh` is unavailable nothing is deletable) and branches used by a local worktree, and deletes only with `--apply` plus `--authorize "delete-<n>-branches-on-<remote>"`; `--runs` deletes run folders that are both older than `--keep-days` and fully passed; `--locks` deletes lock files whose owner process is gone; `--remove-worktrees` additionally removes worktrees that are clean, pushed and merged into the default branch (never `--force`, never the main checkout, and nothing at all when the remote is unreachable). Stop that project's Bambooed tasks before `--apply`, and read the audit first. The `/cleanup` command (installed from `templates/commands/cleanup.md` into `~/.codex/prompts/` and `~/.claude/commands/`) runs the audit and then reclaims build artifacts only; `/cleanup runs` also deletes old finished run folders (ledgers and evidence, so opt-in), `/cleanup worktrees` also removes merged worktrees, and `/cleanup audit` stops after the audit.
+
+Runs recorded before the `finished` flag existed (no `learnings` gate, no `finished: true`) count as open: reclaim leaves their worktrees alone and `--runs` never deletes them. Close such a run once with `run-state.mjs finish --run <id>` (needs `done-jev` passed) or remove its worktree by hand after reading the audit.
+
+## Continuity and self-healing
+- Checkpoint every gate: `node "<skill>/scripts/run-state.mjs" set --repo <repo> --run <run-id> --gate <gate> --status <status> --next "<next action>"` when a gate starts and when it ends.
+- On any new session, resume, or the user saying "resume": run `run-state.mjs show --repo <repo>` and continue at `resumeAt` with `next`. Re-verify the gate's inputs (worktree SHA, candidate diff, receipts) before relying on them; gates are re-runnable.
+- Transient failures (HTTP 429/5xx, network drop, worker crash, CLI exit without result, test-runner hang): retry the same step up to 2 times with backoff, recording each attempt in `failures.md`. A worker that fails twice is re-dispatched once with a narrower packet; Qwen failing before authoring starts falls back to Terra per the team rules.
+- Deterministic failures (test failure, guard violation, Jev block) are never retried blindly; apply the gate's own fix rules.
+- Never end a turn idle. A turn may end only while a dispatched worker is still running (Bambooed wakes the Architect when it returns) or when finishing. Your own shell commands never justify ending a turn: run them in the foreground with a timeout. Background shells started by the Architect do not wake it and are lost when the session ends. Goals exist only for Codex and cannot be combined with a team, so continuity comes from the turn rules above, the run-state checkpoint and the successor handover, not from a mode.
+- Stop only for the reasons the core allows; when stopping, write the resume point with `run-state.mjs` so the next session continues without re-planning.

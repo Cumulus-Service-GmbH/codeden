@@ -1,0 +1,21 @@
+# Skeleton written by TrioHarness bootstrap. Two jobs are required by the merge-approval ruleset copied from the reference repo.
+# 1. build-test: REPLACE the placeholder step with this repo's verified build and test commands (AGENTS.md "Proof commands").
+#    It fails until it is replaced, so a repo can never look green without checks.
+# 2. secret-scan: copy the `secret-scan` job from the reference repo's workflow (the user's existing repos already have one)
+#    so every repo scans the same way; do not invent a second scanner.
+name: CI
+on:
+  pull_request:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build and test (REPLACE ME)
+        run: |
+          echo "Replace this step with the repo's verified build and test commands." >&2
+          exit 1

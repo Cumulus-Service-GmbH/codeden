@@ -1,0 +1,270 @@
+#!/bin/sh
+# TrioHarness Lean: agent processes may push only task branches, and never credentials. Humans are unaffected
+# by the ref policy; the content scan below applies to everyone (a secret on the remote is a secret leaked).
+# Activation of the ref policy depends on the host marking agent shells (OPENCODE_CONFIG_CONTENT, CLAUDECODE,
+# CODEX_SANDBOX, CODEX_SANDBOX_NETWORK_DISABLED, or TRIOHARNESS_AGENT, which scrubEnv sets when it strips a secret-bearing marker). Agents never bypass this hook (--no-verify, hook edits, core.hooksPath).
+zero=0000000000000000000000000000000000000000
+agent=0
+if [ -n "${OPENCODE_CONFIG_CONTENT+x}${CLAUDECODE+x}${CODEX_SANDBOX+x}${CODEX_SANDBOX_NETWORK_DISABLED+x}${TRIOHARNESS_AGENT+x}" ]; then agent=1; fi
+
+# Credential file names (mirror of scripts/secret-patterns.mjs SECRET_FILE_PATTERNS).
+# Rejected by NAME. `.env.example|sample|template|dist|schema|defaults` and appsettings.<env>.json are NOT here:
+# those are content-gated below (blocked only when a secret-shaped line is added inside them).
+secret_files='(^|/)\.env$|(^|/)\.env\.(local|development|production|staging|test|qa|prod|dev)([.][^/]*)?$|(^|/)\.npmrc$|(^|/)\.pypirc$|(^|/)\.netrc$|\.(pfx|p12|pem|key|jks|keystore|publishsettings|asc|gpg|ppk)$|(^|/)id_(rsa|dsa|ecdsa|ed25519)(\.pub)?$|(^|/)secrets?\.(json|ya?ml|toml)$|(^|/)credentials?(\.[^/]+)?$|(^|/)local\.settings\.json$|(^|/)\.aws/credentials$|(^|/)\.kube/config$|\.tfstate(\.backup)?$'
+# Secret-shaped added lines (mirror of SECRET_VALUE_PATTERNS; conservative subset that grep -E can run).
+secret_values='-----BEGIN [A-Z ]*(PRIVATE KEY|CERTIFICATE)-----|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{20,}|[sr]k_(live|test)_[A-Za-z0-9]{16,}|gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|AIza[0-9A-Za-z_-]{35}|SG\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|(AccountKey|SharedAccessKey|SharedAccessSignature) *= *[A-Za-z0-9+/=%]{20,}|[?&]sig=[A-Za-z0-9%+/=]{20,}|://[^/ :@]+:[^@ /]{4,}@|Authorization: *(Basic|Bearer) +[A-Za-z0-9+/=._-]{8,}|_authToken *= *[^ ]{8,}|(Password|Pwd) *= *[^;" $(){}]{4,}([;" ]|$)|(api[_-]?key|secret|token|password|passwd|pwd)["'"'"']? *[:=] *["'"'"'][^"'"'"' ]{8,}["'"'"']|^(export +)?[A-Z0-9_]*(KEY|SECRET|TOKEN|PASSWORD|PASSWD|PWD|SAS|CONNECTION_?STRING|CREDENTIALS?) *= *[^ $<]{8,}'
+
+# Name-allowed content also uses the placeholder exclusions from yaml-password in secret-patterns.mjs.
+# Return only line numbers; check every awk status so scanner failures block the push.
+scan_failure() { echo "Push blocked: secret scanner failed." >&2; exit 1; }
+secret_value_lines() {
+  value_text=$(cat) || return 2
+  value_matches=$(printf '%s\n' "$value_text" | grep -n -E -e "$secret_values")
+  value_status=$?
+  [ "$value_status" -le 1 ] || return 2
+  if [ -n "$value_matches" ]; then printf '%s\n' "$value_matches" | cut -d: -f1; fi
+  # The extra YAML rule applies only to lines whose companion path has a name allowance.
+  # Ordinary content and commit messages retain the existing grep patterns above.
+  if [ -n "${1:-}" ]; then
+    printf '%s\n' "$value_text" | THL_SECRET_ALLOW="$allow" awk -v P="$1" '
+    BEGIN { n=split(ENVIRON["THL_SECRET_ALLOW"],rows,"\n"); for(i=1;i<=n;i++){ split(rows[i],f,/[[:space:]]+/); if(f[2]=="name") names[f[1]]=1 } }
+    { if ((getline path < P) <= 0) exit 2; if (!(path in names)) next }
+    tolower($0) ~ /^[[:space:]]*(password|passwd|secret|api[_-]?key|token)[[:space:]]*:[[:space:]]+/ {
+      value=$0; sub(/^[^:]*:[[:space:]]+/, "", value); sub(/[[:space:]]+$/, "", value)
+      if (length(value) < 8 || value ~ /[[:space:]]/) next
+      sub(/^["\047][[:space:]]*/, "", value)
+      if (value !~ /^(<|\$\{|\$[A-Za-z_]|%|\{\{)/) print NR
+    }'
+  fi
+}
+filter_names() {
+  THL_SECRET_ALLOW="$allow" awk -v mode="$1" '
+    BEGIN { n=split(ENVIRON["THL_SECRET_ALLOW"],rows,"\n"); for(i=1;i<=n;i++){ split(rows[i],f,/[[:space:]]+/); if(f[2]=="name") names[f[1]]=1 } }
+    (mode == "listed" && $0 in names) || (mode == "unlisted" && !($0 in names)) { print }'
+}
+
+# Remote queries and fetches are each bounded to 120 seconds. No local HEAD/name guess is trusted.
+# A watchdog is used where timeout/gtimeout is absent; both it and its sleep are reaped.
+bounded_git() {
+  if command -v timeout >/dev/null 2>&1; then
+    GIT_TERMINAL_PROMPT=0 timeout -s KILL 120 git "$@" </dev/null
+  elif command -v gtimeout >/dev/null 2>&1; then
+    GIT_TERMINAL_PROMPT=0 gtimeout -s KILL 120 git "$@" </dev/null
+  else
+    GIT_TERMINAL_PROMPT=0 git "$@" </dev/null &
+    query_pid=$!
+    (
+      timer_pid=""
+      timer_cancelled=0
+      # Remember cancellation during timer launch, then reap the child once its PID is assigned.
+      trap 'timer_cancelled=1; if [ -n "$timer_pid" ]; then kill "$timer_pid" 2>/dev/null; wait "$timer_pid" 2>/dev/null; exit; fi' TERM INT
+      sleep 120 &
+      timer_pid=$!
+      if [ "$timer_cancelled" = 1 ]; then
+        kill "$timer_pid" 2>/dev/null
+        wait "$timer_pid" 2>/dev/null
+        exit
+      fi
+      wait "$timer_pid"
+      kill -KILL "$query_pid" 2>/dev/null
+    ) >/dev/null 2>&1 &
+    watchdog_pid=$!
+    wait "$query_pid"
+    query_status=$?
+    kill "$watchdog_pid" 2>/dev/null
+    wait "$watchdog_pid" 2>/dev/null
+    return "$query_status"
+  fi
+}
+default_sha=""
+remote_name=${1:-}
+case "$remote_name" in -*) remote_name="" ;; esac
+verify_default() {
+  default_sha=""
+  fetch_branch=""
+  # Preserve trailing newlines so extra blank lines remain malformed instead of being trimmed away.
+  advertised=$(bounded_git ls-remote --symref "$remote_name" HEAD 2>/dev/null && printf '.')
+  advertised_status=$?
+  advertised=${advertised%.}
+  newline='
+'
+  # Two complete lines, with exactly one trailing newline; no unterminated third line.
+  if [ "$advertised_status" = 0 ] && [ "$advertised" != "${advertised%"$newline"}" ] &&
+     [ "$(printf '%s' "$advertised" | wc -l | tr -d ' ')" = 2 ]; then
+    branch=$(printf '%s' "$advertised" | sed -n 's/^ref: refs\/heads\/\(.*\)	HEAD$/\1/p')
+    sha=$(printf '%s' "$advertised" | grep -E -e '^[0-9a-fA-F]{40}([0-9a-fA-F]{24})?	HEAD$' | cut -f1 | tr 'A-F' 'a-f')
+    if [ -n "$branch" ] && [ -n "$sha" ] && git check-ref-format "refs/heads/$branch" >/dev/null 2>&1; then
+      fetch_branch=$branch
+      if git cat-file -e "$sha^{commit}" 2>/dev/null; then
+        tracking_sha=$(git rev-parse --verify "refs/remotes/$remote_name/$branch^{commit}" 2>/dev/null)
+        if [ "$tracking_sha" = "$sha" ]; then default_sha=$sha; fi
+      fi
+    fi
+  fi
+}
+# Require a configured remote whose resolved fetch URL is the actual push target.
+# A split pushurl or URL rewrite must not supply allowances from another destination.
+configured_remote=""
+if [ -n "$remote_name" ] && git remote | grep -F -x -e "$remote_name" >/dev/null 2>&1; then
+  configured_remote=$remote_name
+  if [ -n "${2:-}" ] && fetch_url=$(git ls-remote --get-url -- "$remote_name" 2>/dev/null) && [ "$fetch_url" = "$2" ]; then
+    verify_default
+    if [ -z "$default_sha" ] && [ -n "$fetch_branch" ]; then
+      if bounded_git fetch -- "$remote_name" "$fetch_branch" >/dev/null 2>&1; then
+        # Ask again: the remote may have moved during the fetch. Never trust FETCH_HEAD alone.
+        verify_default
+      fi
+    fi
+  fi
+fi
+# On failure, no allowlist and the entire local history is scanned. A clean scan may still pass.
+unverified_remedy() {
+  if [ -z "$default_sha" ]; then
+    if [ -n "$configured_remote" ]; then
+      printf 'Default branch unverified (stale, offline or differing fetch/push URLs): run `git fetch %s` and retry.\n' "$configured_remote" >&2
+    else
+      printf 'Default branch unverified: the push URL cannot be verified; push via a named remote.\n' >&2
+    fi
+  fi
+}
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  if [ "$local_sha" = "$zero" ]; then
+    if [ "$agent" = 1 ]; then echo "Push blocked: agents may not delete remote refs ($remote_ref)" >&2; exit 1; fi
+    continue
+  fi
+  if [ "$agent" = 1 ]; then
+    case "$remote_ref" in
+      refs/heads/codeden/*|refs/heads/bambooed/*|refs/heads/trio/*)
+        # Fast-forward only: a run may extend a task branch, never rewrite it (another live run may own it).
+        if [ "$remote_sha" != "$zero" ] && ! git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
+          echo "Push blocked: agents may only fast-forward $remote_ref (no force push, no rewrite of a remote task branch)" >&2; exit 1
+        fi ;;
+      *)
+        # Gate 0 (repo-shape.mjs --apply) may CREATE the default branch once: the marker (set only by that
+        # script, never by an agent) must name a conventional default, the local and remote refs must both be
+        # that branch, and the remote ref must not exist yet. An update of an existing ref is never allowed.
+        case "${TRIOHARNESS_SHAPE_CREATE:-}" in main|master|develop|trunk) marker_ok=1 ;; *) marker_ok=0 ;; esac
+        if [ "$marker_ok" = 1 ] && [ "$remote_ref" = "refs/heads/$TRIOHARNESS_SHAPE_CREATE" ] && [ "$local_ref" = "refs/heads/$TRIOHARNESS_SHAPE_CREATE" ] && [ "$remote_sha" = "$zero" ]; then
+          :
+        else
+          echo "Push blocked: agents may push only codeden/*, bambooed/* or trio/* branches (got $remote_ref)" >&2; exit 1
+        fi ;;
+    esac
+  fi
+
+  # Content scan over everything this push would send: every commit in the range, not just the final tree.
+  if [ -z "$default_sha" ] || [ "$remote_sha" = "$zero" ]; then
+    range="$local_sha"
+    if [ -n "$default_sha" ]; then range="$default_sha..$local_sha"; fi
+  else
+    range="$remote_sha..$local_sha"
+  fi
+  allow=""
+  if [ -n "$default_sha" ]; then
+    allow=$(git show "$default_sha:.trioharness/secret-allow.txt" 2>/dev/null)
+  fi
+  # Validate the same exact-path grammar as parseAllow before applying either allowance kind.
+  allow=$(printf '%s\n' "$allow" | LC_ALL=C awk -v bom="$(printf '\357\273\277')" '{
+  row=$0; if (NR == 1 && index(row,bom) == 1) row=substr(row,length(bom)+1); sub(/\r$/, "", row); if (index(row, "\r")) exit 2; sub(/[[:space:]]+#.*/, "", row); sub(/^[[:space:]]+/, "", row); sub(/[[:space:]]+$/, "", row)
+  if (row == "" || substr(row,1,1) == "#") next
+  n=split(row,f,/[[:space:]]+/); p=f[1]; token=f[2]
+  if (n != 2 || p ~ /^\// || (token == "name" && (p ~ /^[A-Za-z]:/ || index(p,"./") == 1 || p ~ /[^ -~]/ || index(p,"\""))) || index(p,"..") || index(p,"\\") || index(p,"*") || index(p,"?") || index(p,"[") || index(p,"]") || (token != "name" && (length(token) != 40 || token ~ /[^0-9a-f]/))) exit 2
+  # Canonical separators keep all downstream awk field splitting identical.
+  print p " " token
+}')
+  if [ "$?" != 0 ]; then
+    echo "Warning: secret-allow-invalid on the verified default branch; ignoring all allowances for this push." >&2
+    allow=""
+  fi
+  # Scratch is required: without it the scan cannot preserve paths or check every Git read.
+  tmp=$(mktemp -d 2>/dev/null) || scan_failure
+  [ -n "$tmp" ] || scan_failure
+  trap 'rm -rf "$tmp"' 0
+  trap 'exit 1' HUP INT TERM
+  # Every commit in the range, merges included (-m shows each merge against each parent), renames as adds.
+  changed_files=$(git log --format= --name-only -m --no-renames --diff-filter=AMRC "$range" 2>/dev/null) || scan_failure
+  # Git C-quoted paths cannot match exact allowances safely; reject them by name.
+  bad_file=$(printf '%s\n' "$changed_files" | grep -E -e '^"' -e "$secret_files" | grep -v -E -e '(^|/)\.trioharness/secrets\.json$' | sort -u | filter_names unlisted) || scan_failure
+  if [ -n "$bad_file" ]; then
+    unverified_remedy
+    echo "Push blocked: credential file(s) in the pushed commits ($remote_ref):" >&2
+    echo "$bad_file" | sed 's/^/  /' >&2
+    echo "Remove them from every commit in the range (guard.mjs reports the commits), never with --no-verify." >&2
+    exit 1
+  fi
+  # Name allowances never permit binary or attribute-suppressed changes, even in removed history.
+  allowed_names=$(printf '%s\n' "$allow" | awk '$2 == "name" { print $1 }') || scan_failure
+  if [ -n "$allowed_names" ]; then
+    commits=$(git rev-list "$range" 2>/dev/null) || scan_failure
+    bad_binary=$(
+      for commit in $commits; do
+        stats=$(git show --format= --numstat --no-renames --diff-merges=separate "$commit" 2>/dev/null) || exit 1
+        printf '%s\n' "$stats" | THL_SECRET_ALLOW="$allow" awk -F '\t' 'BEGIN { n=split(ENVIRON["THL_SECRET_ALLOW"],rows,"\n"); for(i=1;i<=n;i++){split(rows[i],f,/[[:space:]]+/);if(f[2]=="name")names[f[1]]=1} } $1=="-" && $2=="-" && $3 in names { print $3 }' || exit 1
+        commit_names=$(git show --format= --name-only --no-renames --diff-merges=separate "$commit" 2>/dev/null) || exit 1
+        changed_names=$(printf '%s\n' "$commit_names" | filter_names listed) || exit 1
+        printf '%s\n' "$changed_names" | while IFS= read -r path; do
+          [ -n "$path" ] || continue
+          attrs=$(git check-attr --source="$commit" diff binary -- "$path" 2>/dev/null) || { printf '%s\n' "unreadable attributes"; continue; }
+          if printf '%s\n' "$attrs" | grep -E -q ': (diff: unset|binary: set)$'; then printf '%s\n' "$path"; fi
+          # Deletions have no blob at this commit. For present blobs, removing NUL must not change
+          # the object hash, regardless of diff attributes or Git's binary-size heuristic.
+          blob_entry=$(git ls-tree "$commit" -- "$path") || exit 1
+          if [ -n "$blob_entry" ]; then
+            blob_oid=$(git rev-parse --verify "$commit:$path") || exit 1
+            git cat-file blob "$blob_oid" > "$tmp/blob" 2>/dev/null || exit 1
+            LC_ALL=C tr -d '\000' < "$tmp/blob" > "$tmp/text" || exit 1
+            text_oid=$(git hash-object --stdin < "$tmp/text") || exit 1
+            if [ "$blob_oid" != "$text_oid" ]; then printf '%s\n' "$path"; fi
+          fi
+        done || exit 1
+      done
+    ) || scan_failure
+    if [ -n "$bad_binary" ]; then
+      echo "Push blocked: binary or suppressed-diff attribute on a name-allowed path in pushed history." >&2
+      exit 1
+    fi
+  fi
+  # Added lines only (grep -E is portable; awk interval support is not). Never print the matched text.
+  # An added line is let through only when .trioharness/secret-allow.txt on the DEFAULT branch (never the
+  # pushed commits) lists "<path> <git blob hash of this exact line>": reviewed, merged first, one line each.
+  # lines = added content, paths = the file of each added line (same line numbers). Headers are only
+  # trusted between "diff --git" and the first "@@", so a content line starting with "++" is content.
+  git log -p -U0 -m --no-renames --no-color --format= "$range" > "$tmp/patch" 2>/dev/null || scan_failure
+  awk -v L="$tmp/lines" -v P="$tmp/paths" '
+    /^diff --git / { hdr = 1; next }
+    /^@@/ { hdr = 0; next }
+    hdr && /^\+\+\+ / { f = substr($0, 5); if (substr(f,1,1) == "\"") exit 2; if (f == "/dev/null") f = ""; else sub(/^b\//, "", f); next }
+    !hdr && /^\+/ { print substr($0, 2) > L; print f > P }' < "$tmp/patch" || { rm -rf "$tmp"; scan_failure; }
+  hits=0
+  if [ -s "$tmp/lines" ]; then
+    value_lines=$(secret_value_lines "$tmp/paths" < "$tmp/lines") || { rm -rf "$tmp"; scan_failure; }
+    for n in $value_lines; do
+      line=$(sed -n "${n}p" "$tmp/lines") || scan_failure
+      path=$(sed -n "${n}p" "$tmp/paths") || scan_failure
+      fp=$(printf '%s' "$line" | git hash-object --stdin 2>/dev/null) || scan_failure
+      ok=""
+      if [ -n "$allow" ] && [ -n "$fp" ] && [ -n "$path" ]; then
+        ok=$(printf '%s\n' "$allow" | awk -v p="$path" -v f="$fp" '$1 == p && $2 == f { print "y"; exit }') || { rm -rf "$tmp"; scan_failure; }
+      fi
+      if [ -z "$ok" ]; then hits=1; break; fi
+    done
+  fi
+  if [ "$hits" = 1 ]; then
+    unverified_remedy
+    echo "Push blocked: a secret-shaped line is added somewhere in the pushed commits ($remote_ref)." >&2
+    echo "Run: node <skill>/scripts/guard.mjs --base <base> --owned ... for the commit, file and rule. Remove it from history, or (a true false positive) list that exact line in .trioharness/secret-allow.txt through a reviewed PR merged first. Never --no-verify." >&2
+    exit 1
+  fi
+  # Commit messages are pushed too.
+  git log --format=%B "$range" > "$tmp/messages" 2>/dev/null || scan_failure
+  value_lines=$(secret_value_lines < "$tmp/messages") || scan_failure
+  if [ -n "$value_lines" ]; then
+    unverified_remedy
+    echo "Push blocked: a secret-shaped line is in a commit message in the pushed range ($remote_ref). Reword it (git rebase) — never --no-verify." >&2
+    exit 1
+  fi
+  rm -rf "$tmp"
+  trap - 0 HUP INT TERM
+done
+exit 0

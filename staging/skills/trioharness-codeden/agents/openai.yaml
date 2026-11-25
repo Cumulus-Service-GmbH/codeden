@@ -1,0 +1,4 @@
+interface:
+  display_name: "TrioHarness CodeDen"
+  short_description: "Full-gate factory delivery in CodeDen with Jev bound to the merge"
+  default_prompt: "Use $trioharness-codeden to complete this repository task through all applicable gates."

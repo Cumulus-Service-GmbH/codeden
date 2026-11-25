@@ -1,0 +1,33 @@
+{
+  "schema": 1,
+  "remote": "origin",
+  "defaultBranch": "main",
+  "targets": {
+    "qa": {
+      "agentAllowed": true,
+      "subscription": "<subscription id or name>",
+      "resourceGroup": "<resource group>",
+      "app": "<qa app service name>",
+      "slot": null,
+      "build": [
+        { "command": "dotnet", "args": ["publish", "<path/to/App.csproj>", "-c", "Release", "-o", "{out}", "-p:SourceRevisionId={sha}"], "cwd": "." }
+      ],
+      "outputDir": "{out}",
+      "health": { "url": "https://<qa-host>/health", "shaField": "commit", "timeoutSeconds": 300 }
+    },
+    "prod": {
+      "agentAllowed": false,
+      "requireOnDefaultBranch": true,
+      "requireSameShaOn": "qa",
+      "subscription": "<subscription id or name>",
+      "resourceGroup": "<resource group>",
+      "app": "<prod app service name>",
+      "slot": null,
+      "build": [
+        { "command": "dotnet", "args": ["publish", "<path/to/App.csproj>", "-c", "Release", "-o", "{out}", "-p:SourceRevisionId={sha}"], "cwd": "." }
+      ],
+      "outputDir": "{out}",
+      "health": { "url": "https://<prod-host>/health", "shaField": "commit", "timeoutSeconds": 300 }
+    }
+  }
+}
