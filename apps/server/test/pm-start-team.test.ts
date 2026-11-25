@@ -34,9 +34,15 @@ async function start(
     pmPolicy?: AutonomyPolicy;
     roleFloors?: RoleAutonomyFloors;
     guard?: boolean;
+    providerVisible?: () => boolean;
     teamPolicy?: AutonomyPolicy;
     autonomy?: AutonomyLevel;
     resumeWith?: AutonomyLevel;
+    afterStart?: (
+      ctx: Parameters<typeof startSession.handler>[1],
+      child: Session,
+      sessions: SessionService,
+    ) => Promise<void>;
   },
 ) {
   const database = openDatabase(":memory:");
@@ -111,7 +117,10 @@ async function start(
       runner: {
         isConnected: () => true,
         providers: () =>
-          ["claude", "codex", "cursor", "gemini", "opencode"].map((id) => ({
+          (opts.providerVisible?.() === false
+            ? []
+            : ["claude", "codex", "cursor", "gemini", "opencode"]
+          ).map((id) => ({
             id,
             capabilities: {
               readOnly: true,
@@ -131,6 +140,7 @@ async function start(
       launcher: { launch: vi.fn(async () => {}), resume },
     } as unknown as SessionServiceDeps);
     services.sessions = {
+      update: sessions.update.bind(sessions),
       start: async (req: StartSessionRequest, options: Parameters<SessionService["start"]>[1]) => {
         const result = await sessions.start(req, { ...options, chromeApproved: true });
         if (result.status === "started") {
@@ -157,6 +167,7 @@ async function start(
     }
     const result = await startSession.handler(startSession.input.parse(args), ctx);
     const child = started[0];
+    if (opts.afterStart && child) await opts.afterStart(ctx, child, sessions);
     if (opts.resumeWith && child) {
       project.autonomy = opts.resumeWith;
       sessionRepo.update(child.id, (s) => ({ ...s, status: "stopped" }));
@@ -272,6 +283,108 @@ it("refuses an explicit request below a Read-only project default", async () => 
   await expect(start({ autonomy: "full" }, { autonomy: "read_only" })).rejects.toThrow(
     "Autonomy policy requires read_only",
   );
+});
+
+it("blocks a PM autonomy change above the read-only project floor", async () => {
+  await start(
+    {},
+    {
+      autonomy: "read_only",
+      afterStart: async (ctx, child) => {
+        await expect(
+          setSessionAutonomy.handler(
+            {
+              sessionId: child.id,
+              autonomy: "full",
+              reason: "Change autonomy",
+            },
+            ctx,
+          ),
+        ).rejects.toThrow("Autonomy policy requires read_only");
+      },
+    },
+  );
+});
+
+it.each([
+  ["review scope", "full", { title: "[Code Reviewer] Review" }, /read-only scope/],
+  [
+    "guarded install",
+    "auto",
+    { purpose: "Install tooling", scope: { paths: ["/tmp/installer"] } },
+    /guarded install/,
+  ],
+  ["durable review scope", "read_only", { title: "[Code Reviewer] Review" }, /read-only scope/],
+] as const)(
+  "requires a compatible target when joining for %s",
+  async (_lane, autonomy, input, reason) => {
+    const workKey = "request:join-policy";
+    await start(
+      { workKey, autonomy },
+      {
+        guard: false,
+        project: [{ ...writer, role: "reviewer" }],
+        afterStart: async (ctx, child) => {
+          ctx.services.sessionRepo.update(child.id, (session) => ({
+            ...session,
+            status: "running",
+          }));
+          await expect(
+            startSession.handler(
+              startSession.input.parse({
+                prompt: "Follow up",
+                purpose: "Review the diff",
+                ...input,
+                workKey,
+                conflict: { resolution: "join", sessionId: child.id },
+              }),
+              ctx,
+            ),
+          ).rejects.toThrow(reason);
+        },
+      },
+    );
+  },
+);
+
+it("refuses an installer join when the target provider cannot be verified", async () => {
+  let visible = true;
+  const input = {
+    purpose: "Install tooling",
+    scope: { paths: ["/tmp/installer"] },
+    workKey: "request:installer-provider",
+  };
+  await start(input, {
+    providerVisible: () => visible,
+    afterStart: async (ctx, child) => {
+      visible = false;
+      ctx.services.sessionRepo.update(child.id, (session) => ({ ...session, status: "running" }));
+      await expect(
+        startSession.handler(
+          startSession.input.parse({
+            ...input,
+            prompt: "Follow up",
+            conflict: { resolution: "join", sessionId: child.id },
+          }),
+          ctx,
+        ),
+      ).rejects.toThrow("provider can't be checked");
+    },
+  });
+});
+
+it("keeps the owner's explicit autonomy override when a PM session resumes", async () => {
+  const { resumed } = await start(
+    {},
+    {
+      autonomy: "read_only",
+      resumeWith: "read_only",
+      afterStart: async (_ctx, child, sessions) => {
+        await sessions.update(child.id, { autonomy: "full" }, { owner: true });
+      },
+    },
+  );
+  expect(resumed?.autonomy).toBe("full");
 });
 
 it("refuses a request below the purpose policy", async () => {

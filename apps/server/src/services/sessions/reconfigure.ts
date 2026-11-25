@@ -80,6 +80,7 @@ export async function updateSession(
     ...(req.planMode !== undefined && { planMode: req.planMode }),
   };
   const updatesConfig = Object.keys(change).length > 0;
+  const owner = audit && "owner" in audit;
   const session = repo.update(
     id,
     (s) => ({
@@ -95,8 +96,10 @@ export async function updateSession(
       ? (m) => ({
           ...(m ?? emptyStartMeta()),
           ...(!refreshAutonomy &&
-            m?.autonomyChoice !== undefined &&
-            req.autonomy !== undefined && { autonomyChoice: req.autonomy }),
+            req.autonomy !== undefined && {
+              ...(!owner && m?.autonomyChoice !== undefined && { autonomyChoice: req.autonomy }),
+              ownerAutonomyOverride: owner ? req.autonomy : undefined,
+            }),
           configRevision: (m?.configRevision ?? 0) + 1,
           pendingConfig: { ...m?.pendingConfig, ...change },
         })

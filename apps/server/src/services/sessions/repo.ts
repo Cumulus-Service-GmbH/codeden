@@ -91,6 +91,8 @@ export type StoredStartMeta = SessionStartMeta & {
   guardedInstall?: boolean;
   /** PM session choice: null inherits defaults, absent preserves the legacy stored level. */
   autonomyChoice?: AutonomyLevel | null;
+  /** The owner explicitly selected this level, including across a resume. */
+  ownerAutonomyOverride?: AutonomyLevel;
   /** The PM delegated session starts to this Team Architect. */
   teamArchitect?: true;
   pending?: PendingStart | null;

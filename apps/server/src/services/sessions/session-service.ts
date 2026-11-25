@@ -222,19 +222,16 @@ export class SessionService {
   private assertProviderAllowed(
     session: Session,
     workspace: WorkspaceRequest,
-    archived?: Session,
+    existing?: Session,
     guardedInstall?: boolean,
   ): void {
     const project = session.projectId ? this.deps.projects.get(session.projectId) : null;
-    // On the runner that hosts the role's conversations (the old one's), not only the home one.
-    const provider = this.provider(session.provider, archived?.id);
-    // Start fresh retires the old conversation with this one's creation: never on a provider
-    // that can't be checked yet (the runner not connected).
-    if (archived && !provider) {
+    const provider = this.provider(session.provider, existing?.id);
+    if (existing && !provider) {
       throw new ServiceError(
         503,
         "runner_unavailable",
-        "The runner isn't connected, so the new conversation's provider can't be checked yet. Try again in a moment.",
+        "The runner isn't connected, so the session's provider can't be checked yet. Try again in a moment.",
       );
     }
     // A worktree session runs in a CodeDen worktree (the runner checks the real folder too).
@@ -246,8 +243,8 @@ export class SessionService {
       inWorktree,
     );
     if (unenforced) throw badRequest(unenforced, "security_rules_unenforced");
-    this.assertSupervisedSupported(session.provider, session.autonomy);
-    this.assertReadOnlySupported(session.role, session.provider, session.autonomy);
+    this.assertSupervisedSupported(session.provider, session.autonomy, existing?.id);
+    this.assertReadOnlySupported(session.role, session.provider, session.autonomy, existing?.id);
   }
 
   /** Reject `supervised` on a provider that can't enforce it (`capabilities.supervised`). */
@@ -404,7 +401,25 @@ export class SessionService {
           if (target.projectId !== req.projectId) {
             throw badRequest("Can only join a session in the same project", "join_mismatch");
           }
-          assertAutonomy(target.autonomy, floor);
+          assertAutonomy(target.autonomy, stricter(floor, req.autonomy));
+          if (options.readOnlyScope || options.guardedInstall) {
+            const meta = repo.find(target.id)?.startMeta;
+            if (options.readOnlyScope && !meta?.readOnlyScope) {
+              throw badRequest("Join requires a session with a read-only scope", "join_mismatch");
+            }
+            if (options.guardedInstall && !meta?.guardedInstall) {
+              throw badRequest("Join requires a guarded install session", "join_mismatch");
+            }
+            this.assertProviderAllowed(
+              target,
+              { mode: target.worktreePath ? "worktree" : "repo_root" },
+              target,
+              options.guardedInstall,
+            );
+            if (options.readOnlyScope) {
+              this.assertReadOnlySupported(target.role, target.provider, "read_only", target.id);
+            }
+          }
           if (req.input) {
             await this.send(target.id, { input: req.input, whenBusy: "queue" }, req.startedBy.kind);
           }
@@ -447,7 +462,7 @@ export class SessionService {
         chromeOptIn: options.chromeApproved,
         chromeRequested: req.chrome,
         ...(options.teamArchitect ? { teamArchitect: true } : {}),
-        ...(options.autonomyFloor ? { autonomyFloor: options.autonomyFloor } : {}),
+        ...(floor ? { autonomyFloor: floor } : {}),
         ...(options.readOnlyScope ? { readOnlyScope: true } : {}),
         ...(options.guardedInstall ? { guardedInstall: true } : {}),
         ...(pmStart ? { autonomyChoice: req.autonomy ?? null } : {}),
@@ -1179,15 +1194,17 @@ export class SessionService {
     const { repo, projects, settings } = this.deps;
     const found = repo.find(id);
     const choice = found?.startMeta?.autonomyChoice;
+    const ownerOverride = found?.startMeta?.ownerAutonomyOverride;
     const projectId = found?.session.projectId;
-    if (!found || choice === undefined || !projectId) return;
+    if (!found || (choice === undefined && ownerOverride === undefined) || !projectId) return;
     const { session, startMeta } = found;
     const projectDefault = projects.get(projectId).autonomy;
     const autonomy =
-      projectDefault === "read_only"
+      ownerOverride ??
+      (projectDefault === "read_only"
         ? projectDefault
         : (choice ??
-          stricter(projectDefault ?? settings.get().autonomy.default, startMeta?.autonomyFloor));
+          stricter(projectDefault ?? settings.get().autonomy.default, startMeta?.autonomyFloor)));
     if (autonomy === undefined || autonomy === session.autonomy) return;
     this.assertReadOnlySupported(session.role, session.provider, autonomy, id);
     this.assertSupervisedSupported(session.provider, autonomy, id);

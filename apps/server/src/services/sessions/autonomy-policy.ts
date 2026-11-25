@@ -95,18 +95,18 @@ export function sessionAutonomyFloor(
   session: Session,
 ): AutonomyLevel | undefined {
   const meta = sessionRepo.find(session.id)?.startMeta;
+  const project = session.projectId ? projects.get(session.projectId) : undefined;
   const { floor: current } = resolveAutonomy(
     teamRoleOfTitle(session.title ?? undefined),
     session.purpose,
     session.scope,
-    session.projectId && session.scope.paths?.length
-      ? projects.get(session.projectId).path
-      : undefined,
+    project?.path,
     settings.get().autonomy,
     session.projectId ? factory.data.loop(session.projectId)?.tuning.autonomyPolicy : undefined,
     meta ?? {},
   );
-  return stricter(current, meta?.autonomyFloor);
+  const projectFloor = project?.autonomy === "read_only" ? "read_only" : undefined;
+  return stricter(stricter(current, meta?.autonomyFloor), projectFloor);
 }
 
 export function assertAutonomy(

@@ -86,6 +86,7 @@ it("an agent still can't lower it", async () => {
   const events = overrideEvents();
   const services = {
     sessionRepo: repo,
+    projects: { get: () => ({ autonomy: "full" }) },
     sessions,
     settings: { get: () => Settings.parse({}) },
     factory: { data: { loop: () => undefined } },
@@ -129,6 +130,7 @@ it("reports the PM policy to the owner and still allows an explicit override", a
   const { sessions, repo } = fixture;
   const services = {
     sessionRepo: repo,
+    projects: { get: () => ({ autonomy: "full" }) },
     sessions,
     settings: {
       get: () => Settings.parse({ autonomy: { pmPolicy: { writer: { "*": "read_only" } } } }),
