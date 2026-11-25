@@ -1,7 +1,7 @@
 import type { AutonomyLevel, Session, Snapshot } from "@codeden/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { toast } from "sonner";
 import { AUTONOMY } from "@/components/thread/autonomy";
 import {
@@ -33,6 +33,18 @@ const WHEN = {
   next_tool_call: "from its next tool call",
   next_turn: "from its next turn",
 } as const;
+
+// Bind the confirmation to the affected sessions and what the dialog tells the user.
+function proposalKey(projectId: string, changes: LevelChange[]): string {
+  const entries = changes.map(({ session, from, to, appliesFrom }) =>
+    JSON.stringify([session.id, sessionName(session), session.provider, from, to, appliesFrom]),
+  );
+  return JSON.stringify([projectId, entries.sort()]);
+}
+
+function proposalChanged() {
+  toast.info("The permissions proposal changed. Review it and apply again.");
+}
 
 interface Outcome {
   change: LevelChange;
@@ -110,19 +122,51 @@ export function SessionsKeepingLevel({
 }) {
   const keeping = useSnapshotData((s) => sessionsKeepingLevel(s.sessions, projectId, level), []);
   const providers = useSnapshotData((s) => s.runner.providers, []);
-  const [confirming, setConfirming] = useState<LevelChange[] | null>(null);
+  const queryClient = useQueryClient();
+  const changes = planLevelChanges(keeping, level, providers);
+  const key = proposalKey(projectId, changes);
+  const [confirming, setConfirming] = useState<{ changes: LevelChange[]; key: string } | null>(
+    null,
+  );
   const [failed, setFailed] = useState<Failures | null>(null);
   const apply = useApplyLevel(setFailed);
+  useEffect(() => {
+    if (confirming && confirming.key !== key) {
+      setConfirming(null);
+      proposalChanged();
+    }
+  }, [confirming, key]);
   if (keeping.length === 0) return null;
 
   const run = (changes: LevelChange[]) => {
     setFailed(null);
     apply.mutate(changes);
   };
+  const currentProposal = (expected: string): LevelChange[] | undefined => {
+    // Realtime may update the cache before React renders the changed proposal.
+    const snapshot = queryClient.getQueryData<Snapshot>(snapshotKey);
+    const project = snapshot?.projects.find((p) => p.id === projectId && !p.archivedAt);
+    if (!snapshot || !project) return;
+    const target = project.autonomy ?? snapshot.settings.autonomy.default;
+    const current = planLevelChanges(
+      sessionsKeepingLevel(snapshot.sessions, projectId, target),
+      target,
+      snapshot.runner.providers,
+    );
+    return expected === proposalKey(projectId, current) ? current : undefined;
+  };
   const start = () => {
-    const changes = planLevelChanges(keeping, level, providers);
-    if (changes.some((c) => c.raises)) setConfirming(changes);
-    else run(changes);
+    const current = currentProposal(key);
+    if (!current) return proposalChanged();
+    if (current.some((c) => c.raises)) setConfirming({ changes: current, key });
+    else run(current);
+  };
+  const confirm = () => {
+    setConfirming(null);
+    if (!confirming) return;
+    const current = currentProposal(confirming.key);
+    if (!current) return proposalChanged();
+    run(current);
   };
   // Reasons from applying another level no longer say anything about this one.
   const reasons = failed?.level === level ? failed.reasons : new Map<string, string>();
@@ -172,12 +216,9 @@ export function SessionsKeepingLevel({
         </ul>
       )}
       <ConfirmRaise
-        changes={confirming}
+        changes={confirming?.changes ?? null}
         onCancel={() => setConfirming(null)}
-        onConfirm={(changes) => {
-          setConfirming(null);
-          run(changes);
-        }}
+        onConfirm={confirm}
       />
     </div>
   );
@@ -191,7 +232,7 @@ function ConfirmRaise({
 }: {
   changes: LevelChange[] | null;
   onCancel: () => void;
-  onConfirm: (changes: LevelChange[]) => void;
+  onConfirm: () => void;
 }) {
   const raised = changes?.filter((c) => c.raises) ?? [];
   const lowered = (changes?.length ?? 0) - raised.length;
@@ -224,7 +265,7 @@ function ConfirmRaise({
         </ul>
         <AlertDialogFooter>
           <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction onClick={() => changes && onConfirm(changes)}>
+          <AlertDialogAction onClick={onConfirm}>
             Apply to {sessions(changes?.length ?? 0)}
           </AlertDialogAction>
         </AlertDialogFooter>

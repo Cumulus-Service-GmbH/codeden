@@ -1,5 +1,5 @@
 import { Attachment, MAX_ATTACHMENT_BYTES } from "@codeden/contracts";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { filesToAttachments, toInputAttachments } from "@/components/composer/attachments";
 
 describe("composer file attachments", () => {
@@ -26,6 +26,32 @@ describe("composer file attachments", () => {
     ]);
     for (const a of input) expect(Attachment.safeParse(a).success).toBe(true);
   });
+
+  it.each(["text/plain", "image/png"])(
+    "normalizes an empty %s file without a data URL",
+    async (type) => {
+      const read = vi.spyOn(FileReader.prototype, "readAsDataURL");
+      try {
+        const { attachments, tooLarge } = await filesToAttachments([
+          new File([], "empty", { type }),
+        ]);
+        expect(tooLarge).toEqual([]);
+        const input = toInputAttachments(attachments);
+        expect(input.map((a) => Attachment.parse(a))).toEqual([
+          {
+            type: "file",
+            name: "empty",
+            path: "empty",
+            mediaType: type,
+            source: { type: "base64", data: "" },
+          },
+        ]);
+        expect(read).not.toHaveBeenCalled();
+      } finally {
+        read.mockRestore();
+      }
+    },
+  );
 
   it("leaves out files over 20 MB and names them", async () => {
     const big = new File(["x"], "video.mov");

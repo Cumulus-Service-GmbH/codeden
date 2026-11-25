@@ -56,15 +56,17 @@ export async function filesToAttachments(
       tooLarge.push(file.name || "A pasted file");
       continue;
     }
-    const dataUrl = await readDataUrl(file);
+    // A zero-byte file has empty base64 and no image preview.
+    const dataUrl = file.size === 0 ? null : await readDataUrl(file);
+    const data = dataUrl === null ? "" : base64Of(dataUrl);
     const media = ImageMediaType.safeParse(file.type);
-    if (media.success) {
+    if (dataUrl !== null && media.success) {
       attachments.push({
         id: nextId(),
         type: "image",
         name: file.name || "pasted-image.png",
         mediaType: media.data,
-        data: base64Of(dataUrl),
+        data,
         previewUrl: dataUrl,
       });
     } else {
@@ -73,7 +75,7 @@ export async function filesToAttachments(
         type: "file",
         name: file.name || "attachment",
         ...(file.type ? { mediaType: file.type } : {}),
-        data: base64Of(dataUrl),
+        data,
       });
     }
   }
