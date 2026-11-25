@@ -1,7 +1,8 @@
-import type { ItemOf, UserQuestion } from "@codeden/contracts";
+import type { InboxItem, ItemOf, UserQuestion } from "@codeden/contracts";
 import { act, fireEvent, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { InboxEntry } from "@/components/inbox/inbox-entry";
 import { ConflictCard } from "@/components/project/conflict-card";
 import { ApprovalCard } from "@/components/thread/cards/approval-card";
 import { QuestionCard } from "@/components/thread/cards/question-card";
@@ -12,9 +13,24 @@ import { usageKeys } from "@/components/usage/api";
 import { mockUsageApi } from "@/components/usage/mock-data";
 import { createMockClient } from "@/lib/api/mock";
 import { conflicts } from "@/lib/api/mock/fixtures/sessions";
+import * as queries from "@/lib/queries";
 import { emptyTranscript } from "@/lib/transcript/reducer";
+import * as timeline from "@/lib/transcript/timeline";
 import { buildTimeline, type WorkEntry } from "@/lib/transcript/timeline";
+import { inboxItem } from "./attention-fixtures";
 import { renderWithClient } from "./utils";
+
+function FocusableInboxEntry({ item }: { item: InboxItem }) {
+  const [focused, setFocused] = useState(false);
+  return (
+    <>
+      <button type="button" onClick={() => setFocused(true)}>
+        Focus inbox entry
+      </button>
+      <InboxEntry item={item} focused={focused} />
+    </>
+  );
+}
 
 vi.mock("@/components/on-demand", async (importOriginal) => ({
   ...(await importOriginal<object>()),
@@ -78,6 +94,47 @@ describe("ApprovalCard for a plan", () => {
     title: "Approve the plan and start implementing",
     options: ["allow_once", "deny"],
   };
+
+  it("keeps the inbox plan context across unrelated rerenders without rebuilding the timeline", async () => {
+    const item = inboxItem("inbox-plan", "approval", { itemId: planApproval.id });
+    const transcript = emptyTranscript("s1");
+    transcript.threads.root = {
+      id: "root",
+      parentThreadId: null,
+      parentItemId: null,
+      title: null,
+      agentType: null,
+      itemIds: ["plan", planApproval.id],
+      turnIds: ["turn"],
+    };
+    transcript.items.plan = {
+      item: { id: "plan", kind: "plan", status: "completed", text: "Write the acceptance test" },
+      turnId: "turn",
+      threadId: "root",
+    };
+    transcript.items[planApproval.id] = { item: planApproval, turnId: "turn", threadId: "root" };
+    const useTranscript = vi.spyOn(queries, "useTranscript").mockReturnValue({
+      transcript,
+      focusedTranscript: undefined,
+      isLoading: false,
+      error: null,
+    });
+    const build = vi.spyOn(timeline, "buildTimeline");
+    try {
+      renderWithClient(<FocusableInboxEntry item={item} />, createMockClient(), {
+        withRouter: true,
+      });
+      await screen.findByText("Write the acceptance test");
+      expect(build).toHaveBeenCalled();
+      build.mockClear();
+      fireEvent.click(screen.getByRole("button", { name: "Focus inbox entry" }));
+      expect(screen.getByText("Write the acceptance test")).toBeTruthy();
+      expect(build).not.toHaveBeenCalled();
+    } finally {
+      useTranscript.mockRestore();
+      build.mockRestore();
+    }
+  });
 
   it("shows the diff against the previous plan version after a revision", async () => {
     const client = createMockClient();

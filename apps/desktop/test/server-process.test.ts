@@ -3,7 +3,12 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resetLoginShellPath } from "../src/main/login-shell-path";
-import { rotateLog, ServerProcess } from "../src/main/server-process";
+import {
+  rotateLog,
+  type ServerExit,
+  ServerProcess,
+  type ServerProcessOptions,
+} from "../src/main/server-process";
 import { serverLog } from "../src/server/log";
 
 const STUCK = resolve(__dirname, "support/stuck-server.mjs");
@@ -12,12 +17,13 @@ const dirs: string[] = [];
 function stuckServer(
   log: string[],
   home = mkdtempSync(join(tmpdir(), "codeden-server-process-")),
-  startupTimeoutMs?: number,
+  overrides?: Partial<
+    Pick<ServerProcessOptions, "startupTimeoutMs" | "onExit" | "onUnexpectedExit">
+  >,
 ): ServerProcess {
   dirs.push(home);
   return new ServerProcess({
     entry: STUCK,
-    startupTimeoutMs,
     home,
     port: 1,
     fake: true,
@@ -25,6 +31,7 @@ function stuckServer(
     onUpdateCommand: () => {},
     onUnexpectedExit: () => {},
     log: (m) => log.push(m),
+    ...overrides,
   });
 }
 
@@ -78,9 +85,17 @@ describe("ServerProcess.start", () => {
 
 it("rejects startup and stops a child that never reports readiness", async () => {
   vi.stubEnv("STUCK_SERVER_MODE", "no-ready");
-  const server = stuckServer([], undefined, 100);
+  const exited = Promise.withResolvers<ServerExit>();
+  const onUnexpectedExit = vi.fn();
+  const server = stuckServer([], undefined, {
+    startupTimeoutMs: 100,
+    onExit: exited.resolve,
+    onUnexpectedExit,
+  });
   try {
     await expect(server.start()).rejects.toThrow("startup deadline");
+    expect(await exited.promise).toMatchObject({ reason: "startup" });
+    expect(onUnexpectedExit).not.toHaveBeenCalled();
   } finally {
     await server.stop({ stopRunner: false, timeoutMs: 100 });
   }

@@ -94,8 +94,12 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
   const theme = useResolvedTheme();
   const session = useSession(sessionId);
   const project = useProject(session?.projectId);
+  const [checkedSessionId, setCheckedSessionId] = useState<string>();
   const knownNonGit =
-    project?.isGitRepo === false && session?.worktreePath === null && session.cwd === project.path;
+    checkedSessionId !== sessionId &&
+    project?.isGitRepo === false &&
+    session?.worktreePath === null &&
+    session.cwd === project.path;
   const sessions = useSnapshotData((s) => s.sessions, noSessions);
   // The session it was forked, handed off or reviewed from, by id: it may be archived and out
   // of the snapshot (§6).
@@ -185,7 +189,27 @@ export function DiffPanel({ sessionId }: { sessionId: string }) {
   if (notGitRepo) {
     return (
       <div className="flex h-full flex-col" data-testid="diff-panel">
-        <EmptyState icon={<FileDiff />} title="Not a git repository" className="h-full">
+        <EmptyState
+          icon={<FileDiff />}
+          title="Not a git repository"
+          className="h-full"
+          action={
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={isFetching || git.isFetching}
+              onClick={() => {
+                if (knownNonGit) setCheckedSessionId(sessionId);
+                else {
+                  void git.refetch();
+                  void refetch();
+                }
+              }}
+            >
+              Check for git
+            </Button>
+          }
+        >
           No diff to show: this session runs in{" "}
           <code className="font-mono text-[12px] break-all">{session?.cwd ?? "its folder"}</code>,
           which isn't a git repository, so CodeDen can't track its changes.

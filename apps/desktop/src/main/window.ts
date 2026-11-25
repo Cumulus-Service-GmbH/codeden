@@ -99,9 +99,10 @@ export class MainWindow {
 
   async showRecovery(): Promise<void> {
     if (this.quitting || this.window.isDestroyed()) return;
+    const menuHint = process.platform === "darwin" ? "" : "Press Alt to show the menu bar. ";
     const page = `<!doctype html><meta charset="utf-8"><title>CodeDen</title>
       <h1>CodeDen could not load</h1>
-      <p>In the Help menu, choose Retry Loading CodeDen or Export Diagnostics.</p>`;
+      <p>${menuHint}In the Help menu, choose Retry Loading CodeDen or Export Diagnostics.</p>`;
     try {
       await this.window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(page)}`);
     } catch {

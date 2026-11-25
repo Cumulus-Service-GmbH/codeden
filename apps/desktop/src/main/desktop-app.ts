@@ -147,9 +147,9 @@ export class DesktopApp {
           reason: details.reason,
           code: details.exitCode,
         });
-        if (this.uiLoad === this.conn) return;
+        if (this.conn && this.uiLoad === this.conn) return;
         this.loaded = false;
-        if (retry) void this.loadUi();
+        if (retry && this.conn) void this.loadUi();
         else void this.window.showRecovery();
       },
       log: this.log,
@@ -172,7 +172,7 @@ export class DesktopApp {
 
   /** Connect to (or start) the server and load the UI. */
   private async open(): Promise<void> {
-    if (this.connecting || this.quitting) return;
+    if (this.conn || this.connecting || this.quitting) return;
     this.connecting = true;
     try {
       this.conn = await connect({

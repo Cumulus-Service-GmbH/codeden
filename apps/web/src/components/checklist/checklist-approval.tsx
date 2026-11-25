@@ -228,6 +228,7 @@ export function ProposalChanges({
   if (pending.plan) {
     const { plan } = pending;
     const lines = diffLines(pending.diff, undefined, checklist.items);
+    const firstPlanOnEmptyChecklist = !checklist.plan && checklist.items.length === 0;
     const nextIds = new Set(plan.tasks.map(({ id }) => id));
     const previousOrder = checklist.plan?.tasks.filter(({ id }) => nextIds.has(id)) ?? [];
     const previousIds = new Set(previousOrder.map(({ id }) => id));
@@ -241,7 +242,7 @@ export function ProposalChanges({
         <p className="wrap-break-word font-mono text-3xs" title={plan.sha}>
           {plan.sha}
         </p>
-        {(pending.diff.length > 0 || reordered) && (
+        {((!firstPlanOnEmptyChecklist && pending.diff.length > 0) || reordered) && (
           <div className="mt-1">
             <p className="text-2xs font-medium">
               {checklist.plan ? "Changes to approved plan" : "Changes to current checklist"}

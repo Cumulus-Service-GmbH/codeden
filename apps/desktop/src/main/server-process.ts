@@ -56,9 +56,11 @@ export interface ServerProcessOptions {
   logFile: string;
   /** The server asks the updater to do something; answer with `send({ type: "update.done" })`. */
   onUpdateCommand: (id: string, command: DesktopUpdateCommand) => void;
-  /** The process exited without being asked to (crash, or `codeden stop` from a terminal). */
+  /** Time allowed for the child to report readiness, in milliseconds. */
   startupTimeoutMs?: number;
+  /** Every child exit, including a startup failure or requested shutdown. */
   onExit?: (exit: ServerExit) => void;
+  /** After readiness, the child exited without a shutdown request from this app. */
   onUnexpectedExit: (code: number | null) => void;
   log: (message: string) => void;
 }

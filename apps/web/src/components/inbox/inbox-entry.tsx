@@ -1,6 +1,7 @@
 import { type InboxItem, InboxSettlement } from "@codeden/contracts";
 import { Link } from "@tanstack/react-router";
 import { ArrowUpRight, CircleDot, GitPullRequest } from "lucide-react";
+import { useMemo } from "react";
 import { ProjectTile } from "@/components/shell/sidebar/project-group";
 import { ApprovalCard } from "@/components/thread/cards/approval-card";
 import { QuestionCard } from "@/components/thread/cards/question-card";
@@ -23,22 +24,25 @@ function MirroredRequest({ item }: { item: InboxItem }) {
     ...(item.itemId ? { item: item.itemId } : {}),
   });
   const source = item.itemId && transcript?.items[item.itemId] ? transcript : focusedTranscript;
-  const mirrored = item.itemId ? source?.items[item.itemId]?.item : undefined;
+  const entry = item.itemId ? source?.items[item.itemId] : undefined;
+  const mirrored = entry?.item;
+  const planRow = useMemo(
+    () =>
+      mirrored?.kind === "approval_request" && mirrored.action === "plan" && source && entry
+        ? buildTimeline(source, entry.threadId).find((row) => row.key === mirrored.id)
+        : undefined,
+    [source, entry, mirrored],
+  );
   if (!item.sessionId) return null;
   if (!transcript) return <Skeleton className="h-24 w-full rounded-xl" />;
   if (mirrored?.kind === "approval_request") {
-    const entry = source?.items[mirrored.id];
-    const row =
-      mirrored.action === "plan" && source && entry
-        ? buildTimeline(source, entry.threadId).find((row) => row.key === mirrored.id)
-        : undefined;
     return (
       <ApprovalCard
         item={mirrored}
         sessionId={item.sessionId}
         compact
-        plan={row?.type === "card" ? row.plan : undefined}
-        previousPlan={row?.type === "card" ? row.previousPlan : undefined}
+        plan={planRow?.type === "card" ? planRow.plan : undefined}
+        previousPlan={planRow?.type === "card" ? planRow.previousPlan : undefined}
       />
     );
   }

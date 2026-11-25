@@ -1,4 +1,4 @@
-import { TechDebtAction, type TechDebtFinding } from "@codeden/contracts";
+import { isActiveSession, TechDebtAction, type TechDebtFinding } from "@codeden/contracts";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useClient } from "@/lib/api";
+import { useSessionLookup } from "@/lib/queries";
 import { techDebtSummariesKey } from "@/lib/tech-debt-queries";
 
 const labels: Record<TechDebtFinding["status"], string> = {
@@ -14,6 +15,24 @@ const labels: Record<TechDebtFinding["status"], string> = {
   fixed: "Fixed",
   dismissed: "Dismissed",
 };
+
+function RetryFixButton({
+  sessionId,
+  disabled,
+  retry,
+}: {
+  sessionId: string | null;
+  disabled: boolean;
+  retry: () => void;
+}) {
+  const { session, loading } = useSessionLookup(sessionId ?? undefined);
+  if (loading || (session && isActiveSession(session))) return null;
+  return (
+    <Button size="sm" variant="outline" disabled={disabled} onClick={retry}>
+      Retry fix
+    </Button>
+  );
+}
 
 export function TechDebtPanel({ projectId }: { projectId: string }) {
   const { techDebt } = useClient();
@@ -138,14 +157,11 @@ export function TechDebtPanel({ projectId }: { projectId: string }) {
                 {(finding.status === "open" || finding.status === "in_progress") && (
                   <div className="flex flex-wrap gap-2">
                     {finding.status === "in_progress" && (
-                      <Button
-                        size="sm"
-                        variant="outline"
+                      <RetryFixButton
+                        sessionId={finding.sessionId}
                         disabled={update.isPending}
-                        onClick={() => submit({ action: "fix", ids: [finding.id] })}
-                      >
-                        Retry fix
-                      </Button>
+                        retry={() => submit({ action: "fix", ids: [finding.id] })}
+                      />
                     )}
                     <Button
                       size="sm"
