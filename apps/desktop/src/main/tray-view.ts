@@ -8,6 +8,7 @@ export interface TrayInput {
   update: DesktopUpdateState;
   /** `settings.updates.mode` is `auto` (a download installs on quit, no prompt needed). */
   autoUpdate: boolean;
+  fork?: boolean;
 }
 
 export interface TrayView {
@@ -53,7 +54,7 @@ export function trayView(input: TrayInput): TrayView {
     tooltip: `CodeDen (${summary})`,
     lines,
     badge: activity && input.connected ? Math.max(activity.inbox, activity.waiting) : 0,
-    update: updateItem(update, input.autoUpdate),
+    update: input.fork ? null : updateItem(update, input.autoUpdate),
   };
 }
 

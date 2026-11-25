@@ -102,9 +102,22 @@ export function UpdateBanner() {
   const [hidden, setHidden] = useState<string | null>(null);
   useHandover(data);
   if (!data) return null;
-  const install = () => actions.install.mutate();
+  const install = () => actions.install.mutate(data.latest ?? undefined);
   const requestError = actions.install.error ?? actions.restart.error;
 
+  const result = data.result;
+  const resultKey = result ? `fork:${result.status}:${result.message}` : null;
+  if (result && resultKey !== hidden && data.state === "idle") {
+    return (
+      <Bar
+        tone={result.status === "installed" ? "done" : "warn"}
+        state={result.status}
+        onClose={() => setHidden(resultKey)}
+      >
+        {result.message}
+      </Bar>
+    );
+  }
   const view = bannerView(data, phase, handoverTarget);
   if (!view || hidden === view.key) return null;
   const later = () => {

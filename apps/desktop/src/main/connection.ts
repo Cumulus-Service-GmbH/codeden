@@ -23,7 +23,7 @@ export interface ConnectOptions {
   args: LaunchArgs;
   /** `dist/server.js`. */
   serverEntry: string;
-  onUpdateCommand: (id: string, command: DesktopUpdateCommand) => void;
+  onUpdateCommand: (id: string, command: DesktopUpdateCommand, version?: string) => void;
   onExit: (exit: ServerExit) => void;
   onUnexpectedExit: (code: number | null) => void;
   log: (message: string) => void;

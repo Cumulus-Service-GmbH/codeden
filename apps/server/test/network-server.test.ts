@@ -2,7 +2,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { networkInterfaces, tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NetworkStatus } from "@codeden/contracts";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { type RunningServer, startServer } from "../src";
 import { removeTree } from "./support/remove-tree";
@@ -22,9 +22,10 @@ const lanAddress = Object.values(networkInterfaces())
 let home: string;
 let server: RunningServer | undefined;
 
-const start = () =>
+const start = (forkCommit?: string) =>
   startServer({
     port: 0,
+    forkCommit,
     dataDir: home,
     token: TOKEN,
     runner: false,
@@ -33,9 +34,11 @@ const start = () =>
   });
 
 beforeEach(() => {
+  vi.stubEnv("CODEDEN_UPDATE_CHECK", "0");
   home = mkdtempSync(join(tmpdir(), "codeden-netsrv-"));
 });
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await server?.close();
   server = undefined;
   await removeTree(home);
@@ -47,6 +50,16 @@ async function api(path: string, init: RequestInit = {}) {
 }
 
 describe("network access on a real server", () => {
+  it("answers the signed fork health probes with its exact build SHA", async () => {
+    const commit = "a".repeat(40);
+    server = await start(commit);
+    for (const path of ["/health", "/api/health"]) {
+      expect(await (await api(path)).json()).toMatchObject({ ok: true, name: "codeden" });
+    }
+    expect(await (await api("/build-info")).json()).toMatchObject({ commit });
+    expect((await fetch(`${server.url}/build-info`)).status).toBe(401);
+  });
+
   it("binds 127.0.0.1 by default and refuses to go wider without a password", async () => {
     server = await start();
     const status = (await (await api("/api/network")).json()) as NetworkStatus;
@@ -134,6 +147,15 @@ describe("network access on a real server", () => {
     expect((await fetch(`${remote}/mcp`, { method: "POST", headers: { cookie } })).status).toBe(
       404,
     );
+
+    for (const action of ["install", "restart", "rollback"]) {
+      const denied = await fetch(`${remote}/api/updates/${action}`, {
+        method: "POST",
+        headers: { cookie, origin: remote, "content-type": "application/json" },
+        body: "{}",
+      });
+      expect(denied.status).toBe(404);
+    }
 
     const before = server.services.settings.get().autonomy;
     for (const autonomy of [

@@ -1,8 +1,11 @@
+import { mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import {
   type DesktopInfo,
   type DesktopUpdateCommand,
   deepLinkPath,
+  FORK_BUILD,
+  ForkUpdateResult,
   parseDeepLink,
 } from "@codeden/contracts";
 import { app, dialog, Menu, Notification, shell } from "electron";
@@ -30,6 +33,9 @@ import {
 import { AppTray } from "./tray";
 import { trayView } from "./tray-view";
 import { UpdateController } from "./updates/controller";
+import { type ForkCandidate, findForkUpdate } from "./updates/fork-release";
+import { stageForkUpdate } from "./updates/fork-stage";
+import { resultFile, startForkWorker, updateLock } from "./updates/fork-worker";
 import { quitAction, standaloneAction, updateSupport } from "./updates/policy";
 import { loadUpdater, waitForRunnerExit } from "./updates/updater";
 import { MainWindow } from "./window";
@@ -61,6 +67,10 @@ export class DesktopApp {
   private tray!: AppTray;
   private badge!: AppBadge;
   private readonly keepAwake = new KeepAwake();
+  private updateProbe =
+    FORK_BUILD &&
+    typeof process.send === "function" &&
+    process.env.CODEDEN_FORK_UPDATE_PROBE === "1";
   private updates!: UpdateController;
   private browser!: NativeBrowserFeature;
   private monitor: ActivityMonitor | undefined;
@@ -95,15 +105,29 @@ export class DesktopApp {
 
   async start(): Promise<void> {
     this.log(`app: CodeDen ${app.getVersion()} starting (home ${this.args.home})`);
-    const unsupported = updateSupport({
-      packaged: app.isPackaged,
-      platform: process.platform,
-      // `CodeDen.app/Contents/Resources/app` -> `CodeDen.app`.
-      macSigned: await macSigned(join(app.getAppPath(), "..", "..", "..")),
-    });
+    const unsupported = FORK_BUILD
+      ? app.isPackaged && process.platform === "darwin"
+        ? null
+        : "Fork updates install from the packaged macOS app."
+      : updateSupport({
+          packaged: app.isPackaged,
+          platform: process.platform,
+          // `CodeDen.app/Contents/Resources/app` -> `CodeDen.app`.
+          macSigned: await macSigned(join(app.getAppPath(), "..", "..", "..")),
+        });
     this.updates = new UpdateController({
       current: app.getVersion(),
       unsupported,
+      ...(FORK_BUILD
+        ? {
+            fork: {
+              check: findForkUpdate,
+              arch: process.arch,
+              apply: (candidate) => this.applyForkUpdate(candidate),
+            },
+            result: await this.readForkResult(),
+          }
+        : {}),
       updater: () => loadUpdater(this.log),
       beforeInstall: () => this.prepareInstall(),
       log: this.log,
@@ -124,6 +148,27 @@ export class DesktopApp {
         code: details.exitCode,
       });
     });
+    if (this.updateProbe) {
+      delete process.env.CODEDEN_FORK_UPDATE_PROBE;
+      process.once("disconnect", () => {
+        this.updateProbe = false;
+      });
+      process.on("message", (message) => {
+        if (
+          typeof message === "object" &&
+          message !== null &&
+          "type" in message &&
+          message.type === "fork-update-result" &&
+          "result" in message
+        ) {
+          const result = ForkUpdateResult.safeParse(message.result);
+          if (result.success) this.updates.setResult(result.data);
+          return;
+        }
+        if (message !== "fork-update-shutdown" || this.quitting) return;
+        void this.stopForkProbe();
+      });
+    }
     Menu.setApplicationMenu(Menu.buildFromTemplate(this.menu()));
     this.tray = new AppTray(
       this.asset(process.platform === "darwin" ? "trayTemplate.png" : "tray.png"),
@@ -178,7 +223,7 @@ export class DesktopApp {
       this.conn = await connect({
         args: this.args,
         serverEntry: join(this.dist, "server.js"),
-        onUpdateCommand: (id, command) => void this.onServerCommand(id, command),
+        onUpdateCommand: (id, command, version) => void this.onServerCommand(id, command, version),
         onExit: (exit) => this.diagnostics.record({ kind: "server-exit", ...exit }),
         onUnexpectedExit: (code) => {
           void this.onServerExit(code).catch(() => {
@@ -190,6 +235,10 @@ export class DesktopApp {
       });
     } catch (error) {
       this.log(`app: no server: ${String(error)}`);
+      if (this.updateProbe) {
+        this.quit("server-crash");
+        return;
+      }
       await dialog.showMessageBox({
         type: "error",
         title: "CodeDen could not start",
@@ -202,10 +251,17 @@ export class DesktopApp {
       this.connecting = false;
     }
     if (this.quitting) {
-      await this.conn.server?.stop({ stopRunner: false });
+      await this.conn.server?.stop({ stopRunner: this.updateProbe });
       return;
     }
     this.conn.server?.send({ type: "update.state", state: this.updates.state });
+    if (this.updateProbe && process.send && this.conn.server?.pid) {
+      process.send({
+        type: "fork-update-ready",
+        pid: this.conn.server.pid,
+        port: Number(new URL(this.conn.url).port),
+      });
+    }
     this.browser.connect(this.conn);
 
     this.monitor?.stop();
@@ -311,14 +367,14 @@ export class DesktopApp {
         this.keepAwake.set(false);
         // Open session browsers move to the runner's Chromium before the views go.
         await this.browser?.quit();
-        if (this.updates && quitAction(this.updates.state.phase) === "install") {
+        if (!FORK_BUILD && this.updates && quitAction(this.updates.state.phase) === "install") {
           // Installing drains the runner first (up to 90 s); the installer ends the app.
           clearTimeout(watchdog);
           hardStop.cancel();
           await this.updates.installOnQuit();
           return;
         }
-        await this.conn?.server?.stop({ stopRunner: false });
+        await this.conn?.server?.stop({ stopRunner: this.updateProbe });
         this.tray?.destroy();
       } catch (error) {
         // A failed step must not leave the app unable to quit.
@@ -327,6 +383,70 @@ export class DesktopApp {
       this.quitReady = true;
       app.quit();
     })();
+  }
+
+  private async stopForkProbe(): Promise<void> {
+    try {
+      if (this.conn?.server) await this.drainForForkUpdate();
+    } catch (error) {
+      this.log(`updates: rollback drain failed: ${String(error)}`);
+    } finally {
+      this.quit("system");
+    }
+  }
+
+  private async readForkResult(): Promise<ForkUpdateResult | undefined> {
+    try {
+      return ForkUpdateResult.parse(JSON.parse(await readFile(resultFile(this.args.home), "utf8")));
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async drainForForkUpdate(): Promise<void> {
+    const server = this.conn?.server;
+    if (!server) throw new Error("Fork updates require CodeDen's own desktop server");
+    this.monitor?.stop();
+    await this.browser.quit();
+    await server.stop({ stopRunner: true, timeoutMs: 90_000 });
+  }
+
+  private async applyForkUpdate(candidate: ForkCandidate): Promise<void> {
+    if (this.quitting || !this.conn?.server || this.args.fake) {
+      throw new Error("Start the installed app with its own server to apply a fork update");
+    }
+    const live = join(app.getAppPath(), "..", "..", "..");
+    const verifier = join(this.dist, "fork-signature");
+    const lock = updateLock(live);
+    const port = Number(new URL(this.conn.url).port);
+    await mkdir(lock, { mode: 0o700 });
+    let staging: Awaited<ReturnType<typeof stageForkUpdate>> | undefined;
+    let worker: Awaited<ReturnType<typeof startForkWorker>> | undefined;
+    try {
+      staging = await stageForkUpdate(live, verifier, candidate);
+      if (this.quitting) throw new Error("CodeDen is already quitting");
+      worker = await startForkWorker(join(this.dist, "fork-update-worker.js"), {
+        ...staging,
+        live,
+        home: this.args.home,
+        oldPid: process.pid,
+        port,
+      });
+      await this.drainForForkUpdate();
+      if (this.quitting) throw new Error("CodeDen is already quitting");
+      const child = worker;
+      await new Promise<void>((resolve, reject) => {
+        child.send("apply", (error) => (error ? reject(error) : resolve()));
+      });
+      child.disconnect();
+      child.unref();
+      this.quit("system");
+    } catch (error) {
+      if (worker?.connected) worker.disconnect();
+      if (staging) await rm(staging.work, { recursive: true, force: true });
+      await rm(lock, { recursive: true, force: true });
+      throw error;
+    }
   }
 
   /** Before the installer runs: stop the server and drain the runner (as `codeden stop`). */
@@ -343,22 +463,32 @@ export class DesktopApp {
     this.quitReady = true;
   }
 
-  private async onServerCommand(id: string, command: DesktopUpdateCommand): Promise<void> {
+  private async onServerCommand(
+    id: string,
+    command: DesktopUpdateCommand,
+    version?: string,
+  ): Promise<void> {
     let error: string | null = null;
     try {
-      await this.updates.run(command);
+      await this.updates.run(command, version);
     } catch (e) {
       error = e instanceof Error ? e.message : String(e);
     }
     this.conn?.server?.send({ type: "update.done", id, error });
   }
 
-  private async runUpdate(command: DesktopUpdateCommand): Promise<void> {
-    await this.updates.run(command).catch((e: unknown) => this.log(`updates: ${String(e)}`));
+  private async runUpdate(command: DesktopUpdateCommand, version?: string): Promise<void> {
+    await this.updates
+      .run(command, version)
+      .catch((e: unknown) => this.log(`updates: ${String(e)}`));
   }
 
   private async onServerExit(code: number | null): Promise<void> {
     if (this.quitting) return;
+    if (this.updateProbe) {
+      this.quit("server-crash");
+      return;
+    }
     this.loaded = false;
     this.conn = undefined;
     this.monitor?.stop();
@@ -396,6 +526,7 @@ export class DesktopApp {
       activity: this.status.activity,
       connected: this.status.connected,
       update: this.updates.state,
+      fork: FORK_BUILD,
       autoUpdate: this.status.settings?.updates.mode === "auto",
     });
     this.tray.update(view);
@@ -409,7 +540,7 @@ export class DesktopApp {
       if (!settings) return;
       const state = this.updates.state;
       const action = standaloneAction({
-        mode: settings.updates.mode,
+        mode: FORK_BUILD && settings.updates.mode === "auto" ? "notify" : settings.updates.mode,
         phase: state.phase,
         unsupported: state.unsupported,
         checkedAt: state.checkedAt ? Date.parse(state.checkedAt) : null,
@@ -424,7 +555,8 @@ export class DesktopApp {
   /** Without our own server there is no update banner: say it with a notification. */
   private notifyUpdate(): void {
     const state = this.updates.state;
-    if (this.conn?.server !== null || !Notification.isSupported() || !state.latest) return;
+    if (FORK_BUILD || this.conn?.server !== null || !Notification.isSupported() || !state.latest)
+      return;
     if (state.phase !== "available" && state.phase !== "downloaded") return;
     const key = `${state.phase}:${state.latest}`;
     if (this.notifiedUpdate === key) return;

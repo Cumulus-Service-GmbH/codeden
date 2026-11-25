@@ -24,7 +24,10 @@ export function useUpdateActions() {
   const queryClient = useQueryClient();
   const onSuccess = (status: UpdateStatus) => queryClient.setQueryData(updatesKey, status);
   return {
-    install: useMutation({ mutationFn: () => client.updates.install(), onSuccess }),
+    install: useMutation({
+      mutationFn: (version?: string) => client.updates.install(version ? { version } : undefined),
+      onSuccess,
+    }),
     restart: useMutation({ mutationFn: () => client.updates.restart(), onSuccess }),
     rollback: useMutation({ mutationFn: () => client.updates.rollback(), onSuccess }),
   };

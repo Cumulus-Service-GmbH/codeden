@@ -18,6 +18,7 @@
 import { existsSync } from "node:fs";
 import { chmod, cp, readdir } from "node:fs/promises";
 import { join } from "node:path";
+import { FORK_RELEASE_REPOSITORY } from "../../packages/contracts/src/fork-build.ts";
 
 /** electron-builder's `Arch` enum values, by name. */
 const ARCH_NAMES = { 0: "ia32", 1: "x64", 2: "armv7l", 3: "arm64", 4: "universal" };
@@ -76,6 +77,9 @@ const notarize = Boolean(
     process.env.APPLE_TEAM_ID,
 );
 
+const [releaseOwner, releaseRepo] = FORK_RELEASE_REPOSITORY.split("/");
+const forkRelease = process.env.CODEDEN_FORK_RELEASE_BUILD === "1";
+
 /** @type {import("electron-builder").Configuration} */
 export default {
   appId: "dev.codeden.app",
@@ -87,10 +91,11 @@ export default {
   asar: false,
   // Native modules are Node-API (node-pty, @napi-rs/keyring): no rebuild for Electron needed.
   npmRebuild: false,
+  forceCodeSigning: forkRelease,
   files: ["**/*", "!**/*.map", "!**/*.d.ts"],
   afterPack: prepareNativeModules,
   protocols: [{ name: "CodeDen", schemes: ["codeden"] }],
-  publish: [{ provider: "github", owner: "leonvanzyl", repo: "codeden", releaseType: "release" }],
+  publish: [{ provider: "github", owner: releaseOwner, repo: releaseRepo, releaseType: "release" }],
   electronFuses: {
     // The server and runner run on the app's binary as Node.js (ELECTRON_RUN_AS_NODE).
     runAsNode: true,
@@ -124,7 +129,13 @@ export default {
     entitlementsInherit: "build/entitlements.mac.plist",
     // A Developer ID from CSC_LINK/CSC_NAME when configured, otherwise an ad-hoc signature.
     identity: macSigning ? undefined : "-",
-    notarize,
+    notarize: !forkRelease && notarize,
+    ...(forkRelease
+      ? {
+          binaries: ["Contents/Resources/app/dist/fork-signature"],
+          timestamp: "none",
+        }
+      : {}),
     extendInfo: { NSMicrophoneUsageDescription: "CodeDen uses the microphone for dictation." },
     artifactName: "CodeDen-${version}-${arch}.${ext}",
   },

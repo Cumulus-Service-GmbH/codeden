@@ -1,8 +1,11 @@
 import {
   type DesktopUpdateCommand,
   type DesktopUpdateState,
+  type ForkUpdateResult,
   isNewerVersion,
 } from "@codeden/contracts";
+
+import type { ForkCandidate, findForkUpdate } from "./fork-release";
 
 /** The part of electron-updater's `autoUpdater` the controller uses (injectable for tests). */
 export interface Updater {
@@ -16,6 +19,12 @@ export interface Updater {
 
 export interface UpdateControllerOptions {
   current: string;
+  fork?: {
+    check: typeof findForkUpdate;
+    arch: string;
+    apply(candidate: ForkCandidate): Promise<void>;
+  };
+  result?: ForkUpdateResult;
   /** Why updates can't work in this build (see `updateSupport`), or null. */
   unsupported: string | null;
   /** Created on first use, so development runs never load the updater. */
@@ -61,6 +70,7 @@ const firstLine = (error: unknown) =>
 export class UpdateController {
   private current: DesktopUpdateState;
   private readonly listeners = new Set<(state: DesktopUpdateState) => void>();
+  private candidate: ForkCandidate | null = null;
   private instance: Updater | undefined;
   private inFlight: Promise<void> | null = null;
 
@@ -73,6 +83,7 @@ export class UpdateController {
       percent: null,
       error: null,
       unsupported: opts.unsupported,
+      result: opts.result,
     };
   }
 
@@ -85,8 +96,33 @@ export class UpdateController {
     return () => this.listeners.delete(listener);
   }
 
+  setResult(result: ForkUpdateResult): void {
+    this.set({ result });
+  }
+
   /** Run a command; rejects with the reason it failed (also recorded in the state). */
-  run(command: DesktopUpdateCommand): Promise<void> {
+  run(command: DesktopUpdateCommand, version?: string): Promise<void> {
+    if (this.opts.fork) {
+      if (command !== "check" && command !== "apply") {
+        return Promise.reject(new Error("Fork updates require Update now"));
+      }
+      if (
+        command === "apply" &&
+        (this.current.unsupported ||
+          this.current.phase === "installing" ||
+          this.inFlight ||
+          !this.candidate ||
+          this.candidate.version !== version ||
+          !isNewerVersion(this.candidate.version, this.opts.current))
+      ) {
+        return Promise.reject(new Error(this.current.unsupported ?? "No fork update is ready"));
+      }
+      this.inFlight ??= (command === "check" ? this.checkFork() : this.applyFork()).finally(() => {
+        this.inFlight = null;
+      });
+      return this.inFlight;
+    }
+    if (command === "apply") return Promise.reject(new Error("Fork update is unavailable"));
     if (this.current.unsupported) return Promise.reject(new Error(this.current.unsupported));
     if (command === "install") return this.install();
     // One check or download at a time; a second request joins the first.
@@ -94,6 +130,39 @@ export class UpdateController {
       this.inFlight = null;
     });
     return this.inFlight;
+  }
+
+  private async checkFork(): Promise<void> {
+    const fork = this.opts.fork;
+    if (!fork || this.current.phase === "installing") return;
+    this.set({ phase: "checking" });
+    try {
+      const { candidate, upstream, error } = await fork.check(fork.arch);
+      this.candidate = candidate;
+      const available = candidate && isNewerVersion(candidate.version, this.opts.current);
+      this.set({
+        phase: error ? "error" : available ? "available" : "idle",
+        latest: candidate?.version ?? null,
+        upstream,
+        error: error ?? null,
+        checkedAt: this.nowIso(),
+      });
+    } catch (error) {
+      this.candidate = null;
+      this.fail(error, { latest: null, checkedAt: this.nowIso() });
+    }
+  }
+
+  private async applyFork(): Promise<void> {
+    const candidate = this.candidate;
+    if (!candidate || !this.opts.fork) throw new Error("No fork update is ready");
+    this.set({ phase: "downloading", error: null });
+    try {
+      await this.opts.fork.apply(candidate);
+      this.set({ phase: "installing" });
+    } catch (error) {
+      this.fail(error, {});
+    }
   }
 
   private async updater(): Promise<Updater> {
@@ -174,7 +243,7 @@ export class UpdateController {
 
   /** Quitting with a downloaded update: install without starting the app again. */
   async installOnQuit(): Promise<void> {
-    if (this.current.phase !== "downloaded") return;
+    if (this.opts.fork || this.current.phase !== "downloaded") return;
     this.set({ phase: "installing" });
     await this.opts.beforeInstall().catch(() => undefined);
     (await this.updater()).quitAndInstall(true, false);

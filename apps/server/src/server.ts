@@ -1,6 +1,7 @@
 import { rmSync } from "node:fs";
 import {
   CODEDEN_VERSION,
+  FORK_BUILD,
   HOME_RUNNER_ID,
   type ServerLock,
   TeamReviewLimitsAudit,
@@ -48,6 +49,8 @@ import type { UtilityService } from "./services/utility";
 import { SettingsStore } from "./settings-store";
 
 export interface StartServerOptions {
+  /** Reviewed SHA embedded in a signed fork desktop package. */
+  forkCommit?: string;
   /**
    * Port to listen on: 127.0.0.1, or 0.0.0.0 while network access is on (§15.1). 0 picks a
    * free port; a later switch keeps the port.
@@ -330,7 +333,13 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
       // `/mcp` authenticates agents with per-session tokens instead of the install token.
       publicPaths: new Set(["/api/health", "/mcp"]),
       // Agents and the desktop app only: never reachable from another device.
-      loopbackOnlyPaths: new Set(["/mcp", ...BROWSER_LOOPBACK_ONLY_PATHS]),
+      loopbackOnlyPaths: new Set([
+        "/mcp",
+        ...BROWSER_LOOPBACK_ONLY_PATHS,
+        ...(FORK_BUILD
+          ? ["/api/updates/install", "/api/updates/restart", "/api/updates/rollback"]
+          : []),
+      ]),
       remote: {
         enabled: () => network.enabled,
         ownHosts: () => network.ownHosts(),
@@ -357,6 +366,17 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
       }, 50);
     },
   });
+  if (opts.forkCommit) {
+    app.get("/health", (c) =>
+      c.json({
+        ok: true,
+        name: "codeden",
+        version: CODEDEN_VERSION,
+        uptimeSec: (Date.now() - startedAt) / 1000,
+      }),
+    );
+    app.get("/build-info", (c) => c.json({ version: CODEDEN_VERSION, commit: opts.forkCommit }));
+  }
   app.route("/api", api);
   const mcp = createMcpHandler({ tokens: services.mcpTokens, registry: services.tools, log });
   app.all("/mcp", (c) => mcp(c.req.raw));

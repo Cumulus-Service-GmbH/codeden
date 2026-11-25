@@ -1,12 +1,17 @@
 import {
   CODEDEN_VERSION,
   compareVersions,
+  FORK_RELEASE_REPOSITORY,
+  fetchGithubLatest,
+  forkReleaseVersion,
   type InstallSource,
   isNewerVersion,
   type ReleaseNotes,
   type UpdateMode,
   type UpdateState,
   type UpdateStatus,
+  type UpstreamRelease,
+  watchUpstream,
 } from "@codeden/contracts";
 import { conflict, errorMessage } from "../errors";
 import {
@@ -62,6 +67,7 @@ export type Updates = Pick<
 
 export interface UpdateServiceDeps {
   home: string;
+  forkChannel?: boolean;
   /** `settings.updates.mode`. */
   mode: () => UpdateMode;
   /** `CODEDEN_UPDATE_CHECK=0`: never ask the registry (tests, air-gapped machines). */
@@ -93,6 +99,7 @@ const DEV_HOST: SelfUpdateHost = {
  * and starts on the next launch. Every change is pushed to `onChange` listeners (the UI).
  */
 export class UpdateService {
+  private upstream: UpstreamRelease | null = null;
   private latest: string | null = null;
   private checkedAt: number | null = null;
   private error: string | null = null;
@@ -160,7 +167,12 @@ export class UpdateService {
     let state = this.state;
     let target = this.target;
     // Installed by `codeden update`, auto mode or an earlier session: ready for a restart.
-    if (state === "idle" && pointer && isNewerVersion(pointer.version, current)) {
+    if (
+      !this.deps.forkChannel &&
+      state === "idle" &&
+      pointer &&
+      isNewerVersion(pointer.version, current)
+    ) {
       if (!installProblem(packageRoot(this.deps.home, pointer.version), pointer.version)) {
         state = "installed";
         target = pointer.version;
@@ -172,22 +184,33 @@ export class UpdateService {
     return {
       current,
       latest: this.latest,
-      updateAvailable: enabled && this.latest !== null && isNewerVersion(this.latest, current),
+      updateAvailable:
+        !this.deps.forkChannel &&
+        enabled &&
+        this.latest !== null &&
+        isNewerVersion(this.latest, current),
       enabled,
       mode: this.deps.mode(),
       checkedAt: this.checkedAt === null ? null : new Date(this.checkedAt).toISOString(),
       error: enabled ? this.error : null,
-      command: "npm i -g codeden@latest",
+      upstream: this.deps.forkChannel && enabled ? this.upstream : undefined,
+      installRequiresDesktop: this.deps.forkChannel,
+      command: this.deps.forkChannel
+        ? `https://github.com/${FORK_RELEASE_REPOSITORY}/releases/latest`
+        : "npm i -g codeden@latest",
       source: this.host.source,
       state,
       target,
       progress: state === "installing" ? this.progress : null,
       installError: state === "failed" ? this.installError : null,
-      canRestart: this.host.source === "packaged" && this.host.restart !== undefined,
+      canRestart:
+        !this.deps.forkChannel &&
+        this.host.source === "packaged" &&
+        this.host.restart !== undefined,
       restartCommand: this.host.restartCommand,
       installed: listInstalled(this.deps.home),
       rollbackTo,
-      canRollback: this.host.source === "packaged" && pointer !== null,
+      canRollback: !this.deps.forkChannel && this.host.source === "packaged" && pointer !== null,
       warning: this.host.warning ?? null,
     };
   }
@@ -197,6 +220,8 @@ export class UpdateService {
    * Returns at once with the `installing` status; progress follows through `onChange`.
    */
   install(opts: { version?: string; restart?: boolean } = {}): UpdateStatus {
+    if (this.deps.forkChannel)
+      throw conflict("Fork updates install from the macOS desktop app", "updates_unsupported");
     if (this.host.source !== "packaged") {
       throw conflict(
         "You're running CodeDen from source: pull and rebuild to update.",
@@ -216,6 +241,8 @@ export class UpdateService {
 
   /** Hand over to the installed version waiting for a restart. */
   restartNow(): UpdateStatus {
+    if (this.deps.forkChannel)
+      throw conflict("Fork updates install from the macOS desktop app", "updates_unsupported");
     const snap = this.snapshot();
     if (snap.state !== "installed" || !snap.target) {
       throw conflict("No installed update is waiting for a restart", "nothing_to_restart");
@@ -226,6 +253,8 @@ export class UpdateService {
 
   /** Point the launcher back at the previous version and restart into it. */
   rollback(): UpdateStatus {
+    if (this.deps.forkChannel)
+      throw conflict("Fork updates install from the macOS desktop app", "updates_unsupported");
     if (this.host.source === "source" || !readPointer(this.deps.home)) {
       throw conflict("There is no previous version to roll back to", "nothing_to_roll_back");
     }
@@ -252,6 +281,7 @@ export class UpdateService {
     await this.check();
     const latest = this.latest;
     if (
+      !this.deps.forkChannel &&
       this.deps.mode() === "auto" &&
       this.host.source === "packaged" &&
       latest &&
@@ -273,7 +303,18 @@ export class UpdateService {
 
   private async fetchLatest(): Promise<void> {
     try {
-      this.latest = await fetchLatestVersion(this.deps.registry, this.deps.fetch);
+      if (this.deps.forkChannel) {
+        const doFetch = this.deps.fetch ?? fetch;
+        const [release, upstream] = await Promise.allSettled([
+          fetchGithubLatest(FORK_RELEASE_REPOSITORY, doFetch),
+          watchUpstream(doFetch),
+        ]);
+        if (upstream.status === "fulfilled") this.upstream = upstream.value;
+        if (release.status === "rejected") throw release.reason;
+        this.latest = forkReleaseVersion(release.value?.tag_name) ?? null;
+      } else {
+        this.latest = await fetchLatestVersion(this.deps.registry, this.deps.fetch);
+      }
       this.error = null;
     } catch (error) {
       this.error = errorMessage(error);

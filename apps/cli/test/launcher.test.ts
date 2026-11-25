@@ -3,7 +3,7 @@ import { homedir, tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { compareVersions } from "@codeden/contracts";
 import { writePointer } from "@codeden/server";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import {
   compareCore,
   decideLaunch,
@@ -16,6 +16,7 @@ import {
   restartCommandFor,
 } from "../src/launcher";
 import { relaunchArgs } from "../src/restart";
+import { updateCommand } from "../src/update-command";
 
 /** A published-looking copy (no `src/` next to `dist/`) of `version` at `<dir>/dist/cli.js`. */
 function packagedCopy(dir: string, version: string): string {
@@ -149,4 +150,30 @@ describe("launcher (§16)", () => {
     ]);
     expect(relaunchArgs(["--port=5000"], 5000)).toEqual(["--port", "5000", "--no-open"]);
   });
+});
+
+it("refuses to check npm for a fork CLI update", async () => {
+  const { home, selfEntry } = setup(null);
+  const fetcher = vi.fn(async () => {
+    throw new Error("Unexpected network request");
+  });
+  vi.stubGlobal("fetch", fetcher);
+  const stderr = vi.spyOn(console, "error").mockImplementation(() => {});
+  try {
+    const launch = {
+      home,
+      binEntry: selfEntry,
+      binVersion: "0.2.0",
+      kind: "npm" as const,
+      source: "packaged" as const,
+      restartCommand: "codeden",
+      warning: null,
+    };
+    expect(await updateCommand(home, { launch, rollback: false })).toBe(1);
+    expect(fetcher).not.toHaveBeenCalled();
+    expect(stderr).toHaveBeenCalledWith(expect.stringContaining("Cumulus-Service-GmbH/codeden"));
+  } finally {
+    stderr.mockRestore();
+    vi.unstubAllGlobals();
+  }
 });

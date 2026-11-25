@@ -93,3 +93,29 @@ describe("Settings > About on a phone (#296)", () => {
     expect(update.parentElement?.textContent).not.toContain("Version 0.7.2 is available.");
   });
 });
+
+it("shows the upstream release as read-only and displays the rollback result", async () => {
+  const client = createMockClient();
+  vi.spyOn(client, "getUpdates").mockResolvedValue({
+    ...available,
+    source: "desktop",
+    latest: null,
+    updateAvailable: false,
+    upstream: {
+      version: "v9.0.0",
+      url: "https://github.com/leonvanzyl/codeden/releases/tag/v9.0.0",
+    },
+    result: { status: "restored", message: "The previous app was restored." },
+  });
+  renderWithClient(<SettingsPage section="about" />, client, { withRouter: true });
+  const upstream = await screen.findByRole("link", { name: /Available upstream; porting tracked/ });
+  expect(upstream.getAttribute("href")).toBe(
+    "https://github.com/leonvanzyl/codeden/releases/tag/v9.0.0",
+  );
+  const button = screen.getByRole<HTMLButtonElement>("button", { name: "Update from upstream" });
+  expect(button.disabled).toBe(true);
+  expect(button.parentElement?.title).toBe(
+    "Fork build: updates come from Cumulus-Service-GmbH/codeden after porting",
+  );
+  expect(screen.getByText("The previous app was restored.")).toBeTruthy();
+});

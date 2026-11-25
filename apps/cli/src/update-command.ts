@@ -1,4 +1,10 @@
-import { CODEDEN_VERSION, isNewerVersion, UpdateStatus } from "@codeden/contracts";
+import {
+  CODEDEN_VERSION,
+  FORK_BUILD,
+  FORK_RELEASE_REPOSITORY,
+  isNewerVersion,
+  UpdateStatus,
+} from "@codeden/contracts";
 import {
   applyRollback,
   ensureInstallToken,
@@ -26,6 +32,12 @@ export async function updateCommand(
 ): Promise<number> {
   if (opts.launch.source === "source") {
     console.error(FROM_SOURCE);
+    return 1;
+  }
+  if (FORK_BUILD) {
+    console.error(
+      `Use Update now in the macOS desktop app for releases from ${FORK_RELEASE_REPOSITORY}.`,
+    );
     return 1;
   }
   const paths = homePaths(home);

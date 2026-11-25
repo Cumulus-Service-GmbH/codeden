@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { CODEDEN_VERSION, DesktopHostMessage, type DesktopServerMessage } from "@codeden/contracts";
 import { ensureHome, ensureInstallToken, resolveHome, startServer } from "@codeden/server";
 import { serverLog } from "./log";
@@ -19,7 +21,11 @@ export async function serve(opts: { home?: string; port: number; fake: boolean }
   const desktop = new IpcDesktopUpdater(send, CODEDEN_VERSION);
   let closing = false;
 
+  const forkCommit = (
+    await readFile(join(import.meta.dirname, "fork-commit"), "utf8").catch(() => "")
+  ).trim();
   const server = await startServer({
+    forkCommit: /^[0-9a-f]{40}$/.test(forkCommit) ? forkCommit : undefined,
     port: opts.port,
     dataDir: home,
     token,

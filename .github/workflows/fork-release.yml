@@ -1,0 +1,81 @@
+name: Fork desktop release
+
+on:
+  workflow_dispatch:
+    inputs:
+      review_pr:
+        description: Fork pull request with a clean review on this exact commit
+        required: true
+        type: number
+
+permissions:
+  contents: write
+  pull-requests: read
+
+concurrency:
+  group: fork-desktop-release
+
+jobs:
+  release:
+    if: github.repository == 'Cumulus-Service-GmbH/codeden'
+    runs-on: macos-latest
+    timeout-minutes: 45
+    env:
+      REVIEW_PR: ${{ inputs.review_pr }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Verify the shared Build C review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/release/check-fork-review.mjs
+      - run: pnpm install --frozen-lockfile
+      - name: Verify the candidate
+        env:
+          VITEST_MAX_WORKERS: "2"
+        run: |
+          pnpm typecheck
+          pnpm lint
+          pnpm exec vitest run packages/contracts/test/fork-update.test.ts apps/desktop/test/fork-update.test.ts apps/server/test/updates.test.ts apps/web/test/update-banner.test.tsx apps/web/test/update-mobile.test.tsx
+          pnpm build
+      - name: Build the static bundle verifier
+        run: |
+          for arch in arm64 x86_64; do
+            swiftc -O -target "$arch-apple-macos13" apps/desktop/native/fork-signature.swift -o "$RUNNER_TEMP/fork-signature-$arch"
+          done
+          lipo -create "$RUNNER_TEMP/fork-signature-arm64" "$RUNNER_TEMP/fork-signature-x86_64" -output apps/desktop/dist/fork-signature
+          printf '%s\n' "$GITHUB_SHA" > apps/desktop/dist/fork-commit
+      - name: Package with the existing signing identity
+        env:
+          CODEDEN_FORK_RELEASE_BUILD: "1"
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+        run: |
+          missing=0
+          for name in CSC_LINK CSC_KEY_PASSWORD; do
+            if [ -z "${!name}" ]; then
+              echo "::error::Missing signing secret $name"
+              missing=1
+            fi
+          done
+          [ "$missing" -eq 0 ] || exit 1
+          CSC_NAME=$(node --input-type=module -e 'import {FORK_SIGNER_NAME} from "./packages/contracts/src/fork-build.ts"; console.log(FORK_SIGNER_NAME)')
+          export CSC_NAME
+          pnpm --filter @codeden/desktop package --dir --arch arm64 --arch x64
+      - name: Verify and attach signed artifacts and receipts
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node scripts/release/check-fork-review.mjs
+          node scripts/release/fork-artifacts.mjs "$RUNNER_TEMP/fork-release"
+          version=$(node -p 'require("./apps/desktop/package.json").version')
+          tag="fork-v$version"
+          gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" -f "ref=refs/tags/$tag" -f "sha=$GITHUB_SHA" --silent
+          gh release create "$tag" "$RUNNER_TEMP/fork-release/"* --verify-tag --draft --title "CodeDen $version" --generate-notes
+          gh release edit "$tag" --draft=false --latest

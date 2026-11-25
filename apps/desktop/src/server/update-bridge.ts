@@ -39,12 +39,12 @@ export class IpcDesktopUpdater {
     return () => this.listeners.delete(listener);
   }
 
-  run(command: DesktopUpdateCommand): Promise<void> {
+  run(command: DesktopUpdateCommand, version?: string): Promise<void> {
     const id = String(++this.nextId);
     return new Promise<void>((resolve, reject) => {
       this.pending.set(id, { resolve, reject });
       try {
-        this.send({ type: "update.command", id, command });
+        this.send({ type: "update.command", id, command, version });
       } catch (error) {
         this.pending.delete(id);
         reject(error instanceof Error ? error : new Error(String(error)));

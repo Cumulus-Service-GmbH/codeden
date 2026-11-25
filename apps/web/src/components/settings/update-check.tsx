@@ -1,3 +1,4 @@
+import { FORK_RELEASE_REPOSITORY, isNewerVersion } from "@codeden/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { RefreshCw, RotateCcw } from "lucide-react";
 import { canUpdate } from "@/components/shell/update-banner";
@@ -27,7 +28,13 @@ export function UpdateCheck() {
   else if (data.state === "installed") text = `Version ${data.target} is installed.`;
   else if (data.updateAvailable) text = `Version ${data.latest} is available.`;
   else if (data.error) text = `Couldn't check for updates: ${data.error}`;
-  else if (data.latest) text = "You're on the latest version.";
+  else if (
+    data.installRequiresDesktop &&
+    data.latest &&
+    isNewerVersion(data.latest, data.current)
+  ) {
+    text = `Version ${data.latest} is available in the macOS desktop app.`;
+  } else if (data.latest) text = "You're on the latest version.";
   else text = "Not checked yet.";
   const rollbackLabel = data.rollbackTo
     ? `Roll back to ${data.rollbackTo}`
@@ -44,7 +51,11 @@ export function UpdateCheck() {
         {(showInstall || data.enabled) && (
           <div className="flex flex-wrap items-center gap-2">
             {showInstall && (
-              <Button size="xs" onClick={() => actions.install.mutate()} disabled={busy}>
+              <Button
+                size="xs"
+                onClick={() => actions.install.mutate(data.latest ?? undefined)}
+                disabled={busy || actions.install.isPending}
+              >
                 Update now
               </Button>
             )}
@@ -61,6 +72,28 @@ export function UpdateCheck() {
           </div>
         )}
       </div>
+      {data.upstream && (
+        <div className="flex flex-wrap items-center gap-2 text-muted-foreground">
+          <a href={data.upstream.url} target="_blank" rel="noreferrer" className="underline">
+            {data.upstream.version} · Available upstream; porting tracked
+          </a>
+          <span title={`Fork build: updates come from ${FORK_RELEASE_REPOSITORY} after porting`}>
+            <Button size="xs" disabled aria-label="Update from upstream">
+              Update now
+            </Button>
+          </span>
+        </div>
+      )}
+      {data.result && (
+        <p
+          role="status"
+          className={
+            data.result.status === "installed" ? "text-muted-foreground" : "text-status-failed"
+          }
+        >
+          {data.result.message}
+        </p>
+      )}
       {data.source === "source" ? (
         <p className="text-muted-foreground">
           You're running from source: pull and rebuild to update (

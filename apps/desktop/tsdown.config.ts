@@ -19,7 +19,10 @@ const ON_DEMAND = ["@anthropic-ai/claude-agent-sdk"];
  */
 export default defineConfig([
   {
-    entry: { main: "src/main/main.ts" },
+    entry: {
+      main: "src/main/main.ts",
+      "fork-update-worker": "src/main/updates/fork-worker-entry.ts",
+    },
     format: "esm",
     platform: "node",
     target: "node24",

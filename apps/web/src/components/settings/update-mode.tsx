@@ -1,4 +1,4 @@
-import type { InstallSource, UpdateMode } from "@codeden/contracts";
+import { FORK_BUILD, type InstallSource, type UpdateMode } from "@codeden/contracts";
 import {
   Select,
   SelectContent,
@@ -32,9 +32,14 @@ export function updateModeHelp(mode: UpdateMode, source: InstallSource | undefin
 export function UpdateModeSetting() {
   const { settings, update } = useSettings();
   const { data } = useUpdates();
-  const mode = settings.updates.mode;
+  const mode = FORK_BUILD && settings.updates.mode === "auto" ? "notify" : settings.updates.mode;
+  const help = FORK_BUILD
+    ? mode === "off"
+      ? "Never checks GitHub Releases for new versions."
+      : "Checks for fork updates and shows upstream releases for porting. Updates require Update now in the macOS desktop app."
+    : updateModeHelp(mode, data?.source);
   return (
-    <SettingRow label="Updates" help={updateModeHelp(mode, data?.source)}>
+    <SettingRow label="Updates" help={help}>
       <Select value={mode} onValueChange={(v) => update({ updates: { mode: v as UpdateMode } })}>
         <SelectTrigger size="sm" className="w-44" data-testid="update-mode">
           <SelectValue />
@@ -42,7 +47,7 @@ export function UpdateModeSetting() {
         <SelectContent>
           <SelectItem value="off">Off</SelectItem>
           <SelectItem value="notify">Notify me</SelectItem>
-          <SelectItem value="auto">Install automatically</SelectItem>
+          {!FORK_BUILD && <SelectItem value="auto">Install automatically</SelectItem>}
         </SelectContent>
       </Select>
     </SettingRow>

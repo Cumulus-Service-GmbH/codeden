@@ -11,6 +11,7 @@ import {
   readPointer,
   writePointer,
 } from "../src/services/updates/app-dir";
+import { type DesktopUpdater, DesktopUpdateService } from "../src/services/updates/desktop";
 import { installAppVersion } from "../src/services/updates/installer";
 import { writeUpdateResult } from "../src/services/updates/last-result";
 import { changelogSection, fetchReleaseNotes } from "../src/services/updates/registry";
@@ -387,6 +388,74 @@ describe("release notes", () => {
     );
     const none = await fetchReleaseNotes("0.9.0", sources, fetchWith(null));
     expect(none.body).toBeNull();
-    expect(none.url).toContain("/releases/tag/v0.9.0");
+    expect(none.url).toBe(
+      "https://github.com/Cumulus-Service-GmbH/codeden/releases/tag/fork-v0.9.0",
+    );
+  });
+});
+
+describe("fork update policy", () => {
+  it("checks the fork and read-only upstream releases with no npm apply or restart", async () => {
+    const fetcher = vi.fn<typeof fetch>().mockImplementation(async (input) =>
+      Response.json({
+        tag_name: String(input).includes("Cumulus-Service-GmbH") ? "fork-v0.7.8" : "v9.0.0",
+      }),
+    );
+    const updates = new UpdateService({
+      home: tempHome(),
+      mode: () => "auto",
+      current: "0.7.7",
+      registry: REGISTRY,
+      host: packagedHost(),
+      forkChannel: true,
+      fetch: fetcher,
+    });
+    expect(await updates.status()).toMatchObject({
+      latest: "0.7.8",
+      updateAvailable: false,
+      installRequiresDesktop: true,
+      upstream: { version: "v9.0.0" },
+    });
+    expect(fetcher.mock.calls.map(([url]) => url)).toEqual([
+      "https://api.github.com/repos/Cumulus-Service-GmbH/codeden/releases/latest",
+      "https://api.github.com/repos/leonvanzyl/codeden/releases/latest",
+    ]);
+    expect(() => updates.install({ version: "9.0.0" })).toThrow(/macOS desktop app/);
+    expect(() => updates.restartNow()).toThrow(/macOS desktop app/);
+  });
+
+  it("keeps persisted auto mode read-only and sends one apply for the fork version", async () => {
+    const desktopState = {
+      phase: "available" as const,
+      current: "0.7.7",
+      latest: "0.7.8",
+      checkedAt: null,
+      percent: null,
+      error: null,
+      unsupported: null,
+      upstream: {
+        version: "v9.0.0",
+        url: "https://github.com/leonvanzyl/codeden/releases/tag/v9.0.0",
+      },
+    };
+    const run = vi.fn<DesktopUpdater["run"]>(async () => {});
+    const updates = new DesktopUpdateService({
+      current: "0.7.7",
+      mode: () => "auto",
+      forkChannel: true,
+      desktop: { state: () => desktopState, onChange: () => () => {}, run },
+    });
+    try {
+      updates.start();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(run.mock.calls).toEqual([["check"]]);
+      expect(() => updates.install({ version: "9.0.0" })).toThrow(/No installable fork update/);
+      expect(() => updates.restartNow()).toThrow(/No downloaded update/);
+      updates.install({ version: "0.7.8" });
+      expect(run.mock.calls).toEqual([["check"], ["apply", "0.7.8"]]);
+    } finally {
+      updates.stop();
+    }
   });
 });

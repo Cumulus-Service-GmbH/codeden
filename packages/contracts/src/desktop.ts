@@ -2,6 +2,7 @@ import { z } from "zod";
 import { Id, Timestamp } from "./common";
 import type { InboxItem } from "./entities/inbox";
 import type { Session } from "./entities/session";
+import { ForkUpdateResult, UpstreamRelease } from "./fork-update";
 import { BrowserCookie, BrowserHandoffTab, BrowserRelayEndpoint } from "./runner/browser";
 
 /**
@@ -66,6 +67,8 @@ export const DesktopUpdateState = z.object({
   /** The newest release found, null until a check succeeded. */
   latest: z.string().nullable(),
   checkedAt: Timestamp.nullable(),
+  upstream: UpstreamRelease.nullable().optional(),
+  result: ForkUpdateResult.optional(),
   /** Download progress (0-100) while `downloading`. */
   percent: z.number().min(0).max(100).nullable(),
   /** Why the last check or download failed. */
@@ -76,7 +79,7 @@ export const DesktopUpdateState = z.object({
 export type DesktopUpdateState = z.infer<typeof DesktopUpdateState>;
 
 /** What the server asks the desktop updater to do (driven by the update banner and policy). */
-export const DesktopUpdateCommand = z.enum(["check", "download", "install"]);
+export const DesktopUpdateCommand = z.enum(["check", "download", "install", "apply"]);
 export type DesktopUpdateCommand = z.infer<typeof DesktopUpdateCommand>;
 
 // ---------------------------------------------------------------- main <-> server child IPC
@@ -94,7 +97,12 @@ export const DesktopServerMessage = z.discriminatedUnion("type", [
   /** The server could not start (`code` is e.g. `EADDRINUSE`). */
   z.object({ type: z.literal("failed"), message: z.string(), code: z.string().nullable() }),
   /** Run an updater command; answered with `update.done` carrying the same `id`. */
-  z.object({ type: z.literal("update.command"), id: z.string(), command: DesktopUpdateCommand }),
+  z.object({
+    type: z.literal("update.command"),
+    id: z.string(),
+    command: DesktopUpdateCommand,
+    version: z.string().optional(),
+  }),
 ]);
 export type DesktopServerMessage = z.infer<typeof DesktopServerMessage>;
 

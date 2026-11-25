@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { defaultTeam, messageFrom, type Session, type Team } from "@codeden/contracts";
+import { defaultTeam, FORK_BUILD, messageFrom, type Session, type Team } from "@codeden/contracts";
 import { createImageEngineRegistry, type ImageEngineRegistry } from "@codeden/providers";
 import type { Db } from "../db/client";
 import type { EventStore } from "../events/store";
@@ -703,6 +703,7 @@ function createUpdates(opts: ServicesOptions): Updates {
     mode: () => opts.settings.get().updates.mode,
     checksDisabled: process.env.CODEDEN_UPDATE_CHECK === "0",
     notes: notesSources(),
+    forkChannel: FORK_BUILD,
     fetch: opts.updates?.fetch,
     intervalMs: opts.updates?.intervalMs,
     log: opts.log,

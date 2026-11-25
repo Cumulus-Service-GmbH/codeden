@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { Timestamp } from "./common";
+import { ForkUpdateResult, UpstreamRelease } from "./fork-update";
 
 /**
  * `settings.updates.mode` (§16): `off` never asks the registry; `notify` checks and offers a
@@ -52,6 +53,9 @@ export const UpdateStatus = z.object({
   enabled: z.boolean(),
   mode: UpdateMode,
   checkedAt: Timestamp.nullable(),
+  upstream: UpstreamRelease.nullable().optional(),
+  installRequiresDesktop: z.boolean().optional(),
+  result: ForkUpdateResult.optional(),
   /** Why the last check failed (offline, registry error), else null. */
   error: z.string().nullable(),
   /** The manual way to update, e.g. `npm i -g codeden@latest`. */

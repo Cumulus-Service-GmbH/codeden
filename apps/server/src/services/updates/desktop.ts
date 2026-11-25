@@ -2,6 +2,7 @@ import {
   CODEDEN_VERSION,
   type DesktopUpdateCommand,
   type DesktopUpdateState,
+  FORK_RELEASE_REPOSITORY,
   isNewerVersion,
   type ReleaseNotes,
   type UpdateMode,
@@ -19,11 +20,12 @@ export interface DesktopUpdater {
   state(): DesktopUpdateState;
   onChange(listener: (state: DesktopUpdateState) => void): () => void;
   /** Resolves when the main process finished the command; rejects with its error. */
-  run(command: DesktopUpdateCommand): Promise<void>;
+  run(command: DesktopUpdateCommand, version?: string): Promise<void>;
 }
 
 export interface DesktopUpdateServiceDeps {
   desktop: DesktopUpdater;
+  forkChannel?: boolean;
   /** `settings.updates.mode`. */
   mode: () => UpdateMode;
   /** `CODEDEN_UPDATE_CHECK=0`: never check (tests, air-gapped machines). */
@@ -38,7 +40,7 @@ export interface DesktopUpdateServiceDeps {
 }
 
 const SIX_HOURS = 6 * 3600_000;
-export const DESKTOP_RELEASES_URL = "https://github.com/leonvanzyl/codeden/releases/latest";
+export const DESKTOP_RELEASES_URL = `https://github.com/${FORK_RELEASE_REPOSITORY}/releases/latest`;
 
 /**
  * Update checks for the desktop app (§17). Same contract and policy as the npm self-update
@@ -123,6 +125,8 @@ export class DesktopUpdateService {
       command: DESKTOP_RELEASES_URL,
       source: "desktop",
       state,
+      upstream: enabled ? d.upstream : undefined,
+      result: d.result,
       target: state === "idle" ? null : d.latest,
       progress,
       installError: state === "failed" ? (d.error ?? "The update could not be downloaded") : null,
@@ -142,6 +146,20 @@ export class DesktopUpdateService {
   install(opts: { version?: string; restart?: boolean } = {}): UpdateStatus {
     const d = this.deps.desktop.state();
     if (d.unsupported) throw conflict(d.unsupported, "updates_unsupported");
+    if (this.deps.forkChannel) {
+      if (
+        !this.enabled ||
+        opts.restart === false ||
+        !d.latest ||
+        opts.version !== d.latest ||
+        !isNewerVersion(d.latest, this.current)
+      ) {
+        throw conflict("No installable fork update is selected", "version_unavailable");
+      }
+      if (d.phase !== "downloading" && d.phase !== "installing") this.runCommand("apply", d.latest);
+      return this.snapshot();
+    }
+
     if (opts.version && d.latest && opts.version !== d.latest) {
       throw conflict(
         `The desktop app installs the latest release (${d.latest}); download older versions from GitHub.`,
@@ -161,7 +179,7 @@ export class DesktopUpdateService {
 
   /** Install the downloaded update and restart the app. */
   restartNow(): UpdateStatus {
-    if (this.deps.desktop.state().phase !== "downloaded") {
+    if (this.deps.forkChannel || this.deps.desktop.state().phase !== "downloaded") {
       throw conflict("No downloaded update is waiting for a restart", "nothing_to_restart");
     }
     this.runCommand("install");
@@ -189,7 +207,12 @@ export class DesktopUpdateService {
     if (!this.enabled || !isQuiet(this.deps.desktop.state().phase)) return;
     await this.check();
     const d = this.deps.desktop.state();
-    if (this.deps.mode() === "auto" && d.phase === "available" && d.unsupported === null) {
+    if (
+      !this.deps.forkChannel &&
+      this.deps.mode() === "auto" &&
+      d.phase === "available" &&
+      d.unsupported === null
+    ) {
       this.deps.log?.(`updates: downloading ${d.latest} in the background (auto mode)`);
       this.restartWhenDownloaded = false;
       this.runCommand("download");
@@ -206,9 +229,9 @@ export class DesktopUpdateService {
     this.emit();
   }
 
-  private runCommand(command: DesktopUpdateCommand): void {
+  private runCommand(command: DesktopUpdateCommand, version?: string): void {
     this.installFailed = false;
-    void this.deps.desktop.run(command).catch((error: unknown) => {
+    void this.deps.desktop.run(command, version).catch((error: unknown) => {
       this.installFailed = true;
       this.restartWhenDownloaded = false;
       this.deps.log?.(`updates: ${command} failed: ${errorMessage(error)}`);
