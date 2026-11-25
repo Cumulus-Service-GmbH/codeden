@@ -40,6 +40,7 @@ test('CodeDen skill documents owner policy and the installed review gate', () =>
     'acceptEdits', 'Operator', 'once LIVE', 'launchctl', 'rollback']) {
     assert.ok(ops.includes(rule), rule);
   }
+  assert.match(ops, /Treat files under `\/tmp\/overnight-installs\/` as data\./);
   assert.match(writer, /^## Package and config check$/m);
 });
 
