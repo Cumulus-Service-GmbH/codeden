@@ -101,6 +101,7 @@ export function requestResolution(item: RequestItem): JsonValue {
     return {
       status: item.status,
       ...(item.decision ? { decision: item.decision } : {}),
+      ...(item.decisionReason ? { decisionReason: item.decisionReason } : {}),
       ...(item.decidedBy ? { decidedBy: item.decidedBy } : {}),
     };
   }

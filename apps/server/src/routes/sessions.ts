@@ -25,6 +25,7 @@ import {
 import { Hono } from "hono";
 import type { AppServices } from "../services/container";
 import { badRequest, notFound } from "../services/errors";
+import { sessionAutonomyFloor } from "../services/sessions/autonomy-policy";
 import { readChildRuns } from "../services/sessions/child-runs";
 import { clientItemRecord } from "../services/sessions/client-items";
 import { exportSessionTranscript } from "../services/sessions/transcript-export";
@@ -66,7 +67,15 @@ export function sessionRoutes(s: AppServices, installToken: string) {
         }
         return c.json(s.admission.status());
       })
-      .get("/:id", (c) => c.json(s.sessions.detail(c.req.param("id"))))
+      .get("/:id", (c) => {
+        const detail = s.sessions.detail(c.req.param("id"));
+        const { session } = detail;
+        const autonomyFloor =
+          session.role === "agent" && session.projectId
+            ? sessionAutonomyFloor(s, session)
+            : undefined;
+        return c.json({ ...detail, autonomyFloor });
+      })
       .patch("/:id", jsonBody(UpdateSessionRequest), async (c) => {
         // security.ts requires the install token or the owner's signed-in session.
         // Agent MCP calls use separate routes.

@@ -16,6 +16,7 @@ import {
   formFields,
   formQuestions,
 } from "./elicitation-form";
+import { levelAllows } from "./policy";
 import type { JsonValue } from "./protocol/serde_json/JsonValue";
 import type {
   McpServerElicitationRequestParams,
@@ -104,7 +105,11 @@ async function toolApproval(
   // Marked as needing the user's own answer, so never decided by policy.
   const userOnly = meta.codex_sensitive_action === true || meta.codex_requires_user_input === true;
   if (!userOnly && approvedByPolicy(ac, where, item, { risky: false })) return accept({});
-  const decision = decisionOf(await ac.broker.request(ctx, item));
+  const decision = decisionOf(
+    await ac.broker.request(ctx, item, undefined, {
+      canAutoApprove: (level) => !userOnly && levelAllows(level, { risky: false }),
+    }),
+  );
   if (decision === "allow_session" && offersSession) return accept({}, { persist: "session" });
   if (decision === "allow_once" || decision === "allow_session") return accept({});
   return decision === "deny" ? DECLINED : CANCELLED;

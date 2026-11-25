@@ -3,12 +3,16 @@ import { isAbsolute, relative, resolve, sep } from "node:path";
 import {
   AutonomyLevel,
   type AutonomyPolicy,
+  autonomyPolicyReason,
   REVIEW_TEAM_ROLES,
   roleAutonomyFloor,
+  type Session,
   type Settings,
   type TeamRole,
+  teamRoleOfTitle,
   type WorkScope,
 } from "@codeden/contracts";
+import type { AppServices } from "../container";
 import { badRequest } from "../errors";
 
 export function stricter(a?: AutonomyLevel, b?: AutonomyLevel): AutonomyLevel | undefined {
@@ -80,14 +84,35 @@ export function resolveAutonomy(
   return { floor, readOnlyScope, guardedInstall };
 }
 
+/** The PM must satisfy the policy at launch and the policies in force now. */
+export function sessionAutonomyFloor(
+  {
+    factory,
+    projects,
+    sessionRepo,
+    settings,
+  }: Pick<AppServices, "factory" | "projects" | "sessionRepo" | "settings">,
+  session: Session,
+): AutonomyLevel | undefined {
+  const meta = sessionRepo.find(session.id)?.startMeta;
+  const { floor: current } = resolveAutonomy(
+    teamRoleOfTitle(session.title ?? undefined),
+    session.purpose,
+    session.scope,
+    session.projectId && session.scope.paths?.length
+      ? projects.get(session.projectId).path
+      : undefined,
+    settings.get().autonomy,
+    session.projectId ? factory.data.loop(session.projectId)?.tuning.autonomyPolicy : undefined,
+    meta ?? {},
+  );
+  return stricter(current, meta?.autonomyFloor);
+}
+
 export function assertAutonomy(
   requested: AutonomyLevel | undefined,
   floor: AutonomyLevel | undefined,
 ): void {
-  if (requested && floor && stricter(requested, floor) !== requested) {
-    throw badRequest(
-      `Autonomy policy requires ${floor} or more supervision. Requested ${requested}.`,
-      "autonomy_policy",
-    );
-  }
+  const reason = requested && autonomyPolicyReason(requested, floor);
+  if (reason) throw badRequest(reason, "autonomy_policy");
 }

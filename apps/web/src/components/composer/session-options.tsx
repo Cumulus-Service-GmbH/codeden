@@ -1,5 +1,5 @@
 import type { Session, Snapshot, UpdateSessionRequest } from "@codeden/contracts";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useNavigate } from "@tanstack/react-router";
 import { useRef } from "react";
 import { toast } from "sonner";
@@ -77,6 +77,12 @@ export function SessionOptions({ session, running }: { session: Session; running
   const modelListAtStart = providerInfo?.capabilities.modelListAtStart ?? false;
   const setHandoff = useUiStore((s) => s.setHandoff);
   const handoffBlocked = useHandoffBlocked(session);
+  const autonomyFloor = useQuery({
+    queryKey: ["session-detail", session.id],
+    queryFn: () => client.getSessionDetail(session.id),
+    enabled: session.role === "agent" && session.projectId !== null,
+    select: (detail) => detail.autonomyFloor,
+  }).data;
   const update = useMutation({
     mutationFn: (patch: UpdateSessionRequest) => client.updateSession(session.id, patch),
     onSuccess: (updated, patch) => {
@@ -143,6 +149,7 @@ export function SessionOptions({ session, running }: { session: Session; running
       {session.role === "agent" && (
         <AutonomyPicker
           value={session.autonomy}
+          autonomyFloor={autonomyFloor}
           readOnlySupported={supportsReadOnly(providerInfo)}
           supervisedSupported={supportsSupervised(providerInfo)}
           providerName={providerInfo?.displayName}

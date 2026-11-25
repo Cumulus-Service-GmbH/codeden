@@ -713,6 +713,34 @@ it("closes the inbox on respond unless explicitly deferred by the internal calle
   expect(services.inbox.get(target.id).status).toBe("resolved");
 });
 
+it("lets Codex's completion event close the inbox with the effective approval", async () => {
+  const { add, services, runnerCalls, store } = setup();
+  const target = add(
+    "stale-session-approval",
+    { action: "command", toolName: "shell", command: "git fetch" },
+    { provider: "codex" },
+  );
+  const response = { kind: "approval", decision: "allow_session", decidedBy: "user" } as const;
+  await services.sessions.respond(target.sessionId, { requestId: target.item.requestId, response });
+
+  expect(runnerCalls).toContainEqual(
+    expect.objectContaining({ name: "session.respond", response }),
+  );
+  expect(services.inbox.get(target.id).status).toBe("open");
+  store.append([
+    agentEventToNewEvent(target.sessionId, {
+      type: "item.completed",
+      threadId: "thread",
+      turnId: "turn",
+      item: { ...target.item, status: "completed", decision: "allow_once", decidedBy: "user" },
+    }),
+  ]);
+  expect(services.inbox.get(target.id)).toMatchObject({
+    status: "resolved",
+    resolution: { status: "completed", decision: "allow_once", decidedBy: "user" },
+  });
+});
+
 it.each(["session", "inbox"])(
   "the %s route stamps a claimed orchestrator response as the user's",
   async (route) => {

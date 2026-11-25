@@ -1,4 +1,5 @@
-import type { UserQuestion } from "@codeden/contracts";
+import { realpathSync } from "node:fs";
+import { sessionApprovalBlockReason, type UserQuestion } from "@codeden/contracts";
 import { guardedReadCommand } from "../policy/delegated-read";
 import type { RiskAssessment } from "../policy/risk";
 import { shorten } from "../util/text";
@@ -9,7 +10,7 @@ import {
   decisionOf,
 } from "./approval-context";
 import { handleElicitation } from "./elicitation";
-import { commandRisk, patchRisk, permissionsRisk } from "./policy";
+import { commandRisk, levelAllows, patchRisk, permissionsRisk } from "./policy";
 import type { ServerRequest } from "./protocol";
 import type {
   CommandExecutionApprovalDecision,
@@ -51,14 +52,20 @@ export async function handleServerRequest(
         availableDecisions?: unknown;
       };
       const rawCommand = typeof p.command === "string" ? p.command : undefined;
+      const canAccept =
+        p.availableDecisions == null ||
+        (Array.isArray(p.availableDecisions) && p.availableDecisions.includes("accept"));
       const command = p.commandActions?.length
         ? p.commandActions.map((a) => a.command).join(" && ")
         : (rawCommand ?? "");
-      const risk = commandRisk(
-        [rawCommand ?? "", ...(p.commandActions ?? []).map((a) => a.command)],
-        ac.risk,
-        { cwd: p.cwd, stdin: p.kind === "writeStdin" },
-      );
+      const assess = () =>
+        commandRisk(
+          [rawCommand ?? "", ...(p.commandActions ?? []).map((a) => a.command)],
+          ac.risk,
+          { cwd: p.cwd, stdin: p.kind === "writeStdin" },
+        );
+      const risk = assess();
+      const policyCanAccept = canAccept && (p.command == null || rawCommand !== undefined);
       const item: ApprovalItem = {
         id: `approval-${p.approvalId ?? p.itemId}`,
         kind: "approval_request",
@@ -71,11 +78,9 @@ export async function handleServerRequest(
         ...(p.cwd ? { cwd: p.cwd } : {}),
         toolName: "shell",
         toolCallItemId: p.itemId,
-        options: ["allow_once", "allow_session", "deny"],
+        options: ["allow_once", "deny"],
       };
-      if ((p.command == null || rawCommand !== undefined) && approvedByPolicy(ac, p, item, risk)) {
-        return { decision: "accept" };
-      }
+      if (policyCanAccept && approvedByPolicy(ac, p, item, risk)) return { decision: "accept" };
       // The parsed actions are for display. Delegate only the exact command supplied
       // by a normal local execution request, without extra permission context.
       const exact = readCommand(rawCommand);
@@ -89,9 +94,9 @@ export async function handleServerRequest(
         !p.reason &&
         !p.networkApprovalContext &&
         !p.proposedNetworkPolicyAmendments?.length &&
+        p.proposedExecpolicyAmendment == null &&
         p.additionalPermissions == null &&
-        (p.availableDecisions == null ||
-          (Array.isArray(p.availableDecisions) && p.availableDecisions.includes("accept"))) &&
+        canAccept &&
         (!p.commandActions?.length ||
           (p.commandActions.length === 1 && p.commandActions[0]?.command === exact))
           ? { ...item, command: exact, toolInput: { command: exact } }
@@ -99,25 +104,83 @@ export async function handleServerRequest(
       const verified = () =>
         candidate ? guardedReadCommand(candidate, p.cwd ?? undefined, ac.risk.cwd) : undefined;
       const verifiedItem = candidate && verified() ? candidate : undefined;
+      const standingItem: ApprovalItem | undefined = verifiedItem && {
+        ...verifiedItem,
+        options: ["allow_once", "allow_session", "deny"],
+      };
+      const grants = ac.sessionReadApprovals;
+      const sessionKey = () => {
+        if (
+          !grants ||
+          !standingItem ||
+          !p.cwd ||
+          !rawCommand ||
+          ac.autonomy?.() === "read_only" ||
+          sessionApprovalBlockReason(standingItem) ||
+          !verified()
+        )
+          return;
+        try {
+          return JSON.stringify([realpathSync(p.cwd), rawCommand]);
+        } catch {
+          return;
+        }
+      };
+      const offeredKey = sessionKey();
+      if (offeredKey && standingItem && grants?.has(offeredKey)) {
+        ac.broker.record(ac.ctx(p.threadId, p.turnId), {
+          ...standingItem,
+          status: "completed",
+          decision: "allow_session",
+          decidedBy: "policy",
+        });
+        return { decision: "accept" };
+      }
       const response = await ac.broker.request(
         ac.ctx(p.threadId, p.turnId),
-        verifiedItem ?? withRisk(item, risk),
+        (offeredKey ? standingItem : verifiedItem) ?? withRisk(item, risk),
         undefined,
         {
-          problem: (answer) =>
+          canAutoApprove: (level) => policyCanAccept && levelAllows(level, assess()),
+          ...(offeredKey ? { allowSession: true } : {}),
+          normalize: (answer) =>
             answer.kind === "approval" &&
-            answer.decidedBy === "orchestrator" &&
-            (!verifiedItem || !verified())
-              ? "This approval requires the owner."
-              : undefined,
+            answer.decision === "allow_session" &&
+            (answer.decidedBy === undefined || answer.decidedBy === "user") &&
+            (!offeredKey || sessionKey() !== offeredKey)
+              ? { ...answer, decision: "allow_once" }
+              : answer,
+          problem: (answer) => {
+            if (answer.kind !== "approval") return;
+            if (
+              (answer.decision === "allow_session" &&
+                answer.decidedBy !== undefined &&
+                answer.decidedBy !== "user") ||
+              (answer.decidedBy === "orchestrator" && (!verifiedItem || !verified()))
+            )
+              return "This approval requires the owner.";
+          },
         },
       );
+      if (response.kind === "approval" && response.decision === "allow_session" && offeredKey) {
+        grants?.add(offeredKey);
+        return { decision: "accept" };
+      }
       const map: Record<string, CommandExecutionApprovalDecision> = {
         allow_once: "accept",
-        allow_session: "acceptForSession",
         deny: "decline",
         cancel: "cancel",
       };
+      // Codex attributes decline to the user and cancel interrupts the turn.
+      // Fail only the command request when someone else refused it.
+      if (
+        response.kind === "approval" &&
+        response.decision === "deny" &&
+        response.decidedBy !== undefined &&
+        response.decidedBy !== "user"
+      ) {
+        throw new CodexRpcError(-32000, `Command approval was refused by ${response.decidedBy}`);
+      }
       return { decision: map[decisionOf(response)] ?? "cancel" };
     }
     case "item/fileChange/requestApproval": {
@@ -143,7 +206,10 @@ export async function handleServerRequest(
       };
       const risk = patchRisk(paths, p.grantRoot, ac.risk);
       if (approvedByPolicy(ac, p, item, risk)) return { decision: "accept" };
-      const response = await ac.broker.request(ac.ctx(p.threadId, p.turnId), item);
+      const response = await ac.broker.request(ac.ctx(p.threadId, p.turnId), item, undefined, {
+        canAutoApprove: (level) =>
+          levelAllows(level, patchRisk(ac.filePaths(p.itemId) ?? [], p.grantRoot, ac.risk)),
+      });
       const map: Record<string, FileChangeApprovalDecision> = {
         allow_once: "accept",
         allow_session: "acceptForSession",
@@ -173,7 +239,14 @@ export async function handleServerRequest(
       // Granted for this turn only, so the next request is judged again.
       const risk = permissionsRisk(p.permissions, ac.risk);
       if (approvedByPolicy(ac, p, item, risk)) return { permissions: granted, scope: "turn" };
-      const response = await ac.broker.request(ac.ctx(p.threadId, p.turnId), withRisk(item, risk));
+      const response = await ac.broker.request(
+        ac.ctx(p.threadId, p.turnId),
+        withRisk(item, risk),
+        undefined,
+        {
+          canAutoApprove: (level) => levelAllows(level, risk),
+        },
+      );
       const decision = decisionOf(response);
       if (decision === "allow_once" || decision === "allow_session") {
         return { permissions: granted, scope: decision === "allow_session" ? "session" : "turn" };

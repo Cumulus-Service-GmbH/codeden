@@ -423,6 +423,8 @@ export type ArchivedSessionsPage = z.infer<typeof ArchivedSessionsPage>;
 /** `GET /api/sessions/:id`. */
 export const SessionDetail = z.object({
   session: Session,
+  /** Least supervised level the PM may choose. The owner may override it. */
+  autonomyFloor: AutonomyLevel.optional(),
   /** Accumulated usage across turns (token counts and cost summed; context/rate limits latest). */
   usage: Usage.nullable(),
   /** Follow-up suggestions of the latest completed root turn (§7.5). */
