@@ -56,7 +56,7 @@ it("fills Team pins, keeps free choices for unpinned and untagged starts, refuse
   });
   setTeam([member]);
   await start({ title: "Counter" });
-  expect(launch.mock.lastCall?.[0]).not.toHaveProperty("provider");
+  expect(launch.mock.lastCall?.[0]).toMatchObject({ provider: "codex" });
   // A tagged role the resolved Team does not set is refused, as the guard refuses it.
   setTeam([]);
   await expect(start()).rejects.toThrow("TEAM_ROLE_UNSET");

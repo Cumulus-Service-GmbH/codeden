@@ -1,5 +1,5 @@
 /** Preferred providers when the choice is `auto`, in order. */
-const AUTO_ORDER = ["claude", "codex", "opencode", "cursor", "gemini"];
+const AUTO_ORDER = ["claude", "codex", "opencode", "cursor", "gemini", "antigravity"];
 
 /**
  * The providers a runner loaded, in the order `auto` tries them: the preferred ones first, then

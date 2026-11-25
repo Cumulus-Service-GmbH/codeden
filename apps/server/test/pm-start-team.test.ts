@@ -57,9 +57,10 @@ async function start(
     const started: StartSessionRequest[] = [];
     const services = {
       db: database.db,
-      projects: { get: () => ({ kind: "local", archivedAt: null }) },
+      projects: { get: () => ({ kind: "local", archivedAt: null, path: process.cwd() }) },
       factory: {
         isUnattended: () => false,
+        providerChoices: async () => [{ id: "claude", runnable: true }],
         data: {
           loop: () => ({
             tuning: {
