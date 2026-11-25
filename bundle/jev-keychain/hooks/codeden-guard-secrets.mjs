@@ -12,7 +12,8 @@ const JEV_NATIVE_ACCESS = /\b(?:keyring|getPassword|SecItemCopyMatching|SecKeych
 const JEV_ENTRY = /typesafe\.apiKey/i;
 const JEV_RUNTIME_PATH = resolve(homedir(), ".config", "trioharness", "jev-keyring-runtime");
 const JEV_READER_PATH = resolve(JEV_RUNTIME_PATH, "bin", "jev-keychain-reader");
-const SHELL_PATH_PATTERN = /[?*]|\[[^/]+\]|\{[^/]*(?:,|\.\.)[^/]*\}/;
+const SHELL_PATH_PATTERN = /[?*]|\[[^/]+\]|\{[^{}]*(?:,|\.\.)[^{}]*\}|[+@!]\(|\([^/]*\|[^/]*\)/;
+const SIMPLE_GLOB = /^[^()[\]{}]*$/;
 const currentUser = userInfo().username;
 const realPath = path => {
   try { return realpathSync(path); } catch { return null; }
@@ -21,18 +22,29 @@ const realPath = path => {
 function globTouchesPath(path, protectedPath) {
   let remaining = 4096;
   function visit(dir, parts) {
+    if (--remaining < 0) return true;
     const [part, ...rest] = parts;
     if (part === undefined) return protectedPath(realPath(dir));
+    if (part === "..") {
+      const actual = realPath(dir);
+      return actual !== null && visit(resolve(actual, part), rest);
+    }
     if (!SHELL_PATH_PATTERN.test(part)) return visit(resolve(dir, part), rest);
     if (part === "**" && visit(dir, rest)) return true;
     let entries;
-    try { entries = opendirSync(dir); } catch { return false; }
+    try { entries = opendirSync(dir); }
+    catch (error) { return !["ENOENT", "ENOTDIR"].includes(error.code); }
     try {
       for (let entry; (entry = entries.readSync());) {
         if (--remaining < 0) return true;
-        if (!matchesGlob(entry.name, part === "**" ? "*" : part)) continue;
+        // Complex shell patterns vary by shell. Over-approximate their matches
+        // and test the resulting paths instead of assuming Node's glob dialect.
+        if (part !== "**" && SIMPLE_GLOB.test(part) &&
+            !matchesGlob(entry.name, part) &&
+            !(entry.name.startsWith(".") && matchesGlob(entry.name.slice(1), part))) continue;
         const path = resolve(dir, entry.name);
-        if (visit(path, rest) || (part === "**" && entry.isDirectory() && visit(path, parts))) return true;
+        if (visit(path, rest) ||
+            (part === "**" && (entry.isDirectory() || entry.isSymbolicLink()) && visit(path, parts))) return true;
       }
       return false;
     } finally {
@@ -240,6 +252,7 @@ function checkAwk(text, inspect) {
 
 function inspectScript(script, name, inspect, cwd, writtenScripts) {
   const shell = SHELL.test(name) || name === "source" || name === ".";
+  const path = resolveScriptPath(cwd ?? "/", script);
   const inspectText = (text, fromFile = false) => {
     if (name === null) {
       // Azure policy already checks the caller's argv. Only exempt a pure CLI forwarding shim.
@@ -257,7 +270,7 @@ function inspectScript(script, name, inspect, cwd, writtenScripts) {
     if (shell) return inspect(text, true, false, { cwd, scriptContent: true });
     if (AWK.test(name)) return checkAwk(text, inspect);
     if (POWERSHELL.test(name)) return inspect(text, true, true);
-    const trustedJev = fromFile && JEV_SCRIPTS.has(resolveScriptPath(cwd ?? "/", script));
+    const trustedJev = fromFile && JEV_SCRIPTS.has(script) && realPath(path) === script;
     return inspectSourceContent(text, (command, capturedOutput) => inspect(command, true, false, { capturedOutput }), trustedJev);
   };
   if (STDIN_SCRIPT.test(script)) return "stdin script executes unchecked input";
@@ -268,7 +281,6 @@ function inspectScript(script, name, inspect, cwd, writtenScripts) {
     return text === null ? "written script could not be inspected" : text === undefined ? null : inspectText(text);
   }
   if (!cwd && !isAbsolute(script) && !script.startsWith("~/")) return "script requires a known working directory";
-  const path = resolveScriptPath(cwd ?? "/", script);
   const pending = writtenScripts?.get(path);
   if (pending === null) return "written script could not be inspected";
   if (pending !== undefined) {
@@ -321,45 +333,48 @@ export function checkExecution(program, args, isPlainWord, inspect, options = {}
   // With a dynamic cd, inspect only relative paths visible from the hook cwd.
   const scriptCwd = options.cwd === null && !options.scriptContent ? options.hookCwd ?? null : options.cwd;
   const values = args.map(({ value }) => value);
-  const targets = [...args, ...(options.redirects ?? []).map(redirect => redirect.target).filter(Boolean)];
+  const redirectTargets = (options.redirects ?? []).map(redirect => redirect.target).filter(Boolean);
   const readerPath = realPath(JEV_READER_PATH);
   const runtimePath = realPath(JEV_RUNTIME_PATH);
   const homePath = homedir();
-  const targetPath = value => resolveScriptPath(scriptCwd ?? "/",
-    value.replace(/^(?:~([^/]*)|\$(?:HOME|\{HOME\}))(?=$|\/)/,
-      (prefix, user) => !user || user === currentUser ? homePath : prefix));
+  const expandHome = value => value.replace(/^(?:~([^/]*)|\$(?:HOME|\{HOME\}))(?=$|\/)/,
+    (prefix, user) => !user || user === currentUser ? homePath : prefix);
+  const targetPath = value => resolve(scriptCwd ?? "/", expandHome(value));
   const inside = (path, root) => root && path &&
     (path === root || path.startsWith(root.endsWith(sep) ? root : root + sep));
   const guardedRoots = [JEV_RUNTIME_PATH, runtimePath, JEV_FILE, realPath(JEV_FILE)].filter(Boolean);
   const metadataCommand = /^(?:cd|ls|pwd|realpath|readlink|stat|test|echo|printf|mkdir|\[\[?)$/.test(name);
   const shellPatternTest = name === "[[" || name === "[";
-  const protectedPath = path => guardedRoots.some(root => inside(path, root) ||
-    (!metadataCommand && path !== sep && inside(root, path)));
-  const touchesRuntime = ({ value, syntax }) => {
+  const touchesRuntime = ({ value, syntax }, metadataOnly) => {
+    const protectedPath = path => guardedRoots.some(root => inside(path, root) ||
+      (!metadataOnly && inside(root, path)));
     if (!value) return false;
     if (JEV_RUNTIME_TEXT.test(value)) return true;
     const assigned = value.replace(/^[\w-]+=/, "");
     const operand = /^(?:tar|bsdtar|gtar)$/.test(name)
-      ? assigned.replace(/^-[crtxuzjJvpkhm]*C(?=.)/, "") : assigned;
+      ? assigned.replace(/^-[A-Za-z]*?C(?=.)/, "") : assigned;
     if (!operand) return false;
-    const path = targetPath(operand);
-    const actual = realPath(path);
+    const expanded = expandHome(operand);
+    const rawPath = isAbsolute(expanded) ? expanded : (scriptCwd ?? "/") + sep + expanded;
+    const path = resolve(rawPath);
+    const actual = realPath(rawPath);
     if (protectedPath(path) || protectedPath(actual)) return true;
-    const firstGlob = !shellPatternTest && SHELL_PATH_PATTERN.test(syntax) && (operand.includes("/") || scriptCwd)
-      ? path.search(SHELL_PATH_PATTERN) : -1;
-    if (firstGlob < 0) return false;
-    const prefix = path.slice(0, firstGlob);
-    return guardedRoots.some(root => root.startsWith(prefix)) || globTouchesPath(path, protectedPath);
+    if ((metadataOnly && shellPatternTest) || !SHELL_PATH_PATTERN.test(syntax ?? "") ||
+        !SHELL_PATH_PATTERN.test(expanded)) return false;
+    if (!isAbsolute(expanded) && !scriptCwd) return true;
+    if (/[{(][^})]*\/[^})]*[})]/.test(expanded)) return true;
+    return globTouchesPath(rawPath, protectedPath);
   };
   const programPath = targetPath(program.value);
   const canonicalProgram = readerPath && realPath(programPath) === readerPath;
   const pathAlias = readerPath && !program.value.includes("/") &&
     (process.env.PATH || "").split(delimiter).some(entry => realPath(resolve(entry, program.value)) === readerPath);
-  const metadataOnly = programPath === JEV_READER_PATH && canonicalProgram && isPlainWord(program.syntax) &&
+  const metadataOnly = program.value === JEV_READER_PATH && readerPath === JEV_READER_PATH && isPlainWord(program.syntax) &&
     values.length === 1 && values[0] === "present" && isPlainWord(args[0].syntax);
-  if (targets.some(touchesRuntime) ||
-      (!metadataOnly && (canonicalProgram || pathAlias || touchesRuntime(program)))) return JEV_CREDENTIAL_DENIAL;
-  if (targets.some(({ value }) => JEV_FILE_TEXT.test(value))) return JEV_CREDENTIAL_DENIAL;
+  if (args.some(word => touchesRuntime(word, metadataCommand)) ||
+      redirectTargets.some(word => touchesRuntime(word, false)) ||
+      (!metadataOnly && (canonicalProgram || pathAlias || touchesRuntime(program, true)))) return JEV_CREDENTIAL_DENIAL;
+  if ([...args, ...redirectTargets].some(({ value }) => JEV_FILE_TEXT.test(value))) return JEV_CREDENTIAL_DENIAL;
   const evaluator = launcherTarget(name, values);
   const prefix = evaluator < 0 ? values : values.slice(0, evaluator);
   const flags = prefix.slice(0, prefix.indexOf("--") < 0 ? prefix.length : prefix.indexOf("--"));

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { registerHooks } from 'node:module';
 import test from 'node:test';
@@ -15,6 +15,22 @@ const hooks = registerHooks({
 });
 const { ask, loadJevSource, redactCredential, keychainTransport, runGate } = await import(jevPath.href);
 hooks.deregister();
+
+const readerPath = home => join(home, '.config/trioharness/jev-keyring-runtime/bin/jev-keychain-reader');
+
+test('9.R2: the JS preflight denies a reader reached through a symlinked parent before spawn', t => {
+  const directory = realpathSync(mkdtempSync(join(process.cwd(), '.jev-security-alias-')));
+  t.after(() => rmSync(directory, { recursive: true, force: true }));
+  const home = join(directory, 'home');
+  const alias = join(directory, 'alias');
+  const security = readerPath(home);
+  mkdirSync(dirname(security), { recursive: true });
+  writeFileSync(security, '', { mode: 0o500 });
+  symlinkSync(home, alias);
+  assert.throws(() => keychainTransport({ platform: 'darwin', accountHome: alias, home: alias,
+    run: () => assert.fail('spawned a reader through an alias') }),
+  /^Error: JEV_KEYCHAIN_ACCESS_REQUIRED:/);
+});
 
 test('Jev copies match byte for byte', () => {
   const read = path => readFileSync(new URL(path, import.meta.url));
@@ -84,11 +100,12 @@ test('a skipped gate never opens a credential source', async () => {
 });
 
 test('9.R2: presence returns no value and request sends only JSON to the native transport', { skip: process.platform === 'win32' }, async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'jev-security-fixture-'));
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'jev-security-fixture-')));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const security = join(directory, 'security');
+  const security = readerPath(directory);
+  mkdirSync(dirname(security), { recursive: true });
   writeFileSync(security, '', { mode: 0o700 });
-  const options = { platform: 'darwin', accountHome: directory, home: directory, security };
+  const options = { platform: 'darwin', accountHome: directory, home: directory };
   const request = { model: 'jev-latest', state: {}, questions: {} };
   const calls = [];
   const mock = (exe, [operation], opts) => {
@@ -119,9 +136,10 @@ test('9.R2: presence returns no value and request sends only JSON to the native 
 });
 
 test('a blocking native preflight is killed and an ACL denial never uses a legacy source', { skip: process.platform === 'win32' }, async t => {
-  const directory = mkdtempSync(join(tmpdir(), 'jev-security-block-'));
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), 'jev-security-block-')));
   t.after(() => rmSync(directory, { recursive: true, force: true }));
-  const security = join(directory, 'security');
+  const security = readerPath(directory);
+  mkdirSync(dirname(security), { recursive: true });
   writeFileSync(security, `#!/bin/sh
 case "$1" in
   present) exit 0 ;;
@@ -129,7 +147,7 @@ case "$1" in
   *) exit 3 ;;
 esac
 `, { mode: 0o700 });
-  const options = { platform: 'darwin', accountHome: directory, home: directory, security, timeout: 300 };
+  const options = { platform: 'darwin', accountHome: directory, home: directory, timeout: 300 };
   const results = [];
   const env = Object.fromEntries([['TYPESAFE_API_KEY', 'synthetic-fallback']]);
   const transport = await loadJevSource(env, {

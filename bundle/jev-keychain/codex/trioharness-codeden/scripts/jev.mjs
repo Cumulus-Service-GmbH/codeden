@@ -9,7 +9,7 @@
 // Usage: node jev.mjs <route|plan|finding|check|fixed|done> <input.json> [--dry-run] [--log <file>] [--attempt-repo <repo> --attempt-run <id>]
 // Plan input: {objective, criteria, changes, proof, owned_paths, evidence, after?: "investigator-pack"|"scope-cut"}; attempt is assigned by --attempt-repo/--attempt-run; after required at attempt >=3; maximum 4 since the last pass.
 // Exit: 0 pass · 2 blocked/escalate · 3 Jev unavailable or bad input (never treated as a pass)
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { homedir, userInfo } from 'node:os';
@@ -229,13 +229,14 @@ const KEYCHAIN_ACCESS_REQUIRED = 'JEV_KEYCHAIN_ACCESS_REQUIRED: the Jev key need
 
 function keychainTransport({
   platform = process.platform, accountHome = userInfo().homedir, home = homedir(),
-  security = join(accountHome, '.config', 'trioharness', 'jev-keyring-runtime', 'bin', 'jev-keychain-reader'),
   run = spawnSync, timeout = 1500, requestTimeout = 22000
 } = {}) {
   if (platform !== 'darwin' || resolve(home) !== resolve(accountHome)) return null;
+  const security = join(accountHome, '.config', 'trioharness', 'jev-keyring-runtime', 'bin', 'jev-keychain-reader');
   const reader = lstatSync(security, { throwIfNoEntry: false });
   if (!reader) return null;
-  if (!reader.isFile() || reader.nlink !== 1 || reader.uid !== process.getuid?.() || (reader.mode & 0o022)) {
+  if (!reader.isFile() || reader.nlink !== 1 || reader.uid !== process.getuid?.() ||
+      (reader.mode & 0o022) || realpathSync(security) !== security) {
     throw new Error(KEYCHAIN_ACCESS_REQUIRED);
   }
   const opts = { encoding: 'utf8', timeout, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024 + 4,

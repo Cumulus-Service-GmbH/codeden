@@ -1,10 +1,31 @@
 #include <curl/curl.h>
+#include <libproc.h>
+#include <mach-o/dyld.h>
+#include <pwd.h>
 #include <stdarg.h>
 #undef curl_easy_setopt
 #undef curl_easy_getinfo
 static CURLcode fixture_setopt(CURL *curl, CURLoption option, ...);
 static CURLcode fixture_getinfo(CURL *curl, CURLINFO info, ...);
 static CURLcode fixture_perform(CURL *curl);
+static const char *fixture_executable;
+static const char *fixture_loader_path;
+static struct passwd fixture_owner;
+static unsigned keychain_step;
+static struct passwd *fixture_getpwuid(uid_t uid) {
+    (void)uid;
+    return &fixture_owner;
+}
+static int fixture_proc_path(int pid, void *buffer, uint32_t size) {
+    (void)pid;
+    return snprintf(buffer, size, "%s", fixture_executable);
+}
+static int fixture_loader(char *buffer, uint32_t *size) {
+    return snprintf(buffer, *size, "%s", fixture_loader_path) < *size ? 0 : -1;
+}
+#define proc_pidpath fixture_proc_path
+#define _NSGetExecutablePath fixture_loader
+#define getpwuid fixture_getpwuid
 #define curl_easy_setopt fixture_setopt
 #define curl_easy_getinfo fixture_getinfo
 #define curl_easy_perform fixture_perform
@@ -16,22 +37,22 @@ static CURLcode fixture_perform(CURL *curl);
 #undef main
 
 OSStatus unexpected_interaction(Boolean enabled) {
-    (void)enabled;
-    abort();
+    if (enabled || keychain_step++ != 1) abort();
+    return errSecSuccess;
 }
 
 OSStatus unexpected_open(const char *path, SecKeychainRef *keychain) {
-    (void)path;
-    (void)keychain;
-    abort();
+    if (!strstr(path, "/.jev-native.") || keychain_step++ != 2) abort();
+    *keychain = (SecKeychainRef)CFRetain(kCFBooleanTrue);
+    return errSecSuccess;
 }
 
 OSStatus unexpected_lookup(CFTypeRef keychain, UInt32 serviceSize, const char *service,
                            UInt32 accountSize, const char *account, UInt32 *length,
                            void **data, SecKeychainItemRef *item) {
     (void)keychain; (void)serviceSize; (void)service; (void)accountSize; (void)account;
-    (void)length; (void)data; (void)item;
-    abort();
+    if (length || data || item || keychain_step++ != 3) abort();
+    return errSecSuccess;
 }
 
 static curl_write_callback response_sink;
@@ -91,13 +112,24 @@ static CURLcode fixture_getinfo(CURL *curl, CURLINFO info, ...) {
     return CURLE_OK;
 }
 
-int main(void) {
+int main(int argc, char **argv) {
     @autoreleasepool {
         if (!hardened_reader()) return 1;
         char *removed_mode[] = { "aliased-fixture", "read", NULL };
         if (run_reader(2, removed_mode) != 3) return 2;
         char *copied_mode[] = { "copied-fixture", "ready", NULL };
         if (run_reader(2, copied_mode) != 3) return 9;
+        if (argc != 3) return 10;
+        fixture_loader_path = fixture_executable = argv[2];
+        if (!installed_reader(argv[1], argv[2])) return 11;
+        fixture_executable = "/fixture/copied-reader";
+        if (installed_reader(argv[1], argv[2])) return 12;
+        fixture_executable = argv[2];
+        if (installed_reader(argv[1], "/fixture/alias")) return 13;
+        fixture_owner.pw_dir = argv[1];
+        keychain_step = 1;
+        char *metadata_mode[] = { argv[2], "present", NULL };
+        if (run_reader(2, metadata_mode) != 0 || keychain_step != 4) return 14;
         const char token[] = "fixture/opaque";
         NSData *fixture = [NSData dataWithBytes:token length:sizeof(token) - 1];
         if (safe_response([@"{\"answers\":{\"x\":\"fixture\\/opaque\"}}" dataUsingEncoding:NSUTF8StringEncoding], fixture)) return 3;

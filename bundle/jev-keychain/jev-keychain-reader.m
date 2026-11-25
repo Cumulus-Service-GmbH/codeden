@@ -2,6 +2,7 @@
 #include <Security/Security.h>
 #include <crt_externs.h>
 #include <curl/curl.h>
+#include <libproc.h>
 #include <limits.h>
 #include <mach-o/dyld.h>
 #include <pwd.h>
@@ -9,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 static NSString *const endpoint = @"https://api.typesafe.ai/v1/systemone";
@@ -121,12 +123,17 @@ static NSData *request_body(void) {
 }
 
 static BOOL installed_reader(const char *home, const char *invocation) {
-    char actual[PATH_MAX], expected[PATH_MAX];
+    char actual[PATH_MAX], expected[PATH_MAX], kernel[PROC_PIDPATHINFO_MAXSIZE];
     uint32_t length = sizeof(actual);
     int size = snprintf(expected, sizeof(expected),
         "%s/.config/trioharness/jev-keyring-runtime/bin/jev-keychain-reader", home);
+    struct stat info;
     return size > 0 && (size_t)size < sizeof(expected) && strcmp(invocation, expected) == 0 &&
-        _NSGetExecutablePath(actual, &length) == 0 && strcmp(actual, expected) == 0;
+        _NSGetExecutablePath(actual, &length) == 0 && strcmp(actual, expected) == 0 &&
+        proc_pidpath(getpid(), kernel, sizeof(kernel)) > 0 && strcmp(kernel, expected) == 0 &&
+        realpath(expected, actual) && strcmp(actual, expected) == 0 &&
+        lstat(expected, &info) == 0 && S_ISREG(info.st_mode) && info.st_nlink == 1 &&
+        info.st_uid == getuid() && (info.st_mode & 0022) == 0;
 }
 
 static int run_reader(int argc, char **argv) {
@@ -134,22 +141,24 @@ static int run_reader(int argc, char **argv) {
     BOOL present = strcmp(argv[1], "present") == 0;
     BOOL ready = strcmp(argv[1], "ready") == 0;
     BOOL request = strcmp(argv[1], "request") == 0;
-    if ((!present && !ready && !request) || !hardened_reader()) return 3;
-
-    static char *empty_environment[] = { NULL };
-    *_NSGetEnviron() = empty_environment;
-    NSData *body = request ? request_body() : nil;
-    if (request && !body) return 65;
-    const struct passwd *owner = getpwuid(getuid());
-    char path[PATH_MAX];
-    if (!owner || !installed_reader(owner->pw_dir, argv[0])) return 3;
-    int size = snprintf(path, sizeof(path), "%s/Library/Keychains/login.keychain-db", owner->pw_dir);
-    if (size < 0 || (size_t)size >= sizeof(path)) return 3;
+    if (!present && !ready && !request) return 3;
 
     sigset_t deadline;
     if (sigemptyset(&deadline) || sigaddset(&deadline, SIGALRM) ||
         signal(SIGALRM, SIG_DFL) == SIG_ERR || sigprocmask(SIG_UNBLOCK, &deadline, NULL)) return 3;
     alarm(2);
+
+    const struct passwd *owner = getpwuid(getuid());
+    if (!owner || !installed_reader(owner->pw_dir, argv[0]) || !hardened_reader()) return 3;
+
+    static char *empty_environment[] = { NULL };
+    *_NSGetEnviron() = empty_environment;
+    NSData *body = request ? request_body() : nil;
+    if (request && !body) return 65;
+    char path[PATH_MAX];
+    int size = snprintf(path, sizeof(path), "%s/Library/Keychains/login.keychain-db", owner->pw_dir);
+    if (size < 0 || (size_t)size >= sizeof(path)) return 3;
+
     if (SecKeychainSetUserInteractionAllowed(false) != errSecSuccess) return 3;
     SecKeychainRef keychain = NULL;
     if (SecKeychainOpen(path, &keychain) != errSecSuccess || !keychain) return 3;
