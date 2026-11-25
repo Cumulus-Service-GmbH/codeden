@@ -260,3 +260,39 @@ export function killTree(child: ChildProcess): void {
   }
   child.kill("SIGTERM");
 }
+
+const stopping = new WeakMap<ChildProcess, Promise<void>>();
+
+/** Close stdin, escalate if needed, and wait until Node has reaped the direct child. */
+export function stopStdioChild(child: ChildProcess): Promise<void> {
+  const existing = stopping.get(child);
+  if (existing) return existing;
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) {
+    return Promise.resolve();
+  }
+  const stopped = new Promise<void>((resolve, reject) => {
+    const term = setTimeout(() => killTree(child), 1500).unref();
+    const kill = setTimeout(() => child.kill("SIGKILL"), 3000).unref();
+    const deadline = setTimeout(() => {
+      child.off("exit", exited);
+      reject(new Error(`Child process ${child.pid} did not exit after termination`));
+    }, 5000).unref();
+    const exited = () => {
+      clearTimeout(term);
+      clearTimeout(kill);
+      clearTimeout(deadline);
+      resolve();
+    };
+    child.once("exit", exited);
+    try {
+      child.stdin?.end();
+    } catch {
+      // Continue to signal and wait for exit if stdin is already unusable.
+    }
+  }).catch((error: unknown) => {
+    stopping.delete(child);
+    throw error;
+  });
+  stopping.set(child, stopped);
+  return stopped;
+}

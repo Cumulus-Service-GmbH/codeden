@@ -101,6 +101,62 @@ it("audits the exact input digest when a plain shell approval is delegated", asy
   );
 });
 
+it.each([
+  ["claude", "Bash", "sed -n '1,20p' README.md"],
+  ["codex", "shell", "nl -ba README.md"],
+  ["codex", "shell", "rg --no-config -n match README.md"],
+] as const)(
+  "delegates %s read %s %s through decide_approval",
+  async (provider, toolName, command) => {
+    const { service, add, runnerCalls, worktree } = setup();
+    writeFileSync(join(worktree, "README.md"), "fixture");
+    const { id } = add(
+      "verified-read",
+      {
+        action: "command",
+        command,
+        toolName,
+        toolInput: { command },
+      },
+      { provider },
+    );
+    expect(service.list().approvals[0]).toMatchObject({ id, delegable: true });
+    await expect(service.decide(actor, { ...decision, id })).resolves.toMatchObject({ id });
+    expect(runnerCalls).toHaveLength(1);
+  },
+);
+
+it.each(["legacy", "shared", "remote", "private-cwd", "hook"] as const)(
+  "keeps %s shell reads owner-only",
+  async (mode) => {
+    const { service, add, runnerCalls, worktree } = setup(undefined, mode === "remote");
+    const command = "ls -la";
+    const privateDir = join(worktree, ".codeden");
+    mkdirSync(privateDir);
+    const { id } = add(
+      "unverified-read",
+      {
+        action: "command",
+        command,
+        toolName: "shell",
+        ...(mode === "legacy" ? {} : { toolInput: { command } }),
+        ...(mode === "private-cwd" ? { cwd: privateDir } : {}),
+        ...(mode === "hook" ? { hookAsk: true } : {}),
+      },
+      { provider: "codex", ...(mode === "shared" ? { worktreePath: null } : {}) },
+    );
+    expect(service.list().approvals[0]).toMatchObject({
+      id,
+      delegable: false,
+      ownerOnly: "unclassified",
+    });
+    await expect(service.decide(actor, { ...decision, id })).rejects.toMatchObject({
+      code: "owner_only_approval",
+    });
+    expect(runnerCalls).toEqual([]);
+  },
+);
+
 it("requires the owner for a plain read through a symlink outside the worktree", async () => {
   const { service, add, runnerCalls } = setup();
   const command = "cat linked.txt";
@@ -244,7 +300,7 @@ afterEach(async () => {
   env = undefined;
 });
 
-function setup(onRespond?: () => void) {
+function setup(onRespond?: () => void, remote = false) {
   const fixture = createGithubEnv();
   env = fixture;
   const worktree = join(fixture.dir, ".worktree");
@@ -253,6 +309,13 @@ function setup(onRespond?: () => void) {
   const runner: RunnerPort = {
     isConnected: () => true,
     runnerId: () => "r1",
+    ...(remote
+      ? {
+          remote: () => {
+            throw new Error("Remote runner fixture");
+          },
+        }
+      : {}),
     providers: () => [],
     mcpProxyUrl: () => null,
     waitForConnection: async () => true,

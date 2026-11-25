@@ -1,4 +1,5 @@
 import type { UserQuestion } from "@codeden/contracts";
+import { guardedReadCommand } from "../policy/delegated-read";
 import type { RiskAssessment } from "../policy/risk";
 import { shorten } from "../util/text";
 import {
@@ -58,7 +59,39 @@ export async function handleServerRequest(
         options: ["allow_once", "allow_session", "deny"],
       };
       if (approvedByPolicy(ac, p, item, risk)) return { decision: "accept" };
-      const response = await ac.broker.request(ac.ctx(p.threadId, p.turnId), withRisk(item, risk));
+      // The parsed actions are for display. Delegate only the exact command supplied
+      // by a normal local execution request, without extra permission context.
+      const exact = p.command;
+      const candidate =
+        !risk.risky &&
+        exact &&
+        p.cwd &&
+        p.environmentId === null &&
+        p.approvalId == null &&
+        (p.kind === undefined || p.kind === "command") &&
+        !p.reason &&
+        !p.networkApprovalContext &&
+        !p.proposedNetworkPolicyAmendments?.length &&
+        (!p.commandActions?.length ||
+          (p.commandActions.length === 1 && p.commandActions[0]?.command === exact))
+          ? { ...item, command: exact, toolInput: { command: exact } }
+          : undefined;
+      const verified = () =>
+        candidate ? guardedReadCommand(candidate, p.cwd ?? undefined, ac.risk.cwd) : undefined;
+      const verifiedItem = candidate && verified() ? candidate : undefined;
+      const response = await ac.broker.request(
+        ac.ctx(p.threadId, p.turnId),
+        verifiedItem ?? withRisk(item, risk),
+        undefined,
+        {
+          problem: (answer) =>
+            answer.kind === "approval" &&
+            answer.decidedBy === "orchestrator" &&
+            (!verifiedItem || !verified())
+              ? "This approval requires the owner."
+              : undefined,
+        },
+      );
       const map: Record<string, CommandExecutionApprovalDecision> = {
         allow_once: "accept",
         allow_session: "acceptForSession",

@@ -1,6 +1,6 @@
 import { lstatSync, realpathSync, statSync } from "node:fs";
-import { isAbsolute, resolve } from "node:path";
-import { plainReadTargets } from "@codeden/contracts";
+import { isAbsolute, relative, resolve } from "node:path";
+import { isPrivateReadPath, plainReadTargets } from "@codeden/contracts";
 import { isInsidePath } from "../util/workspace-guard";
 import { isSecretPath } from "./paths";
 
@@ -17,7 +17,12 @@ export function guardedReadCommand(
   try {
     const realRoot = realpathSync(root);
     const realCwd = realpathSync(cwd);
-    if (!isInsidePath(realRoot, realCwd) || !statSync(realCwd).isDirectory()) return;
+    if (
+      !isInsidePath(realRoot, realCwd) ||
+      isPrivateReadPath(relative(realRoot, realCwd)) ||
+      !statSync(realCwd).isDirectory()
+    )
+      return;
     if (command.startsWith("git ")) {
       if (realCwd !== realRoot) return;
       const gitEntry = lstatSync(resolve(realRoot, ".git"));
@@ -27,6 +32,7 @@ export function guardedReadCommand(
       const target = resolve(realCwd, read);
       if (
         !isInsidePath(realRoot, target) ||
+        isPrivateReadPath(relative(realRoot, target)) ||
         isSecretPath(target) ||
         realpathSync(target) !== target
       )
@@ -39,11 +45,16 @@ export function guardedReadCommand(
     return;
   }
 
+  // Codex accepts the provider request unchanged. Its grammar requires the protections
+  // that Claude can apply by substituting the hardened invocation.
+  if (tool.toolName === "shell") return command;
   if (command.startsWith("rg ")) return `command rg --no-config ${command.slice(3)}`;
   if (command.startsWith("git ")) {
-    return command.replace(
-      /^git +show\b/,
-      "command git --no-pager show --no-ext-diff --no-textconv",
+    const prefix = "command git --no-pager --no-optional-locks -c core.fsmonitor=false";
+    return command.replace(/^git +(show|log|diff)\b/, (_match, sub: string) =>
+      sub === "log"
+        ? `${prefix} log --no-show-signature --no-notes --no-decorate`
+        : `${prefix} ${sub} --no-ext-diff --no-textconv`,
     );
   }
   return `command ${command}`;

@@ -1,6 +1,6 @@
 import type { ChildProcess } from "node:child_process";
-import { createInterface } from "node:readline";
-import { killTree } from "../util/exec";
+import { stopStdioChild } from "../util/exec";
+import { readStdioLines, STDIO_LINE_LIMIT } from "../util/stdio-lines";
 import type { AcpIncoming, AcpRequestId } from "./protocol";
 
 /** JSON-RPC "method not found": what an agent gets for a request CodeDen doesn't handle. */
@@ -46,11 +46,29 @@ export class AcpRpc {
   ) {
     const stdout = child.stdout;
     if (!stdout || !child.stdin) throw new Error(`${label} needs piped stdio`);
-    createInterface({ input: stdout }).on("line", (line) => this.onLine(line));
+    let overflowed = false;
+    const stopReading = readStdioLines(
+      stdout,
+      (line) => {
+        if (!this.exited && !overflowed) this.onLine(line);
+      },
+      () => {
+        if (this.exited || overflowed) return;
+        overflowed = true;
+        const warning = `${this.label} stdout line truncated at ${STDIO_LINE_LIMIT} bytes`;
+        console.warn(warning);
+        this.stderrTail = warning;
+        void this.close().catch((error: unknown) => {
+          console.warn(String(error));
+          this.onExit(null);
+        });
+      },
+    );
     child.stderr?.setEncoding("utf8").on("data", (d: string) => {
       this.stderrTail = (this.stderrTail + d).slice(-4000);
     });
     child.stdin.on("error", () => {});
+    child.once("exit", stopReading);
     child.on("exit", (code) => this.onExit(code));
     child.on("error", (error) => {
       this.stderrTail += `\n${error.message}`;
@@ -79,20 +97,7 @@ export class AcpRpc {
 
   /** Stop the agent: close stdin, then kill the process tree if it lingers. */
   close(): Promise<void> {
-    if (this.exited) return Promise.resolve();
-    const exited = new Promise<void>((resolve) => {
-      this.child.once("exit", () => resolve());
-      setTimeout(() => resolve(), 5000).unref();
-    });
-    try {
-      this.child.stdin?.end();
-    } catch {
-      // ignore
-    }
-    setTimeout(() => {
-      if (!this.exited) killTree(this.child);
-    }, 1500).unref();
-    return exited;
+    return stopStdioChild(this.child);
   }
 
   private write(message: object): void {

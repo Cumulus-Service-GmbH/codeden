@@ -47,6 +47,7 @@ try {
     openCodeExecutable: values.opencode,
     mcpUpstreamUrl: values["mcp-upstream"],
     sweepDescendants: true,
+    serverLostGraceMs: 120_000,
     log,
     onShutdown: (exitCode) => process.exit(exitCode),
   });

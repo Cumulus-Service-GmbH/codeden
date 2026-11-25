@@ -15,6 +15,35 @@ let home: string;
 let runner: RunningRunner | undefined;
 const children: ChildProcess[] = [];
 
+it("shuts down when the local server is gone before its first attachment", async () => {
+  const shutdown = vi.fn();
+  runner = await startRunner({ home, serverLostGraceMs: 0, lockCheckMs: 10, onShutdown: shutdown });
+  await vi.waitFor(() => expect(shutdown).toHaveBeenCalledWith(0));
+  expect(readLock(runner.lockFile)).toBeUndefined();
+});
+
+it("accepts a replacement server and stops once no local server remains", async () => {
+  const shutdown = vi.fn();
+  const log = vi.fn();
+  const serverLock = join(home, "server.json");
+  writeFileSync(serverLock, JSON.stringify({ pid: process.pid }));
+  runner = await startRunner({
+    home,
+    serverLostGraceMs: 0,
+    lockCheckMs: 10,
+    onShutdown: shutdown,
+    log,
+  });
+  const first = await TestServer.attach(runner);
+  await first.close();
+  const second = await TestServer.attach(runner);
+  await second.close();
+  writeFileSync(serverLock, JSON.stringify({ pid: 0 }));
+  await vi.waitFor(() => expect(shutdown).toHaveBeenCalledWith(0));
+  expect(log).toHaveBeenCalledWith("local server is gone; shutting down");
+  expect(readLock(runner.lockFile)).toBeUndefined();
+});
+
 beforeEach(() => {
   home = tempDir("codeden-takeover-");
 });

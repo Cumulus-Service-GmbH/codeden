@@ -70,7 +70,7 @@ function spawnRunnerChild(config: RunnerLaunchConfig, home: string): ChildProces
 }
 
 /**
- * Start the runner as a detached process that outlives the server (§4.2).
+ * Start the runner as a detached process that survives a brief server restart (§4.2).
  * Output goes to `<home>/logs/runner.log`.
  */
 export function spawnRunner(config: RunnerLaunchConfig, home: string): number | undefined {

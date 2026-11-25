@@ -35,6 +35,8 @@ import { assertSingleInstance, readLock, removeOwnLock } from "./lock";
 import { LinkMcpUpstream } from "./mcp/link-upstream";
 import { HttpMcpUpstream, handleMcpRequest, type McpUpstream } from "./mcp/proxy";
 import { ProcessSupervisor } from "./process/supervisor";
+import { isAlive } from "./process/tree";
+import { serverPid } from "./process/worktree-processes";
 import { TerminalHost } from "./pty/terminal-host";
 import { runnerProfile } from "./runner-profile";
 import { SessionHost } from "./session-host";
@@ -78,6 +80,8 @@ export interface StartRunnerOptions {
   lockCheckMs?: number;
   /** How long `close()` waits for sessions to close before ending their processes. Default 10 s. */
   closeGraceMs?: number;
+  /** Detached local runner: how long a missing server may take to restart. */
+  serverLostGraceMs?: number;
   log?: (message: string) => void;
 }
 
@@ -130,6 +134,7 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
     return !current || current.token === token;
   };
   let attached: ServerConnection | undefined;
+  let serverMissingSince: number | undefined;
   let stopped = false;
   const journal = new Journal(dir, {
     owned: ownsHome,
@@ -309,6 +314,7 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
           // A newer server connection replaces the previous one.
           if (attached && attached !== conn) attached.close("replaced by a new connection");
           attached = conn;
+          serverMissingSince = undefined;
           log("server attached");
           // The runner outlives app restarts, and a model release changes a provider's list
           // without any local change: a (re)starting app gets a fresh list unless it is recent.
@@ -373,13 +379,27 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   process.once("exit", removeLock);
   // A lock naming another runner means this one was replaced (#588): servers find runners only
   // through the lock, so none can reach it again. It stops with its agents instead of running
-  // turns beside the new runner. A runner that only lost its server keeps running (§4.2).
+  // turns beside the new runner. The local runner allows a server restart before stopping (§4.2).
   const lockWatch = setInterval(() => {
+    if (closing) return;
     const current = readLock(lockFile);
-    if (!current || current.token === token || closing) return;
-    log(`runner pid ${current.pid} took over this home; shutting down`);
-    handOver();
-    finish();
+    if (current && current.token !== token) {
+      log(`runner pid ${current.pid} took over this home; shutting down`);
+      handOver();
+      void finish();
+      return;
+    }
+    if (core.backend !== "local" || opts.serverLostGraceMs === undefined) return;
+    const pid = serverPid(opts.home);
+    if (attached || (pid !== undefined && isAlive(pid))) {
+      serverMissingSince = undefined;
+      return;
+    }
+    serverMissingSince ??= performance.now();
+    if (performance.now() - serverMissingSince >= opts.serverLostGraceMs) {
+      log("local server is gone; shutting down");
+      void finish();
+    }
   }, opts.lockCheckMs ?? LOCK_CHECK_MS);
   lockWatch.unref();
 

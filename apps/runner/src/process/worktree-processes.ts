@@ -52,10 +52,12 @@ export interface EndProcessesOptions {
 const RUNNER_STARTED_AT = Date.now() - process.uptime() * 1000;
 
 /** The server's pid from `<home>/server.json`, when it is there. */
-function serverPid(home: string): number | undefined {
+export function serverPid(home: string): number | undefined {
   try {
     const lock = JSON.parse(readFileSync(join(home, "server.json"), "utf8")) as { pid?: unknown };
-    return typeof lock.pid === "number" ? lock.pid : undefined;
+    return typeof lock.pid === "number" && Number.isSafeInteger(lock.pid) && lock.pid > 0
+      ? lock.pid
+      : undefined;
   } catch {
     return undefined;
   }

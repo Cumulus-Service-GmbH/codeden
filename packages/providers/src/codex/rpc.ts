@@ -1,6 +1,6 @@
 import type { ChildProcess } from "node:child_process";
-import { createInterface } from "node:readline";
-import { killTree } from "../util/exec";
+import { stopStdioChild } from "../util/exec";
+import { readStdioLines, STDIO_LINE_LIMIT } from "../util/stdio-lines";
 import type { ClientRequest, RequestId, ServerNotification, ServerRequest } from "./protocol";
 
 /** A JSON-RPC error returned by the app-server. */
@@ -45,11 +45,29 @@ export class CodexRpc {
   ) {
     const stdout = child.stdout;
     if (!stdout || !child.stdin) throw new Error("codex app-server needs piped stdio");
-    createInterface({ input: stdout }).on("line", (line) => this.onLine(line));
+    let overflowed = false;
+    const stopReading = readStdioLines(
+      stdout,
+      (line) => {
+        if (!this.exited && !overflowed) this.onLine(line);
+      },
+      () => {
+        if (this.exited || overflowed) return;
+        overflowed = true;
+        const warning = `${"codex app-server"} stdout line truncated at ${STDIO_LINE_LIMIT} bytes`;
+        console.warn(warning);
+        this.stderrTail = warning;
+        void this.close().catch((error: unknown) => {
+          console.warn(String(error));
+          this.onExit(null);
+        });
+      },
+    );
     child.stderr?.setEncoding("utf8").on("data", (d: string) => {
       this.stderrTail = (this.stderrTail + d).slice(-4000);
     });
     child.stdin.on("error", () => {});
+    child.once("exit", stopReading);
     child.on("exit", (code) => this.onExit(code));
     child.on("error", (error) => {
       this.stderrTail += `\n${error.message}`;
@@ -80,21 +98,7 @@ export class CodexRpc {
    * process has exited (a thread can only have one writer, so a resume must wait for this).
    */
   close(): Promise<void> {
-    if (this.exited) return Promise.resolve();
-    const exited = new Promise<void>((resolve) => {
-      this.child.once("exit", () => resolve());
-      const hardStop = setTimeout(() => resolve(), 5000);
-      hardStop.unref();
-    });
-    try {
-      this.child.stdin?.end();
-    } catch {
-      // ignore
-    }
-    setTimeout(() => {
-      if (!this.exited) killTree(this.child);
-    }, 1500).unref();
-    return exited;
+    return stopStdioChild(this.child);
   }
 
   private write(message: object): void {
