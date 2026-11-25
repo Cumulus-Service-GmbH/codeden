@@ -28,6 +28,7 @@ import type { Model, TurnStartParams } from "./protocol/v2";
 import type { CodexRpc } from "./rpc";
 import { openCodexThread, startTurn } from "./thread-open";
 import { TurnStartWatch } from "./turn-start-watch";
+import { allowsWorktreeGit, prepareWorktreeGit } from "./worktree-git";
 
 export interface CodexSessionConfig {
   executable: ResolvedCommand;
@@ -63,6 +64,8 @@ export class CodexSession implements ProviderSession {
   private readonly broker: ApprovalBroker;
   private rpc: CodexRpc | undefined;
   private starting: Promise<CodexRpc> | undefined;
+  private gitRoots: string[] = [];
+  private gitPreflightOn: CodexRpc | undefined;
   private turnPending = false;
   /** Model/effort changes from `configure`, applied on every following turn. */
   private nextTurn: SessionConfigChange = {};
@@ -135,6 +138,7 @@ export class CodexSession implements ProviderSession {
     this.turnPending = true;
     try {
       const rpc = await this.ensureServer();
+      await this.ensureGitLocks(rpc);
       await this.unpark(rpc);
       const model = await this.turnModel(rpc);
       const inUse = model ?? explicitModel(this.opts.model) ?? this.threadModel;
@@ -279,7 +283,18 @@ export class CodexSession implements ProviderSession {
 
   /** Session options with the current autonomy (a restarted app-server resumes with it). */
   private currentOptions(): SessionOptions {
-    return { ...this.opts, autonomy: this.autonomy };
+    const opts = { ...this.opts, autonomy: this.autonomy };
+    if (allowsWorktreeGit(opts)) {
+      opts.additionalDirectories = [...opts.additionalDirectories, ...this.gitRoots];
+    }
+    return opts;
+  }
+
+  private async ensureGitLocks(rpc: CodexRpc): Promise<void> {
+    const opts = { ...this.opts, autonomy: this.autonomy };
+    if (this.gitPreflightOn === rpc || !allowsWorktreeGit(opts)) return;
+    this.gitRoots = await prepareWorktreeGit(rpc, opts);
+    this.gitPreflightOn = rpc;
   }
 
   /** `turn/start` overrides that carry the current autonomy (§11.2). */
@@ -361,6 +376,7 @@ export class CodexSession implements ProviderSession {
     this.rpc = rpc;
     // The thread may still be archived through a short-lived app-server after a crash.
     await this.parked?.archived;
+    await this.ensureGitLocks(rpc);
     await this.openThread(rpc, { report: true });
     if (this.config.onModels) {
       rpc.request<{ data: Model[] }>("model/list", {}).then(

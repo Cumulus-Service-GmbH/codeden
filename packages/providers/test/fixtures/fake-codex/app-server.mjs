@@ -26,6 +26,7 @@
 // the app-server has unloaded, even right after a resume.
 // FAKE_CODEX_THREADS names a JSON file of the threads in the Codex home (`{ id, preview }`):
 // thread/list returns those not archived, two per page.
+import { spawnSync } from "node:child_process";
 import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
@@ -162,6 +163,15 @@ createInterface({ input: process.stdin }).on("line", (line) => {
     case "initialize":
       if (mode === "hang") return;
       return send({ id: msg.id, result: { userAgent: "fake-codex/0.0.0" } });
+    case "command/exec": {
+      const [command, ...args] = msg.params.command;
+      const result = spawnSync(command, args, {
+        cwd: msg.params.cwd,
+        env: { ...process.env, ...msg.params.env },
+        encoding: "utf8",
+      });
+      return send({ id: msg.id, result: { exitCode: result.status, stdout: result.stdout, stderr: result.stderr } });
+    }
     case "thread/start":
       return send({ id: msg.id, result: { thread: { id: "thread-1" }, model: "gpt-configured" } });
     case "thread/resume":
