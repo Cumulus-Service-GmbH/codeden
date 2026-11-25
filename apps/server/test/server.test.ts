@@ -17,7 +17,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
 import { type RunningServer, startServer } from "../src";
-import { sampleSessionEvent } from "./helpers";
+import { sampleSession, sampleSessionEvent } from "./helpers";
 import { removeTree } from "./support/remove-tree";
 
 const TOKEN = "t".repeat(64);
@@ -73,6 +73,38 @@ it("reports saved Team overrides and merged sources through the authenticated AP
   expect(await read(`${url}?${new URLSearchParams({ projectId: project.id })}`)).toEqual({
     team: [override, operator],
     sources: { writer: "project", operator: "default" },
+    overrides: {},
+  });
+});
+
+it("reports the session’s approved Team through diagnostics after live Settings change", async () => {
+  const { settings, projects, sessionRepo } = server.services;
+  const { project } = await projects.create({ source: { type: "local", path: home } });
+  const approved = Team.parse([{ role: "writer", provider: "codex", model: "approved-model" }]);
+  sessionRepo.create(
+    { ...sampleSession, projectId: project.id },
+    {
+      workspaceMode: "repo_root",
+      workspaceFallback: null,
+      forced: null,
+      queuedBehind: [],
+      runTeam: approved,
+    },
+  );
+  settings.update({
+    teamSetup: {
+      remembered: true,
+      team: [
+        { role: "operator", provider: "claude", model: "added-after-admission", effort: null },
+      ],
+    },
+  });
+  const query = new URLSearchParams({ sessionId: sampleSession.id });
+  const reply = await fetch(`${server.url}/api/settings/team?${query}`, { headers: auth });
+  expect(reply.status).toBe(200);
+  expect(TeamDiagnostics.parse(await reply.json())).toEqual({
+    team: approved,
+    sources: { writer: "project" },
     overrides: {},
   });
 });

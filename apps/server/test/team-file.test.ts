@@ -368,7 +368,7 @@ it("a session whose pins came from the Team has no layer of its own: a Team chan
   inherited.delete(session.id);
 });
 
-it("keeps the approved run Team in the session's Team file when the project default changes", async () => {
+it("keeps the approved run Team in the session's Team file when project and global defaults change", async () => {
   const id = await addProject();
   const session: Session = { ...sampleSession, projectId: id, status: "running" };
   sessions.set(session.id, session);
@@ -383,6 +383,7 @@ it("keeps the approved run Team in the session's Team file when the project defa
   const path = teamFilePath(join(dir, "home"), session.id);
   expect(read(path).team).toContainEqual(opus);
   projectTeams.set(id, [{ ...opus, model: "new-default-reviewer" }]);
+  defaults = [astra];
   refresh([
     {
       seq: 1,
@@ -391,8 +392,16 @@ it("keeps the approved run Team in the session's Team file when the project defa
       type: "project.updated",
       payload: { project: projects.get(id) },
     },
+    {
+      seq: 2,
+      sessionId: null,
+      ts: new Date().toISOString(),
+      type: "settings.updated",
+      payload: { settings: Settings.parse({}) },
+    },
   ]);
-  expect(read(path).team).toContainEqual(opus);
+  expect(read(path).team).toEqual([opus]);
+  inherited.delete(session.id);
 });
 
 it("exports the Team selected for the session, including sibling role pins", async () => {

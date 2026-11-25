@@ -88,6 +88,35 @@ function withService(
   };
 }
 
+it(
+  "keeps unpinned run model and effort through launch despite updated defaults",
+  withService(
+    {
+      teamSetup: {
+        remembered: true,
+        team: [{ role: "writer", provider: "codex", model: "updated", effort: "high" }],
+      },
+      providers: { agent: { provider: "codex", model: "legacy", effort: "medium" } },
+    },
+    async (_start, repo, service) => {
+      const approved = [{ role: "writer", provider: "codex", model: null, effort: null }] as const;
+      const result = await service.start(
+        StartSessionRequest.parse({
+          projectId: "p1",
+          title: "[Writer] Continue the assignment",
+          provider: "codex",
+          startedBy: { kind: "pm" },
+        }),
+        { teamId: "approved", runTeam: [...approved] },
+      );
+      if (result.status !== "started") throw new Error(result.status);
+      const row = repo.find(result.sessionId);
+      expect(row?.session).toMatchObject({ provider: "codex", model: null, effort: null });
+      expect(row?.startMeta).toMatchObject({ teamId: "approved", runTeam: approved });
+    },
+  ),
+);
+
 describe("PM Browser Operator launch consent", () => {
   const teamSettings = (provider: string): SettingsInput => ({
     teamSetup: { remembered: true, team: [{ role: "browserOperator", provider }] },
