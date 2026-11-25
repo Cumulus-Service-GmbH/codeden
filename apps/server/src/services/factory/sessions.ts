@@ -1,6 +1,8 @@
 import {
+  ACTIVE_SESSION_STATUSES,
   type DiscoveryArea,
   type FactoryItem,
+  isActiveSession,
   type ModelInfo,
   type Session,
   StartSessionRequest,
@@ -45,10 +47,8 @@ function brief(text: string): UserInput {
   return { text, attachments: [], from: "factory" };
 }
 
-/** Statuses that hold a session slot (`maxConcurrentSessions`). */
-const SLOT_STATUSES = new Set(["created", "queued", "starting", "running", "waiting"]);
-/** Statuses of sessions the kill switch stops. */
-const LIVE_STATUSES = new Set([...SLOT_STATUSES, "idle", "interrupted"]);
+/** Statuses of sessions the kill switch stops: working ones, and those between turns. */
+const LIVE_STATUSES = new Set([...ACTIVE_SESSION_STATUSES, "idle", "interrupted"]);
 
 /** Work key of the dark factory's scout (one long-lived session per project). */
 export const SCOUT_WORK_KEY = "factory:scout";
@@ -59,7 +59,7 @@ export const REVIEW_WORK_KEY_PREFIX = "factory:review:";
 
 /** Whether a session is busy with a turn (or about to start one). */
 export function isBusy(s: Session): boolean {
-  return SLOT_STATUSES.has(s.status);
+  return isActiveSession(s);
 }
 
 /**
@@ -90,10 +90,12 @@ export class FactorySessions {
     return this.deps.repo.list({ projectId, role: "agent" }).filter(isFactorySession);
   }
 
-  /** Factory sessions holding a slot right now, leaving out `except` (a session's own slot). */
+  /**
+   * Factory sessions holding a slot (`maxConcurrentSessions`) right now: working or about to
+   * (`isActiveSession`), leaving out `except` (a session's own slot).
+   */
   activeCount(projectId: string, except?: string): number {
-    return this.list(projectId).filter((s) => s.id !== except && SLOT_STATUSES.has(s.status))
-      .length;
+    return this.list(projectId).filter((s) => s.id !== except && isActiveSession(s)).length;
   }
 
   /** Providers the runner offers (the Fake provider only when nothing else is there). */

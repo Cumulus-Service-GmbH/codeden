@@ -272,6 +272,8 @@ describe("side-by-side installs", () => {
       if (/^npm_config_/i.test(key)) vi.stubEnv(key, undefined);
     }
     vi.stubEnv("npm_config_allow_scripts", "parent-allow-scripts");
+    vi.stubEnv("npm_config_cert", "parent-client-cert");
+    vi.stubEnv("npm_config_key", "parent-client-key");
     vi.stubEnv("NPM_CONFIG_USERCONFIG", "parent-user-config");
     vi.stubEnv("Npm_Config_Registry", "https://mirror.example/");
     try {
@@ -303,12 +305,18 @@ describe("side-by-side installs", () => {
 
   it("passes the parent's npm registry, proxy, CA and userconfig settings to the installer's npm", async () => {
     const home = tempHome();
+    for (const key of Object.keys(process.env)) {
+      if (/^npm_config_/i.test(key)) vi.stubEnv(key, undefined);
+    }
     const settings = {
       Npm_Config_Registry: "https://mirror.example/",
+      "npm_config_@test-scope:registry": "https://scope.example/",
       npm_config_proxy: "http://proxy.example/",
       npm_config_https_proxy: "http://proxy.example/",
+      "npm_config_https-proxy": "http://proxy.example/",
       npm_config_ca: "parent-ca",
       npm_config_cafile: join(home, "ca.pem"),
+      "npm_config_strict-ssl": "true",
       NPM_CONFIG_USERCONFIG: join(home, ".npmrc"),
     };
     for (const [key, value] of Object.entries(settings)) vi.stubEnv(key, value);

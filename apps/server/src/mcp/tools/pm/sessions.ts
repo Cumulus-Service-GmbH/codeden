@@ -24,7 +24,7 @@ import {
 import { defineTool, type ToolAvailabilityContext, ToolError } from "../../define";
 import { currentTurn } from "../../transcript";
 import { agentSessionOf, compactSession, compactWork, projectFor } from "../shared/helpers";
-import { describeProviderParam } from "../shared/provider-choices";
+import { describeProviderParam, fallbackProvider } from "../shared/provider-choices";
 import { assertMayStartOnIssues, issuesNamed } from "./issue-trust";
 
 const ENDED = new Set(["completed", "failed", "stopped"]);
@@ -76,8 +76,8 @@ export const startSession = defineTool({
   // The loaded providers and whether each is ready, as of this listing.
   describeInput: describeProviderParam(
     "provider",
-    "Leave it out to use the project's default provider when it is loaded, else the default provider for agents in Settings when it is loaded, else the first loaded provider in a fixed order, ready or not.",
-    "An id that isn't loaded is refused while the runner is connected. Readiness isn't checked when a session starts: on a provider that isn't ready the session is created and then fails to start or fails its first turn, so pick one that is ready.",
+    "Leave it out to use the project's default provider when it is ready, else the default provider for agents in Settings when it is ready (when that is auto, the first ready provider in a fixed order); when none of them is ready, the call is refused with this list.",
+    "An id that isn't loaded is refused while the runner is connected. A provider you name isn't checked for readiness: on one that isn't ready the session is created and then fails to start or fails its first turn, so pick one that is ready.",
   ),
   input: PmStartSessionInput,
   handler: async (input, { services, projectId, sessionId, caller, role: callerRole, signal }) => {
@@ -86,6 +86,11 @@ export const startSession = defineTool({
     }
     const project = projectFor(services, projectId);
     await assertMayStartOnIssues(services, { caller, sessionId }, project, issuesNamed(input));
+    // `auto` names none, as for the session service. Joining or skipping starts nothing, so it
+    // needs no provider.
+    const named = input.provider === "auto" ? undefined : input.provider;
+    const startsNothing =
+      input.conflict?.resolution === "join" || input.conflict?.resolution === "skip";
     const issue =
       input.issueNumber && project.kind === "github"
         ? {
@@ -137,9 +142,11 @@ export const startSession = defineTool({
     }
     const models =
       member?.model && input.model ? services.factory.ctx.sessions.models(member.provider) : [];
-    const { choice, mismatch } = applyTeamRole(input, team, models);
+    const { choice, mismatch } = applyTeamRole({ ...input, provider: named }, team, models);
     if (!choice) throw new ToolError(mismatch);
-    const { provider, model, effort } = choice;
+    const { model, effort } = choice;
+    const provider =
+      choice.provider ?? (startsNothing ? undefined : await fallbackProvider(services, project));
     const req = StartSessionRequest.parse({
       projectId,
       role: "agent",

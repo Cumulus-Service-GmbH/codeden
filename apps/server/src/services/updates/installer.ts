@@ -94,9 +94,11 @@ export async function installAppVersion(opts: InstallAppOptions): Promise<void> 
         baseEnv: Object.fromEntries(
           Object.entries(process.env).filter(([key]) => {
             const name = key.toLowerCase();
+            if (!name.startsWith(npmConfigPrefix)) return true;
+            const setting = name.slice(npmConfigPrefix.length);
             return (
-              !name.startsWith(npmConfigPrefix) ||
-              inheritedNpmConfig.has(name.slice(npmConfigPrefix.length))
+              inheritedNpmConfig.has(setting.replaceAll("-", "_")) ||
+              /^@[^/:]+:registry$/.test(setting)
             );
           }),
         ),

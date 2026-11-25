@@ -46,6 +46,7 @@ import {
 } from "../runner-port";
 import type { UtilityService } from "../utility";
 import type { SessionAdmission } from "./admission";
+import { assertProjectActive, inArchivedProject } from "./archived-project";
 import { assertAutonomy } from "./autonomy-policy";
 import { freezeChecks, roundAfter, withRound } from "./checks";
 import { compactingRefusal, compactionRunning, compactRefusal, startCompaction } from "./compact";
@@ -63,6 +64,7 @@ import {
   supervisedUnsupported,
 } from "./permissions";
 import { deliverPriority } from "./priority-delivery";
+import { autoOrder } from "./provider-order";
 import type { QuestionBroker, ResponseActor } from "./questions";
 import { applyPendingConfig, assertConfigRevision, updateSession } from "./reconfigure";
 import { type AutonomyAudit, emptyStartMeta, type SessionRepo, type StoredStartMeta } from "./repo";
@@ -104,9 +106,6 @@ export interface CheckRuns {
   /** Whether checks are running for the session now. */
   isRunning(sessionId: string): boolean;
 }
-
-/** Preferred providers when the choice is `auto` (first ready one wins). */
-const AUTO_ORDER = ["claude", "codex", "opencode", "cursor", "gemini", "antigravity"];
 
 const BUSY = new Set(["running", "waiting"]);
 /** Messages from these senders can start a turn without a global session slot. */
@@ -578,6 +577,7 @@ export class SessionService {
     from: QueueSender = "user",
   ): Promise<SendMessageResponse> {
     const session = this.deps.repo.get(id);
+    assertProjectActive(this.deps.projects, session);
     assertRoleWritable(session);
     this.assertForcedProvider(session);
     if (NOT_STARTED.has(session.status)) return this.enqueue(id, req.input, from);
@@ -659,6 +659,7 @@ export class SessionService {
     source: QueueSender | QueuedMessage = "user",
   ): Promise<"steered" | "queued"> {
     const session = this.deps.repo.get(id);
+    assertProjectActive(this.deps.projects, session);
     this.assertForcedProvider(session);
     if (!BUSY.has(session.status)) throw conflict("No turn is running", "no_turn");
     const capabilities = this.provider(session.provider, id)?.capabilities;
@@ -668,7 +669,7 @@ export class SessionService {
     if (compactionRunning(this.deps.repo, session)) throw compactingRefusal();
     const { outbox } = this.deps;
     const stored = typeof source === "string" ? this.externalize(session, raw) : source.input;
-    const input = this.deps.artifacts.resolveAttachments(stored);
+    const input = this.forRunner(session, stored);
     const delay = capabilities.interruptToolCall
       ? this.deps.settings.get().priorityInterruptMinutes * 60_000
       : undefined;
@@ -748,6 +749,7 @@ export class SessionService {
    */
   async compact(id: string): Promise<CompactSessionResponse> {
     const session = this.deps.repo.get(id);
+    assertProjectActive(this.deps.projects, session);
     this.assertForcedProvider(session);
     const refusal = compactRefusal(session, this.provider(session.provider, id), {
       delivering: this.delivering.has(id),
@@ -841,7 +843,8 @@ export class SessionService {
       !this.holds.isHeld(session.id) &&
       !this.delivering.has(session.id) &&
       !this.priorityWaits.has(session.id) &&
-      FLUSHABLE.has(session.status)
+      FLUSHABLE.has(session.status) &&
+      !inArchivedProject(this.deps.projects, session)
     );
   }
 
@@ -952,6 +955,7 @@ export class SessionService {
   async continueAfterRestart(id: string, text: string): Promise<void> {
     if (this.delivering.has(id)) return;
     const session = this.deps.repo.get(id);
+    if (inArchivedProject(this.deps.projects, session)) return;
     const input: UserInput = { text, attachments: [], from: "codeden" };
     if (this.deps.repo.find(id)?.startMeta?.admission) return;
     if (!this.reserve(session)) {
@@ -1106,7 +1110,7 @@ export class SessionService {
     return { status: "queued" };
   }
 
-  /** Pasted images saved as artifacts: the form CodeDen stores (queued messages). */
+  /** Pasted images and files saved as artifacts: the form CodeDen stores (queued messages). */
   private externalize(session: Session, input: UserInput): UserInput {
     return this.deps.artifacts.externalizeAttachments(input, {
       sessionId: session.id,
@@ -1114,9 +1118,15 @@ export class SessionService {
     });
   }
 
-  /** Input handed to the runner: artifacts resolved to the file paths providers read. */
+  /**
+   * Input handed to the runner: artifacts resolved to the file paths providers read, only the
+   * session's own (and its project's shared ones, from a conflicting start).
+   */
   private forRunner(session: Session, input: UserInput): UserInput {
-    return this.deps.artifacts.resolveAttachments(this.externalize(session, input));
+    return this.deps.artifacts.resolveAttachments(this.externalize(session, input), {
+      sessionId: session.id,
+      projectId: session.projectId,
+    });
   }
 
   private launchInBackground(
@@ -1183,8 +1193,7 @@ export class SessionService {
     }
     const configured = this.configuredProvider(req.role, projectDefault);
     if (configured) return configured;
-    const auto = [...AUTO_ORDER, ...available].find((id) => available.includes(id));
-    return auto ?? "claude";
+    return autoOrder(available)[0] ?? "claude";
   }
 
   /** PM and orchestrator choices take precedence over the project default. */

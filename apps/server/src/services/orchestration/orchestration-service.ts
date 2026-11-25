@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import {
   type ConflictRecord,
   type InboxItem,
+  isActiveSession,
   messageFrom,
   type Notice,
   type Overview,
@@ -23,6 +24,7 @@ import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
 import type { RunnerPort } from "../runner-port";
 import { isSendBusyError } from "../sessions/admission";
+import { inArchivedProject } from "../sessions/archived-project";
 import { mayHaveStarted } from "../sessions/input-decorator";
 import type { SessionRepo } from "../sessions/repo";
 import type { SessionService } from "../sessions/session-service";
@@ -92,8 +94,6 @@ export interface OrchestrationDeps {
   options?: OrchestrationOptions;
   log?: (message: string) => void;
 }
-
-const NOT_READY = new Set(["created", "queued", "starting", "running", "waiting"]);
 
 const WAKE_TEXT =
   "Automatic wake-up for the updates above. Act on anything that needs it; otherwise reply in one short line.";
@@ -466,9 +466,11 @@ export class OrchestrationService {
     const role: OrchestrationRole = key === "orchestrator" ? "orchestrator" : "pm";
     const projectId = role === "pm" ? key.slice(3) : null;
     if (this.notices.undelivered(role, projectId).length === 0) return "empty";
+    // An archived project's sessions take no input (§13): its PM isn't woken, or started.
+    if (inArchivedProject(this.deps.projects, { projectId })) return "empty";
     const ensured = await this.roles.ensure(role, projectId);
     const session = this.roles.find(role, projectId) ?? ensured;
-    if (NOT_READY.has(session.status)) return "busy";
+    if (isActiveSession(session)) return "busy";
     try {
       await this.deps.sessions.send(
         session.id,
