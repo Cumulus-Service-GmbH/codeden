@@ -94,6 +94,28 @@ describe("SessionOptions autonomy (§11.2)", () => {
     );
   });
 
+  it("shows the PM policy reason and lets the owner pick Full", async () => {
+    const client = createMockClient();
+    const session = agent({ autonomy: "supervised" });
+    const detail = await client.getSessionDetail(session.id);
+    const getSessionDetail = vi
+      .spyOn(client, "getSessionDetail")
+      .mockResolvedValue({ ...detail, autonomyFloor: "supervised" });
+    const updateSession = vi.spyOn(client, "updateSession");
+    renderWithClient(<SessionOptions session={session} running />, client);
+    await waitFor(() => expect(getSessionDetail).toHaveBeenCalledWith(session.id));
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "Permissions" }), { key: "Enter" });
+    const option = await screen.findByRole("menuitem", {
+      name: /Full.*Autonomy policy requires supervised or more supervision. Requested full./,
+    });
+    expect(option.textContent).toContain("You can override this policy.");
+    fireEvent.click(option);
+    await waitFor(() =>
+      expect(updateSession).toHaveBeenCalledWith(session.id, { autonomy: "full" }),
+    );
+  });
+
   it("does not save when the same level is picked again", async () => {
     const client = createMockClient();
     const updateSession = vi.spyOn(client, "updateSession");

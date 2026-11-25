@@ -248,6 +248,8 @@ export const ApprovalRequestItem = z.object({
   options: z.array(ApprovalDecision).default(["allow_once", "allow_session", "deny"]),
   decision: ApprovalDecision.optional(),
   decidedBy: ApprovalDecider.optional(),
+  /** Why policy resolved this pending request. */
+  decisionReason: z.string().optional(),
 });
 
 /** One question in a `user_question` item. */

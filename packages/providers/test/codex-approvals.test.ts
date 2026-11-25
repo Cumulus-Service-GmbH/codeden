@@ -21,8 +21,7 @@ const TURN = "turn-1";
 
 describe("Codex approvals", () => {
   const ctx = { threadId: "s1:thread-root", turnId: TURN };
-  const run = async (req: object, answer: object) => {
-    const events: AgentEvent[] = [];
+  const run = async (req: object, answer: object, events: AgentEvent[] = []) => {
     const broker = new ApprovalBroker((e) => events.push(AgentEvent.parse(e)));
     const pending = handleServerRequest(req as ServerRequest, {
       broker,
@@ -36,6 +35,20 @@ describe("Codex approvals", () => {
     broker.respond(started.item.requestId, answer as never);
     return { result: await pending, events };
   };
+
+  const commandRequest = (command: string) => ({
+    method: "item/commandExecution/requestApproval",
+    id: 0,
+    params: {
+      threadId: T,
+      turnId: TURN,
+      itemId: "command",
+      command,
+      cwd: "/w",
+      startedAtMs: 1,
+      environmentId: null,
+    },
+  });
 
   it.each([
     ["cat README.md", {}, true],
@@ -117,9 +130,120 @@ describe("Codex approvals", () => {
         broker.respond(requestId, { kind: "approval", decision: "deny" });
       }
       expect(await pending).toEqual({ decision: allowed ? "accept" : "decline" });
+      if (allowed) {
+        const denied = handleServerRequest(
+          {
+            ...commandRequest(command),
+            params: { ...commandRequest(command).params, cwd: root, ...patch },
+          } as ServerRequest,
+          { broker, risk: { cwd: root }, ctx: () => ctx, filePaths: () => [] },
+        );
+        broker.respond("command", {
+          kind: "approval",
+          decision: "deny",
+          decidedBy: "orchestrator",
+        });
+        await expect(denied).rejects.toThrow("Command approval was refused by orchestrator");
+      }
     } finally {
       rmSync(root, { recursive: true, force: true });
     }
+  });
+
+  it.each([
+    "git fetch",
+    "git fetch && git checkout main && node team-review.mjs --help",
+    "cat ../README.md",
+    "rg needle README.md",
+  ])("uses a stale session approval only once for %s", async (command) => {
+    const { result, events } = await run(commandRequest(command), {
+      kind: "approval",
+      decision: "allow_session",
+      decidedBy: "user",
+    });
+    expect(result).toEqual({ decision: "accept" });
+    expect(events[0]).toMatchObject({ item: { options: ["allow_once", "deny"] } });
+    expect(events[1]).toMatchObject({
+      item: { status: "completed", decision: "allow_once", decidedBy: "user" },
+    });
+  });
+
+  it("offers and reapplies a session approval for an exact verified local read", async () => {
+    const root = mkdtempSync(join(tmpdir(), "codex-session-read-"));
+    try {
+      const path = join(root, "README.md");
+      writeFileSync(path, "fixture");
+      const events: AgentEvent[] = [];
+      const broker = new ApprovalBroker((event) => events.push(event));
+      const ac = {
+        broker,
+        risk: { cwd: root },
+        ctx: () => ctx,
+        filePaths: () => [],
+        sessionReadApprovals: new Set<string>(),
+      };
+      const request = commandRequest("/bin/zsh -fc 'cat README.md'");
+      const start = (extra: object = {}) =>
+        handleServerRequest(
+          {
+            ...request,
+            params: { ...request.params, cwd: root, environmentId: "local", ...extra },
+          } as ServerRequest,
+          ac,
+        );
+
+      const first = start();
+      expect(events[0]).toMatchObject({
+        item: { options: ["allow_once", "allow_session", "deny"] },
+      });
+      broker.respond("command", { kind: "approval", decision: "allow_session" });
+      expect(await first).toEqual({ decision: "accept" });
+      await expect(start()).resolves.toEqual({ decision: "accept" });
+      expect(events.filter((event) => event.type === "item.started")).toHaveLength(1);
+
+      const extraPermissions = start({ additionalPermissions: { network: { enabled: true } } });
+      expect(events.at(-1)).toMatchObject({ item: { options: ["allow_once", "deny"] } });
+      broker.respond("command", { kind: "approval", decision: "deny" });
+      expect(await extraPermissions).toEqual({ decision: "decline" });
+
+      const differentInvocation = start({ command: "cat README.md" });
+      expect(events.at(-1)).toMatchObject({
+        item: { options: ["allow_once", "allow_session", "deny"] },
+      });
+      rmSync(path);
+      broker.respond("command", { kind: "approval", decision: "allow_session" });
+      expect(await differentInvocation).toEqual({ decision: "accept" });
+      expect(events.at(-1)).toMatchObject({ item: { decision: "allow_once" } });
+
+      const missing = start();
+      expect(events.at(-1)).toMatchObject({ item: { options: ["allow_once", "deny"] } });
+      broker.respond("command", { kind: "approval", decision: "deny" });
+      expect(await missing).toEqual({ decision: "decline" });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("maps an owner refusal to decline", async () => {
+    const { result, events } = await run(commandRequest("git fetch"), {
+      kind: "approval",
+      decision: "deny",
+      decidedBy: "user",
+    });
+    expect(result).toEqual({ decision: "decline" });
+    expect(events[1]).toMatchObject({ item: { decision: "deny", decidedBy: "user" } });
+  });
+
+  it("fails an expired command request without a user decline or turn cancellation", async () => {
+    const events: AgentEvent[] = [];
+    await expect(
+      run(
+        commandRequest("git fetch"),
+        { kind: "approval", decision: "deny", decidedBy: "policy" },
+        events,
+      ),
+    ).rejects.toThrow("Command approval was refused by policy");
+    expect(events[1]).toMatchObject({ item: { decision: "deny", decidedBy: "policy" } });
   });
 
   it("maps command approvals both ways and flags risky commands", async () => {

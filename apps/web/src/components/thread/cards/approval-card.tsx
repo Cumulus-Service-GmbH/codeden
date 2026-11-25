@@ -146,7 +146,7 @@ function ActionApprovalCard({
               disabled={busy}
               onClick={() => decide.mutate("allow_session")}
             >
-              Always allow this session
+              Approve for this session
             </Button>
           )}
           {item.options.includes("deny") && (

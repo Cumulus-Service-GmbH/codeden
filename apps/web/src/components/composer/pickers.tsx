@@ -1,4 +1,4 @@
-import type { AutonomyLevel } from "@codeden/contracts";
+import { type AutonomyLevel, autonomyPolicyReason } from "@codeden/contracts";
 import { Check, ClipboardList } from "lucide-react";
 import { useId } from "react";
 import { useTapTooltip } from "@/components/common/tap-tooltip";
@@ -126,6 +126,7 @@ function PlanUnavailableToggle(unavailable: PlanUnavailable) {
 export function AutonomyPicker({
   value,
   onChange,
+  autonomyFloor,
   readOnlySupported = true,
   supervisedSupported = true,
   providerName,
@@ -134,6 +135,8 @@ export function AutonomyPicker({
 }: {
   value: AutonomyLevel;
   onChange: (v: AutonomyLevel) => void;
+  /** Policy limit for PM changes. The owner can choose any supported level. */
+  autonomyFloor?: AutonomyLevel;
   /** False when the session's provider cannot enforce Read-only. */
   readOnlySupported?: boolean;
   /** False when the session's provider cannot enforce Supervised. */
@@ -168,6 +171,7 @@ export function AutonomyPicker({
             providerName,
           );
           const unavailable = reason !== null;
+          const policyReason = autonomyPolicyReason(level, autonomyFloor);
           return (
             <DropdownMenuItem
               key={level}
@@ -181,6 +185,11 @@ export function AutonomyPicker({
                 <span className="block text-2xs text-muted-foreground">
                   {reason ?? o.description}
                 </span>
+                {!unavailable && policyReason && (
+                  <span className="block text-2xs text-muted-foreground">
+                    {policyReason} You can override this policy.
+                  </span>
+                )}
               </span>
               {level === value && <Check className="mt-0.5 size-3.5" />}
             </DropdownMenuItem>

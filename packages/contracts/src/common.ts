@@ -28,6 +28,16 @@ export type Role = z.infer<typeof Role>;
 export const AutonomyLevel = z.enum(["read_only", "supervised", "auto", "full"]);
 export type AutonomyLevel = z.infer<typeof AutonomyLevel>;
 
+/** Why a PM cannot choose a level above the session's autonomy policy. */
+export function autonomyPolicyReason(
+  level: AutonomyLevel,
+  floor?: AutonomyLevel,
+): string | undefined {
+  if (floor && AutonomyLevel.options.indexOf(level) > AutonomyLevel.options.indexOf(floor)) {
+    return `Autonomy policy requires ${floor} or more supervision. Requested ${level}.`;
+  }
+}
+
 /** Reasoning effort. Each model advertises the subset it supports (see `ModelInfo.efforts`). */
 export const ReasoningEffort = z.enum(["minimal", "low", "medium", "high", "xhigh", "max"]);
 export type ReasoningEffort = z.infer<typeof ReasoningEffort>;

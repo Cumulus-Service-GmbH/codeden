@@ -41,7 +41,7 @@ export function plainReadTargets(tool: Tool, standing = false): string[] | undef
   const command = tool.command;
   if (
     tool.action !== "command" ||
-    (tool.toolName !== "Bash" && (standing || tool.toolName !== "shell")) ||
+    (tool.toolName !== "Bash" && tool.toolName !== "shell") ||
     !command ||
     tool.url !== undefined ||
     tool.singleUse ||

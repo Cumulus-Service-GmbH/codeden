@@ -50,7 +50,7 @@ describe("ApprovalCard", () => {
     const respond = vi.spyOn(client, "respond").mockResolvedValue();
     renderWithClient(<ApprovalCard item={approval} sessionId="s1" />, client);
     expect(screen.getByText("Force push to main")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: /Always allow this session/ }));
+    fireEvent.click(screen.getByRole("button", { name: /Approve for this session/ }));
     await waitFor(() =>
       expect(respond).toHaveBeenCalledWith("s1", "req-1", {
         kind: "approval",

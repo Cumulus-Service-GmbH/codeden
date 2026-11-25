@@ -1,10 +1,10 @@
-import type {
-  AgentEvent,
+import {
+  type AgentEvent,
   AutonomyLevel,
-  ReasoningEffort,
-  RuntimeResponse,
-  SessionOptions,
-  UserInput,
+  type ReasoningEffort,
+  type RuntimeResponse,
+  type SessionOptions,
+  type UserInput,
 } from "@codeden/contracts";
 import { type ProviderSession, ProviderSessionError, type SessionConfigChange } from "../adapter";
 import { ApprovalBroker } from "../approvals";
@@ -61,6 +61,7 @@ export class CodexSession implements ProviderSession {
   readonly events = new AsyncQueue<AgentEvent>();
   private readonly mapper: CodexEventMapper;
   private readonly broker: ApprovalBroker;
+  private readonly sessionReadApprovals = new Set<string>();
   private rpc: CodexRpc | undefined;
   private starting: Promise<CodexRpc> | undefined;
   private turnPending = false;
@@ -119,12 +120,15 @@ export class CodexSession implements ProviderSession {
   }
 
   /**
-   * Autonomy from the next `turn/start` on, as approval-policy and sandbox overrides. A running
-   * turn keeps the policy it started with (the app-server fixes it per turn).
+   * The native sandbox and approval policy apply from the next `turn/start`.
+   * CodeDen can resolve its brokered approvals as soon as autonomy is raised.
    */
   async setAutonomy(level: AutonomyLevel): Promise<void> {
+    const raised =
+      AutonomyLevel.options.indexOf(level) > AutonomyLevel.options.indexOf(this.autonomy);
     this.autonomy = level;
     this.autonomyChanged = true;
+    if (raised && !this.opts.readOnly) this.broker.approvePendingForAutonomy(level);
   }
 
   async send(input: UserInput): Promise<void> {
@@ -341,6 +345,7 @@ export class CodexSession implements ProviderSession {
         onRequest: (req) =>
           handleServerRequest(req, {
             broker: this.broker,
+            sessionReadApprovals: this.sessionReadApprovals,
             risk: {
               cwd: this.opts.cwd,
               extraRoots: this.opts.additionalDirectories,

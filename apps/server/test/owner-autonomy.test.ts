@@ -1,4 +1,4 @@
-import { Settings } from "@codeden/contracts";
+import { SessionDetail, Settings } from "@codeden/contracts";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
@@ -33,6 +33,7 @@ function setup() {
   const request = vi.fn(async () => ({}));
   const sessions = new SessionService({
     repo,
+    outbox: { count: () => 0 },
     runner: {
       request,
       providers: () => [{ id: session.provider, capabilities: { supervised: true } }],
@@ -122,4 +123,41 @@ it("the UI route passes the owner", async () => {
   });
   expect(response.status).toBe(200);
   expect(update).toHaveBeenCalledWith("s1", { autonomy: "full" }, { owner: true });
+});
+
+it("reports the PM policy to the owner and still allows an explicit override", async () => {
+  const { sessions, repo } = fixture;
+  const services = {
+    sessionRepo: repo,
+    sessions,
+    settings: {
+      get: () => Settings.parse({ autonomy: { pmPolicy: { writer: { "*": "read_only" } } } }),
+    },
+    factory: { data: { loop: () => undefined } },
+  } as unknown as AppServices;
+  const app = sessionRoutes(services, "token");
+  const detail = await app.request(`/${id}`);
+  expect(detail.status).toBe(200);
+  expect(SessionDetail.parse(await detail.json()).autonomyFloor).toBe("read_only");
+  await expect(
+    setSessionAutonomy.handler(
+      { sessionId: id, autonomy: "full", reason: "Change permissions" },
+      {
+        services,
+        projectId: "p1",
+        sessionId: "pm1",
+        role: "pm",
+        caller: "mcp",
+        signal: new AbortController().signal,
+      },
+    ),
+  ).rejects.toThrow("Autonomy policy requires read_only or more supervision. Requested full.");
+
+  const response = await app.request(`/${id}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ autonomy: "full" }),
+  });
+  expect(response.status).toBe(200);
+  expect(await response.json()).toMatchObject({ autonomy: "full" });
 });

@@ -1,8 +1,8 @@
-import { existsSync, mkdtempSync, readFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AgentEvent, SessionOptions } from "@codeden/contracts";
-import { afterEach, describe, expect, it } from "vitest";
+import type { AgentEvent, AutonomyLevel, SessionOptions } from "@codeden/contracts";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { CodexSession } from "../src/codex/session";
 import { FakeProvider } from "../src/fake/adapter";
 import type { FakeSession } from "../src/fake/session";
@@ -96,6 +96,93 @@ describe("Codex autonomy changes", () => {
       networkAccess: false,
     });
   });
+  async function pendingCommand(autonomy: AutonomyLevel, command: string) {
+    const root = mkdtempSync(join(tmpdir(), "codeden-codex-pending-"));
+    const log = join(root, "requests.log");
+    const script = join(root, "requests.json");
+    writeFileSync(
+      script,
+      JSON.stringify([
+        {
+          method: "item/commandExecution/requestApproval",
+          params: { itemId: "pending", command, cwd: root, environmentId: null },
+        },
+      ]),
+    );
+    const session = new CodexSession(
+      {
+        ...base,
+        cwd: root,
+        autonomy,
+        env: { FAKE_CODEX_LOG: log, FAKE_CODEX_REQUESTS: script },
+      },
+      { executable: fakeCodex },
+    );
+    sessions.push(session);
+    const events: AgentEvent[] = [];
+    void (async () => {
+      for await (const event of session.events) events.push(event);
+    })();
+    await session.start();
+    await session.send({ text: "Start command", attachments: [] });
+    await vi.waitFor(() =>
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "item.started",
+          item: expect.objectContaining({ requestId: "pending" }),
+        }),
+      ),
+    );
+    return { session, events, log };
+  }
+
+  it.each(["auto", "full"] as const)(
+    "auto-resolves a pending command when raised to %s",
+    async (level) => {
+      const { session, events, log } = await pendingCommand("supervised", "pwd");
+      await session.setAutonomy(level);
+      await vi.waitFor(() =>
+        expect(requests(log)).toContainEqual({
+          method: "answer:item/commandExecution/requestApproval",
+          params: { decision: "accept" },
+        }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          type: "item.completed",
+          item: expect.objectContaining({
+            requestId: "pending",
+            status: "completed",
+            decision: "allow_once",
+            decidedBy: "policy",
+            decisionReason: "Auto-resolved by autonomy change.",
+          }),
+        }),
+      );
+    },
+  );
+
+  it.each([
+    ["supervised", "full", "echo ok > /definitely-outside-worktree/approval-fixture"],
+    ["supervised", "auto", "git push --force origin main"],
+    ["supervised", "read_only", "pwd"],
+  ] as const)(
+    "leaves the request open when changing from %s to %s for %s",
+    async (from, to, command) => {
+      const { session, log } = await pendingCommand(from, command);
+      await session.setAutonomy(to);
+      expect(requests(log).some((r) => r.method.startsWith("answer:"))).toBe(false);
+      await expect(
+        session.respond("pending", { kind: "approval", decision: "deny" }),
+      ).resolves.toBeUndefined();
+      await vi.waitFor(() =>
+        expect(requests(log)).toContainEqual({
+          method: "answer:item/commandExecution/requestApproval",
+          params: { decision: "decline" },
+        }),
+      );
+    },
+  );
 });
 
 describe("Fake autonomy changes", () => {

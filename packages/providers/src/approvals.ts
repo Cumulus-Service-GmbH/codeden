@@ -1,5 +1,6 @@
 import {
   type AgentEvent,
+  type AutonomyLevel,
   type ItemOf,
   type RuntimeResponse,
   sessionApprovalBlockReason,
@@ -18,13 +19,17 @@ interface Pending {
   ctx: ItemCtx;
   item: Request;
   review: AnswerReview | undefined;
-  resolve: (response: RuntimeResponse) => void;
+  resolve: (response: RuntimeResponse, decisionReason?: string) => void;
 }
 
 /** How the asker takes a response, when it has rules of its own (an MCP server's form). */
 export interface AnswerReview {
   /** The provider independently verified a scoped read and can enforce its session grant. */
   allowSession?: true;
+  /** Whether this request qualifies for automatic approval at the new level. */
+  canAutoApprove?: (level: AutonomyLevel) => boolean;
+  /** Canonicalize a response before validation and recording. */
+  normalize?: (response: RuntimeResponse) => RuntimeResponse;
   /**
    * What doesn't fit in the response, if anything: `respond` rejects it with this message
    * (`invalid_answer`) and the request stays open, so nothing is sent until it fits.
@@ -63,11 +68,15 @@ export class ApprovalBroker {
       item = { ...item, options: item.options.filter((option) => option !== "allow_session") };
     }
     return new Promise((resolve) => {
-      const finish = (response: RuntimeResponse) => {
+      const finish = (response: RuntimeResponse, decisionReason?: string) => {
         if (!this.pending.delete(item.requestId)) return;
         signal?.removeEventListener("abort", onAbort);
         const declined = response.kind === "answer" && review?.declines?.(response) === true;
-        this.emit({ type: "item.completed", ...ctx, item: completed(item, response, declined) });
+        this.emit({
+          type: "item.completed",
+          ...ctx,
+          item: completed(item, response, declined, decisionReason),
+        });
         resolve(response);
       };
       const onAbort = () => finish({ kind: "cancel" });
@@ -90,9 +99,10 @@ export class ApprovalBroker {
    * Answer a pending request. Throws `unknown_request` for unknown ids, and `invalid_answer`
    * (leaving the request open) for a response its {@link AnswerReview} finds a problem with.
    */
-  respond(requestId: string, response: RuntimeResponse): void {
+  respond(requestId: string, answer: RuntimeResponse): void {
     const pending = this.pending.get(requestId);
     if (!pending) throw new ProviderSessionError("unknown_request", `Unknown request ${requestId}`);
+    const response = pending.review?.normalize?.(answer) ?? answer;
     const problem =
       pending.review?.problem?.(response) ??
       (pending.item.kind === "approval_request" &&
@@ -108,13 +118,30 @@ export class ApprovalBroker {
     return this.pending.has(requestId);
   }
 
+  /** Resolve pending approvals the provider policy allows at the raised level. */
+  approvePendingForAutonomy(level: AutonomyLevel): void {
+    for (const pending of this.pending.values()) {
+      if (pending.item.kind !== "approval_request" || !pending.review?.canAutoApprove?.(level))
+        continue;
+      pending.resolve(
+        { kind: "approval", decision: "allow_once", decidedBy: "policy" },
+        "Auto-resolved by autonomy change.",
+      );
+    }
+  }
+
   /** Cancel every pending request (interrupt, close). */
   cancelAll(): void {
     for (const pending of [...this.pending.values()]) pending.resolve({ kind: "cancel" });
   }
 }
 
-function completed(item: Request, response: RuntimeResponse, declined: boolean): Request {
+function completed(
+  item: Request,
+  response: RuntimeResponse,
+  declined: boolean,
+  decisionReason?: string,
+): Request {
   if (item.kind === "approval_request") {
     if (response.kind === "approval") {
       return {
@@ -122,6 +149,7 @@ function completed(item: Request, response: RuntimeResponse, declined: boolean):
         status: response.decision === "deny" ? "declined" : "completed",
         decision: response.decision,
         decidedBy: response.decidedBy ?? "user",
+        ...(decisionReason ? { decisionReason } : {}),
       };
     }
     return { ...item, status: "cancelled" };

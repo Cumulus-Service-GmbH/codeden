@@ -19,7 +19,7 @@ import { applyTeamRole } from "../../../services/factory/team-role";
 import {
   assertAutonomy,
   resolveAutonomy,
-  stricter,
+  sessionAutonomyFloor,
 } from "../../../services/sessions/autonomy-policy";
 import { defineTool, type ToolAvailabilityContext, ToolError } from "../../define";
 import { currentTurn } from "../../transcript";
@@ -287,17 +287,7 @@ export const setSessionAutonomy = defineTool({
     if (ENDED.has(session.status) || session.archivedAt) {
       throw new ToolError("The agent session has ended.");
     }
-    const { settings, factory, sessionRepo } = ctx.services;
-    const currentFloor = resolveAutonomy(
-      teamRoleOfTitle(session.title ?? undefined),
-      session.purpose,
-      settings.get().autonomy.pmPolicy,
-      factory.data.loop(ctx.projectId)?.tuning.autonomyPolicy,
-    );
-    assertAutonomy(
-      autonomy,
-      stricter(currentFloor, sessionRepo.find(session.id)?.startMeta?.autonomyFloor),
-    );
+    assertAutonomy(autonomy, sessionAutonomyFloor(ctx.services, session));
     const updated = await ctx.services.sessions.update(
       session.id,
       { autonomy },

@@ -5,6 +5,8 @@ import { levelAllows } from "./policy";
 
 export interface ApprovalContext {
   broker: ApprovalBroker;
+  /** Exact verified reads approved for the lifetime of this provider session. */
+  sessionReadApprovals?: Set<string>;
   risk: RiskContext;
   /**
    * The session's current permission level. Under Auto and Full, requests the level allows are

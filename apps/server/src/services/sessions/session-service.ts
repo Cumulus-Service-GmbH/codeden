@@ -801,6 +801,13 @@ export class SessionService {
       });
     // The orchestrator closes the request in the same transaction as its audit record.
     if (options.closeInbox === false) return;
+    // Codex may apply a stale session approval once. Its completion event has the effective decision.
+    if (
+      session.provider === "codex" &&
+      req.response.kind === "approval" &&
+      req.response.decision === "allow_session"
+    )
+      return;
     const resolution: JsonValue =
       req.response.kind === "approval"
         ? { decision: req.response.decision, decidedBy: req.response.decidedBy ?? "user" }
