@@ -153,5 +153,5 @@ test('redo: a host snapshot uses only the reviewer roles it carries', () => {
   assert.equal(resolved.roles.codeReviewer.primary.provider, 'claude');
   assert.deepEqual(resolved.roles.codeReviewer.fallback.claude, []);
   assert.match(team.reviewerProblem(resolved, { writer: 'claude', slot: 'primary',
-    reviewer: resolved.roles.codeReviewer.primary }), /same-vendor review/);
+    reviewer: resolved.roles.codeReviewer.primary }), /^REVIEWER_SAME_VENDOR:/);
 });
