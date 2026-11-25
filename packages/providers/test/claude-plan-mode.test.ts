@@ -9,6 +9,7 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentEvent, RunnerCommand, SessionOptions } from "@codeden/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { type RunnerCore, ServerConnection } from "../../../apps/runner/src/connection";
 import { openDatabase } from "../../../apps/server/src/db/client";
 import { EventStore } from "../../../apps/server/src/events/store";
 import { sessionRoutes } from "../../../apps/server/src/routes/sessions";
@@ -23,6 +24,7 @@ import {
   planLevelChanges,
   sessionsKeepingLevel,
 } from "../../../apps/web/src/lib/project-permissions";
+import { ProviderSessionError } from "../src/adapter";
 import { KEEP_PLANNING } from "../src/claude/plan-review";
 import { ClaudeSession } from "../src/claude/session";
 
@@ -34,12 +36,14 @@ import { ClaudeSession } from "../src/claude/session";
 function stubSdk() {
   const launches: Options[] = [];
   const modes: PermissionMode[] = [];
+  const prompts: AsyncIterable<unknown>[] = [];
   const beforeMode = vi.fn(async (_mode: PermissionMode) => {});
   const refuse = new Set<PermissionMode>();
   let deliver: (message: unknown) => void = () => {};
   let exit = () => {};
-  const query = ((params: { options: Options }) => {
+  const query = ((params: { options: Options; prompt: AsyncIterable<unknown> }) => {
     launches.push(params.options);
+    prompts.push(params.prompt);
     const inbox: unknown[] = [];
     let wake = () => {};
     let ended = false;
@@ -76,6 +80,7 @@ function stubSdk() {
     query,
     launches,
     modes,
+    prompts,
     beforeMode,
     refuse,
     deliver: (m: unknown) => deliver(m),
@@ -607,6 +612,129 @@ describe("Claude plan mode", () => {
     await session.send({ text: "Continue", attachments: [] });
     expect(sdk.launches[1]).toMatchObject({ resume: "prior", permissionMode: "default" });
     await vi.waitFor(() => expect(sdk.modes).toEqual(["default", "default", "default"]));
+  });
+
+  it.each(["steer", "send", "compact"] as const)(
+    "blocks Supervised %s until the plan exit's revision is confirmed",
+    async (action) => {
+      const sdk = stubSdk();
+      const { session, events, permission, items } = open(sdk, { autonomy: "supervised" });
+      const input = { text: "Continue", attachments: [] };
+      await session.send(input);
+      const approval = permission("ExitPlanMode", { plan: "A synthetic plan" }, "exit");
+      await vi.waitFor(() => expect(items("approval_request")).toHaveLength(1));
+      await session.respond("r-exit", { kind: "approval", decision: "allow_once" });
+      await expect(approval).resolves.toMatchObject({ behavior: "allow" });
+      if (action !== "steer") {
+        vi.useFakeTimers();
+        try {
+          await session.interrupt();
+          await vi.runOnlyPendingTimersAsync();
+        } finally {
+          vi.useRealTimers();
+        }
+        expect(events.some((event) => event.type === "turn.interrupted")).toBe(true);
+      }
+
+      expect(sdk.modes).toEqual(["plan"]);
+      const submit = () => (action === "compact" ? session.compact() : session[action](input));
+      await expect(submit()).rejects.toMatchObject({ code: "config_unconfirmed" });
+
+      const write = Promise.withResolvers<void>();
+      sdk.beforeMode.mockImplementationOnce(() => write.promise);
+      sdk.deliver(toolResult("exit"));
+      await vi.waitFor(() => expect(sdk.beforeMode).toHaveBeenCalledWith("default"));
+      const settled = vi.fn();
+      const pending = submit().then(settled, settled);
+      try {
+        await new Promise<void>((done) => setImmediate(done));
+        expect(settled).not.toHaveBeenCalled();
+      } finally {
+        write.resolve();
+        await pending;
+      }
+      expect(settled).toHaveBeenCalledExactlyOnceWith(undefined);
+      expect(sdk.modes).toEqual(["plan", "default"]);
+    },
+  );
+
+  it.each([
+    { endTurn: true, providerCode: "no_turn", wireCode: "no_turn" },
+    { endTurn: false, providerCode: "config_unconfirmed", wireCode: "command_failed" },
+  ])("rejects waiting Supervised steer with $providerCode", async (test) => {
+    const sdk = stubSdk();
+    const { session, events } = open(sdk, { autonomy: "supervised", planMode: false });
+    await session.send({ text: "initial", attachments: [] });
+    const prompts = sdk.prompts[0]?.[Symbol.asyncIterator]();
+    if (!prompts) throw new Error("Missing SDK prompt stream");
+    expect(await prompts.next()).toMatchObject({ done: false });
+
+    const entered = Promise.withResolvers<void>();
+    const write = Promise.withResolvers<void>();
+    sdk.beforeMode.mockImplementationOnce(() => {
+      entered.resolve();
+      return write.promise;
+    });
+    const configured = session.setAutonomy("supervised").catch((error: unknown) => error);
+    await entered.promise;
+
+    const errors: unknown[] = [];
+    const frames: unknown[] = [];
+    const host = {
+      steer: async (command: Extract<RunnerCommand, { name: "session.steer" }>) => {
+        try {
+          await session.steer(command.input);
+          return {};
+        } catch (error) {
+          errors.push(error);
+          throw error;
+        }
+      },
+    };
+    const ws = { readyState: 1, send: (frame: string) => frames.push(JSON.parse(frame)) };
+    const connection = new ServerConnection(
+      ws as unknown as ConstructorParameters<typeof ServerConnection>[0],
+      { host } as unknown as RunnerCore,
+      () => {},
+    );
+    const steering = connection.handle({
+      type: "command",
+      id: "steer",
+      command: {
+        name: "session.steer",
+        sessionId: "s1",
+        input: { text: "priority", attachments: [] },
+      },
+    });
+    try {
+      await new Promise<void>((done) => setImmediate(done));
+      expect(frames).toEqual([]);
+      if (test.endTurn) {
+        sdk.deliver({ type: "result", subtype: "success" });
+        await vi.waitFor(() =>
+          expect(events.some((event) => event.type === "turn.completed")).toBe(true),
+        );
+      }
+    } finally {
+      if (test.endTurn) write.resolve();
+      else write.reject(new Error("Synthetic mode refusal"));
+      await configured;
+      await steering;
+    }
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(ProviderSessionError);
+    expect(errors[0]).toMatchObject({ code: test.providerCode });
+    await session.close();
+    expect(await prompts.next()).toMatchObject({ done: true });
+    expect(frames).toEqual([
+      {
+        type: "result",
+        id: "steer",
+        ok: false,
+        error: expect.objectContaining({ code: test.wireCode }),
+      },
+    ]);
   });
 
   it("declining keeps it planning, with the user's feedback", async () => {

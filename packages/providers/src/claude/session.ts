@@ -117,9 +117,12 @@ export class ClaudeSession implements ProviderSession {
   private readonly broker: ApprovalBroker;
   private readonly policy: ClaudePolicy;
   private q: Query | undefined;
+  private startupMode?: Promise<void>;
+  private queryDisposal?: Promise<void>;
   private modeUpdate = Promise.resolve();
   private pendingModeUpdates = 0;
   private modeRevision = 0;
+  private confirmedModeRevision?: number;
   private correctingMode = false;
   private appliedMode: PermissionMode | undefined;
   private settingMode: PermissionMode | undefined;
@@ -195,6 +198,11 @@ export class ClaudeSession implements ProviderSession {
     return this.mapper.resumeToken ?? this.opts.resumeToken;
   }
 
+  /** A Supervised start is ready only after the query acknowledges its native mode. */
+  async confirmStartup(): Promise<void> {
+    await this.withConfirmedPermissionMode();
+  }
+
   /**
    * A subagent's streamed messages don't carry their calls' final output counts; its
    * transcript does. Read it once the run finished and let the card take the final figures.
@@ -256,10 +264,14 @@ export class ClaudeSession implements ProviderSession {
       throw new ProviderSessionError("turn_running", "A turn is already running");
     const message = toSdkUserMessage(input);
     const prompts = this.ensureQuery();
-    this.steered.clear();
-    const turnId = this.mapper.beginTurn();
-    this.emitUserMessage(turnId, input);
-    prompts.push(message);
+    await this.withConfirmedPermissionMode(() => {
+      if (this.mapper.turnId)
+        throw new ProviderSessionError("turn_running", "A turn is already running");
+      this.steered.clear();
+      const turnId = this.mapper.beginTurn();
+      this.emitUserMessage(turnId, input);
+      prompts.push(message);
+    });
   }
 
   /**
@@ -272,21 +284,30 @@ export class ClaudeSession implements ProviderSession {
     if (this.mapper.turnId)
       throw new ProviderSessionError("turn_running", "A turn is already running");
     const prompts = this.ensureQuery();
-    this.steered.clear();
-    this.mapper.beginCompaction();
-    prompts.push(toSdkUserMessage({ text: COMPACT_COMMAND, attachments: [] }));
+    await this.withConfirmedPermissionMode(() => {
+      if (this.mapper.turnId)
+        throw new ProviderSessionError("turn_running", "A turn is already running");
+      this.steered.clear();
+      this.mapper.beginCompaction();
+      prompts.push(toSdkUserMessage({ text: COMPACT_COMMAND, attachments: [] }));
+    });
   }
 
   /** Queue input into the running turn; the CLI folds it in at the next tool boundary. */
   async steer(input: UserInput): Promise<void> {
     const turnId = this.mapper.turnId;
-    if (!turnId || !this.prompts) throw new ProviderSessionError("no_turn", "No turn is running");
+    const prompts = this.prompts;
+    if (!turnId || !prompts) throw new ProviderSessionError("no_turn", "No turn is running");
     const message = toSdkUserMessage(input);
-    // A uuid lets a Stop cancel it while it still waits in the CLI's queue.
-    const uuid = randomUUID();
-    this.steered.add(uuid);
-    this.emitUserMessage(turnId, input);
-    this.prompts.push({ ...message, uuid });
+    await this.withConfirmedPermissionMode(() => {
+      if (this.mapper.turnId !== turnId)
+        throw new ProviderSessionError("no_turn", "No turn is running");
+      // A uuid lets a Stop cancel it while it still waits in the CLI's queue.
+      const uuid = randomUUID();
+      this.steered.add(uuid);
+      this.emitUserMessage(turnId, input);
+      prompts.push({ ...message, uuid });
+    });
   }
 
   /**
@@ -330,18 +351,89 @@ export class ClaudeSession implements ProviderSession {
     this.mcpStatus.stop();
     this.broker.cancelAll();
     this.mapper.closeAll();
-    this.prompts?.close();
-    try {
-      if (this.q?.[Symbol.asyncDispose]) await this.q[Symbol.asyncDispose]();
-      else this.q?.close();
-    } catch {
-      this.abort?.abort();
-    }
+    await this.disposeQuery();
     this.mcpConfig.remove();
     this.events.close();
   }
 
   // ---------------------------------------------------------------- internals
+
+  private clearQuery(): void {
+    this.markedHookAsks.clear();
+    this.prompts?.close();
+    this.q = undefined;
+    this.startupMode = undefined;
+    this.planExit = undefined;
+    this.prompts = undefined;
+  }
+
+  private disposeQuery(): Promise<void> {
+    if (this.queryDisposal) return this.queryDisposal;
+    const { q, abort } = this;
+    if (!q) return Promise.resolve();
+    this.clearQuery();
+    this.queryDisposal = (async () => {
+      try {
+        if (q[Symbol.asyncDispose]) await q[Symbol.asyncDispose]();
+        else q.close();
+      } catch {
+        abort?.abort();
+      }
+    })().finally(() => {
+      this.queryDisposal = undefined;
+    });
+    return this.queryDisposal;
+  }
+
+  private async confirmQueryStartup(q: Query): Promise<void> {
+    try {
+      await this.applyPermissionMode();
+    } catch (error) {
+      if (this.q === q && !this.closed) {
+        this.warnPermissionMode(
+          "claude_permission_mode_update_failed",
+          "Claude refused to apply the session's startup permission mode.",
+        );
+        await this.disposeQuery();
+      }
+      throw error;
+    } finally {
+      if (this.q === q) this.startupMode = undefined;
+    }
+  }
+
+  /** Check the latest native write and perform the input operation in the same continuation. */
+  private async withConfirmedPermissionMode(action?: () => void): Promise<void> {
+    if (this.autonomy === "supervised" || this.startupMode) {
+      const { q, modeRevision, startupMode } = this;
+      const current = () => !this.closed && this.q === q && this.modeRevision === modeRevision;
+      let update: Promise<void> | undefined;
+      try {
+        if (startupMode) await startupMode;
+        while (current()) {
+          update = this.modeUpdate;
+          await update;
+          if (this.modeUpdate === update) break;
+        }
+      } catch {
+        update = undefined;
+      }
+      if (this.closed) throw new ProviderSessionError("closed", "Session is closed");
+      if (
+        !q ||
+        !current() ||
+        update !== this.modeUpdate ||
+        (this.autonomy === "supervised" &&
+          (this.planExit || this.confirmedModeRevision !== modeRevision))
+      ) {
+        throw new ProviderSessionError(
+          "config_unconfirmed",
+          "Claude has not confirmed its permission mode",
+        );
+      }
+    }
+    action?.();
+  }
 
   /**
    * Put the CLI in the permission mode for the current level and plan state. Without a running
@@ -356,14 +448,18 @@ export class ClaudeSession implements ProviderSession {
     // Serialize writes to this query, and read current state when each write is dispatched.
     const active = () => this.q === q && !this.closed;
     this.pendingModeUpdates++;
-    const update = this.modeUpdate.then(async () => {
+    const previous = this.modeUpdate.catch(() => {});
+    const update = previous.then(async () => {
       if (!active()) return;
       const revision = this.modeRevision;
       const mode = permissionModeFor(this.autonomy, this.planMode);
       const setMode = async (target: PermissionMode) => {
         this.settingMode = target;
         await q.setPermissionMode(target);
-        if (active()) this.appliedMode = target;
+        if (active()) {
+          this.appliedMode = target;
+          this.confirmedModeRevision = revision;
+        }
       };
       try {
         await setMode(mode);
@@ -378,7 +474,7 @@ export class ClaudeSession implements ProviderSession {
         if (active()) this.settingMode = undefined;
       }
     });
-    this.modeUpdate = update.catch(() => {});
+    this.modeUpdate = update;
     try {
       await update;
     } finally {
@@ -499,6 +595,8 @@ export class ClaudeSession implements ProviderSession {
   }
 
   private ensureQuery(): AsyncQueue<SDKUserMessage> {
+    if (this.queryDisposal)
+      throw new ProviderSessionError("config_unconfirmed", "Claude's previous query is closing");
     if (this.q && this.prompts) return this.prompts;
     const prompts = new AsyncQueue<SDKUserMessage>();
     const abort = new AbortController();
@@ -542,7 +640,9 @@ export class ClaudeSession implements ProviderSession {
       throw error;
     }
     this.q = q;
+    this.startupMode = undefined;
     this.modeUpdate = Promise.resolve();
+    this.confirmedModeRevision = undefined;
     this.pendingModeUpdates = 0;
     this.correctingMode = false;
     this.appliedMode = permissionModeFor(this.autonomy, this.planMode);
@@ -551,7 +651,10 @@ export class ClaudeSession implements ProviderSession {
     this.prompts = prompts;
     this.abort = abort;
     void this.pump(q);
-    if (this.autonomy === "supervised") void this.applyPermissionModeInBackground();
+    if (this.autonomy === "supervised") {
+      this.startupMode = this.confirmQueryStartup(q);
+      void this.startupMode.catch(() => {});
+    }
     // The composer's `/` menu lists what Claude Code would run (built-in commands included).
     q.supportedCommands().then(
       (commands) => this.mapper.reportCommands(commands),
@@ -580,6 +683,7 @@ export class ClaudeSession implements ProviderSession {
     let failure: unknown;
     try {
       for await (const message of q) {
+        if (this.q !== q) return;
         this.mapper.handle(message);
         this.afterMessage(message);
         const type = str(message, "type");
@@ -606,14 +710,9 @@ export class ClaudeSession implements ProviderSession {
       }
     } catch (error) {
       failure = error;
-    } finally {
-      if (this.q === q) {
-        this.markedHookAsks.clear();
-        this.q = undefined;
-        this.planExit = undefined;
-        this.prompts = undefined;
-      }
     }
+    if (this.q !== q) return;
+    this.clearQuery();
     if (this.closed) return;
     this.broker.cancelAll();
     if (this.mapper.turnId) {

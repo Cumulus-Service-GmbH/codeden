@@ -223,6 +223,56 @@ it("keeps a waiting priority message queued when the runner disconnects", async 
   expect(texts()).toEqual(["priority"]);
 });
 
+it.each([true, false])(
+  "queues a late steer once when the turn end arrived before the refusal: %s",
+  async (endedBeforeRefusal) => {
+    const { sessions, sent, request, endTurn } = providerLike({ turnRunning: true, steer: true });
+    repo.update("s1", (session) => ({ ...session, status: "running" }));
+    const entered = Promise.withResolvers<void>();
+    const refusal = Promise.withResolvers<never>();
+    request.mockImplementationOnce(() => {
+      entered.resolve();
+      return refusal.promise;
+    });
+
+    const result = sessions.send("s1", { input: input("priority"), whenBusy: "steer" });
+    await entered.promise;
+    if (endedBeforeRefusal) await endTurn();
+    refusal.reject(new RunnerCommandError("no_turn", "No turn is running"));
+    await expect(result).resolves.toEqual({ status: "queued" });
+    expect(texts()).toEqual(["priority"]);
+    expect(store.listTypes(["message.queued"])).toHaveLength(1);
+    await settle();
+    if (!endedBeforeRefusal) {
+      expect(sent).toEqual([]);
+      await endTurn();
+    }
+    expect(sent).toEqual(["priority"]);
+    expect(texts()).toEqual([]);
+    expect(request.mock.calls.map(([command]) => command.name)).toEqual([
+      "session.steer",
+      "session.send",
+    ]);
+  },
+);
+
+it.each(["config_unconfirmed", "command_failed"])(
+  "rejects %s without queueing or delivering priority input",
+  async (code) => {
+    const { sessions, sent, request, endTurn } = providerLike({ turnRunning: true, steer: true });
+    repo.update("s1", (session) => ({ ...session, status: "running" }));
+    request.mockRejectedValueOnce(new RunnerCommandError(code, "Synthetic steer refusal"));
+    await expect(
+      sessions.send("s1", { input: input("priority"), whenBusy: "steer" }),
+    ).rejects.toMatchObject({ code });
+    await endTurn();
+    await settle();
+    expect(store.listTypes(["message.queued"])).toEqual([]);
+    expect(sent).toEqual([]);
+    expect(request.mock.calls.map(([command]) => command.name)).toEqual(["session.steer"]);
+  },
+);
+
 describe("deliveries racing a running turn (#96)", () => {
   it("queues the second of two deliveries racing an idle session, and delivers both in order", async () => {
     const { sessions, launcher, sent, endTurn } = providerLike();

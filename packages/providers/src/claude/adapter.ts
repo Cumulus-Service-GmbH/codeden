@@ -172,7 +172,7 @@ export class ClaudeAdapter implements ProviderAdapter {
     const executable = this.executable();
     if (!executable) throw new Error("Claude Code is not installed (no `claude` on PATH)");
     const { query, getSubagentMessages } = await (this.options.loadSdk ?? loadClaudeSdk)();
-    return new ClaudeSession(await withFork(this, opts), {
+    const session = new ClaudeSession(await withFork(this, opts), {
       executable,
       query,
       ...(getSubagentMessages ? { getSubagentMessages } : {}),
@@ -183,6 +183,13 @@ export class ClaudeAdapter implements ProviderAdapter {
         this.catalog.set(toModelInfos(models));
       },
     });
+    try {
+      await session.confirmStartup();
+      return session;
+    } catch (error) {
+      await session.close();
+      throw error;
+    }
   }
 
   /**

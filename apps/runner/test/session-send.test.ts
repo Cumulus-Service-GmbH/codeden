@@ -2,6 +2,7 @@ import { tmpdir } from "node:os";
 import type { SessionOptions } from "@codeden/contracts";
 import { FakeProvider, ProviderRegistry } from "@codeden/providers";
 import { afterEach, describe, expect, it } from "vitest";
+import { type RunnerCore, ServerConnection } from "../src/connection";
 import { CommandError } from "../src/errors";
 import { SessionHost } from "../src/session-host";
 
@@ -45,3 +46,40 @@ describe("session.send", () => {
     expect(refused).toMatchObject({ code: "turn_running", message: "A turn is already running" });
   });
 });
+
+it.each([new Error("Synthetic failure"), { code: "no_turn", message: "Untrusted failure shape" }])(
+  "keeps an untyped steer failure as command_failed",
+  async (failure) => {
+    const frames: unknown[] = [];
+    const ws = { readyState: 1, send: (frame: string) => frames.push(JSON.parse(frame)) };
+    const core = {
+      host: {
+        steer: async () => {
+          throw failure;
+        },
+      },
+    };
+    const connection = new ServerConnection(
+      ws as unknown as ConstructorParameters<typeof ServerConnection>[0],
+      core as unknown as RunnerCore,
+      () => {},
+    );
+    await connection.handle({
+      type: "command",
+      id: "steer",
+      command: {
+        name: "session.steer",
+        sessionId: "s1",
+        input: { text: "priority", attachments: [] },
+      },
+    });
+    expect(frames).toEqual([
+      {
+        type: "result",
+        id: "steer",
+        ok: false,
+        error: expect.objectContaining({ code: "command_failed" }),
+      },
+    ]);
+  },
+);

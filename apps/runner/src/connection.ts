@@ -7,6 +7,7 @@ import {
   type ServerToRunnerMessage,
   ServerToRunnerMessage as ServerToRunnerSchema,
 } from "@codeden/contracts";
+import { ProviderSessionError } from "@codeden/providers";
 import type { WSContext, WSEvents } from "hono/ws";
 import { WebSocket } from "ws";
 import { executeCommand, type RunnerCore } from "./commands";
@@ -128,7 +129,16 @@ export class ServerConnection implements McpLinkChannel {
           const result = await executeCommand(this.core, msg.command);
           this.send({ type: "result", id: msg.id, ok: true, result });
         } catch (error) {
-          const code = error instanceof CommandError ? error.code : "command_failed";
+          let code = "command_failed";
+          if (error instanceof CommandError) {
+            code = error.code;
+          } else if (
+            msg.command.name === "session.steer" &&
+            error instanceof ProviderSessionError &&
+            error.code === "no_turn"
+          ) {
+            code = error.code;
+          }
           const message = error instanceof Error ? error.message : String(error);
           this.send({ type: "result", id: msg.id, ok: false, error: { code, message } });
         }
