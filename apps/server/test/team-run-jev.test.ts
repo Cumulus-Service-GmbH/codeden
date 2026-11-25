@@ -1,5 +1,15 @@
 import { createHash } from "node:crypto";
-import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { expect, it, vi } from "vitest";
@@ -13,6 +23,13 @@ it.each(["sibling.mjs", "nested/sibling.mjs", "node_modules/pkg/index.mjs"])(
     const sibling = join(dir, name);
     try {
       await mkdir(dirname(sibling), { recursive: true, mode: 0o700 });
+      if (name.startsWith("node_modules/")) {
+        await symlink(
+          await realpath(dirname(sibling)),
+          join(dir, "node_modules", "alias"),
+          "junction",
+        );
+      }
       await mkdir(join(dir, ".git"));
       await chmod(join(dir, ".git"), 0o777);
       await writeFile(join(dir, ".git", "ignored.json"), "{}");
@@ -30,6 +47,21 @@ it.each(["sibling.mjs", "nested/sibling.mjs", "node_modules/pkg/index.mjs"])(
     }
   },
 );
+
+it("rejects package links that leave the pinned helper installation", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "team-jev-pin-"));
+  try {
+    const script = join(dir, "jev.mjs");
+    await writeFile(script, "export const version = 1;\n", { mode: 0o600 });
+    await mkdir(join(dir, "node_modules"));
+    const resolve = pinTeamJevHelper(script);
+    expect(resolve()).toEqual(expect.stringContaining("jev.mjs"));
+    await symlink(tmpdir(), join(dir, "node_modules", "alias"), "junction");
+    expect(resolve()).toBeNull();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 it.each([
   [0, "proceed", "pass"],

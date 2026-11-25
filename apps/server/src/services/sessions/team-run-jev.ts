@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
-import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
+import { lstatSync, readdirSync, readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { readFile, unlink, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { TeamWorkerJev } from "@codeden/contracts";
 import type { Exec } from "../exec";
 import { jevToolEnv } from "../review-jev";
@@ -33,26 +33,51 @@ export function pinTeamJevHelper(configuredPath: string): () => string | null {
     const hash = createHash("sha256");
     let entries = 0;
     let sources = 0;
+    let packageSources = 0;
     let total = 0;
+    const packageTarget = (path: string) => {
+      const target = relative(directory, path);
+      const parts = target.split(sep);
+      if (
+        isAbsolute(target) ||
+        !parts.includes("node_modules") ||
+        parts.some((p) => p === ".." || p === ".git")
+      ) {
+        throw new Error("Helper link target is outside the pinned packages");
+      }
+      return target;
+    };
+    const addFile = (file: string, name: string, inPackage: boolean) => {
+      if (inPackage ? ++packageSources > 4096 : ++sources > 256) {
+        throw new Error("Too many helper sources");
+      }
+      const stat = secureSource(file);
+      total += stat.size;
+      if (!stat.isFile() || total > 32 * 1024 * 1024) throw new Error("Unexpected helper source");
+      hash.update(name).update("\0").update(readFileSync(file)).update("\0");
+    };
     const visit = (dir: string, prefix: string) => {
       for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
         a.name.localeCompare(b.name),
       )) {
         if (entry.name === ".git") continue;
-        if (++entries > 4096) throw new Error("Helper installation is too large");
-        if (entry.isSymbolicLink()) throw new Error("Unexpected helper symlink");
+        if (++entries > 8192) throw new Error("Helper installation is too large");
         const file = join(dir, entry.name);
         const name = `${prefix}${entry.name}`;
-        if (entry.isDirectory()) {
+        const inPackage = prefix.split("/").includes("node_modules");
+        if (entry.isSymbolicLink()) {
+          if (!inPackage) throw new Error("Unexpected helper symlink");
+          packageTarget(resolve(dir, readlinkSync(file)));
+          const resolved = realpathSync(file);
+          const target = packageTarget(resolved);
+          hash.update(name).update("\0link\0").update(target).update("\0");
+          // Physical directories are visited once. File aliases can target extensionless executables.
+          if (!secureSource(resolved).isDirectory()) addFile(resolved, name, true);
+        } else if (entry.isDirectory()) {
           if (!secureSource(file).isDirectory()) throw new Error("Unexpected helper directory");
           visit(file, `${name}/`);
-        } else if (/\.(?:[cm]?js|json)$/.test(entry.name)) {
-          if (++sources > 256) throw new Error("Too many helper sources");
-          const stat = secureSource(file);
-          total += stat.size;
-          if (!stat.isFile() || total > 8 * 1024 * 1024)
-            throw new Error("Unexpected helper source");
-          hash.update(name).update("\0").update(readFileSync(file)).update("\0");
+        } else if (inPackage || /\.(?:[cm]?js|json)$/.test(entry.name)) {
+          addFile(file, name, inPackage);
         }
       }
     };
