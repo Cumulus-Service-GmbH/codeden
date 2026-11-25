@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import {
   type ConflictRecord,
+  type EventOf,
   type InboxItem,
   isActiveSession,
   messageFrom,
@@ -376,7 +377,7 @@ export class OrchestrationService {
   /** Record a notice (other services: GitHub checks, automations); wakes its target when asked. */
   notify(draft: NoticeDraft, wake = true): Notice | undefined {
     const created = this.notices.create({ ...draft, wake });
-    if (created && wake) this.wakes.request(wakeKey(created.target, created.projectId));
+    if (created && wake && created.type !== "card.decided") this.requestNoticeWake(created);
     return created;
   }
 
@@ -425,6 +426,11 @@ export class OrchestrationService {
 
   private onEvents(events: RawEventEnvelope[]): void {
     this.asks.onEvents(events);
+    for (const event of events) {
+      if (event.type !== "notice.created") continue;
+      const { notice } = event.payload as EventOf<"notice.created">["payload"];
+      if (notice.type === "card.decided" && notice.wake) this.requestNoticeWake(notice);
+    }
     const relevant = events.some(
       (e) =>
         e.type === "agent.turn.completed" ||
@@ -461,15 +467,33 @@ export class OrchestrationService {
     });
   }
 
+  private requestNoticeWake(notice: Notice): void {
+    if (notice.target === "session") {
+      if (notice.sessionId) this.wakes.request(`session:${notice.sessionId}`);
+    } else {
+      this.wakes.request(wakeKey(notice.target, notice.projectId));
+    }
+  }
+
   /** Deliver pending notices to their target with one wake (called by the scheduler). */
   private async fire(key: string): Promise<WakeResult> {
-    const role: OrchestrationRole = key === "orchestrator" ? "orchestrator" : "pm";
-    const projectId = role === "pm" ? key.slice(3) : null;
-    if (this.notices.undelivered(role, projectId).length === 0) return "empty";
-    // An archived project's sessions take no input (§13): its PM isn't woken, or started.
-    if (inArchivedProject(this.deps.projects, { projectId })) return "empty";
-    const ensured = await this.roles.ensure(role, projectId);
-    const session = this.roles.find(role, projectId) ?? ensured;
+    let session: Session;
+    if (key.startsWith("session:")) {
+      const id = key.slice("session:".length);
+      const recipient = this.deps.repo.find(id)?.session;
+      if (!recipient || recipient.archivedAt || inArchivedProject(this.deps.projects, recipient)) {
+        return "empty";
+      }
+      if (!this.notices.forSession(id).some((notice) => notice.wake)) return "empty";
+      session = recipient;
+    } else {
+      const role: OrchestrationRole = key === "orchestrator" ? "orchestrator" : "pm";
+      const projectId = role === "pm" ? key.slice(3) : null;
+      if (this.notices.undelivered(role, projectId).length === 0) return "empty";
+      if (inArchivedProject(this.deps.projects, { projectId })) return "empty";
+      const ensured = await this.roles.ensure(role, projectId);
+      session = this.roles.find(role, projectId) ?? ensured;
+    }
     if (isActiveSession(session)) return "busy";
     try {
       await this.deps.sessions.send(

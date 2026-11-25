@@ -75,6 +75,35 @@ describe("orchestration contracts (§8)", () => {
     expect(() => Notice.parse({ ...notice, type: "session.failed" })).toThrow();
   });
 
+  it("round-trips a card decision notice", () => {
+    const decided = {
+      ...notice,
+      type: "card.decided",
+      data: {
+        cardId: "c1",
+        kind: "merge_verify",
+        decision: "approve",
+        decidedAt: ts,
+        target: {
+          kind: "merge_verify",
+          repository: "org/repo",
+          pullNumber: 10,
+          headSha: "a".repeat(40),
+        },
+      },
+    };
+    const batch = { notices: [decided] };
+    expect(NoticeBatchData.parse(JSON.parse(JSON.stringify(batch)))).toEqual(batch);
+    const event = {
+      seq: 1,
+      sessionId: null,
+      ts,
+      type: "notice.created",
+      payload: { notice: decided },
+    };
+    expect(EventEnvelope.parse(event)).toEqual(event);
+  });
+
   it("round-trips a scheduled wake-up (§8.2)", () => {
     const reminder: Notice = {
       id: "reminder:1",

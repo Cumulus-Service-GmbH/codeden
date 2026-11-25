@@ -8,6 +8,7 @@ import {
   specHeld,
 } from "@codeden/contracts";
 import { conflict, errorMessage, notFound } from "../errors";
+import { cardDecided } from "../orchestration/card-decisions";
 import { type FactoryContext, raiseInbox } from "./context";
 import { implementStep } from "./prompts";
 import { specRevisionStep } from "./prompts-spec";
@@ -161,26 +162,51 @@ export async function decideSpec(
   }
   const at = ctx.now().toISOString();
   const decided = { ...spec, decidedAt: at, by: "user" as const, sentAt: null };
+  // The factory scheduler owns the continuation. Its next builder turn carries this notice.
+  const extra = item.builderSessionId
+    ? [
+        cardDecided(
+          {
+            cardId: specInboxId(item.id),
+            kind: "spec_approval",
+            decision: req.decision === "approve" ? "approve" : "deny",
+            decidedAt: at,
+            target: { itemId, version: spec.requestedAt },
+          },
+          { role: "agent", projectId, id: item.builderSessionId },
+          { wake: false, version: spec.requestedAt },
+        ),
+      ]
+    : [];
+
   if (req.decision === "approve") {
-    const updated = ctx.store.updateItem(item.id, (i) => ({
-      ...i,
-      specApproval: { ...decided, state: "approved" },
-      note: "Spec approved: the builder implements it next",
-    }));
+    const updated = ctx.store.updateItem(
+      item.id,
+      (i) => ({
+        ...i,
+        specApproval: { ...decided, state: "approved" },
+        note: "Spec approved: the builder implements it next",
+      }),
+      { extra },
+    );
     closeSpecInbox(ctx, item.id, "Spec approved");
     await comment(ctx, item, "**CodeDen software factory**: spec approved.\n\nNext: Implement.");
     return updated;
   }
-  const updated = ctx.store.updateItem(item.id, (i) => ({
-    ...i,
-    specApproval: {
-      ...decided,
-      state: "changes_requested",
-      feedback: req.feedback,
-      rounds: spec.rounds + 1,
-    },
-    note: "Changes requested to the spec: the builder revises it",
-  }));
+  const updated = ctx.store.updateItem(
+    item.id,
+    (i) => ({
+      ...i,
+      specApproval: {
+        ...decided,
+        state: "changes_requested",
+        feedback: req.feedback,
+        rounds: spec.rounds + 1,
+      },
+      note: "Changes requested to the spec: the builder revises it",
+    }),
+    { extra },
+  );
   closeSpecInbox(ctx, item.id, "Changes requested");
   const quoted = req.feedback
     .split("\n")

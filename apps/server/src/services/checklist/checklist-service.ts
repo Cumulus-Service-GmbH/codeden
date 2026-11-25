@@ -18,6 +18,7 @@ import { projectChecklists, projects, sessions, turns } from "../../db/schema";
 import type { EventStore } from "../../events/store";
 import { badRequest, conflict, forbidden, notFound } from "../errors";
 import { closedItem, InboxService } from "../inbox-service";
+import { cardDecided } from "../orchestration/card-decisions";
 
 type ItemMetadata = {
   note?: string;
@@ -440,7 +441,19 @@ export class ChecklistService {
       }
     }
     const closed = closedItem(card, status, null, updatedAt);
-    this.save(next, [this.cardEvent("inbox.updated", closed)]);
+    this.save(next, [
+      this.cardEvent("inbox.updated", closed),
+      cardDecided(
+        {
+          cardId: card.id,
+          kind: "checklist_approval",
+          decision: status === "resolved" ? "approve" : "deny",
+          decidedAt: updatedAt,
+          target: { projectId: next.projectId },
+        },
+        { role: "pm", projectId: next.projectId, id: null },
+      ),
+    ]);
     if (pending.startPurpose) {
       this.notifyPm?.(
         next.projectId,

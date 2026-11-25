@@ -273,6 +273,8 @@ export function renderNotices(list: Notice[], projectName?: (id: string) => stri
 
 function noticeDetail(n: Notice): string {
   switch (n.type) {
+    case "card.decided":
+      return ` · card ${n.data.cardId} · ${n.data.kind} · ${n.data.decision} at ${n.data.decidedAt} · ${quote(JSON.stringify(n.data.target), Number.POSITIVE_INFINITY)}`;
     case "session.finished":
       return ` · ${n.data.workKey} · session ${short(n.data.sessionId)}${n.data.summary ? ` · "${clipKeepingEnd(n.data.summary)}"` : ""}`;
     case "session.needs_input":

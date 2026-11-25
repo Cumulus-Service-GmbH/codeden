@@ -1,8 +1,10 @@
 import { z } from "zod";
 import { GitHubIssueRef, GitHubPrRef, Id, JsonValue, Timestamp } from "./common";
+import { GitHubApprovalTarget } from "./decision-rights";
 import { InboxItemKind, InboxItemStatus } from "./entities/inbox";
 import { AutonomyMode, FactoryLoopState } from "./factory";
 import { FactoryHalt, FactoryLoopControl, FactoryRunState } from "./factory-control";
+import { ApprovalAction } from "./items";
 import { ConflictDecision, ScheduledRun, StartedBy, WorkKey, WorkSummary } from "./work";
 
 /**
@@ -17,6 +19,7 @@ export type NoticeTarget = z.infer<typeof NoticeTarget>;
 
 /** Kinds of notices (§8.2 step 4). */
 export const NoticeType = z.enum([
+  "card.decided",
   "session.finished",
   "session.needs_input",
   "session.failed",
@@ -66,8 +69,33 @@ const workRef = {
   startedBy: StartedBy,
 };
 
+/** An approval outcome with enough information to identify its exact target. */
+export const CardDecision = z
+  .discriminatedUnion("kind", [
+    z.object({ kind: z.literal("merge_verify"), target: GitHubApprovalTarget.options[0] }),
+    z.object({ kind: z.literal("environment_release"), target: GitHubApprovalTarget.options[1] }),
+    z.object({ kind: z.literal("plan"), target: z.object({ actions: z.array(Id) }) }),
+    z.object({
+      kind: z.enum(["guard", "approval"]),
+      target: z.object({ action: ApprovalAction, requestId: Id }),
+    }),
+    z.object({ kind: z.literal("checklist_approval"), target: z.object({ projectId: Id }) }),
+    z.object({
+      kind: z.literal("spec_approval"),
+      target: z.object({ itemId: Id, version: Timestamp }),
+    }),
+  ])
+  .and(z.object({ cardId: Id, decision: z.enum(["approve", "deny"]), decidedAt: Timestamp }));
+export type CardDecision = z.infer<typeof CardDecision>;
+
 /** A typed notice. `data` is specific to `type`. */
 export const Notice = z.discriminatedUnion("type", [
+  z.object({
+    ...noticeBase,
+    type: z.literal("card.decided"),
+    target: z.enum(["pm", "orchestrator", "session"]),
+    data: CardDecision,
+  }),
   z.object({
     ...noticeBase,
     type: z.literal("session.finished"),

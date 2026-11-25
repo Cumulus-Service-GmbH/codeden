@@ -58,6 +58,7 @@ export function httpGithubApi(http: Fetcher): GithubApi {
   const project = (id: string) => `/projects/${enc(id)}/github`;
   return {
     decisionCards: () => get("/inbox/decision-cards", (v) => DecisionCard.array().parse(v)),
+    denyDecisionCard: (id) => post(`/inbox/decision-cards/${enc(id)}/deny`, {}, () => {}),
     approveDecisionCard: (id, input = {}) =>
       post(`/inbox/decision-cards/${enc(id)}/approve`, input, () => {}),
     connection: () => get("/github/connection", (v) => GithubConnection.parse(v)),

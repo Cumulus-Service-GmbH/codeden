@@ -18,8 +18,8 @@ import { Id, Timestamp } from "./common";
 import {
   DecisionCard,
   DecisionConfirmation,
+  DecisionDenial,
   GitHubCommentResult,
-  OrchestratorDecisionDenial,
   PlanApprovalStep,
 } from "./decision-rights";
 import { Artifact } from "./entities/artifact";
@@ -182,7 +182,7 @@ export const EventEnvelope = z.discriminatedUnion("type", [
   // GitHub sync (§9); `sessionId` is the PR's linked session when there is one.
   globalEvent("decision.raised", DecisionCard),
   globalEvent("decision.confirmed", DecisionConfirmation),
-  globalEvent("decision.denied", OrchestratorDecisionDenial),
+  globalEvent("decision.denied", DecisionDenial),
   globalEvent("approval.decided_by_orchestrator", OrchestratorApprovalDecision),
   globalEvent("decision.step_consumed", z.object({ id: Id, step: PlanApprovalStep })),
   /** The outcome of a handler after its approved step was consumed. */

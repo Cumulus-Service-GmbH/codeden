@@ -441,7 +441,7 @@ export class FactoryStore {
   updateItem(
     id: string,
     change: (item: FactoryItem) => FactoryItem,
-    opts: { touch?: boolean } = {},
+    opts: { touch?: boolean; extra?: NewEvent[] } = {},
   ): FactoryItem {
     const current = this.item(id);
     if (!current) throw new Error(`No factory item ${id}`);
@@ -456,6 +456,7 @@ export class FactoryStore {
     const next = opts.touch === false ? stepped : { ...stepped, updatedAt: now };
     this.events.append([
       { type: "factory.item.updated", sessionId: null, payload: { item: next } },
+      ...(opts.extra ?? []),
     ]);
     this.reads.remember(next);
     return next;

@@ -17,8 +17,10 @@ function DecisionCardRow({ card }: { card: DecisionCard }) {
   const canApprove =
     !mergeVerify || (!!ownerWords.trim() && OwnerApprovalWords.safeParse(ownerWords).success);
   const approval = useMutation({
-    mutationFn: () =>
-      client.github.approveDecisionCard(card.id, mergeVerify ? { ownerWords } : undefined),
+    mutationFn: (decision: "approve" | "deny") =>
+      decision === "deny"
+        ? client.github.denyDecisionCard(card.id)
+        : client.github.approveDecisionCard(card.id, mergeVerify ? { ownerWords } : undefined),
     onSuccess: () => queries.invalidateQueries({ queryKey: decisionCardsKey }),
   });
   const { data: snapshot } = useSnapshot();
@@ -88,9 +90,18 @@ function DecisionCardRow({ card }: { card: DecisionCard }) {
       <Button
         size="sm"
         disabled={approval.isPending || !canApprove}
-        onClick={() => approval.mutate()}
+        onClick={() => approval.mutate("approve")}
       >
-        {approval.isPending ? "Recording approval…" : "Approve"}
+        {approval.isPending && approval.variables === "approve" ? "Recording approval…" : "Approve"}
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        className="ml-2"
+        disabled={approval.isPending}
+        onClick={() => approval.mutate("deny")}
+      >
+        {approval.isPending && approval.variables === "deny" ? "Recording denial…" : "Deny"}
       </Button>
     </article>
   );

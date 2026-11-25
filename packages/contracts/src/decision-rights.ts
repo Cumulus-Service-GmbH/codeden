@@ -103,8 +103,11 @@ export const DecisionConfirmation = DecisionConfirmationInput.extend({
   ]),
 });
 
-/** A PM plan card declined by the orchestrator. */
-export const OrchestratorDecisionDenial = z.strictObject({
+/** An approval declined by the owner or an eligible orchestrator. */
+export const DecisionDenial = z.strictObject({
   id: Id,
-  by: z.strictObject({ role: z.literal("orchestrator"), sessionId: Id }),
+  by: z.discriminatedUnion("role", [
+    z.strictObject({ role: z.literal("owner") }),
+    z.strictObject({ role: z.literal("orchestrator"), sessionId: Id }),
+  ]),
 });

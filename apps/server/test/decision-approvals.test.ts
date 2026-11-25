@@ -485,6 +485,10 @@ it.each([true, false])("records the consumed step's result when ok is %s", async
   expect((await registry.call(step.action, step.args, caller, plan)).isError).toBe(true);
   expect(handler).toHaveBeenCalledTimes(1);
   expect(store.listAfter(0).slice(2)).toMatchObject([
+    {
+      type: "notice.created",
+      payload: { notice: { type: "card.decided", data: { cardId: card.id } } },
+    },
     { type: "decision.step_consumed", payload: { id: card.id, step } },
     {
       type: "decision.step_result",

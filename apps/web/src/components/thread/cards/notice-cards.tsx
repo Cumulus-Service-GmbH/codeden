@@ -37,6 +37,7 @@ export function noticeBatchOf(item: ItemOf<"notice">): Notice[] | null {
 }
 
 const look: Record<NoticeType, { icon: LucideIcon; tone: string; label: string }> = {
+  "card.decided": { icon: CheckCircle2, tone: "text-primary", label: "Approval decision" },
   "session.finished": { icon: CheckCircle2, tone: "text-status-done", label: "Finished" },
   "session.needs_input": {
     icon: MessageCircleQuestion,

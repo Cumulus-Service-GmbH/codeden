@@ -264,12 +264,34 @@ export class NoticeStore {
    * scheduled wake-up counts once it is due.
    */
   undelivered(target: NoticeTarget, projectId: string | null): Notice[] {
+    return this.pending(target, projectId);
+  }
+
+  forSession(sessionId: string): Notice[] {
+    return this.pending("session", null, sessionId);
+  }
+
+  pendingSessions(): string[] {
+    return this.db
+      .selectDistinct({ id: notices.sessionId })
+      .from(notices)
+      .where(and(eq(notices.target, "session"), isNull(notices.deliveredAt)))
+      .all()
+      .flatMap(({ id }) => (id && this.forSession(id).some((notice) => notice.wake) ? [id] : []));
+  }
+
+  private pending(
+    target: Notice["target"],
+    projectId: string | null,
+    sessionId?: string,
+  ): Notice[] {
     return this.db
       .select()
       .from(notices)
       .where(
         and(
           eq(notices.target, target),
+          sessionId === undefined ? undefined : eq(notices.sessionId, sessionId),
           isNull(notices.deliveredAt),
           projectId === null ? undefined : eq(notices.projectId, projectId),
           or(isNull(notices.notBefore), lte(notices.notBefore, new Date().toISOString())),

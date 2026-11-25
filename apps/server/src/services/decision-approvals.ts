@@ -18,6 +18,7 @@ import { z } from "zod";
 import type { ProjectionReader } from "../events/reducer/types";
 import type { EventStore } from "../events/store";
 import { badRequest, errorMessage, ServiceError } from "./errors";
+import { decisionCardNotice } from "./orchestration/card-decisions";
 import { checkPlanStep } from "./plan-approval";
 
 interface Actor {
@@ -208,6 +209,7 @@ export class DecisionApprovals {
           sessionId: null,
           payload: { id, by, ...(ownerWords === undefined ? {} : { ownerWords }) },
         },
+        decisionCardNotice(card, "approve"),
         ...(record?.(reader) ?? []),
       ];
     });
@@ -230,25 +232,20 @@ export class DecisionApprovals {
     return refuse("This card requires the owner or its eligible second key");
   }
 
-  deny(id: string, actor: Actor, record: (reader: ProjectionReader) => NewEvent[]): void {
-    const { sessionId } = actor;
+  deny(id: string, actor: Actor, record?: (reader: ProjectionReader) => NewEvent[]): void {
     this.store.appendFrom((reader) => {
       const current = this.cards().get(id);
-      if (
-        !current ||
-        current.confirmed ||
-        !sessionId ||
-        !canOrchestratorDecide(current.card, actor)
-      ) {
-        refuse("An open PM plan card is required");
-      }
+      if (!current || current.confirmed) refuse("Approval card is unavailable or already used");
+      const by =
+        actor.role === "owner"
+          ? { role: "owner" as const }
+          : actor.sessionId && canOrchestratorDecide(current.card, actor)
+            ? { role: "orchestrator" as const, sessionId: actor.sessionId }
+            : refuse("An open PM plan card is required");
       return [
-        {
-          type: "decision.denied",
-          sessionId: null,
-          payload: { id, by: { role: "orchestrator", sessionId } },
-        },
-        ...record(reader),
+        { type: "decision.denied", sessionId: null, payload: { id, by } },
+        decisionCardNotice(current.card, "deny"),
+        ...(record?.(reader) ?? []),
       ];
     });
   }

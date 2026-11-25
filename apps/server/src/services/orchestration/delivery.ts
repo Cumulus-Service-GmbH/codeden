@@ -43,7 +43,11 @@ export function wakesTarget(n: Notice): boolean {
 }
 
 const keyOf = (session: Session) =>
-  session.role === "pm" ? `pm:${session.projectId}` : "orchestrator";
+  session.role === "agent"
+    ? `session:${session.id}`
+    : session.role === "pm"
+      ? `pm:${session.projectId}`
+      : "orchestrator";
 
 /**
  * Getting notices to the orchestrator and the PMs (§8.2) reliably:
@@ -64,15 +68,18 @@ export class NoticeDelivery {
 
   /** Prepend the status digest and the undelivered notices to a role session's input (§8.4). */
   decorate(session: Session, input: UserInput): DecoratedInput {
-    if (session.role === "agent") return { input };
     try {
-      const parts = [this.deps.digestFor(session)];
-      const pending = this.deps.notices
-        .undelivered(
-          session.role === "pm" ? "pm" : "orchestrator",
-          session.role === "pm" ? session.projectId : null,
-        )
-        .filter((n) => !this.claimed.has(n.id));
+      const agent = session.role === "agent";
+      const pending = (
+        session.role === "agent"
+          ? this.deps.notices.forSession(session.id)
+          : this.deps.notices.undelivered(
+              session.role,
+              session.role === "pm" ? session.projectId : null,
+            )
+      ).filter((n) => !this.claimed.has(n.id));
+      if (agent && pending.length === 0) return { input };
+      const parts = agent ? [] : [this.deps.digestFor(session)];
       parts.push(...(pending.length > 0 ? [renderNotices(pending, this.deps.projectName)] : []));
       parts.push(input.text);
       const ids = pending.map((n) => n.id);
@@ -100,6 +107,9 @@ export class NoticeDelivery {
 
   /** Wake every target whose wake-worthy notices are still undelivered (server start). */
   rearm(): void {
+    for (const id of this.deps.notices.pendingSessions()) {
+      this.deps.wakes.request(`session:${id}`);
+    }
     if (this.deps.notices.undelivered("orchestrator", null).some(wakesTarget)) {
       this.deps.wakes.request("orchestrator");
     }
@@ -115,7 +125,7 @@ export class NoticeDelivery {
     for (const e of events) {
       if (e.type !== "agent.turn.completed" && e.type !== "agent.turn.failed") continue;
       const session = e.sessionId ? this.deps.session(e.sessionId) : undefined;
-      if (!session || session.role === "agent") continue;
+      if (!session) continue;
       const event = e.payload as AgentEventOf<"turn.completed">;
       if (session.rootThreadId && session.rootThreadId !== event.threadId) continue;
       if (e.type === "agent.turn.completed") {
@@ -135,6 +145,8 @@ export class NoticeDelivery {
     const carried = this.carried(session.id, turnId);
     if (carried.length === 0) return;
     this.deps.notices.markReturned(carried);
+    if (session.role === "agent" && !this.deps.notices.forSession(session.id).some(wakesTarget))
+      return;
     const attempt = (this.failures.get(session.id) ?? 0) + 1;
     this.failures.set(session.id, attempt);
     const delays = this.deps.retryDelaysMs ?? [30_000, 2 * 60_000, 10 * 60_000];

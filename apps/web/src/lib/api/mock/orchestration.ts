@@ -225,6 +225,7 @@ export function mockOrchestration(world: MockWorld, deps: Deps): OrchestrationPa
     },
     github: {
       decisionCards: () => delay([]),
+      denyDecisionCard: () => delay(undefined),
       approveDecisionCard: () => delay(undefined),
       connection: () => delay(connection),
       issues: (projectId) =>

@@ -48,6 +48,10 @@ export function inboxRoutes(s: AppServices) {
       );
       return c.json({ approved: true });
     })
+    .post("/decision-cards/:id/deny", (c) => {
+      s.decisions.deny(c.req.param("id"), { role: "owner", projectId: null, sessionId: null });
+      return c.json({ denied: true });
+    })
     .post("/dismiss", jsonBody(DismissInboxRequest), (c) => {
       const { ids, filter, note } = c.req.valid("json");
       const scope = ids ? { ids } : { filter: filter ?? {} };

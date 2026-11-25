@@ -18,6 +18,7 @@ import {
   githubRepoChanged,
   resetGithubProjection,
 } from "../services/github/projection";
+import { runtimeCardNotice } from "../services/orchestration/card-decisions";
 import { applyOrchestrationProjection } from "../services/orchestration/projection";
 import { indexUnfinishedItems } from "../services/search/index-writer";
 import { applyUsageReport } from "../services/usage/ledger";
@@ -120,7 +121,7 @@ export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
         .from(projectChecklists)
         .where(item.projectId ? eq(projectChecklists.projectId, item.projectId) : undefined)
         .all();
-      return checklists.flatMap(({ checklist }) => {
+      const derived: NewEvent[] = checklists.flatMap(({ checklist }) => {
         const updatedAt = item.updatedAt;
         const items = checklist.items.map((entry) =>
           entry.needsOwner?.inboxItemId === item.id
@@ -136,6 +137,9 @@ export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
           },
         ];
       });
+      const decision = runtimeCardNotice(item, new DbProjectionReader(tx));
+      if (decision) derived.push(decision);
+      return derived;
     }
     case "automation.saved": {
       const row = automationToRow(e.payload.automation);
