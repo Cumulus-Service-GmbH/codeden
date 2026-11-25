@@ -495,7 +495,10 @@ export class SessionHost {
       event.type === "turn.interrupted"
     ) {
       if (hosted.state !== "closing") hosted.state = "idle";
-      if (hosted.rootTurnId === event.turnId) hosted.rootTurnId = undefined;
+      if (hosted.rootTurnId === event.turnId) {
+        hosted.rootTurnId = undefined;
+        hosted.activeTools.clear();
+      }
       if (hosted.compactTurnId === event.turnId) hosted.compactTurnId = undefined;
       if (hosted.checkpoints) this.checkpoint(sessionId, hosted, event.turnId);
     }

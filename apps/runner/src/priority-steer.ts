@@ -42,6 +42,10 @@ export class ActiveTools {
     }
   }
 
+  clear(): void {
+    this.tools.clear();
+  }
+
   shell(): Call | undefined {
     return [...this.tools.values()].find((tool) => tool.shell)?.call;
   }

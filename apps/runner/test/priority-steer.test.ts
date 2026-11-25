@@ -1,6 +1,6 @@
 import { tmpdir } from "node:os";
 import type { AgentEvent, ToolCallItem } from "@codeden/contracts";
-import { FakeProvider, ProviderRegistry } from "@codeden/providers";
+import { AsyncQueue, FakeProvider, ProviderRegistry } from "@codeden/providers";
 import { afterEach, expect, it, vi } from "vitest";
 import { ActiveTools, canInterruptShell } from "../src/priority-steer";
 import { SessionHost } from "../src/session-host";
@@ -42,7 +42,77 @@ it("never interrupts an edit, git or install command", () => {
     const active = new ActiveTools();
     active.track({ type: "item.started", threadId: call.threadId, turnId: call.turnId, item });
     expect(active.canInterrupt(call)).toBe(false);
+    if (item.toolKind === "command") expect(active.shell()).toEqual(call);
+    const wait = { ...item, toolKind: "command" as const, command: "sleep 600" };
+    active.track({
+      type: "item.started",
+      threadId: call.threadId,
+      turnId: call.turnId,
+      item: wait,
+    });
+    expect(active.canInterrupt(call)).toBe(true);
   }
+});
+
+it("drops unfinished child tools when their root turn ends", async () => {
+  vi.useFakeTimers({ toFake: ["setImmediate"] });
+  const fake = new FakeProvider();
+  const stream = new AsyncQueue<AgentEvent>();
+  const steer = vi.fn().mockResolvedValue(undefined);
+  vi.spyOn(fake, "openSession").mockImplementation(async (options) => {
+    const session = await new FakeProvider().openSession(options);
+    return Object.assign(session, { events: stream, steer, close: async () => stream.close() });
+  });
+  host = new SessionHost(new ProviderRegistry([fake]), () => {});
+  const starting = host.start({
+    name: "session.start",
+    sessionId: "s",
+    providerId: "fake",
+    checkpoints: false,
+    options: {
+      sessionId: "s",
+      role: "agent",
+      cwd: tmpdir(),
+      autonomy: "auto",
+      mcpServers: [],
+      additionalDirectories: [],
+      planMode: false,
+    },
+  });
+  await vi.runAllTimersAsync();
+  await starting;
+
+  stream.push({ type: "thread.started", thread: { id: "root" } });
+  stream.push({ type: "turn.started", threadId: "root", turnId: "first" });
+  stream.push({
+    type: "item.started",
+    threadId: "child",
+    turnId: "child-turn",
+    item: {
+      id: "tool",
+      kind: "tool_call",
+      toolKind: "command",
+      toolName: "shell",
+      command: "sleep 600",
+      status: "in_progress",
+    },
+  });
+  const cmd = {
+    name: "session.steer" as const,
+    sessionId: "s",
+    waitForShell: true as const,
+    input: { text: "priority", attachments: [] },
+  };
+  await vi.runAllTimersAsync();
+  const before = host.steer(cmd);
+  await expect(before).resolves.toMatchObject({ waitingFor: { itemId: "tool" } });
+
+  stream.push({ type: "turn.interrupted", threadId: "root", turnId: "first", reason: "provider" });
+  stream.push({ type: "turn.started", threadId: "root", turnId: "second" });
+  await vi.runAllTimersAsync();
+  const after = host.steer(cmd);
+  await expect(after).resolves.toEqual({});
+  expect(steer).toHaveBeenCalledOnce();
 });
 
 it.each([true, false])(
