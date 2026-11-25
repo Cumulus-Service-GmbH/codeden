@@ -1,6 +1,6 @@
 import { createServer } from "node:net";
 import { expect, it } from "vitest";
-import { tryTestSlot } from "./test-slots.mjs";
+import { tryTestSlot, waitForTestSlot } from "./test-slots.mjs";
 
 it("admits two suites, excludes a third, and reuses a released slot", async () => {
   const firstPort = await tryTestSlot([0]);
@@ -26,3 +26,15 @@ it("admits two suites, excludes a third, and reuses a released slot", async () =
 function close(server) {
   return new Promise((resolve) => server.close(resolve));
 }
+
+it("reports an unavailable slot after the wait budget expires", async () => {
+  const held = await tryTestSlot([0]);
+  const port = held.address().port;
+  try {
+    await expect(waitForTestSlot({ ports: [port], timeoutMs: 0 })).rejects.toThrow(
+      /Timed out waiting for.*test slot/,
+    );
+  } finally {
+    await close(held);
+  }
+});
