@@ -1,0 +1,148 @@
+{
+  "test": {
+    "apps": [
+      {
+        "name": "api"
+      },
+      {
+        "name": "app-dev"
+      },
+      {
+        "name": "mobile-api-test",
+        "source": "~/Projects/WebChatMobile/.trioharness/deploy.json targets.mobile-api-test.app",
+        "subscription": "537f1b8d-655c-4e06-87dd-c6c88eac894e",
+        "resourceGroup": "rg-erpure-mobile"
+      }
+    ],
+    "resourceGroups": [
+      {
+        "name": "rg-dev"
+      }
+    ]
+  },
+  "prd": {
+    "resources": [
+      {
+        "name": "kv-configured-test"
+      }
+    ],
+    "apps": [
+      {
+        "name": "mobile-api-prod",
+        "subscription": "537f1b8d-655c-4e06-87dd-c6c88eac894e",
+        "resourceGroup": "rg-erpure-mobile"
+      }
+    ],
+    "grantPrincipals": [
+      {
+        "principalId": "d63529e0-761c-441b-8c71-a01560b42d99",
+        "role": "Reader",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-reportattachments-prd/providers/Microsoft.Storage/storageAccounts/erpurereportattachprd"
+      },
+      {
+        "principalId": "d63529e0-761c-441b-8c71-a01560b42d99",
+        "role": "Storage Blob Data Contributor",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-reportattachments-prd/providers/Microsoft.Storage/storageAccounts/erpurereportattachprd/blobServices/default/containers/mobile-prd-content"
+      },
+      {
+        "principalId": "d63529e0-761c-441b-8c71-a01560b42d99",
+        "role": "Storage Blob Data Contributor",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-reportattachments-prd/providers/Microsoft.Storage/storageAccounts/erpurereportattachprd/blobServices/default/containers/mobile-prd-manifests"
+      },
+      {
+        "principalId": "d63529e0-761c-441b-8c71-a01560b42d99",
+        "role": "Storage Blob Data Contributor",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-reportattachments-prd/providers/Microsoft.Storage/storageAccounts/erpurereportattachprd/blobServices/default/containers/mobile-prd-coordination"
+      },
+      {
+        "principalId": "d63529e0-761c-441b-8c71-a01560b42d99",
+        "role": "ERPURE PRD Attachment Version Deleter",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-reportattachments-prd/providers/Microsoft.Storage/storageAccounts/erpurereportattachprd/blobServices/default/containers/mobile-prd-content"
+      },
+      {
+        "principalId": "d63529e0-761c-441b-8c71-a01560b42d99",
+        "role": "ERPURE PRD Attachment Version Deleter",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-reportattachments-prd/providers/Microsoft.Storage/storageAccounts/erpurereportattachprd/blobServices/default/containers/mobile-prd-manifests"
+      },
+      {
+        "principalId": "d63529e0-761c-441b-8c71-a01560b42d99",
+        "role": "ERPURE PRD Attachment Tags Reader",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-reportattachments-prd/providers/Microsoft.Storage/storageAccounts/erpurereportattachprd/blobServices/default/containers/mobile-prd-content"
+      },
+      {
+        "principalId": "d63529e0-761c-441b-8c71-a01560b42d99",
+        "role": "Reader",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-mobile/providers/Microsoft.App/containerApps/mobile-api-prod"
+      },
+      {
+        "principalId": "261cd9ca-d99b-4380-a5e1-d2d62c2a3862",
+        "role": "Key Vault Secrets User",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/ERPUREAI/providers/Microsoft.KeyVault/vaults/kv-a3632d43-3b45-1211-f8/secrets/report-issue-qa-app-pem"
+      },
+      {
+        "principalId": "261cd9ca-d99b-4380-a5e1-d2d62c2a3862",
+        "role": "Key Vault Secrets User",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/ERPUREAI/providers/Microsoft.KeyVault/vaults/kv-a3632d43-3b45-1211-f8/secrets/report-issue-qa-identity-v1"
+      },
+      {
+        "principalId": "d63529e0-761c-441b-8c71-a01560b42d99",
+        "role": "Key Vault Secrets User",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-mobile/providers/Microsoft.KeyVault/vaults/kv-erpure-mobile-test/secrets/erpureai-a3-report-owner-ro-qa-password"
+      },
+      {
+        "principalId": "d63529e0-761c-441b-8c71-a01560b42d99",
+        "role": "Key Vault Secrets User",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-mobile/providers/Microsoft.KeyVault/vaults/kv-erpure-mobile-test/secrets/migration-authority-prod"
+      },
+      {
+        "principalId": "d63529e0-761c-441b-8c71-a01560b42d99",
+        "role": "Key Vault Secrets User",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-mobile/providers/Microsoft.KeyVault/vaults/kv-erpure-mobile-test/secrets/report-attachment-evidence-pin-prod"
+      },
+      {
+        "principalId": "d63529e0-761c-441b-8c71-a01560b42d99",
+        "role": "Storage Blob Data Reader",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-reportattachments-prd/providers/Microsoft.Storage/storageAccounts/erpurereportattachprd/blobServices/default/containers/mobile-prd-evidence"
+      }
+    ],
+    "allowedCreates": [
+      "az storage container create --account-name erpurereportattachprd -n mobile-prd-content --public-access off --auth-mode login -o none",
+      "az storage container create --account-name erpurereportattachprd -n mobile-prd-manifests --public-access off --auth-mode login -o none",
+      "az storage container create --account-name erpurereportattachprd -n mobile-prd-coordination --public-access off --auth-mode login -o none",
+      "az storage container create --account-name erpurereportattachprd -n mobile-prd-evidence --public-access off --auth-mode login -o none",
+      "az identity create -n id-erpure-mobile-evidence-prod -g rg-erpure-mobile -l eastus -o none",
+      "az keyvault secret set --vault-name kv-erpure-mobile-test -n report-attachment-evidence-pin-prod --value '{}' --disabled true -o none",
+      "az containerapp job create -n job-erpure-mobile-evidence-prod -g rg-erpure-mobile --environment cae-erpure-mobile-test --trigger-type Schedule --cron-expression \"*/3 * * * *\" --workload-profile-name Consumption --cpu 0.25 --memory 0.5Gi --replica-timeout 150 --replica-retry-limit 0 --mi-user-assigned /subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-mobile/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-erpure-mobile-evidence-prod --registry-server crerpuremobiletest.azurecr.io --registry-identity /subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-mobile/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-erpure-mobile-evidence-prod --image crerpuremobiletest.azurecr.io/<repo>@sha256:<digest> --args evidence-publish -o none"
+    ],
+    "evidencePublisherGrants": [
+      {
+        "role": "AcrPull",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-mobile/providers/Microsoft.ContainerRegistry/registries/crerpuremobiletest"
+      },
+      {
+        "role": "Reader",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-mobile/providers/Microsoft.App/containerApps/mobile-api-prod"
+      },
+      {
+        "role": "Reader",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-reportattachments-prd/providers/Microsoft.Storage/storageAccounts/erpurereportattachprd"
+      },
+      {
+        "role": "Reader",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-mobile/providers/Microsoft.KeyVault/vaults/kv-erpure-mobile-test"
+      },
+      {
+        "role": "Storage Blob Data Contributor",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-reportattachments-prd/providers/Microsoft.Storage/storageAccounts/erpurereportattachprd/blobServices/default/containers/mobile-prd-evidence"
+      },
+      {
+        "role": "ERPURE PRD Attachment Tags Reader",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-reportattachments-prd/providers/Microsoft.Storage/storageAccounts/erpurereportattachprd/blobServices/default/containers/mobile-prd-evidence"
+      },
+      {
+        "role": "Key Vault Secrets Officer",
+        "scope": "/subscriptions/537f1b8d-655c-4e06-87dd-c6c88eac894e/resourceGroups/rg-erpure-mobile/providers/Microsoft.KeyVault/vaults/kv-erpure-mobile-test/secrets/report-attachment-evidence-pin-prod"
+      }
+    ]
+  }
+}
