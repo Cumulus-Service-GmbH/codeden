@@ -1,4 +1,4 @@
-import { closeSync, constants, fstatSync, openSync, readSync, statSync } from "node:fs";
+import { closeSync, constants, fstatSync, openSync, readSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute, resolve } from "node:path";
 
@@ -10,6 +10,10 @@ const JEV_FILE = resolve(homedir(), ".config", "trioharness", "jev.env");
 const JEV_FILE_TEXT = /(?:^|[^\w.-])(?:\.config\/)?trioharness\/jev\.env(?![\w.-])/i;
 const JEV_NATIVE_ACCESS = /\b(?:keyring|getPassword|SecItemCopyMatching|SecKeychainFindGenericPassword)\b/i;
 const JEV_ENTRY = /typesafe\.apiKey/i;
+const JEV_READER_PATH = resolve(homedir(), ".config", "trioharness", "jev-keyring-runtime", "bin", "jev-keychain-reader");
+const realPath = path => {
+  try { return realpathSync(path); } catch { return null; }
+};
 const JEV_READER = /\bjev-keychain-reader\b[\s\S]*?\bread\b/i;
 const JEV_SCRIPTS = new Set([
   ".claude/skills/trioharness-codeden/scripts/jev.mjs",
@@ -290,8 +294,14 @@ export function checkExecution(program, args, isPlainWord, inspect, options = {}
   // With a dynamic cd, inspect only relative paths visible from the hook cwd.
   const scriptCwd = options.cwd === null && !options.scriptContent ? options.hookCwd ?? null : options.cwd;
   const values = args.map(({ value }) => value);
-  if (name === "jev-keychain-reader" && values[0] === "read") return JEV_CREDENTIAL_DENIAL;
   const targets = [...values, ...(options.redirects ?? []).map(redirect => redirect.target?.value ?? "")];
+  const readerPath = realPath(JEV_READER_PATH);
+  const isReader = value => value && (programName(value) === "jev-keychain-reader" ||
+    (readerPath && realPath(resolveScriptPath(scriptCwd ?? "/", value)) === readerPath));
+  if (targets.some(isReader) ||
+      (isReader(program.value) && (values.length !== 1 || values[0] !== "present" || !isPlainWord(args[0].syntax)))) {
+    return JEV_CREDENTIAL_DENIAL;
+  }
   if (targets.some(value => JEV_FILE_TEXT.test(value) ||
       resolveScriptPath(scriptCwd ?? "/", value) === JEV_FILE)) return JEV_CREDENTIAL_DENIAL;
   const evaluator = launcherTarget(name, values);

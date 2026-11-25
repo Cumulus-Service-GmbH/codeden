@@ -1,10 +1,23 @@
 #include <Security/Security.h>
 #include <limits.h>
+#include <mach-o/dyld.h>
 #include <pwd.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
+
+static int installed_reader(const char *home, const char *invocation) {
+    char actual[PATH_MAX], expected[PATH_MAX], actual_real[PATH_MAX], expected_real[PATH_MAX];
+    uint32_t actual_size = sizeof(actual);
+    int size = snprintf(expected, sizeof(expected),
+        "%s/.config/trioharness/jev-keyring-runtime/bin/jev-keychain-reader", home);
+    if (size < 0 || (size_t)size >= sizeof(expected) || strcmp(invocation, expected) != 0 ||
+        _NSGetExecutablePath(actual, &actual_size) != 0) return 0;
+    return realpath(actual, actual_real) && realpath(expected, expected_real) &&
+        strcmp(actual_real, expected_real) == 0;
+}
 
 int main(int argc, char **argv) {
     if (argc != 2) return 3;
@@ -17,7 +30,7 @@ int main(int argc, char **argv) {
 
     const struct passwd *owner = getpwuid(getuid());
     char path[PATH_MAX];
-    if (!owner) return 3;
+    if (!owner || !installed_reader(owner->pw_dir, argv[0])) return 3;
     const int size = snprintf(path, sizeof(path), "%s/Library/Keychains/login.keychain-db", owner->pw_dir);
     if (size < 0 || (size_t)size >= sizeof(path)) return 3;
 

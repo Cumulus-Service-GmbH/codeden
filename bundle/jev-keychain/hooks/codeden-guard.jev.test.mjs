@@ -2,8 +2,8 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { checkCommand, loadAzureTargets } from './codeden-guard.mjs';
 
 const targets = loadAzureTargets(new URL('./fixtures/azure-targets.json', import.meta.url));
@@ -45,3 +45,31 @@ test('Jev credential reads return hard-deny through the Claude and Codex hooks',
     }
   }
 });
+
+test('reader aliases and copies are denied while metadata-only present is allowed',
+  { skip: process.platform === 'win32' && 'requires POSIX symlinks' }, t => {
+    const cwd = mkdtempSync(join(process.cwd(), '.guard-jev-reader-'));
+    t.after(() => rmSync(cwd, { recursive: true, force: true }));
+    const home = join(cwd, 'home');
+    const reader = join(home, '.config/trioharness/jev-keyring-runtime/bin/jev-keychain-reader');
+    mkdirSync(dirname(reader), { recursive: true });
+    writeFileSync(reader, '#!/bin/sh\nexit 3\n', { mode: 0o500 });
+    symlinkSync(reader, join(cwd, 'fixture-alias'));
+
+    const guard = new URL('./codeden-guard.mjs', import.meta.url).href;
+    const azure = new URL('./fixtures/azure-targets.json', import.meta.url).href;
+    const script = `
+      import { checkCommand, loadAzureTargets } from ${JSON.stringify(guard)};
+      const targets = loadAzureTargets(new URL(${JSON.stringify(azure)}));
+      const check = command => checkCommand(command, targets, 0, { cwd: process.cwd() });
+      for (const command of [
+        './fixture-alias read',
+        'cp ./fixture-alias ./fixture-copy',
+        'cat < ./fixture-alias'
+      ]) if (!/Jev credential/i.test(check(command) || '')) process.exit(1);
+      if (check('./fixture-alias present')) process.exit(2);
+    `;
+    const result = spawnSync(process.execPath, ['--input-type=module', '-e', script],
+      { env: { HOME: home, PATH: process.env.PATH }, cwd, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+  });
