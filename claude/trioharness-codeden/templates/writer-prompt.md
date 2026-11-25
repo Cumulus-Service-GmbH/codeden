@@ -19,3 +19,8 @@ STRICT NO-BREAKING-CHANGES: app/repo compatibility proof/owner cards per that re
 Start the result with receipt fields from that reference: SKILLS JSON array (name, version, installed SKILL.md path, sha256); DOCS JSON array (libraryId, servedVersion, url, date, proof); RUN_START; EXTERNAL_APIS; UI_PACKET; FAILURE; DEPRECATIONS. Trivial needs none; lean Writer TDD+verification and external API docs; standard all applicable role skills. Architect runs receipt-check with authoritative --ui/--failure/--external-apis yes|no flags before advancing; claims must match. One receipt correction only, then park.
 
 Result: changed paths you own; RED/GREEN exact commands + verbatim summaries/exit codes; criterion evidence; open findings by id/severity/evidence; limitations. No claims for checks not run. Return only result path + verdict.
+
+
+## Package and config check
+
+Always include this heading in the Writer PR body. List changed packages, lockfiles and configuration, and record the checks you ran. If none changed, state that with the exact diff evidence. This section is required for tech debt 3445ecf0 and prevents the foundry merge verifier from refusing with `NO_PACKAGE_CONFIG_CHECK`.
