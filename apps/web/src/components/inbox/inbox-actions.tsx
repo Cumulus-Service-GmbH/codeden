@@ -56,6 +56,10 @@ export function InboxActions({ item }: { item: InboxItem }) {
     onError: fail,
     onSuccess: () => toast.success("New worktrees run these setup commands from now on"),
   });
+  const approveCuration = useMutation({
+    mutationFn: () => client.resolveInbox(item.id, { status: "resolved" }),
+    onError: fail,
+  });
   const merge = useMutation({
     mutationFn: async () => {
       const prId = prIdOf(item);
@@ -98,7 +102,11 @@ export function InboxActions({ item }: { item: InboxItem }) {
     },
   });
   const busy =
-    dismiss.isPending || merge.isPending || removeAgain.isPending || allowSetup.isPending;
+    dismiss.isPending ||
+    approveCuration.isPending ||
+    merge.isPending ||
+    removeAgain.isPending ||
+    allowSetup.isPending;
   const dismissButton = (
     <Button
       size="sm"
@@ -110,6 +118,19 @@ export function InboxActions({ item }: { item: InboxItem }) {
       Dismiss
     </Button>
   );
+
+  if (item.kind === "curation_review") {
+    return (
+      <>
+        {item.notify === "needs_you" && (
+          <Button size="sm" onClick={() => approveCuration.mutate()} disabled={busy}>
+            Approve diff
+          </Button>
+        )}
+        {dismissButton}
+      </>
+    );
+  }
 
   switch (item.kind) {
     case "pr_review": {

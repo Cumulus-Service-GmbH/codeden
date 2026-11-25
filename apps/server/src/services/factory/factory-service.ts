@@ -1,3 +1,4 @@
+import type { ResolveInboxRequest, ReviewCurationInput } from "@codeden/contracts";
 import {
   DRAIN_PER_PROJECT,
   DRAIN_UNAVAILABLE,
@@ -59,6 +60,7 @@ import { ProviderAvailability, type ProviderRunnable } from "./availability";
 import { SessionArchiver } from "./cleanup";
 import type { FactoryContext } from "./context";
 import { assertCanEnter, stoppedLoop, stopWork } from "./controls";
+import { decideCuration, pendingCuration, reviewCuration } from "./curation";
 import * as decisions from "./decisions";
 import { writeDigest } from "./digest";
 import { advanceDrain, drainInboxId, drainStatus, startDrain } from "./drain";
@@ -289,6 +291,24 @@ export class FactoryService {
    * Run something that changes a project's loop record after the ticks and other changes
    * already queued for it, so two writers never overwrite each other's changes.
    */
+  listCuration(projectId: string) {
+    return pendingCuration(this.ctx, projectId);
+  }
+
+  reviewCuration(projectId: string, input: ReviewCurationInput) {
+    return this.serialize(projectId, "review instruction curation", () =>
+      reviewCuration(this.ctx, projectId, input.id, input.decision, input.reason),
+    );
+  }
+
+  decideCuration(id: string, status: ResolveInboxRequest["status"]) {
+    const projectId = this.ctx.inbox.get(id).projectId;
+    if (!projectId) throw notFound("Curation project is unavailable");
+    return this.serialize(projectId, "decide instruction curation", () =>
+      decideCuration(this.ctx, id, status),
+    );
+  }
+
   private serialize<T>(projectId: string, what: string, run: () => Promise<T> | T): Promise<T> {
     return this.enqueue(this.chains, projectId, what, run);
   }

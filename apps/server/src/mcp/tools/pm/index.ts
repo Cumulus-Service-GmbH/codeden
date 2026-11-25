@@ -1,4 +1,5 @@
-import { StartTeamRun } from "@codeden/contracts";
+import { ReviewCurationInput, StartTeamRun } from "@codeden/contracts";
+import { z } from "zod";
 import { type AnyServerTool, defineTool, ToolError } from "../../define";
 import { projectFor } from "../shared/helpers";
 import { createAutomation, updateAutomation } from "./automation-edit";
@@ -45,7 +46,29 @@ const startTeamRun = defineTool({
  * Project manager tools (§8.3, §8.4). `ask_user` is shared with agents (`../ask-user`) and
  * `get_pr_status` with agents (`../github`).
  */
+const listCuration = defineTool({
+  name: "list_instruction_curation",
+  description: "List this project's pending instruction diffs with their base and lesson evidence.",
+  roles: ["pm"],
+  scope: "project",
+  input: z.object({}),
+  handler: async (_, { services, projectId }) => services.factory.listCuration(projectId),
+});
+
+const reviewCuration = defineTool({
+  name: "review_instruction_curation",
+  description:
+    "Review the exact curation diff for scope, lesson provenance, conflicts and security. Approve only when all four pass. The owner then decides whether to publish a draft PR.",
+  roles: ["pm"],
+  scope: "project",
+  input: ReviewCurationInput,
+  handler: async (input, { services, projectId }) =>
+    services.factory.reviewCuration(projectId, input),
+});
+
 export const pmTools: AnyServerTool[] = [
+  listCuration,
+  reviewCuration,
   getProjectStatus,
   listSessions,
   getSession,

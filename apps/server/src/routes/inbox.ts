@@ -1,4 +1,5 @@
 import {
+  CURATION_CARD_PREFIX,
   DecisionConfirmationInput,
   DismissInboxRequest,
   type InboxCounts,
@@ -60,6 +61,9 @@ export function inboxRoutes(s: AppServices) {
     .post("/:id/resolve", jsonBody(ResolveInboxRequest), async (c) => {
       const body = c.req.valid("json");
       const id = c.req.param("id");
+      if (id.startsWith(CURATION_CARD_PREFIX)) {
+        return c.json(await s.factory.decideCuration(id, body.status));
+      }
       if (id.startsWith(CHECKLIST_CARD_ID_PREFIX)) {
         return c.json(s.checklist.decide(id, body.status));
       }

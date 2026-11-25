@@ -12,7 +12,9 @@ import { errorMessage } from "../errors";
 import { EVIDENCE_HEADING } from "../github/evidence";
 import type { GithubService } from "../github/github-service";
 import { authorAssociation } from "../github/graphql";
+import type { CurationPort } from "./curation";
 import * as commentOps from "./github-port-comments";
+import { githubCuration } from "./github-port-curation";
 import * as prOps from "./github-port-prs";
 import * as revertOps from "./github-port-revert";
 
@@ -102,7 +104,7 @@ export type Commenter = IssueAuthor;
  * What the factory needs from GitHub (§9), as a port so tests can run the loop against a
  * scripted GitHub. `GithubFactoryPort` implements it over `GithubService`.
  */
-export interface FactoryGithub {
+export interface FactoryGithub extends Partial<CurationPort> {
   isGithubProject(projectId: string): boolean;
   /** The login of the account CodeDen uses on GitHub (always trusted); null when unknown. */
   viewerLogin(): Promise<string | null>;
@@ -201,6 +203,14 @@ const LOGIN_TTL_MS = 10 * 60_000;
 
 /** `FactoryGithub` over the real `GithubService` (Octokit, the PR/issue projections). */
 export class GithubFactoryPort implements FactoryGithub {
+  curationSnapshot(projectId: string) {
+    return githubCuration(this.github).curationSnapshot(projectId);
+  }
+
+  publishCuration(...args: Parameters<CurationPort["publishCuration"]>) {
+    return githubCuration(this.github).publishCuration(...args);
+  }
+
   private login: { value: string | null; at: number } | null = null;
   /** `diffKeyAt`'s fingerprints per head commit. */
   private readonly diffKeys = new Map<string, string | null>();

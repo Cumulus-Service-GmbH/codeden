@@ -7,6 +7,7 @@ import {
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
 import { type FactoryContext, factoryNotice, pauseLoop, raiseInbox } from "./context";
+import { proposeCuration } from "./curation";
 import { stoppedSinceNudge } from "./idle";
 import { awaitingStart, awaitingStartNote } from "./late-start";
 import { MERGED_AFTER } from "./merge";
@@ -195,7 +196,18 @@ export async function advanceWatching(
   }
   const age = ctx.now().getTime() - Date.parse(item.mergedAt ?? item.updatedAt);
   const timedOut = age > loop.tuning.watchTimeoutMin * 60_000;
-  if (state === "success") return landed();
+  if (state === "success") {
+    const result = landed();
+    if (item.source !== "revert") {
+      const merged = ctx.store.item(item.id);
+      if (merged) {
+        await proposeCuration(ctx, merged).catch((error: unknown) =>
+          ctx.log?.(`factory: ${item.id}: instruction curation: ${errorMessage(error)}`),
+        );
+      }
+    }
+    return result;
+  }
   // Only a green run ends a regression: a revert waits for one, and the user hears when it doesn't come.
   if (item.source === "revert" && (state === "none" || state === "pending"))
     return awaitRevertCi(ctx, project, loop, item, state, age);

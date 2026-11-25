@@ -816,6 +816,20 @@ A file tree for the worktree, a file viewer and editor (CodeMirror 6), turn and 
 
 ### 12.4 Agent configuration
 
+**One home per fact.**
+
+| Fact | Authoritative home |
+|---|---|
+| Security, permissions and production | Policy or guard config, with a short mandatory agent summary |
+| Provider, model, effort and fallback | In-app Team and resolved session Team |
+| Product direction and protected scope | `.codeden/VISION.md` |
+| Build, proof, risk and conventions | Root or scoped `AGENTS.md`, with design detail in this design |
+| Multi-step operations | Skill entrypoint for triggers and rules, references for procedures |
+| Run status, history and lessons | Issue, spec, ADR or receipt. Memory indexes verified facts. Binding lessons need reviewed replacements. |
+
+**Reviewed instruction curation.** Green factory closeout can propose replacement or removal of existing sections in `.codeden/VISION.md` and `AGENTS.md` using verified review lessons. A PM reviews scope, provenance, conflicts and security before the owner can approve the exact diff. A changed base requires a fresh proposal and both decisions. Approval creates a scoped draft PR and preserves vision path protection.
+
+
 First-class screens for each provider's own files:
 
 - **Memory:**

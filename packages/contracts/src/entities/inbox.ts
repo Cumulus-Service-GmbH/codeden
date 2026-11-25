@@ -24,6 +24,7 @@ export const InboxItemKind = z.enum([
   "spec_approval",
   /** Owner approval or rejection of a checklist proposal. */
   "checklist_approval",
+  "curation_review",
   "owner_decision",
   /**
    * Factory merges set aside for a person's quick look (§10.1, `factory-spot-checks.ts`): one item
@@ -111,6 +112,7 @@ export const INBOX_ANSWER_KINDS: readonly InboxItemKind[] = [
   "approval",
   "spec_approval",
   "checklist_approval",
+  "curation_review",
   "setup_change",
   "conflict",
   "triage",

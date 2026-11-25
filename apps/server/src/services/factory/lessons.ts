@@ -161,3 +161,20 @@ export function forgetLesson(
   if (lesson.removedAt) return lesson;
   return ctx.store.saveLesson({ ...lesson, removedAt: ctx.now().toISOString() });
 }
+
+/** Only still-admitted lessons from this completed run can support a curation edit. */
+export async function curationEvidence(ctx: FactoryContext, item: FactoryItem) {
+  if (
+    item.trust !== "trusted" ||
+    !item.pr ||
+    item.review?.verdict !== "approve" ||
+    !learnsFromReviews(ctx, item.projectId)
+  )
+    return [];
+  const keys = new Set(item.review.lessons?.map(lessonKey));
+  const lessons = lessonsInForce(ctx, item.projectId).filter(
+    (lesson) => lesson.itemId === item.id && keys.has(lesson.key),
+  );
+  if (!lessons.length || (await untrustedCommenters(ctx, item))?.length !== 0) return [];
+  return lessons.map(({ id, text }) => ({ id, text }));
+}
