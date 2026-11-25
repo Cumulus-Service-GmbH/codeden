@@ -15,10 +15,12 @@ import { AgentConfigService } from "./agent-config/agent-config-service";
 import { reportedCommands } from "./agent-config/slash-commands";
 import { ArtifactService } from "./artifacts";
 import { AutomationService, type AutomationServiceDeps } from "./automations/automation-service";
+import { automationFork } from "./automations/policy";
 import { BrowserService } from "./browser/browser-service";
 import { ChecklistListener } from "./checklist/checklist-listener";
 import { ChecklistService } from "./checklist/checklist-service";
 import { DecisionApprovals } from "./decision-approvals";
+import { conflict } from "./errors";
 import { type Exec, runTool } from "./exec";
 import { type FactoryOptions, FactoryService } from "./factory/factory-service";
 import { type FactoryGithub, GithubFactoryPort } from "./factory/github-port";
@@ -360,6 +362,8 @@ export function createServices(opts: ServicesOptions): AppServices {
     utility,
     sandboxes,
     projectChecks: redetector,
+    automationQueuedBlocked: (session) => automations.queuedBlocked(session),
+    automationMessageBlocked: (session, input) => automations.queuedMessageBlocked(session, input),
   });
   const checksLoop = new ChecksLoop({
     db: opts.db,
@@ -410,6 +414,13 @@ export function createServices(opts: ServicesOptions): AppServices {
     exec,
     secrets: opts.secrets,
     home: opts.paths.home,
+    userHome,
+    forkTriage: {
+      enabled: (project) => automations.forkTriageEnabled(project),
+      opened: (project, issue) => automations.dispatchForkIssue(project, issue),
+    },
+    automationRun: (session) =>
+      automations.deliveryRun(session) ?? automations.pmTriageRun(session)?.id,
     git: gitBroker,
     ...opts.github,
     log: opts.log,
@@ -445,6 +456,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     inbox,
     orchestration: () => services.orchestration,
     github: factoryGithub,
+    forkIssue: (projectId, number) => github.getIssue(projectId, number, true),
     home: opts.paths.home,
     ...opts.automations,
     log: opts.log,
@@ -677,6 +689,18 @@ export function createServices(opts: ServicesOptions): AppServices {
       runners,
       projects,
       git: gitBroker,
+      automationPush: async (session, cwd, runner, request) => {
+        const run = automations.deliveryRun(session);
+        if (!run || !session.projectId) return undefined;
+        const fork = automationFork(projects.get(session.projectId));
+        if ((request.remote && request.remote !== fork.remote) || request.forceWithLease) {
+          throw conflict(
+            "Automations can push only to the configured fork without force.",
+            "automation_fork_required",
+          );
+        }
+        return github.authorizeAutomationPush(session, cwd, runner, run, fork);
+      },
     }),
     tools: undefined as unknown as ToolRegistry,
     workspaceFs: (session) =>

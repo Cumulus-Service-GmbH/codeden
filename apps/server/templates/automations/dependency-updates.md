@@ -7,7 +7,7 @@ trigger:
 action: start_session
 workKey: automation:dependency-updates
 title: Dependency updates
-autonomy: auto
+autonomy: full
 starter: true
 guards:
   overlapPolicy: skip-if-running

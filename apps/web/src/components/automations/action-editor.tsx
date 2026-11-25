@@ -157,7 +157,7 @@ export function ActionKindPicker({
       onChange={switchTo}
       options={[
         { id: "start_session", label: "Start an agent session", icon: <Bot /> },
-        { id: "message_pm", label: "Message the PM", icon: <MessageSquare /> },
+        { id: "message_pm", label: "Notify only", icon: <MessageSquare /> },
         { id: "triage", label: "Triage the issue", icon: <Filter /> },
       ]}
     />

@@ -74,6 +74,8 @@ export type PendingConfig = {
 };
 
 export type StoredStartMeta = SessionStartMeta & {
+  /** Team review ledger id for an audited automation lane. */
+  automationDelivery?: string;
   /** The new Claude agent session was explicitly titled as a Browser Operator. */
   chromeOptIn?: true;
   /** The user selected a Chrome setting when starting this session from the composer. */
@@ -316,6 +318,21 @@ export class SessionRepo {
   /** Public view of the start metadata. */
   publicStartMeta(meta: StoredStartMeta | null): SessionStartMeta | null {
     return meta ? SessionStartMeta.parse(meta) : null;
+  }
+
+  /** Session links tracked outside the origin PR projection still protect their worktrees. */
+  sessionsWithOpenPr(projectId: string): Session[] {
+    return this.db
+      .select()
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.projectId, projectId),
+          sql`json_extract(${sessions.pr}, '$.state') IN ('open', 'draft')`,
+        ),
+      )
+      .all()
+      .map(rowToSession);
   }
 
   list(query: ListSessionsQuery = {}): Session[] {

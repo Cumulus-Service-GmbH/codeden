@@ -84,7 +84,7 @@ export function describeTrigger(t: AutomationTrigger): string {
 
 export const ACTION_LABEL: Record<Automation["action"]["type"], string> = {
   start_session: "Start an agent session",
-  message_pm: "Message the PM",
+  message_pm: "Notify only",
   triage: "Triage the issue",
 };
 

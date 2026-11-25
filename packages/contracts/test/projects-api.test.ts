@@ -5,6 +5,8 @@ import {
   Project,
   ProjectRefreshOutcome,
   RefreshProjectResponse,
+  RunnerCommand,
+  UpdateProjectRequest,
 } from "../src";
 import { sampleProject, ts } from "./fixtures";
 
@@ -33,6 +35,29 @@ const detected = {
 };
 
 describe("project re-detection", () => {
+  it("round-trips a fork push with an immutable source commit", () => {
+    const push = {
+      name: "git.push",
+      cwd: "/workspace",
+      remote: "fork",
+      branch: "codeden/automation",
+      sourceCommit: "a".repeat(40),
+    };
+    expect(roundTrip(RunnerCommand, push)).toEqual(push);
+    expect(RunnerCommand.safeParse({ ...push, sourceCommit: "HEAD" }).success).toBe(false);
+  });
+
+  it("round-trips an optional automation fork remote", () => {
+    const forkRemote = { remote: "fork", owner: "our-fork", repo: "codeden" };
+    const upstream = detected.github;
+    const project = roundTrip(Project, { ...sampleProject, github: { ...upstream, forkRemote } });
+    expect(project.kind === "github" && project.github.forkRemote).toEqual(forkRemote);
+    expect(roundTrip(UpdateProjectRequest, { forkRemote }).forkRemote).toEqual(forkRemote);
+    expect(
+      UpdateProjectRequest.safeParse({ forkRemote: { ...forkRemote, remote: "--all" } }).success,
+    ).toBe(false);
+  });
+
   it("round-trips a project with a remote warning, and one without", () => {
     const warned = roundTrip(Project, {
       ...sampleProject,

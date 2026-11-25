@@ -12,6 +12,7 @@ policy:
   comment: true
   closeRejected: false
   autoStart: false
+  autonomy: full
 guards:
   overlapPolicy: skip-if-running
   maxConcurrent: 5

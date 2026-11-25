@@ -6,6 +6,7 @@ import type {
   TriagePolicy,
 } from "@codeden/contracts";
 import { UNTRUSTED_INPUT } from "../factory/prompts";
+import type { automationFork } from "./policy";
 
 /**
  * The texts of issue triage (§10): the request a triage run sends to the PM, and the brief of
@@ -20,17 +21,24 @@ export function triageRequestText(opts: {
   issue: GithubIssue | GitHubIssueRef;
   policy: TriagePolicy;
   canStart: boolean;
+  fork?: ReturnType<typeof automationFork>;
 }): string {
   const { automation, run, issue, policy } = opts;
   const labels = Object.entries(policy.labels)
     .map(([decision, names]) => `  - ${decision}: ${names.length ? names.join(", ") : "(none)"}`)
     .join("\n");
   return [
+    opts.fork ? `CodeDen triage run: ${run.id}` : "",
     `Issue triage (automation "${automation.name}", run ${run.id}).`,
     `New issue #${issue.number}: ${issue.title ?? ""}`,
     issue.url,
+    opts.fork
+      ? `Only triage this issue in ${opts.fork.owner}/${opts.fork.repo}. Use triage_issue for the decision and comment.`
+      : "",
     "",
-    "1. Read it with get_issue (and list_issues to look for duplicates). Compare it with the project notes, the vision and the work already running.",
+    opts.fork
+      ? "1. Read the fork issue with get_issue. Compare it with the project notes, vision and current work."
+      : "1. Read it with get_issue (and list_issues to look for duplicates). Compare it with the project notes, the vision and the work already running.",
     "2. Classify it as exactly one of: ready (clear, in scope, safe to implement), needs_info (unclear or missing reproduction), unsafe (touches protected areas or needs a human decision), out_of_scope, duplicate.",
     `3. Apply it with triage_issue using these labels:\n${labels}`,
     policy.comment
@@ -54,11 +62,19 @@ export function triageRequestText(opts: {
 }
 
 /** The brief of the agent session that resolves a triaged issue. */
-export function issueSessionPrompt(issue: GitHubIssueRef, summary: string): string {
+export function issueSessionPrompt(
+  issue: GitHubIssueRef,
+  summary: string,
+  fork?: ReturnType<typeof automationFork>,
+  delivery?: string,
+): string {
   const title = issue.title ?? `Issue #${issue.number}`;
   return [
     `Resolve GitHub issue #${issue.number}: ${title}`,
     issue.url,
+    fork
+      ? `Use only ${fork.owner}/${fork.repo} for GitHub. Qualify gh commands with --repo ${fork.owner}/${fork.repo}. Commit changes and obtain a clean Team review for run ${delivery} against refs/remotes/${fork.remote}/${fork.defaultBranch} before create_pull_request. Do not push directly.`
+      : "",
     summary ? `\nTriage summary: ${summary}` : "",
     "",
     `Read the full issue and its comments first (\`gh issue view ${issue.number} --comments\`). Implement the change in your worktree following the project's conventions, add or update tests that prove it, and run the test suite.`,

@@ -24,19 +24,24 @@ import {
 import type { Db } from "../../db/client";
 import type { EventStore } from "../../events/store";
 import type { ArtifactService } from "../artifacts";
+import { reviewedAutomationHead } from "../automations/delivery";
+import { automationFork } from "../automations/policy";
 import { badRequest, conflict, errorMessage, ServiceError } from "../errors";
 import type { Exec } from "../exec";
+import { teamFilePath } from "../factory/team-file";
 import type { GitBroker } from "../git-broker";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
-import type { RunnerDeps } from "../runner-port";
+import { isRemoteRunner, type RunnerDeps, type RunnerPort } from "../runner-port";
 import type { SecretStore } from "../secrets";
 import type { SessionRepo } from "../sessions/repo";
 import { remoteWorkspaceFs } from "../workspace-fs/workspace-fs";
 import { type AttachEvidenceInput, type AttachEvidenceResult, attachEvidence } from "./attach";
 import { GithubAuth } from "./auth";
 import { GithubClient } from "./client";
+import { type RestIssue, toGithubIssue } from "./diff";
 import { PrFollowUp } from "./follow-up";
+import { fetchPullRequests, toGithubPr } from "./graphql";
 import * as issues from "./issues";
 import { PrFilesCache, readPrInfo, withoutPatch } from "./pr-files";
 import {
@@ -60,6 +65,12 @@ export interface GithubServiceDeps extends RunnerDeps {
   secrets: SecretStore;
   /** CodeDen's data directory: its credential files are never attached as evidence (§15). */
   home?: string;
+  userHome?: string;
+  automationRun?: (session: Session) => string | undefined;
+  forkTriage?: {
+    enabled: (project: Project) => boolean;
+    opened: (project: Project, issue: GithubIssue) => Promise<void>;
+  };
   /** Brokers push credentials for runners that don't share this disk (§9.2). */
   git?: GitBroker;
   /** `fetch` for Octokit and the API base URL (tests point them at a fake GitHub). */
@@ -85,6 +96,7 @@ export class GithubService {
   private readonly followUp: PrFollowUp;
   private readonly reviewInbox: PrReviewInbox;
   private readonly prFiles: PrFilesCache;
+  private readonly forkCursor = new Map<string, { target: string; since: string }>();
   private unsubscribe: (() => void) | undefined;
   private login: { value: string; token: string } | null = null;
 
@@ -97,6 +109,10 @@ export class GithubService {
       store: this.data,
       events: deps.store,
       projects: () => deps.projects.list(),
+      ownsOriginPr: (session) => !deps.automationRun?.(session),
+      afterSync: async (project) => {
+        await Promise.all([this.syncForkTriage(project), this.syncForkAutomationPrs(project)]);
+      },
       idleIntervalMs: deps.idleIntervalMs,
       activeIntervalMs: deps.activeIntervalMs,
       log: deps.log,
@@ -112,6 +128,66 @@ export class GithubService {
     });
     this.reviewInbox = new PrReviewInbox({ inbox: deps.inbox, repo: deps.repo });
     this.prFiles = new PrFilesCache(this.client);
+  }
+
+  private async syncForkTriage(project: Project): Promise<void> {
+    if (
+      project.kind !== "github" ||
+      !project.github.forkRemote ||
+      !this.deps.forkTriage?.enabled(project)
+    ) {
+      this.forkCursor.delete(project.id);
+      return;
+    }
+    const fork = automationFork(project);
+    const target = `${fork.owner}/${fork.repo}`.toLowerCase();
+    const before = this.forkCursor.get(project.id);
+    // Initial polling is a baseline, just like origin issue sync.
+    const until = new Date(Math.floor(Date.now() / 1000) * 1000).toISOString();
+    if (before?.target !== target) {
+      this.forkCursor.set(project.id, { target, since: until });
+      return;
+    }
+    if (before.since >= until) return;
+    const rows = await this.client.run((octokit) =>
+      octokit.paginate(octokit.rest.issues.listForRepo, {
+        owner: fork.owner,
+        repo: fork.repo,
+        since: before.since,
+        state: "open",
+        per_page: 100,
+      }),
+    );
+    for (const row of rows) {
+      if (row.pull_request || row.created_at < before.since || row.created_at >= until) continue;
+      await this.deps.forkTriage.opened(project, toGithubIssue(project.id, row as RestIssue));
+    }
+    this.forkCursor.set(project.id, { target, since: until });
+  }
+
+  private async syncForkAutomationPrs(project: Project): Promise<void> {
+    if (project.kind !== "github" || !project.github.forkRemote) return;
+    const fork = automationFork(project);
+    const prefix = `https://github.com/${fork.owner}/${fork.repo}/pull/`.toLowerCase();
+    const sessions = this.deps.repo
+      .sessionsWithOpenPr(project.id)
+      .filter(
+        (session) =>
+          this.deps.automationRun?.(session) && session.pr?.url.toLowerCase().startsWith(prefix),
+      );
+    if (!sessions.length) return;
+    const numbers = sessions.flatMap((session) => (session.pr ? [session.pr.number] : []));
+    for (const { node } of await fetchPullRequests(this.client, fork.owner, fork.repo, numbers)) {
+      const pr = toGithubPr(project.id, node, null);
+      for (const session of sessions) {
+        if (session.pr?.number !== pr.number || session.pr.state === pr.state) continue;
+        this.deps.repo.update(session.id, (s) =>
+          s.pr?.url === session.pr?.url
+            ? { ...s, pr: { number: pr.number, url: pr.url, state: pr.state, title: pr.title } }
+            : s,
+        );
+      }
+    }
   }
 
   /**
@@ -204,28 +280,58 @@ export class GithubService {
   }
 
   /** One issue, fresh from GitHub, with its latest comments. */
-  getIssue(projectId: string, number: number): Promise<GithubIssueDetails> {
-    return issues.getIssueDetails(this.issueDeps(), projectId, this.githubRepo(projectId), number);
+  getIssue(projectId: string, number: number, automation = false): Promise<GithubIssueDetails> {
+    const repo = automation
+      ? automationFork(this.deps.projects.get(projectId))
+      : this.githubRepo(projectId);
+    return issues.getIssueDetails(
+      { ...this.issueDeps(), isolated: automation },
+      projectId,
+      repo,
+      number,
+    );
   }
 
   triageIssue(
     projectId: string,
     number: number,
     req: TriageIssueRequest,
+    automation = false,
   ): Promise<TriageIssueResult> {
-    return issues.triageIssue(this.issueDeps(), projectId, this.githubRepo(projectId), number, req);
+    const repo = automation
+      ? automationFork(this.deps.projects.get(projectId))
+      : this.githubRepo(projectId);
+    return issues.triageIssue(
+      { ...this.issueDeps(), isolated: automation },
+      projectId,
+      repo,
+      number,
+      req,
+    );
   }
 
-  createIssue(projectId: string, req: CreateGithubIssueRequest): Promise<GithubIssue> {
-    return issues.createIssue(this.issueDeps(), projectId, this.githubRepo(projectId), req);
+  createIssue(
+    projectId: string,
+    req: CreateGithubIssueRequest,
+    automation = false,
+  ): Promise<GithubIssue> {
+    const repo = automation
+      ? automationFork(this.deps.projects.get(projectId))
+      : this.githubRepo(projectId);
+    return issues.createIssue({ ...this.issueDeps(), isolated: automation }, projectId, repo, req);
   }
 
   commentOnIssue(
     projectId: string,
     number: number,
     body: string,
+    session?: Session,
   ): Promise<{ id: number; url: string }> {
-    return issues.commentOnIssue(this.issueDeps(), this.githubRepo(projectId), number, body);
+    const repo =
+      session && this.deps.automationRun?.(session) && projectId
+        ? automationFork(this.deps.projects.get(projectId))
+        : this.githubRepo(projectId);
+    return issues.commentOnIssue(this.issueDeps(), repo, number, body);
   }
 
   labelIssue(projectId: string, number: number, req: GithubLabelRequest): Promise<GithubIssue> {
@@ -243,8 +349,12 @@ export class GithubService {
   async getPrStatus(
     projectId: string,
     number: number,
-    opts: { cached?: boolean } = {},
+    opts: { cached?: boolean; session?: Session } = {},
   ): Promise<GithubPr> {
+    if (opts.session && this.deps.automationRun?.(opts.session)) {
+      const fork = automationFork(this.deps.projects.get(projectId));
+      return refreshPr(this.prDeps(), projectId, fork, number, opts.session.id, true);
+    }
     const repo = this.githubRepo(projectId);
     const cached = this.data.pr(projectId, number);
     if (opts.cached && cached) return cached;
@@ -318,10 +428,45 @@ export class GithubService {
         "read_only",
       );
     }
+    const run = this.deps.automationRun?.(session);
+    if (run && session.projectId) {
+      const fork = automationFork(this.deps.projects.get(session.projectId));
+      return createPullRequest(this.prDeps(), session, fork, input, async (cwd, base, runner) => {
+        return this.authorizeAutomationPush(session, cwd, runner, run, fork, base);
+      });
+    }
     const repo = this.githubRepo(session.projectId);
     const result = await createPullRequest(this.prDeps(), session, repo, input);
     if (session.projectId) this.sync.soon(session.projectId);
     return result;
+  }
+
+  /** Validate the fork push and return the immutable refspec for app callers. */
+  async authorizeAutomationPush(
+    session: Session,
+    cwd: string,
+    runner: RunnerPort,
+    run: string,
+    fork: ReturnType<typeof automationFork>,
+    base?: string,
+  ): Promise<{ remote: string; sourceCommit: string }> {
+    if (isRemoteRunner(runner) || !this.deps.home || !this.deps.userHome) {
+      throw conflict(
+        "The Team review gate needs the local automation worktree.",
+        "automation_review_unavailable",
+      );
+    }
+    const sourceCommit = await reviewedAutomationHead(
+      this.deps.exec,
+      cwd,
+      teamFilePath(this.deps.home, session.id),
+      fork,
+      run,
+      session.provider,
+      this.deps.userHome,
+      base,
+    );
+    return { remote: fork.remote, sourceCommit };
   }
 
   /** `attach_evidence`: files to the evidence branch plus a comment on the PR or issue. */
@@ -331,7 +476,9 @@ export class GithubService {
       this.client,
       this.deps.artifacts,
       session,
-      this.githubRepo(session.projectId),
+      this.deps.automationRun?.(session) && session.projectId
+        ? automationFork(this.deps.projects.get(session.projectId))
+        : this.githubRepo(session.projectId),
       input,
       this.deps.home,
       remoteWorkspaceFs(this.deps, session),

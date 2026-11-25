@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   type Automation,
   type AutomationRun,
@@ -26,6 +27,7 @@ import type { InboxService } from "../inbox-service";
 import type { OrchestrationService } from "../orchestration/orchestration-service";
 import type { ProjectService } from "../projects/project-service";
 import type { SessionService } from "../sessions/session-service";
+import { auditedAutomation, automationFork, isForkIssue } from "./policy";
 import { issueSessionPrompt, triageRequestText } from "./triage-prompts";
 
 /** What triage asks GitHub to decide whether an issue's author is trusted. */
@@ -54,6 +56,9 @@ export interface TriageDeps {
    * approved (undefined: the project's default). The policy's own level when absent.
    */
   sessionAutonomy?: (automation: Automation, project: Project) => AutonomyLevel | undefined;
+  forkIssue?: (projectId: string, number: number) => Promise<GithubIssue>;
+  triageRun?: (projectId: string, issueNumber: number) => AutomationRun | undefined;
+  controlsBlocked?: (project: Project) => string | null;
   /** A report arrived: complete the triage runs waiting on this issue. */
   reported?: (projectId: string, issueNumber: number, decision: string) => void;
 }
@@ -98,12 +103,25 @@ export class TriageService {
     issue: GithubIssue | GitHubIssueRef,
   ): Promise<string> {
     if (project.kind !== "github") throw badRequest("Triage needs a GitHub project", "not_github");
+    const fork = auditedAutomation(automation) ? automationFork(project) : undefined;
+    if (fork && !isForkIssue(issue, fork)) {
+      throw conflict(
+        "Issue triage requires an issue on the configured fork.",
+        "automation_upstream_issue",
+      );
+    }
     const policy = policyOf(automation);
     const canStart = policy.autoStart && project.autonomyMode !== "manual";
-    const text = triageRequestText({ automation, run, issue, policy, canStart });
+    const text = triageRequestText({ automation, run, issue, policy, canStart, fork });
     const res = await this.deps
       .orchestration()
-      .sendToRole("pm", project.id, { text, attachments: [] }, "queue", "automation");
+      .sendToRole(
+        "pm",
+        project.id,
+        { text, attachments: [], from: "automation" },
+        "queue",
+        "automation",
+      );
     return res.sessionId;
   }
 
@@ -118,15 +136,35 @@ export class TriageService {
 
   private async act(project: Project, report: TriageReport): Promise<TriageReportResult> {
     if (report.decision !== "ready") return { status: "recorded" };
+    const run = this.deps.triageRun?.(project.id, report.issueNumber);
     const automation = this.deps.triageAutomation(project.id);
+    if (run && this.deps.controlsBlocked?.(project)) return { status: "recorded" };
     const policy = this.sessionPolicy(automation, project);
-    const { issue, author } = this.syncedIssue(project, report.issueNumber);
-    const trust = await this.authorTrust(project, report.issueNumber, author);
-    if (automation && policy.autoStart && project.autonomyMode !== "manual" && trust.trusted) {
-      const start = await this.startForIssue(project, issue, report.summary, policy, {
-        kind: "automation",
-        id: automation.id,
-      });
+    const fork = run || auditedAutomation(automation) ? automationFork(project) : undefined;
+    const synced = this.syncedIssue(project, report.issueNumber);
+    const issue =
+      fork && !isForkIssue(synced.issue, fork) && this.deps.forkIssue
+        ? await this.deps.forkIssue(project.id, report.issueNumber)
+        : synced.issue;
+    const author = "author" in issue ? (issue.author as string | null) : synced.author;
+    const trust = await this.authorTrust(project, report.issueNumber, author, fork);
+    const current = this.deps.projects.get(project.id);
+    if (fork && (!isForkIssue(issue, fork) || this.deps.controlsBlocked?.(current))) {
+      return { status: "recorded" };
+    }
+    if (automation && policy.autoStart && current.autonomyMode !== "manual" && trust.trusted) {
+      const start = await this.startForIssue(
+        project,
+        issue,
+        report.summary,
+        policy,
+        {
+          kind: "automation",
+          id: automation.id,
+        },
+        undefined,
+        fork,
+      );
       return { status: "started", start };
     }
     const id = triageItemId(project.id, report.issueNumber);
@@ -150,7 +188,7 @@ export class TriageService {
       requestId: null,
       issue,
       pr: null,
-      automationRunId: null,
+      automationRunId: run?.id ?? null,
       createdAt: now,
       updatedAt: now,
       resolvedAt: null,
@@ -165,7 +203,17 @@ export class TriageService {
     const item = this.openItem(itemId);
     const project = this.deps.projects.get(item.projectId ?? "");
     if (!item.issue) throw badRequest("The decision has no issue", "no_issue");
-    const policy = this.sessionPolicy(this.deps.triageAutomation(project.id), project);
+    const automation = this.deps.triageAutomation(project.id);
+    const policy = this.sessionPolicy(automation, project);
+    const fork =
+      item.automationRunId || auditedAutomation(automation) ? automationFork(project) : undefined;
+    if (fork) {
+      const blocked = this.deps.controlsBlocked?.(project);
+      if (blocked) throw conflict(blocked, "automation_disabled");
+    }
+    if (fork && !isForkIssue(item.issue, fork)) {
+      throw conflict("This triage decision is for an upstream issue.", "automation_upstream_issue");
+    }
     const start = await this.startForIssue(
       project,
       item.issue,
@@ -173,6 +221,7 @@ export class TriageService {
       { ...policy, provider: req.provider ?? policy.provider, model: req.model ?? policy.model },
       { kind: "user" },
       req.conflict,
+      fork,
     );
     if (start.status === "conflict") return { item, start };
     const closed = this.deps.inbox.close(item, "resolved", {
@@ -213,15 +262,16 @@ export class TriageService {
     policy: TriagePolicy,
     startedBy: StartedBy,
     decision?: TriageDecisionRequest["conflict"],
+    fork?: ReturnType<typeof automationFork>,
   ): Promise<StartSessionResponse> {
     const title = issue.title ?? `Issue #${issue.number}`;
-    const prompt = issueSessionPrompt(issue, summary);
+    const delivery = fork ? randomUUID() : undefined;
+    const prompt = issueSessionPrompt(issue, summary, fork, delivery);
     return this.deps.sessions.start(
       StartSessionRequest.parse({
         projectId: project.id,
         role: "agent",
-        provider: policy.provider,
-        model: policy.model,
+        ...(fork ? { teamRole: "writer" } : { provider: policy.provider, model: policy.model }),
         autonomy: policy.autonomy,
         purpose: `Resolve #${issue.number}: ${title}`.slice(0, 300),
         workKey: `issue:${issue.number}`,
@@ -232,6 +282,7 @@ export class TriageService {
         input: { text: prompt, attachments: [], from: "automation" },
         conflict: decision,
       }),
+      { automationDelivery: delivery, ownTeamPins: fork ? false : undefined },
     );
   }
 
@@ -253,11 +304,12 @@ export class TriageService {
     project: Project,
     number: number,
     synced: string | null,
+    repo?: ReturnType<typeof automationFork>,
   ): Promise<AuthorTrust> {
     const viewer = await this.deps.github.viewerLogin().catch(() => null);
     const logins = trustedLogins(project.factoryLimits, viewer);
     if (isTrustedAuthor(synced, logins)) return { trusted: true, author: synced, checked: true };
-    const live = await this.deps.github.issueAuthor(project.id, number).catch(() => null);
+    const live = await this.deps.github.issueAuthor(project.id, number, repo).catch(() => null);
     const author = live?.login ?? synced;
     if (!live) return { trusted: false, author, checked: false };
     const trusted = isTrustedAuthor(author, logins) || hasWriteAccess(live.association);

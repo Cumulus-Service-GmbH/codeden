@@ -1,3 +1,4 @@
+import { CreateGithubIssueRequest, TriageIssueRequest } from "@codeden/contracts";
 import { z } from "zod";
 import { defineTool } from "../../define";
 import { inGithubProject } from "../github/available";
@@ -32,8 +33,14 @@ export const getIssue = defineTool({
   scope: "project",
   isAvailable: inGithubProject,
   input: z.object({ number: z.int().positive() }),
-  handler: async ({ number }, { services, projectId }) =>
-    services.orchestration.github.getIssue(githubProject(services, projectId), number),
+  handler: async ({ number }, { services, projectId, sessionId }) => {
+    const project = githubProject(services, projectId);
+    const session = sessionId ? services.sessionRepo.find(sessionId)?.session : undefined;
+    if (session && services.automations.pmTriageRun(session)) {
+      return services.github.getIssue(project.id, number, true);
+    }
+    return services.orchestration.github.getIssue(project, number);
+  },
 });
 
 /** `triage_issue` (§8.3, §10 issue triage): labels, comment, accept or decline. */
@@ -52,8 +59,19 @@ export const triageIssue = defineTool({
     comment: z.string().min(1).max(10_000).optional(),
     close: z.boolean().optional(),
   }),
-  handler: async ({ number, ...triage }, { services, projectId }) =>
-    services.orchestration.github.triageIssue(githubProject(services, projectId), number, triage),
+  handler: async ({ number, ...triage }, { services, projectId, sessionId }) => {
+    const project = githubProject(services, projectId);
+    const session = sessionId ? services.sessionRepo.find(sessionId)?.session : undefined;
+    if (session && services.automations.pmTriageRun(session)) {
+      return services.github.triageIssue(
+        project.id,
+        number,
+        TriageIssueRequest.parse(triage),
+        true,
+      );
+    }
+    return services.orchestration.github.triageIssue(project, number, triage);
+  },
 });
 
 /** `create_issue` (§8.3). */
@@ -69,6 +87,12 @@ export const createIssue = defineTool({
     body: z.string().max(60_000),
     labels: z.array(z.string()).optional(),
   }),
-  handler: async (issue, { services, projectId }) =>
-    services.orchestration.github.createIssue(githubProject(services, projectId), issue),
+  handler: async (issue, { services, projectId, sessionId }) => {
+    const project = githubProject(services, projectId);
+    const session = sessionId ? services.sessionRepo.find(sessionId)?.session : undefined;
+    if (session && services.automations.pmTriageRun(session)) {
+      return services.github.createIssue(project.id, CreateGithubIssueRequest.parse(issue), true);
+    }
+    return services.orchestration.github.createIssue(project, issue);
+  },
 });

@@ -14,6 +14,66 @@ beforeEach(() => {
 afterEach(() => env.close());
 
 describe("create pull request", () => {
+  it("keeps app-driven automation pushes, PRs and comments on the bound fork", async () => {
+    await env.close();
+    const head = "a".repeat(40);
+    let approved = false;
+    env = createGithubEnv({
+      automationRun: () => "automation-run",
+      automationExec: async (command, args) => ({
+        code: command === "git" || approved ? 0 : 1,
+        stdout: args[0] === "remote" ? "https://github.com/acme/widgets.git" : head,
+        stderr: "",
+        notFound: false,
+        timedOut: false,
+        path: null,
+      }),
+    });
+    const session = env.addSession();
+    await expect(
+      env.service.createPullRequest(session.id, { title: "Update" }),
+    ).rejects.toMatchObject({ code: "automation_fork_required" });
+    const project = env.githubProject;
+    if (project.kind !== "github") throw new Error("Expected GitHub fixture");
+    env.store.append([
+      {
+        type: "project.updated",
+        sessionId: null,
+        payload: {
+          project: {
+            ...project,
+            github: {
+              ...project.github,
+              owner: "upstream",
+              remoteUrl: "https://github.com/upstream/widgets.git",
+              forkRemote: { owner: "acme", repo: "widgets", remote: "fork" },
+            },
+          },
+        },
+      },
+    ]);
+    await expect(
+      env.service.createPullRequest(session.id, { title: "Update" }),
+    ).rejects.toMatchObject({ code: "automation_review_required" });
+    expect(env.runnerCalls.some((command) => command.name === "git.push")).toBe(false);
+    approved = true;
+    const result = await env.service.createPullRequest(session.id, { title: "Update" });
+    expect(env.runnerCalls.at(-1)).toMatchObject({
+      name: "git.push",
+      remote: "fork",
+      sourceCommit: head,
+      setUpstream: false,
+    });
+    await env.service.commentOnIssue(P, result.number, "Done", session);
+    expect(
+      env.gh.requests.filter((request) => request.method === "POST").map((request) => request.path),
+    ).toEqual([
+      "/repos/acme/widgets/pulls",
+      `/repos/acme/widgets/issues/${result.number}/comments`,
+    ]);
+    expect(env.service.data.pr(P, result.number)).toBeUndefined();
+  });
+
   it("refuses to commit or push from a Full session with a read-only review scope", async () => {
     const session = env.addSession({ autonomy: "full" });
     env.repo.setStartMeta(session.id, (meta) => {

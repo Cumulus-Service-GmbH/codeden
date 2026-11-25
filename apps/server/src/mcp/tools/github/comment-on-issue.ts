@@ -24,6 +24,7 @@ export const commentOnIssueTool = defineTool({
       projectId,
       number,
       `${input.body}${footer}`,
+      session,
     );
     return `Commented on #${number}: ${comment.url}`;
   },

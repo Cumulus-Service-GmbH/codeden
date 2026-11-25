@@ -21,7 +21,7 @@ function issue(number: number, author = "octocat"): GithubIssue {
     number,
     title: `Bug ${number}`,
     state: "open",
-    url: `https://github.com/acme/widgets/issues/${number}`,
+    url: `https://github.com/team/widgets/issues/${number}`,
     labels: [],
     author,
     body: "Something is broken",
@@ -88,7 +88,19 @@ describe("issue triage (§10)", () => {
       createdAt: ts,
       updatedAt: ts,
       archivedAt: null,
+      teams: {
+        defaultTeamId: "team",
+        teams: [
+          {
+            id: "team",
+            name: "Team",
+            team: [{ role: "writer", provider: "fake", model: "test-model", effort: null }],
+            limits: { maxParallel: 1, maxAssignments: 2, maxRounds: 2 },
+          },
+        ],
+      },
       github: {
+        forkRemote: { remote: "fork", owner: "team", repo: "widgets" },
         owner: "acme",
         repo: "widgets",
         remoteUrl: "https://github.com/acme/widgets.git",
@@ -108,6 +120,7 @@ describe("issue triage (§10)", () => {
     expect(h.server.services.automations.definitions.get(triageId).enabled).toBe(false);
     expect((await h.api("POST", `/automations/${triageId}/enable`, {})).status).toBe(200);
 
+    synced(issue(42));
     h.server.services.store.append([
       { type: "issue.opened", sessionId: null, payload: { issue: issue(42) } },
     ]);
@@ -129,18 +142,34 @@ describe("issue triage (§10)", () => {
     });
   });
 
+  it("refuses an upstream issue even when the fork has the same issue number", async () => {
+    h.server.services.store.append([
+      {
+        type: "issue.opened",
+        sessionId: null,
+        payload: {
+          issue: {
+            ...issue(49),
+            url: "https://github.com/acme/widgets/issues/49",
+          },
+        },
+      },
+    ]);
+    expect(h.server.services.automations.runs.latest(triageId, GH)?.issueNumber).toBe(42);
+  });
+
   it("asks the user about ready issues and starts a session on accept", async () => {
     const result = await report({ issueNumber: 42, decision: "ready", summary: "Clear bug." });
     expect(result).toEqual({ status: "inbox", inboxItemId: `triage:${GH}:42` });
     const runs = AutomationRun.array().parse(
       (await h.api("GET", `/automations/runs?automationId=${triageId}`)).body,
     );
-    expect(runs[0]).toMatchObject({
+    expect(runs.find((run) => run.issueNumber === 42)).toMatchObject({
       status: "completed",
       issueNumber: 42,
       progress: { text: "Triaged as ready" },
     });
-    expect(runs[0]?.finishedAt).not.toBeNull();
+    expect(runs.find((run) => run.issueNumber === 42)?.finishedAt).not.toBeNull();
     const item = InboxItem.parse(h.server.services.inbox.get(`triage:${GH}:42`));
     expect(item).toMatchObject({
       kind: "triage",
@@ -148,6 +177,12 @@ describe("issue triage (§10)", () => {
       title: "Should I take this on? #42 Bug 42",
       issue: { number: 42 },
     });
+    await h.api("PATCH", "/settings", { automations: { enabled: false } });
+    try {
+      expect((await h.api("POST", `/automations/triage/${item.id}/accept`, {})).status).toBe(409);
+    } finally {
+      await h.api("PATCH", "/settings", { automations: { enabled: true } });
+    }
     const accepted = TriageDecisionResponse.parse(
       (await h.api("POST", `/automations/triage/${item.id}/accept`, {})).body,
     );
@@ -167,6 +202,7 @@ describe("issue triage (§10)", () => {
         status: "recorded",
       },
     );
+    synced(issue(44));
     const asked = await report({ issueNumber: 44, decision: "ready", summary: "Small fix." });
     const declined = TriageDecisionResponse.parse(
       (
@@ -228,6 +264,7 @@ describe("issue triage (§10)", () => {
         payload: { issue: { ...issue(46), author: "stranger" } },
       },
     ]);
+    synced(issue(46, "stranger"));
     const result = await report({ issueNumber: 46, decision: "ready", summary: "Looks easy." });
     // A person decides whether a stranger's issue becomes an agent session.
     expect(result).toEqual({ status: "inbox", inboxItemId: `triage:${GH}:46` });

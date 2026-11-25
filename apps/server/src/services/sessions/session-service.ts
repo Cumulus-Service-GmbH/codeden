@@ -86,6 +86,8 @@ export interface SessionServiceDeps extends RunnerDeps {
   repo: SessionRepo;
   admission?: SessionAdmission;
   projects: ProjectService;
+  automationQueuedBlocked?: (session: Session) => boolean;
+  automationMessageBlocked?: (session: Session, input: UserInput) => boolean;
   projectTeam?: (projectId: string, teamId?: string) => Team;
   checklist?: Pick<ChecklistService, "get">;
   inbox: InboxService;
@@ -284,6 +286,7 @@ export class SessionService {
        * then is it the session's own layer of its Team (`sessionTeamMember`).
        */
       ownTeamPins?: boolean;
+      automationDelivery?: string;
       runTeam?: Team;
       teamId?: string;
       teamSession?: TeamMember | null;
@@ -467,6 +470,7 @@ export class SessionService {
         ...(options.guardedInstall ? { guardedInstall: true } : {}),
         ...(pmStart ? { autonomyChoice: req.autonomy ?? null } : {}),
         ...(ownTeamPins ? { ownTeamPins: true as const } : {}),
+        ...(options.automationDelivery ? { automationDelivery: options.automationDelivery } : {}),
         ...(options.teamId ? { teamId: options.teamId } : {}),
         ...(options.runTeam ? { runTeam: options.runTeam } : {}),
         ...(req.tokenSaver ? { tokenSaver: req.tokenSaver } : {}),
@@ -629,6 +633,20 @@ export class SessionService {
   startQueued(session: Session): void {
     const { admission, repo } = this.deps;
     try {
+      if (this.deps.automationQueuedBlocked?.(session)) {
+        admission?.dequeue(session.id);
+        repo.update(session.id, (s) => ({
+          ...s,
+          status: "stopped",
+          endedAt: new Date().toISOString(),
+          result: {
+            outcome: "blocked",
+            summary: "An automation or factory switch blocked this queued run.",
+            at: new Date().toISOString(),
+          },
+        }));
+        return;
+      }
       const meta = repo.find(session.id)?.startMeta;
       const pending = meta?.pending ?? { workspace: { mode: "worktree" as const } };
       admission?.dequeue(session.id);
@@ -997,8 +1015,11 @@ export class SessionService {
       }
       try {
         if (session.archivedAt) admission?.dequeue(id);
-        outbox.remove(next, "sent");
-        await this.sendNow(session, next.input, next.from);
+        const blocked =
+          next.from === "automation" && this.deps.automationMessageBlocked?.(session, next.input);
+        outbox.remove(next, blocked ? "dropped" : "sent");
+        if (!blocked) await this.sendNow(session, next.input, next.from);
+        else this.flushIfSettled(id);
       } catch (error) {
         if (isTurnRunningError(error)) {
           outbox.restore(next);

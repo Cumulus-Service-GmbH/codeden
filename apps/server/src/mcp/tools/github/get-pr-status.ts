@@ -15,7 +15,7 @@ export const getPrStatusTool = defineTool({
     const session = sessionId ? services.sessionRepo.find(sessionId)?.session : undefined;
     const number = input.number ?? session?.pr?.number;
     if (!number) throw new ToolError("You have no pull request yet; pass `number`");
-    const pr = await services.github.getPrStatus(projectId, number);
+    const pr = await services.github.getPrStatus(projectId, number, { session });
     return {
       number: pr.number,
       url: pr.url,

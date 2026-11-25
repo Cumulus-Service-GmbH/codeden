@@ -4,11 +4,14 @@ import type {
   AutomationListItem,
   AutomationListResponse,
   AutomationState,
+  GithubIssue,
   Project,
   RawEventEnvelope,
   RunAutomationRequest,
   RunAutomationResponse,
   ScheduledRun,
+  Session,
+  UserInput,
 } from "@codeden/contracts";
 import type { Db } from "../../db/client";
 import type { EventStore } from "../../events/store";
@@ -30,7 +33,8 @@ import {
   triggerMatches,
 } from "./event-triggers";
 import { AutomationExecutor, type FireRequest } from "./executor";
-import { baseVars, type TemplateVars } from "./prompt";
+import { auditedAutomation, automationBlocked, automationFork, isForkIssue } from "./policy";
+import { baseVars, issueVars, type TemplateVars } from "./prompt";
 import { lastTurnStatus, RunStore } from "./runs";
 import { ScheduleStore } from "./schedule-store";
 import { CronScheduler, type SchedulePair } from "./scheduler";
@@ -49,6 +53,7 @@ export interface AutomationServiceDeps {
   orchestration: () => OrchestrationService;
   /** Issue authors and the account CodeDen uses on GitHub, for triage's trust check. */
   github: TriageGithub;
+  forkIssue?: (projectId: string, number: number) => Promise<GithubIssue>;
   /** `~/.codeden` (global automation files live in `automations/`). */
   home: string;
   templatesDir?: string;
@@ -122,6 +127,12 @@ export class AutomationService implements AutomationPort {
       orchestration: deps.orchestration,
       github: deps.github,
       triageAutomation: (projectId) => this.triageAutomation(projectId),
+      forkIssue: deps.forkIssue,
+      triageRun: (projectId, issueNumber) =>
+        this.runs
+          .runningForIssue(projectId, issueNumber)
+          .find((run) => auditedAutomation(this.definitions.find(run.automationId))),
+      controlsBlocked: (project) => this.blocked(project),
       sessionAutonomy: (automation, project) => this.runAutonomy(automation, project),
       reported: (projectId, issueNumber, decision) =>
         this.executor.completeTriage(projectId, issueNumber, decision),
@@ -172,9 +183,58 @@ export class AutomationService implements AutomationPort {
   /** Global switch, project switch, the automation (or its per-project override), fit. */
   isEnabled(automation: Automation, project: Project): boolean {
     if (!this.deps.settings.get().automations.enabled || project.archivedAt) return false;
+    if (auditedAutomation(automation) && this.blocked(project)) return false;
     if (!this.schedules.projectSettings(project.id).enabled) return false;
     if (automation.action.type === "triage" && project.kind !== "github") return false;
     return this.switchedOn(automation, project);
+  }
+
+  private blocked(project: Project): string | null {
+    return automationBlocked(
+      project,
+      this.deps.settings.get(),
+      this.schedules.projectSettings(project.id).enabled,
+    );
+  }
+
+  deliveryRun(session: Session): string | undefined {
+    const delivery = this.deps.repo.find(session.id)?.startMeta?.automationDelivery;
+    if (delivery) return delivery;
+    if (session.startedBy.kind !== "automation" || !session.startedBy.id) return undefined;
+    const automatic = this.definitions.find(session.startedBy.id);
+    // Before a run row can be attached, the first turn can already call an MCP tool.
+    return auditedAutomation(automatic) ? (session.automationRunId ?? session.id) : undefined;
+  }
+
+  /** Recheck controls when a slot becomes available for an already queued session. */
+  queuedBlocked(session: Session): boolean {
+    if (!session.projectId || !this.deliveryRun(session)) return false;
+    return Boolean(this.blocked(this.deps.projects.get(session.projectId)));
+  }
+
+  private triageRunFor(input: UserInput) {
+    if (input.from !== "automation") return undefined;
+    const id = /^CodeDen triage run: ([a-z0-9-]+)\n/.exec(input.text)?.[1];
+    if (!id) return undefined;
+    return this.runs.find(id);
+  }
+
+  queuedMessageBlocked(session: Session, input: UserInput): boolean {
+    const run = this.triageRunFor(input);
+    if (!run) return false;
+    if (!run.projectId || session.projectId !== run.projectId || run.status !== "running")
+      return true;
+    if (!this.blocked(this.deps.projects.get(run.projectId))) return false;
+    this.runs.save({ ...run, status: "cancelled", finishedAt: this.now().toISOString() });
+    return true;
+  }
+
+  /** Only the PM's current automation turn gets the fork write destination. */
+  pmTriageRun(session: Session) {
+    if (session.role !== "pm") return undefined;
+    const [message] = this.deps.repo.rootItems(session, ["user_message"], 1);
+    const run = message?.kind === "user_message" ? this.triageRunFor(message.input) : undefined;
+    return run?.projectId === session.projectId ? run : undefined;
   }
 
   /** The automation's own switch, or its override in this project (automations for all projects). */
@@ -371,6 +431,22 @@ export class AutomationService implements AutomationPort {
 
   /** Run, and track the session of a session run until it finishes. */
   private async fire(req: FireRequest): Promise<RunAutomationResponse> {
+    if (auditedAutomation(req.automation)) {
+      const project = this.deps.projects.get(req.project.id);
+      const blocked = this.blocked(project);
+      if (blocked) {
+        if (req.triggeredBy === "manual") throw conflict(blocked, "automation_disabled");
+        return {
+          status: "skipped",
+          run: this.executor.recordSkipped(this.executor.newRun(req), "disabled"),
+        };
+      }
+      const fork =
+        project.kind === "github" && req.automation.action.type !== "message_pm"
+          ? automationFork(project)
+          : undefined;
+      req = { ...req, project, fork, audited: true };
+    }
     const res = await this.executor.fire(req);
     const tracked = res.status === "started" || res.status === "queued";
     if (tracked && res.sessionId && req.automation.action.type === "start_session") {
@@ -398,6 +474,36 @@ export class AutomationService implements AutomationPort {
           this.targets(a).some((p) => p.id === projectId) &&
           this.isEnabled(a, project),
       );
+  }
+
+  /** Fork intake is scoped to triage so its issue numbers never enter the origin projection. */
+  forkTriageEnabled(project: Project): boolean {
+    const automation = this.triageAutomation(project.id);
+    return (
+      !!automation &&
+      auditedAutomation(automation) &&
+      automation.trigger.type === "event" &&
+      automation.trigger.event === "issue.opened" &&
+      this.firesOnItsOwn(project) &&
+      !this.schedules.get(automation.id, project.id)?.paused
+    );
+  }
+
+  async dispatchForkIssue(project: Project, issue: GithubIssue): Promise<void> {
+    const automation = this.triageAutomation(project.id);
+    if (!automation || !this.forkTriageEnabled(project)) return;
+    const event = {
+      event: "issue.opened" as const,
+      projectId: project.id,
+      issue,
+      vars: issueVars(issue),
+      labels: issue.labels,
+      branch: null,
+      author: issue.author,
+      sessionId: null,
+    };
+    if (!triggerMatches(automation, event) || factoryOwnsIntake(automation, event, project)) return;
+    await this.fire({ ...this.fireRequest(automation, project, "event", event.vars), issue });
   }
 
   private onEvents(events: RawEventEnvelope[]): void {
@@ -454,6 +560,10 @@ export class AutomationService implements AutomationPort {
         if (factoryOwnsIntake(automation, event, project)) {
           this.executor.recordSkipped(this.executor.newRun(req), "factory_intake");
           continue;
+        }
+        if (automation.action.type === "triage" && auditedAutomation(automation)) {
+          if (project.kind !== "github" || !project.github.forkRemote || !event.issue) continue;
+          if (!isForkIssue(event.issue, automationFork(project))) continue;
         }
         void this.fire({ ...req, issue: event.issue }).catch((error) =>
           this.deps.log?.(`automations: event run of ${automation.id}: ${errorMessage(error)}`),

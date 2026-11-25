@@ -58,6 +58,8 @@ const ts = "2026-11-07T10:00:00.000Z";
 export interface GithubEnvOptions {
   /** Make `artifacts` a junction (a folder symlink elsewhere) to `artifacts-real`. */
   aliasArtifacts?: boolean;
+  automationRun?: (session: Session) => string | undefined;
+  automationExec?: Exec;
 }
 
 export function createGithubEnv(opts: GithubEnvOptions = {}): GithubEnv {
@@ -86,6 +88,7 @@ export function createGithubEnv(opts: GithubEnvOptions = {}): GithubEnv {
         path: "gh",
       };
     }
+    if (opts.automationExec) return opts.automationExec(command, args);
     return { code: null, stdout: "", stderr: "", notFound: true, timedOut: false, path: null };
   };
   const runner: RunnerPort = {
@@ -184,6 +187,8 @@ export function createGithubEnv(opts: GithubEnvOptions = {}): GithubEnv {
     secrets,
     // The data directory holds `artifacts/` like a real home, and is the sessions' worktree.
     home: dir,
+    userHome: dir,
+    automationRun: opts.automationRun,
     fetch: gh.fetch,
     baseUrl: "https://api.github.test",
   });

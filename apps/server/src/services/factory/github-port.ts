@@ -2,6 +2,7 @@ import {
   type ChecksState,
   type GitHubIssueRef,
   type GitHubPrRef,
+  type GitHubRepo,
   type GithubAuthorAssociation,
   type GithubIssue,
   githubPrId,
@@ -107,7 +108,11 @@ export interface FactoryGithub {
   /** The login of the account CodeDen uses on GitHub (always trusted); null when unknown. */
   viewerLogin(): Promise<string | null>;
   /** An issue's author and their association with the repository (one API call). */
-  issueAuthor(projectId: string, number: number): Promise<IssueAuthor>;
+  issueAuthor(
+    projectId: string,
+    number: number,
+    fork?: Pick<GitHubRepo, "owner" | "repo">,
+  ): Promise<IssueAuthor>;
   /**
    * Everyone who commented on an issue or pull request, one entry per comment: its conversation
    * and, with `pr`, the pull request's reviews and review comments.
@@ -218,8 +223,12 @@ export class GithubFactoryPort implements FactoryGithub {
     return value;
   }
 
-  async issueAuthor(projectId: string, number: number): Promise<IssueAuthor> {
-    const repo = this.github.githubRepo(projectId);
+  async issueAuthor(
+    projectId: string,
+    number: number,
+    fork?: Pick<GitHubRepo, "owner" | "repo">,
+  ): Promise<IssueAuthor> {
+    const repo = fork ?? this.github.githubRepo(projectId);
     const data = await this.github.client.run(
       async (o) =>
         (await o.rest.issues.get({ owner: repo.owner, repo: repo.repo, issue_number: number }))

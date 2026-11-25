@@ -83,19 +83,21 @@ async function pushBranch(
   cwd: string,
   branch: string,
   credential: GitCredential | undefined,
+  delivery?: { remote: string; sourceCommit: string },
 ): Promise<void> {
   const push = {
     name: "git.push",
     cwd,
     branch,
-    setUpstream: true,
+    setUpstream: !delivery,
+    ...delivery,
     ...(credential ? { credential } : {}),
   } as const;
   try {
     await runner.request(push, 5 * 60_000);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (ownBranch(session) !== branch || !NOT_FAST_FORWARD.test(message)) throw error;
+    if (delivery || ownBranch(session) !== branch || !NOT_FAST_FORWARD.test(message)) throw error;
     await runner.request({ ...push, forceWithLease: true }, 5 * 60_000);
   }
 }
@@ -109,12 +111,18 @@ export async function createPullRequest(
   session: Session,
   repo: GitHubRepo,
   input: CreatePullRequestInput,
+  authorize?: (
+    cwd: string,
+    base: string,
+    runner: RunnerPort,
+  ) => Promise<{ remote: string; sourceCommit: string }>,
 ): Promise<CreatePullRequestResult> {
   const cwd = sessionWorkdir(session);
   const branch = session.branch;
   if (!branch)
     throw conflict("This session has no branch to open a pull request from", "no_branch");
-  const base = input.base ?? session.baseBranch ?? repo.defaultBranch;
+  const base =
+    input.base ?? (authorize ? repo.defaultBranch : (session.baseBranch ?? repo.defaultBranch));
   if (branch === base) {
     throw conflict(
       `The session works on ${base} itself; a pull request needs its own branch`,
@@ -127,9 +135,11 @@ export async function createPullRequest(
   try {
     const status = await runner.request({ name: "git.status", cwd }, 30_000);
     if (status.files.length > 0) {
-      if (!input.commitMessage) {
+      if (authorize || !input.commitMessage) {
         throw badRequest(
-          `There are ${status.files.length} uncommitted change(s). Commit them first or pass commitMessage.`,
+          authorize
+            ? "Commit and review the automation changes before opening a PR."
+            : `There are ${status.files.length} uncommitted change(s). Commit them first or pass commitMessage.`,
           "uncommitted_changes",
         );
       }
@@ -139,7 +149,8 @@ export async function createPullRequest(
     }
     // A runner in a sandbox gets the token for this push only (§9.2); others use their own git.
     const credential = await deps.git?.credentialFor(runner, githubCloneUrl(repo.owner, repo.repo));
-    await pushBranch(runner, session, cwd, branch, credential);
+    const delivery = await authorize?.(cwd, base, runner);
+    await pushBranch(runner, session, cwd, branch, credential, delivery);
   } catch (error) {
     throw toServiceError(error);
   }
@@ -156,8 +167,10 @@ export async function createPullRequest(
     return res.data[0];
   });
   let number: number;
+  let url: string;
   if (existing) {
     number = existing.number;
+    url = existing.html_url;
     await deps.client.run((octokit) =>
       octokit.rest.pulls.update({
         owner: repo.owner,
@@ -180,9 +193,18 @@ export async function createPullRequest(
       }),
     );
     number = created.data.number;
+    url = created.data.html_url;
   }
 
-  const pr = await refreshPr(deps, session.projectId ?? "", repo, number, session.id);
+  // Fork issue and PR numbers share a namespace with origin in the project projection.
+  const pr = authorize
+    ? {
+        number,
+        url,
+        state: input.draft ? ("draft" as const) : ("open" as const),
+        title: input.title,
+      }
+    : await refreshPr(deps, session.projectId ?? "", repo, number, session.id);
   deps.repo.update(session.id, (s) => ({
     ...s,
     pr: { number: pr.number, url: pr.url, state: pr.state, title: pr.title },
@@ -202,10 +224,12 @@ export async function refreshPr(
   repo: GitHubRepo,
   number: number,
   sessionId?: string | null,
+  isolated = false,
 ): Promise<GithubPr> {
   const [fetched] = await fetchPullRequests(deps.client, repo.owner, repo.repo, [number]);
   if (!fetched)
     throw notFound(`No pull request #${number} in ${repo.owner}/${repo.repo}`, "pr_not_found");
+  if (isolated) return GithubPr.parse(toGithubPr(projectId, fetched.node, sessionId ?? null));
   const prev = deps.store.pr(projectId, number);
   const next = GithubPr.parse(
     toGithubPr(projectId, fetched.node, sessionId ?? prev?.sessionId ?? null),

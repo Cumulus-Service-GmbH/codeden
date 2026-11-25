@@ -6,6 +6,7 @@ import {
   type GithubSyncStatus,
   type NewEvent,
   type Project,
+  type Session,
 } from "@codeden/contracts";
 import type { EventStore } from "../../events/store";
 import { errorMessage } from "../errors";
@@ -21,6 +22,8 @@ export interface GithubSyncDeps {
   events: EventStore;
   /** Projects to sync (only `github` projects that are not archived are used). */
   projects: () => Project[];
+  afterSync?: (project: Project) => Promise<void>;
+  ownsOriginPr?: (session: Session) => boolean;
   /** Poll interval with no session PR open (default 60 s). */
   idleIntervalMs?: number;
   /** Poll interval while a session has an open PR (default 15 s). */
@@ -76,9 +79,13 @@ export class GithubSync {
     if (inFlight) return inFlight;
     const project = this.githubProjects().find((p) => p.id === projectId);
     if (project?.kind !== "github") return Promise.resolve();
-    const run = this.runSync(project.id, project.github).finally(() =>
-      this.running.delete(projectId),
-    );
+    const run = this.runSync(project.id, project.github)
+      .then(async () => {
+        await this.deps
+          .afterSync?.(project)
+          .catch((error) => this.deps.log?.(`github automation sync: ${errorMessage(error)}`));
+      })
+      .finally(() => this.running.delete(projectId));
     this.running.set(projectId, run);
     return run;
   }
@@ -322,10 +329,12 @@ export class GithubSync {
 
   /** Map a PR and link it to its session: kept from before, or the session on its branch. */
   private prOf(projectId: string, node: GqlPullRequest, prev: GithubPr | undefined): GithubPr {
-    let sessionId = prev?.sessionId ?? null;
+    const sessions = this.deps.store.projectSessions(projectId);
+    const eligible = this.deps.ownsOriginPr ? sessions.filter(this.deps.ownsOriginPr) : sessions;
+    let sessionId =
+      prev?.sessionId && eligible.some((s) => s.id === prev.sessionId) ? prev.sessionId : null;
     if (!sessionId) {
-      const owner = this.deps.store
-        .projectSessions(projectId)
+      const owner = eligible
         .filter((s) => s.branch === node.headRefName || s.pr?.number === node.number)
         .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
       sessionId = owner?.id ?? null;

@@ -7,7 +7,7 @@ trigger:
 action: start_session
 workKey: automation:test-coverage
 title: Test coverage gaps
-autonomy: auto
+autonomy: full
 starter: true
 guards:
   overlapPolicy: skip-if-running

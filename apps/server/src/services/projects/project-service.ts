@@ -139,6 +139,16 @@ export class ProjectService {
     }
     Object.assign(next, defaultAgent(current, patch));
     if (patch.autonomy !== undefined) next.autonomy = patch.autonomy;
+    if (patch.forkRemote !== undefined) {
+      if (next.kind !== "github") {
+        throw badRequest(
+          "An automation fork remote requires a GitHub project.",
+          "not_a_github_project",
+        );
+      }
+      const { forkRemote: _old, ...github } = next.github;
+      next.github = patch.forkRemote ? { ...github, forkRemote: patch.forkRemote } : github;
+    }
     if (patch.timezone !== undefined) next.timezone = patch.timezone;
     if (patch.defaultBranch !== undefined) next.defaultBranch = patch.defaultBranch;
     // Pinning keeps `sortOrder`, so a project lands in its group by its manual position.

@@ -364,6 +364,11 @@ export const RunnerCommand = z.discriminatedUnion("name", [
     remote: z.string().optional(),
     /** Default: the current branch. */
     branch: z.string().optional(),
+    /** Push this immutable, reviewed commit to the named branch. */
+    sourceCommit: z
+      .string()
+      .regex(/^[a-f0-9]{40}$/)
+      .optional(),
     /** Set the upstream (`-u`). Default true. */
     setUpstream: z.boolean().optional(),
     forceWithLease: z.boolean().optional(),

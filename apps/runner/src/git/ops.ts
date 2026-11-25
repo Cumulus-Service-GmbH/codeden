@@ -162,7 +162,8 @@ export async function push(
   const args = ["push"];
   if (cmd.setUpstream !== false) args.push("-u");
   if (cmd.forceWithLease) args.push("--force-with-lease");
-  args.push(remote, branch === current ? branch : `HEAD:refs/heads/${branch}`);
+  const source = cmd.sourceCommit ?? (branch === current ? branch : "HEAD");
+  args.push(remote, source === branch ? branch : `${source}:refs/heads/${branch}`);
   await git(cmd.cwd, args, { timeoutMs: 5 * 60_000, credential: cmd.credential });
   return { remote, branch };
 }

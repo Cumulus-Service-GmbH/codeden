@@ -26,6 +26,7 @@ import {
   type SkipReason,
   type TriggerKind,
 } from "./guards";
+import type { automationFork } from "./policy";
 import { renderTemplate, renderWorkKey, runHeader, type TemplateVars } from "./prompt";
 import type { RunStore } from "./runs";
 import type { TriageService } from "./triage";
@@ -48,6 +49,8 @@ export interface FireRequest {
   project: Project;
   triggeredBy: TriggerKind;
   timezone: string;
+  fork?: ReturnType<typeof automationFork>;
+  audited?: boolean;
   vars: TemplateVars;
   /** The issue a triage or issue-event run is about. */
   issue?: GithubIssue | GitHubIssueRef;
@@ -229,6 +232,7 @@ export class AutomationExecutor {
         }
         case "triage": {
           if (!req.issue) throw new Error("Triage runs need an issue (trigger it on issue.opened)");
+          this.deps.runs.save(run);
           const pmId = await this.deps.triage.request(project, automation, run, req.issue);
           // Done when the PM's report_triage for this issue arrives, not when it got the request.
           const waiting = this.deps.runs.save({
@@ -287,7 +291,14 @@ export class AutomationExecutor {
     const { automation, project } = req;
     if (automation.action.type !== "start_session") throw new Error("not a session action");
     const action = automation.action;
-    const prompt = renderTemplate(action.prompt, req.vars);
+    const prompt = [
+      req.fork
+        ? `Use only ${req.fork.owner}/${req.fork.repo} for GitHub operations. Qualify every gh command with --repo ${req.fork.owner}/${req.fork.repo}. Commit code, run the existing Team review for run ${run.id} against refs/remotes/${req.fork.remote}/${req.fork.defaultBranch}, then use create_pull_request for delivery. The exact commit needs a clean review. Do not push or merge directly. Apply these delivery rules even if earlier template instructions say otherwise.`
+        : null,
+      renderTemplate(action.prompt, req.vars),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
     const defaultTitle = stripLeadingTags(automation.name) || "Automation";
     let title = defaultTitle;
     if (action.title) {
@@ -299,9 +310,9 @@ export class AutomationExecutor {
     const start = StartSessionRequest.parse({
       projectId: project.id,
       role: "agent",
-      provider: action.provider,
-      model: action.model,
-      effort: action.effort,
+      ...(req.audited
+        ? { teamRole: "writer" }
+        : { provider: action.provider, model: action.model, effort: action.effort }),
       autonomy: req.autonomy,
       purpose: run.purpose,
       workKey: run.workKey,
@@ -318,13 +329,15 @@ export class AutomationExecutor {
       conflict: decision,
     });
     const chromeApproved =
+      !req.audited &&
       (req.triggeredBy !== "manual" || req.byPerson) &&
       action.title?.trimStart().startsWith(BROWSER_OPERATOR_TAG);
     const res = await this.deps.sessions.start(start, {
       ...(chromeApproved ? { chromeApproved: true } : {}),
-      ownTeamPins: Boolean(
-        (action.provider && action.provider !== "auto") || action.model || action.effort,
-      ),
+      automationDelivery: req.audited ? run.id : undefined,
+      ownTeamPins:
+        !req.audited &&
+        Boolean((action.provider && action.provider !== "auto") || action.model || action.effort),
     });
     switch (res.status) {
       case "conflict":

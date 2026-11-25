@@ -37,6 +37,13 @@ function Harness({ onDraft }: { onDraft: (d: AutomationDraft) => void }) {
 }
 
 describe("the automation editor", () => {
+  it("labels the PM notification action Notify only", () => {
+    const onDraft = vi.fn();
+    renderWithClient(<Harness onDraft={onDraft} />);
+    fireEvent.click(screen.getByRole("button", { name: "Notify only" }));
+    expect(onDraft.mock.lastCall?.[0].action.type).toBe("message_pm");
+  });
+
   it("starts on weekdays at 09:00 with a plain summary and the next runs", async () => {
     const onDraft = vi.fn();
     renderWithClient(<Harness onDraft={onDraft} />);

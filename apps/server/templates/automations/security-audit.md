@@ -7,7 +7,7 @@ trigger:
 action: start_session
 workKey: automation:security-audit
 title: Security audit
-autonomy: auto
+autonomy: full
 starter: true
 guards:
   overlapPolicy: skip-if-running

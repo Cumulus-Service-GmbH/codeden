@@ -12,7 +12,7 @@ import {
   Timestamp,
 } from "./common";
 import { InboxItem, InboxItemKind, InboxItemStatus } from "./entities/inbox";
-import { GitHubRepo, Project } from "./entities/project";
+import { AutomationForkRemote, GitHubRepo, Project } from "./entities/project";
 import { ItemRecord, Session, SessionStatus, Thread, Turn } from "./entities/session";
 import { ProjectExecutionBackend } from "./execution";
 import { UserInput } from "./input";
@@ -107,6 +107,8 @@ export const UpdateProjectRequest = z.object({
   defaultEffort: ReasoningEffort.nullable().optional(),
   autonomy: AutonomyLevel.nullable().optional(),
   timezone: z.string().nullable().optional(),
+  /** Set or clear the repository's automation write destination. */
+  forkRemote: AutomationForkRemote.nullable().optional(),
   defaultBranch: z.string().nullable().optional(),
   /** Pin or unpin the project in the project list (§13). */
   pinned: z.boolean().optional(),

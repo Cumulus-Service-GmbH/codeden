@@ -8,6 +8,7 @@ import {
   type Role,
   RunAutomationResponse,
   ScheduledRun,
+  StartSessionResponse,
   ThreadItemsPage,
 } from "@codeden/contracts";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -300,6 +301,90 @@ describe("automations (§10): scheduler, guards, runs, PM tools, files", () => {
     expect(await upcoming()).toEqual([]);
     await h.api("PATCH", `/projects/${h.projectId}/automations/settings`, { enabled: true });
     expect((await upcoming()).length).toBeGreaterThanOrEqual(4);
+  });
+
+  it("uses Full for a new Team lane, but cancels it at queued launch after the kill switch", async () => {
+    const testId = `starter:${h.projectId}:security-audit`;
+    const services = h.server.services;
+    const project = services.projects.get(h.projectId);
+    const team = {
+      defaultTeamId: "test",
+      teams: [
+        {
+          id: "test",
+          name: "Test",
+          team: [{ role: "writer", provider: "fake", model: null, effort: null }],
+          limits: { maxParallel: 1, maxAssignments: 1, maxRounds: 1 },
+        },
+      ],
+    };
+    await h.api("PATCH", `/projects/${h.projectId}`, { teams: team });
+    await h.api("PATCH", "/settings", { limits: { maxActiveSessions: 1 } });
+    const blocker = StartSessionResponse.parse(
+      (
+        await h.api("POST", "/sessions", {
+          role: "agent",
+          projectId: h.projectId,
+          provider: "fake",
+          input: { text: "[approval] wait" },
+        })
+      ).body,
+    );
+    expect(blocker.status).toBe("started");
+    if (blocker.status !== "started") throw new Error("The first lane did not start");
+    let queued: string | undefined;
+    try {
+      await waitUntil(async () => (await h.detail(blocker.sessionId)).session.status === "waiting");
+      const run = RunAutomationResponse.parse(
+        (
+          await h.api("POST", `/automations/${testId}/run`, {
+            projectId: h.projectId,
+          })
+        ).body,
+      );
+      expect(run.status).toBe("queued");
+      if (run.status !== "queued" || !run.sessionId)
+        throw new Error("The automation did not queue");
+      queued = run.sessionId;
+      expect((await h.detail(queued)).session).toMatchObject({
+        title: "[Writer] Security audit",
+        status: "queued",
+        autonomy: "full",
+      });
+      services.store.append([
+        {
+          type: "project.updated",
+          sessionId: null,
+          payload: { project: { ...services.projects.get(h.projectId), killSwitch: true } },
+        },
+      ]);
+      expect(
+        (await h.api("POST", `/automations/${testId}/run`, { projectId: h.projectId })).status,
+      ).toBe(409);
+      await services.sessions.stop(blocker.sessionId);
+      await waitUntil(
+        async () => (await h.detail(run.sessionId ?? "")).session.status === "stopped",
+      );
+      expect((await h.detail(queued)).session.worktreePath).toBeNull();
+    } finally {
+      await services.sessions.stop(blocker.sessionId);
+      if (queued) await services.sessions.stop(queued);
+      services.store.append([{ type: "project.updated", sessionId: null, payload: { project } }]);
+      await h.api("PATCH", "/settings", { limits: { maxActiveSessions: 4 } });
+    }
+  });
+
+  it("refuses Run now for built-ins while the automations master is off", async () => {
+    await h.api("PATCH", "/settings", { automations: { enabled: false } });
+    try {
+      const testId = `starter:${h.projectId}:test-coverage`;
+      expect(
+        (await h.api("POST", `/automations/${testId}/run`, { projectId: h.projectId })).status,
+      ).toBe(409);
+      expect(await upcoming()).toEqual([]);
+    } finally {
+      await h.api("PATCH", "/settings", { automations: { enabled: true } });
+    }
   });
 
   it("in Manual mode, only runs someone starts happen", async () => {

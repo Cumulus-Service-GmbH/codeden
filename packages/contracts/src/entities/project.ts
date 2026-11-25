@@ -104,11 +104,20 @@ const projectBase = {
   archivedAt: Timestamp.nullable(),
 };
 
+/** The named Git remote and GitHub destination used for app-driven automation writes. */
+export const AutomationForkRemote = z.object({
+  remote: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/),
+  owner: z.string().regex(/^[a-zA-Z0-9][a-zA-Z0-9-]*$/),
+  repo: z.string().regex(/^[a-zA-Z0-9._-]+$/),
+});
+export type AutomationForkRemote = z.infer<typeof AutomationForkRemote>;
+
 /** GitHub repository coordinates for a `github` project. */
 export const GitHubRepo = z.object({
   owner: z.string().min(1),
   repo: z.string().min(1),
   remoteUrl: z.string().min(1),
+  forkRemote: AutomationForkRemote.optional(),
   defaultBranch: z.string().min(1),
 });
 export type GitHubRepo = z.infer<typeof GitHubRepo>;

@@ -44,6 +44,12 @@ export class WorkbenchService {
       /** With `git`: the push credential for a runner that doesn't share this disk (§9.2). */
       projects?: Pick<ProjectService, "get">;
       git?: GitBroker;
+      automationPush?: (
+        session: Session,
+        cwd: string,
+        runner: RunnerPort,
+        request: GitPushRequest,
+      ) => Promise<{ remote: string; sourceCommit: string } | undefined>;
     },
   ) {}
 
@@ -221,6 +227,20 @@ export class WorkbenchService {
   async push(sessionId: string, req: GitPushRequest): Promise<GitPushResponse> {
     const session = this.deps.repo.get(sessionId);
     const runner = this.runner(sessionId);
+    const delivery = await this.deps.automationPush?.(session, workdir(session), runner, req);
+    if (delivery) {
+      return runner
+        .request(
+          {
+            name: "git.push",
+            cwd: workdir(session),
+            ...delivery,
+            setUpstream: false,
+          },
+          GIT_TIMEOUT_MS,
+        )
+        .catch(rethrow);
+    }
     // The token goes with a push to the session's own `origin` only, never to another remote.
     const toOrigin = (req.remote ?? "origin") === "origin";
     const project =

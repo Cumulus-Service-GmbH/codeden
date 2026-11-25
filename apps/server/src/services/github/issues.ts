@@ -17,11 +17,13 @@ export interface IssueDeps {
   client: GithubClient;
   store: GithubStore;
   events: EventStore;
+  isolated?: boolean;
 }
 
 /** Project a REST issue we just read or changed (appends `issue.*` when it differs). */
 function project(deps: IssueDeps, projectId: string, raw: RestIssue): GithubIssue {
   const next = GithubIssue.parse(toGithubIssue(projectId, raw));
+  if (deps.isolated) return next;
   const events = diffIssue(deps.store.issue(projectId, raw.number), next);
   if (events.length > 0) deps.events.append(events);
   return deps.store.issue(projectId, raw.number) ?? next;
