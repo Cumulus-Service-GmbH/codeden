@@ -8,7 +8,9 @@ import {
   McpTokenClaims,
   type Session,
 } from "@codeden/contracts";
+import { ApprovalBroker } from "@codeden/providers";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { handleServerRequest } from "../../../packages/providers/src/codex/approvals";
 import type { ToolCaller } from "../src/mcp/registry";
 import { ensureHome } from "../src/paths";
 import { inboxRoutes } from "../src/routes/inbox";
@@ -125,6 +127,65 @@ it.each([
     expect(runnerCalls).toHaveLength(1);
   },
 );
+
+it.each([
+  ["/bin/sh -c 'cat README.md'", true],
+  ["/bin/sh -c 'cat README.md > out'", false],
+] as const)("lists a Codex 0.172 approval for %s", async (command, delegable) => {
+  const { services, add, worktree } = setup();
+  writeFileSync(join(worktree, "README.md"), "fixture");
+  const events: AgentEvent[] = [];
+  const broker = new ApprovalBroker((event) => events.push(event));
+  const pending = handleServerRequest(
+    {
+      method: "item/commandExecution/requestApproval",
+      id: 1,
+      params: {
+        kind: "command",
+        threadId: "thread",
+        turnId: "turn",
+        itemId: "exec",
+        startedAtMs: 1,
+        environmentId: "local",
+        command,
+        cwd: worktree,
+        commandActions: [
+          {
+            type: "read",
+            command: "cat README.md",
+            name: "README.md",
+            path: join(worktree, "README.md"),
+          },
+        ],
+      },
+    },
+    {
+      broker,
+      risk: { cwd: worktree },
+      ctx: () => ({ threadId: "thread", turnId: "turn" }),
+      filePaths: () => [],
+    },
+  );
+  try {
+    const started = events[0];
+    if (started?.type !== "item.started" || started.item.kind !== "approval_request") {
+      throw new Error("Expected an approval request");
+    }
+    const { id } = add("codex-local", started.item, { provider: "codex" });
+    const result = await services.tools.call("list_pending_approvals", {}, actor);
+    expect(result.isError).toBe(false);
+    expect(JSON.parse(result.text).approvals).toEqual([
+      expect.objectContaining({
+        id,
+        delegable,
+        ...(delegable ? {} : { ownerOnly: "unclassified" }),
+      }),
+    ]);
+  } finally {
+    broker.cancelAll();
+    await pending;
+  }
+});
 
 it.each(["legacy", "shared", "remote", "private-cwd", "hook"] as const)(
   "keeps %s shell reads owner-only",
