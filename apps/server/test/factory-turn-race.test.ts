@@ -146,12 +146,13 @@ function realDelivery() {
   const port = {
     isConnected: () => runner.up,
     providers: () => [],
-    request: async (command: { name: string; sessionId?: string }) => {
+    request: async (command: { name: string; sessionId?: string; revision?: number }) => {
       if (!runner.up) throw away();
-      if (command.name !== "session.send") return {};
-      if (runner.refuse) throw new RunnerCommandError(runner.refuse, "The provider refused");
+      if (command.name !== "session.send" && command.name !== "session.configure") return {};
       const id = command.sessionId as string;
       if (!runner.hosted.has(id)) throw new RunnerCommandError("unknown_session", "Not hosted");
+      if (command.name === "session.configure") return { revision: command.revision };
+      if (runner.refuse) throw new RunnerCommandError(runner.refuse, "The provider refused");
       await runner.opening(id);
       runner.turns.push(id);
       return {};
@@ -173,6 +174,9 @@ function realDelivery() {
     runner: port,
     outbox,
     launcher,
+    projects: { get: () => env.project },
+    settings: env.settings,
+    projectAutonomyPolicy: (id: string) => env.factory.data.loop(id)?.tuning.autonomyPolicy,
     artifacts: {
       externalizeAttachments: (i: UserInput) => i,
       resolveAttachments: (i: UserInput) => i,
@@ -365,6 +369,27 @@ describe("telling a builder to carry on, through the real session service (#96)"
     expect(env.repo.get(builderId).status).toBe("running");
     await tick();
     expect(runner.turns).toEqual([builderId]);
+  });
+
+  it("applies a tightened autonomy policy before opening a recovered builder", async () => {
+    factory(1);
+    const { id, builderId } = await failedBeforeTheFix(91, "stopped");
+    env.repo.update(builderId, (session) => ({ ...session, autonomy: "full" }));
+    env.settings.update({
+      autonomy: { ...env.settings.get().autonomy, roleFloors: { agent: "supervised" } },
+    });
+
+    const { runner } = realDelivery();
+    runner.up = true;
+    const openedAt: Session["autonomy"][] = [];
+    runner.opening = async (sessionId) => {
+      openedAt.push(env.repo.get(sessionId).autonomy);
+    };
+    await tick();
+
+    expect(runner.turns).toEqual([builderId]);
+    expect(openedAt).toEqual(["supervised"]);
+    expect(item(id).stage).toBe("building");
   });
 
   it("fails the item once when its builder can't be started at all, then leaves it to the infrastructure recovery", async () => {
