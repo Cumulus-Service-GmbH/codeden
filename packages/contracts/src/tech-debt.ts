@@ -24,6 +24,8 @@ export const TechDebtFinding = TechDebtFindingInput.extend({
   source: TechDebtIssue.nullable(),
   status: z.enum(["open", "in_progress", "fixed", "dismissed"]),
   reason: z.string().nullable(),
+  /** Evidence for the resolution, separate from the original review receipt. */
+  resolutionReceipt: z.string().nullable().optional(),
   sessionId: Id.nullable(),
 });
 export type TechDebtFinding = z.infer<typeof TechDebtFinding>;
@@ -73,17 +75,66 @@ export type TechDebtSummary = z.infer<typeof TechDebtSummary>;
 /** Counts for every active project. */
 export const TechDebtSummaries = z.array(TechDebtSummary);
 
-/** MCP input for recording a LOW review finding with its receipt. */
-export const RecordTechDebtInput = z.strictObject({
-  projectId: Id.optional(),
+/** One LOW review finding and its evidence, optionally with its original date and PR. */
+const RecordTechDebtRow = z.strictObject({
   location: TechDebtFindingInput.shape.location,
   text: TechDebtFindingInput.shape.text,
   receipt: TechDebtFindingInput.shape.receipt.unwrap(),
   severity: z.literal("LOW").default("LOW"),
+  date: Timestamp.optional(),
+  pr: TechDebtFindingInput.shape.pr.optional(),
 });
 
 /** MCP input for merging a GitHub tracking issue into a project ledger. */
 export const ImportTechDebtInput = z.strictObject({
   projectId: Id.optional(),
   issue: TechDebtIssue,
+});
+
+/** MCP input for recording one finding or up to 500 findings in one project. */
+export const RecordTechDebtInput = z.union([
+  RecordTechDebtRow.extend({ projectId: Id.optional() }),
+  z.strictObject({
+    projectId: Id.optional(),
+    findings: z.array(RecordTechDebtRow).min(1).max(500),
+  }),
+]);
+
+const resolution = {
+  status: z.enum(["fixed", "dismissed"]),
+  reason: z.string().trim().min(1).max(1000),
+  receipt: TechDebtFindingInput.shape.receipt.unwrap(),
+};
+
+/** A resolution with the target ID and evidence for that finding. */
+export const TechDebtResolution = z.strictObject({ id: Id, ...resolution });
+export type TechDebtResolution = z.infer<typeof TechDebtResolution>;
+
+/** MCP input for applying a shared disposition or individual dispositions in one project. */
+export const ResolveTechDebtInput = z.union([
+  z.strictObject({ projectId: Id.optional(), ids: z.array(Id).min(1).max(500), ...resolution }),
+  z.strictObject({
+    projectId: Id.optional(),
+    resolutions: z.array(TechDebtResolution).min(1).max(500),
+  }),
+]);
+
+/** Audit payload for one closed finding, including legacy UI actions without a receipt. */
+export const TechDebtResolutionAudit = TechDebtResolution.extend({
+  projectId: Id,
+  reason: resolution.reason.nullable(),
+  receipt: resolution.receipt.nullable(),
+});
+
+const count = z.int().nonnegative();
+
+/** Number of findings created and number skipped as duplicates by a record call. */
+export const RecordTechDebtCounts = z.strictObject({ recorded: count, duplicates: count });
+/** Number of issue entries imported and number skipped as duplicates by an import call. */
+export const ImportTechDebtCounts = z.strictObject({ imported: count, duplicates: count });
+/** Disposition counts for entries in a resolution call, with no finding data. */
+export const ResolveTechDebtCounts = z.strictObject({
+  resolved: count,
+  unknown: count,
+  alreadyResolved: count,
 });

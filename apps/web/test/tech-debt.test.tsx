@@ -1,6 +1,7 @@
 import { screen, within } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { TechDebtBadge } from "@/components/project/tech-debt-badge";
+import { TechDebtPanel } from "@/components/project/tech-debt-panel";
 import { Sidebar } from "@/components/shell/sidebar/sidebar";
 import { createMockClient } from "@/lib/api/mock";
 import { router } from "@/router";
@@ -45,4 +46,33 @@ it.each(["tech_debt", "tech-debt"])("opens the project ledger for tab=%s", (tab)
     .matchRoutes("/projects/project-1", { tab })
     .find((route) => route.routeId === "/shell/projects/$projectId");
   expect(match?.search).toMatchObject({ tab: "tech-debt" });
+});
+
+it("shows status, reason and resolution receipt in the project ledger", async () => {
+  const client = createMockClient();
+  vi.spyOn(client.techDebt, "list").mockResolvedValue({
+    projectId: "project-1",
+    issue: null,
+    imported: false,
+    findings: [
+      {
+        id: "f",
+        location: "src/file.ts:2",
+        text: "Reuse the helper.",
+        source: null,
+        date: "2026-11-23T00:00:00.000Z",
+        pr: null,
+        sessionId: null,
+        status: "dismissed",
+        reason: "Covered elsewhere.",
+        receipt: "review-1",
+        resolutionReceipt: "resolution-1",
+      },
+    ],
+  });
+  renderWithClient(<TechDebtPanel projectId="project-1" />, client);
+  expect(await screen.findByText("Dismissed")).toBeTruthy();
+  expect(screen.getByText("Covered elsewhere.")).toBeTruthy();
+  expect(screen.getByText("Resolution receipt resolution-1")).toBeTruthy();
+  expect(screen.getByText("Receipt review-1")).toBeTruthy();
 });

@@ -8,6 +8,7 @@ import { noSandboxes, type SandboxService } from "../execution/sandboxes";
 import { ToolRegistry } from "../mcp/registry";
 import { McpTokenStore } from "../mcp/tokens";
 import { allTools } from "../mcp/tools";
+import { resolveTechDebt } from "../mcp/tools/tech-debt";
 import type { HomePaths } from "../paths";
 import type { SettingsStore } from "../settings-store";
 import { AgentConfigService } from "./agent-config/agent-config-service";
@@ -682,7 +683,7 @@ export function createServices(opts: ServicesOptions): AppServices {
       workspaceFsFor({ runner: opts.runner, runners, home: opts.paths.home }, session),
   };
   services.teamRuns = wireTeamRuns(services, exec, opts.teamRuns, opts.log);
-  services.tools = new ToolRegistry(allTools, services, opts.log);
+  services.tools = new ToolRegistry([...allTools, resolveTechDebt], services, opts.log);
   return services;
 }
 

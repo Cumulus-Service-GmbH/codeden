@@ -142,6 +142,7 @@ describe("CodeDen MCP endpoint", () => {
       "schedule_wakeup",
       "list_wakeups",
       "cancel_wakeup",
+      "resolve_tech_debt",
     ]);
     await pm.close();
   });

@@ -37,7 +37,7 @@ import { RunnerDeletedPayload, RunnerRecordRef, RunnerRegisteredPayload } from "
 import { Settings } from "./settings";
 import { TeamReviewLimitsAudit } from "./team";
 import { TeamRun } from "./team-run";
-import { TechDebtView } from "./tech-debt";
+import { TechDebtResolutionAudit, TechDebtView } from "./tech-debt";
 import { Checkpoint, QueuedMessage, SetupStep } from "./workbench";
 
 /**
@@ -90,6 +90,7 @@ export const EventEnvelope = z.discriminatedUnion("type", [
   // Domain events.
   globalEvent("team_run.updated", z.object({ run: TeamRun })),
   globalEvent("tech_debt.updated", z.object({ view: TechDebtView })),
+  globalEvent("tech_debt.resolved", TechDebtResolutionAudit),
   globalEvent("checklist.updated", z.object({ checklist: ProjectChecklist })),
   globalEvent("project.created", z.object({ project: Project })),
   globalEvent("project.updated", z.object({ project: Project })),

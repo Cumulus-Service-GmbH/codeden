@@ -1,8 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
   EventEnvelope,
+  ImportTechDebtCounts,
   ImportTechDebtInput,
+  RecordTechDebtCounts,
   RecordTechDebtInput,
+  ResolveTechDebtCounts,
+  ResolveTechDebtInput,
   TechDebtAction,
   TechDebtIssue,
   TechDebtSummaries,
@@ -81,10 +85,51 @@ describe("project tech debt contracts", () => {
     expect(ImportTechDebtInput.safeParse({ issue: "repo#246" }).success).toBe(false);
   });
 
+  it("round-trips a resolution audit event with caller and evidence", () => {
+    const event = {
+      seq: 1,
+      ts: "2026-11-23T00:00:00.000Z",
+      sessionId: "pm",
+      type: "tech_debt.resolved",
+      payload: { projectId: "p", id: "f", status: "fixed", reason: "Verified.", receipt: "proof" },
+    };
+    expect(EventEnvelope.parse(JSON.parse(JSON.stringify(event)))).toEqual(event);
+  });
+
   it("requires a reason for dismissal and distinct selections for a fix", () => {
     expect(TechDebtAction.safeParse({ action: "dismiss", id: "f", reason: " " }).success).toBe(
       false,
     );
     expect(TechDebtAction.safeParse({ action: "fix", ids: ["f", "f"] }).success).toBe(false);
+  });
+  it("round-trips bulk record, both resolution inputs and counts-only results", () => {
+    const row = {
+      location: "src/file.ts:2",
+      text: "Reuse the helper.",
+      receipt: "review",
+      severity: "LOW",
+    };
+    const resolution = { status: "dismissed", reason: "Already covered.", receipt: "proof" };
+    const cases = [
+      [RecordTechDebtInput, { projectId: "p", findings: [row] }],
+      [ResolveTechDebtInput, { projectId: "p", ids: ["a", "b"], ...resolution }],
+      [ResolveTechDebtInput, { resolutions: [{ id: "a", ...resolution }] }],
+      [RecordTechDebtCounts, { recorded: 1, duplicates: 0 }],
+      [ImportTechDebtCounts, { imported: 1, duplicates: 0 }],
+      [ResolveTechDebtCounts, { resolved: 1, unknown: 1, alreadyResolved: 0 }],
+    ] as const;
+    for (const [schema, value] of cases) {
+      expect(schema.parse(JSON.parse(JSON.stringify(value)))).toEqual(value);
+    }
+    expect(ResolveTechDebtInput.safeParse({ ids: ["a"], ...resolution, receipt: "" }).success).toBe(
+      false,
+    );
+    expect(
+      ResolveTechDebtInput.safeParse({ ids: ["a"], ...resolution, status: "open" }).success,
+    ).toBe(false);
+    expect(
+      ResolveTechDebtCounts.safeParse({ resolved: 1, unknown: 0, alreadyResolved: 0, findings: [] })
+        .success,
+    ).toBe(false);
   });
 });
