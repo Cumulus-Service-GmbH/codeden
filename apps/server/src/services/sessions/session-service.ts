@@ -315,7 +315,7 @@ export class SessionService {
         );
       }
     }
-    const roleSettings = this.roleSettings(req.role, req.projectId);
+    const roleSettings = this.roleSettings(req.role, req.projectId, options.teamId);
     const selectedRole = req.teamRole ?? teamRoleOfTitle(req.title);
     if (selectedRole) {
       req = withTeamRole(req, {
@@ -349,9 +349,10 @@ export class SessionService {
     const browserProvider = browserOperator
       ? this.resolveProvider(req, project ? projectDefaultProvider(project) : null)
       : undefined;
+    const browserInfo = browserProvider ? this.provider(browserProvider) : undefined;
     if (
       browserProvider &&
-      this.provider(browserProvider)?.capabilities.chrome &&
+      (!browserInfo || browserInfo.capabilities.chrome) &&
       !options.chromeApproved
     ) {
       const confirmation = await options.confirmChrome?.();
@@ -408,7 +409,7 @@ export class SessionService {
       }
     }
 
-    const session = this.buildSession(req, project, {
+    const session = this.buildSession(req, project, roleSettings, {
       purpose,
       workKey,
       scope,
@@ -1245,12 +1246,12 @@ export class SessionService {
   }
 
   /** PMs use the project's effective Architect when one is configured. */
-  roleSettings(role: Session["role"], projectId: string | null): RoleDefaults {
+  roleSettings(role: Session["role"], projectId: string | null, teamId?: string): RoleDefaults {
     const settings = this.deps.settings.get();
     if (role === "pm" && projectId) {
       const { team } = resolveTeam({
         defaults: defaultTeam(settings),
-        project: this.deps.projectTeam?.(projectId) ?? [],
+        project: this.deps.projectTeam?.(projectId, teamId) ?? [],
       });
       const architect = teamMember(team, "architect");
       if (architect) return architect;
@@ -1281,6 +1282,7 @@ export class SessionService {
   private buildSession(
     req: StartSessionRequest,
     project: ReturnType<ProjectService["get"]> | null,
+    roleSettings: RoleDefaults,
     work: { purpose: string; workKey: string; scope: Session["scope"]; queued: boolean },
   ): Session {
     const settings = this.deps.settings.get();
@@ -1290,7 +1292,7 @@ export class SessionService {
       teamRoleOfTitle(req.title) || (isFactorySession(req) && req.provider !== "auto")
         ? { model: null, effort: null }
         : roleModelDefaults(
-            this.roleSettings(req.role, req.projectId),
+            roleSettings,
             provider,
             this.provider(provider),
             req.role,

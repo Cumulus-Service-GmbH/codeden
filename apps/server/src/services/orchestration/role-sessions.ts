@@ -34,7 +34,8 @@ const keyOf = (role: OrchestrationRole, projectId: string | null) => `${role}:${
  * The long-lived role sessions (§8.1): one orchestrator (cwd `<home>/orchestrator/`) and one
  * PM per project (cwd: the project root, read-only). Created lazily on first use; afterwards
  * the same session is reused and, when the runner no longer hosts it, resumed through its
- * provider resume token. Provider, model and effort come from `settings.providers.<role>`.
+ * provider resume token. PMs use their Team’s Architect when configured. The built-in roles
+ * read provider Settings otherwise.
  *
  * A session can't change provider, so a role moves to another one with a fresh session: when
  * the role's provider setting is changed to a provider other than the one the role session
@@ -128,7 +129,7 @@ export class RoleSessions {
   /** A role choice changed and the runner can start its replacement. */
   private moveTarget(session: Session): boolean {
     const meta = this.deps.repo.find(session.id)?.startMeta;
-    const setting = this.deps.sessions.roleSettings(session.role, session.projectId);
+    const setting = this.deps.sessions.roleSettings(session.role, session.projectId, meta?.teamId);
     if (meta?.roleProvider === undefined) return false;
     if (meta.roleProvider === setting.provider) {
       if (meta.roleModel === undefined || meta.roleEffort === undefined) {
@@ -212,7 +213,7 @@ export class RoleSessions {
     if (!always && queued.length === 0) return undefined;
     let created: Session;
     try {
-      created = await this.create(role, projectId);
+      created = await this.create(role, projectId, undefined, this.retired.get(key)?.id);
     } catch (error) {
       if (existing && queued.length > 0) {
         this.deps.repo.update(existing.id, (s) => ({ ...s, archivedAt: null }));
@@ -348,6 +349,7 @@ export class RoleSessions {
     role: OrchestrationRole,
     projectId: string | null,
     previous?: Session,
+    teamSourceId = previous?.id,
   ): Promise<Session> {
     const project = role === "pm" && projectId ? this.deps.projects.get(projectId) : null;
     if (role === "pm" && !project) {
@@ -363,7 +365,10 @@ export class RoleSessions {
       title: project ? `PM · ${project.name}` : "Orchestrator",
       autonomy: "auto",
     });
-    const result = await this.deps.sessions.start(request, { replacesRoleId: previous?.id });
+    const result = await this.deps.sessions.start(request, {
+      replacesRoleId: previous?.id,
+      teamId: teamSourceId ? this.deps.repo.find(teamSourceId)?.startMeta?.teamId : undefined,
+    });
     // Queued for a free slot is a started conversation too: it runs once one opens.
     if (result.status !== "started" && result.status !== "queued") {
       throw new ServiceError(409, "role_session_conflict", `Could not start the ${role} session`);

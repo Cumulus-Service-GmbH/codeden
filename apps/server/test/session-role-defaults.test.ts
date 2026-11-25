@@ -46,6 +46,7 @@ type Start = (over: Partial<StartSessionRequestInit>) => Promise<string>;
 function withService(
   settings: SettingsInput,
   run: (start: Start, repo: SessionRepo, service: SessionService) => Promise<void>,
+  connected = true,
 ) {
   return async () => {
     const dir = mkdtempSync(join(tmpdir(), "codeden-role-defaults-"));
@@ -66,8 +67,8 @@ function withService(
         },
         runner: {
           // `plain` has no reasoning effort.
-          providers: () => [info("claude"), info("codex"), info("plain", false)],
-          isConnected: () => true,
+          providers: () => (connected ? [info("claude"), info("codex"), info("plain", false)] : []),
+          isConnected: () => connected,
         },
         settings: { get: () => parsed },
         launcher: { launch: vi.fn(async () => {}) },
@@ -113,15 +114,18 @@ describe("PM Browser Operator launch consent", () => {
     })(),
   );
 
-  it(
-    "does not allow an unconfirmed PM launch",
-    withService(teamSettings("claude"), async (_start, repo, service) => {
-      expect(await service.start(request)).toEqual({
-        status: "skipped",
-        reason: "Chrome requires owner approval.",
-      });
-      expect(repo.list({ projectId: "p1" })).toHaveLength(0);
-    }),
+  it.each([true, false])("requires consent when the runner connection is %s", (connected) =>
+    withService(
+      teamSettings("claude"),
+      async (_start, repo, service) => {
+        expect(await service.start(request)).toEqual({
+          status: "skipped",
+          reason: "Chrome requires owner approval.",
+        });
+        expect(repo.list({ projectId: "p1" })).toHaveLength(0);
+      },
+      connected,
+    )(),
   );
 
   it(

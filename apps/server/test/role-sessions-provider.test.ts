@@ -291,3 +291,31 @@ it(
     });
   }),
 );
+
+it(
+  "uses the selected named Team for a PM and retains it when starting fresh",
+  withRoles(async ({ roles, sessions, repo, setProjectTeam, settle }) => {
+    setProjectTeam([
+      { role: "architect", provider: "claude", model: "project-default", effort: null },
+    ]);
+    setProjectTeam(
+      [{ role: "architect", provider: "codex", model: "named-team", effort: "low" }],
+      "named",
+    );
+    const started = await sessions.start(
+      StartSessionRequest.parse({
+        role: "pm",
+        projectId: "p1",
+        workspace: { mode: "repo_root" },
+      }),
+      { teamId: "named" },
+    );
+    if (started.status !== "started") throw new Error(started.status);
+    const first = repo.get(started.sessionId);
+    expect(first).toMatchObject({ provider: "codex", model: "named-team", effort: "low" });
+    settle(first.id);
+    const next = await roles.startFresh(first.id);
+    expect(next).toMatchObject({ provider: "codex", model: "named-team", effort: "low" });
+    expect(repo.find(next.id)?.startMeta?.teamId).toBe("named");
+  }),
+);

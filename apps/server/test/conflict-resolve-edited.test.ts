@@ -47,6 +47,7 @@ const fake = {
     mcp: true,
     skills: false,
     enforcesSecurityRules: true,
+    chrome: true,
     readOnly: true,
   },
 } as unknown as ProviderInfo;
@@ -73,10 +74,19 @@ beforeEach(() => {
   sessions = new SessionService({
     repo,
     projects: {
-      get: () => ({ id: PROJECT, path: dir, defaultProvider: null, archivedAt: null }),
+      get: () => ({
+        id: PROJECT,
+        path: dir,
+        defaultProvider: null,
+        archivedAt: null,
+        execution: { backend: "local" },
+      }),
     },
     runner: { providers: () => [fake], isConnected: () => true },
     settings: { get: () => Settings.parse({}) },
+    projectTeam: () => [
+      { role: "browserOperator", provider: "fake", model: "browser-model", effort: null },
+    ],
     launcher: { launch },
     inbox,
     outbox,
@@ -122,19 +132,11 @@ async function sendConflicting(req: StartSessionRequest): Promise<ConflictRecord
 }
 
 describe("deciding a conflict after editing a draft with an implicit work key (#187)", () => {
-  it("resolves the Team provider for a replacement draft that opts in to Chrome", async () => {
-    const resolve = vi.fn(async () => ({}));
-    const api = conflictRoutes({
-      orchestration: { conflicts: { resolve } },
-      settings: { get: () => Settings.parse({}) },
-      projectTeam: () => [{ role: "browserOperator", provider: "fake", model: null, effort: null }],
-      factory: {
-        data: {
-          loop: () => ({ tuning: { team: [{ role: "browserOperator", provider: "fake" }] } }),
-        },
-      },
-    } as unknown as AppServices);
-    const res = await api.request("/conflict-id/resolve", {
+  it("uses inherited Team pins for a replacement draft that opts in to Chrome", async () => {
+    runningWork();
+    const record = await sendConflicting(draft("Fix the login bug"));
+    const api = conflictRoutes({ orchestration: { conflicts } } as AppServices);
+    const res = await api.request(`/${record.id}/resolve`, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({
@@ -143,12 +145,11 @@ describe("deciding a conflict after editing a draft with an implicit work key (#
       }),
     });
     expect(res.status).toBe(200);
-    expect(resolve).toHaveBeenCalledWith(
-      "conflict-id",
-      expect.objectContaining({
-        start: expect.objectContaining({ provider: "fake", chrome: true }),
-      }),
-    );
+    const { result } = await res.json();
+    const row = repo.find(result.sessionId);
+    expect(row?.session).toMatchObject({ provider: "fake", model: "browser-model" });
+    expect(row?.startMeta?.chromeRequested).toBe(true);
+    expect(row?.startMeta?.ownTeamPins).toBeUndefined();
   });
 
   it("waits for the running work with the edited text", async () => {
