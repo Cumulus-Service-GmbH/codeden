@@ -10,6 +10,7 @@ const JEV_FILE = resolve(homedir(), ".config", "trioharness", "jev.env");
 const JEV_FILE_TEXT = /(?:^|[^\w.-])(?:\.config\/)?trioharness\/jev\.env(?![\w.-])/i;
 const JEV_NATIVE_ACCESS = /\b(?:keyring|getPassword|SecItemCopyMatching|SecKeychainFindGenericPassword)\b/i;
 const JEV_ENTRY = /typesafe\.apiKey/i;
+const JEV_READER = /\bjev-keychain-reader\b[\s\S]*?\bread\b/i;
 const JEV_SCRIPTS = new Set([
   ".claude/skills/trioharness-codeden/scripts/jev.mjs",
   ".claude/skills/trioharness-lean/scripts/jev.mjs",
@@ -18,7 +19,7 @@ const JEV_SCRIPTS = new Set([
 
 function jevCredentialText(text, trustedJev = false) {
   return JEV_FILE_TEXT.test(text.replace(/["'\\]/g, "")) ||
-    !trustedJev && JEV_NATIVE_ACCESS.test(text) && JEV_ENTRY.test(text) ? JEV_CREDENTIAL_DENIAL : null;
+    !trustedJev && (JEV_READER.test(text) || (JEV_NATIVE_ACCESS.test(text) && JEV_ENTRY.test(text))) ? JEV_CREDENTIAL_DENIAL : null;
 }
 
 export const programName = (word = "") => word.split(/[\\/]/).at(-1).toLowerCase().replace(/\.(?:cmd|exe|ps1)$/, "");
@@ -289,6 +290,7 @@ export function checkExecution(program, args, isPlainWord, inspect, options = {}
   // With a dynamic cd, inspect only relative paths visible from the hook cwd.
   const scriptCwd = options.cwd === null && !options.scriptContent ? options.hookCwd ?? null : options.cwd;
   const values = args.map(({ value }) => value);
+  if (name === "jev-keychain-reader" && values[0] === "read") return JEV_CREDENTIAL_DENIAL;
   const targets = [...values, ...(options.redirects ?? []).map(redirect => redirect.target?.value ?? "")];
   if (targets.some(value => JEV_FILE_TEXT.test(value) ||
       resolveScriptPath(scriptCwd ?? "/", value) === JEV_FILE)) return JEV_CREDENTIAL_DENIAL;

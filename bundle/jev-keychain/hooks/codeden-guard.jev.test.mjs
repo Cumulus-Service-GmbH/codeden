@@ -16,6 +16,7 @@ test('Jev credentials are hard-denied for shell commands and scripts', t => {
   writeFileSync(join(cwd, 'read.sh'), 'cat ' + secretPath);
   writeFileSync(join(cwd, 'read.mjs'), 'readFileSync("' + secretPath + '")');
   for (const command of [
+    '~/.config/trioharness/jev-keyring-runtime/bin/jev-keychain-reader read',
     'cat ' + secretPath, 'cat < "$HOME/.config/trioharness/jev.env"',
     'sh read.sh', 'node read.mjs',
     keychain, 'zsh -c ' + JSON.stringify(keychain),
