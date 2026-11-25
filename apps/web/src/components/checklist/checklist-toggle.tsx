@@ -10,11 +10,12 @@ import {
   needsOwnerCount,
   overallProgress,
   progressLabel,
+  progressOf,
   visibleChecklists,
 } from "./checklist-progress";
 
 /** Opens and closes the checklist sidebar; shows the overall percent once there are items. */
-export function ChecklistToggle() {
+export function ChecklistToggle({ compact = false }: { compact?: boolean }) {
   const { data } = useSnapshot();
   const open = useLayoutStore((s) => s.checklistOpen);
   const toggle = useLayoutStore((s) => s.toggleChecklist);
@@ -29,7 +30,7 @@ export function ChecklistToggle() {
   const needsYou = needsOwnerCount(lists.flatMap((l) => l.checklist.items));
   const label = [
     "Checklist",
-    overall.total > 0 && `Overall checklist progress ${progressLabel(overall)}`,
+    overall.total > 0 && `All projects ${progressLabel(overall)}`,
     needsYou > 0 && `${needsYou} ${needsYou === 1 ? "needs" : "need"} you`,
   ]
     .filter(Boolean)
@@ -40,9 +41,10 @@ export function ChecklistToggle() {
       <TooltipTrigger asChild>
         <Button
           variant="ghost"
-          size="icon-sm"
+          size={overall.total > 0 ? "xs" : "icon-sm"}
           className={cn(
             "relative text-muted-foreground",
+            compact && overall.total > 0 && "h-auto w-9 flex-col gap-0 px-0.5 py-1",
             shown && "bg-sidebar-accent text-foreground",
           )}
           onClick={() => {
@@ -57,10 +59,15 @@ export function ChecklistToggle() {
           aria-pressed={shown}
           data-testid="checklist-toggle"
         >
-          <ListChecks />
+          <ListChecks aria-hidden />
           {overall.total > 0 && (
-            <span className="pointer-events-none absolute -top-1 -right-1.5 rounded-full bg-sidebar px-0.5 text-[9px] leading-3 font-semibold text-muted-foreground tabular-nums ring-1 ring-sidebar-border">
-              {overall.percent}%
+            <span
+              className={cn(
+                "tabular-nums",
+                compact && "whitespace-normal text-[9px] leading-tight",
+              )}
+            >
+              All projects {overall.percent}%
             </span>
           )}
           {needsYou > 0 && (
@@ -70,7 +77,17 @@ export function ChecklistToggle() {
           )}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
+      <TooltipContent>
+        <div>{label}</div>
+        {lists.map(({ project, checklist }) => {
+          const { done, total } = progressOf(checklist.items);
+          return (
+            <div key={project.id}>
+              {project.name} {done}/{total}
+            </div>
+          );
+        })}
+      </TooltipContent>
     </Tooltip>
   );
 }

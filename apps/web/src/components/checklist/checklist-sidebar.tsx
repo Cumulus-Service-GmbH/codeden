@@ -1,4 +1,12 @@
-import { ListChecks, PanelRightClose, PanelRightOpen, Pin, PinOff, X } from "lucide-react";
+import {
+  ListChecks,
+  PanelRightClose,
+  PanelRightOpen,
+  Pin,
+  PinOff,
+  RefreshCw,
+  X,
+} from "lucide-react";
 import { type ReactNode, useEffect } from "react";
 import { DecisionCards, useDecisionCards } from "@/components/inbox/decision-cards";
 import { Button } from "@/components/ui/button";
@@ -58,9 +66,9 @@ function ChecklistBody({
   onClose: () => void;
   pinsNarrow?: boolean;
 }) {
-  const lists = useChecklists();
+  const { data, refetch, isFetching } = useSnapshot();
+  const lists = data ? visibleChecklists(data.projects, data.checklists) : [];
   const { data: cards } = useDecisionCards();
-  const { data } = useSnapshot();
   const pinned = useLayoutStore((s) => s.checklistPinned);
   const setPinned = useLayoutStore((s) => s.setChecklistPinned);
   const setCollapsed = useLayoutStore((s) => s.setChecklistCollapsed);
@@ -80,6 +88,10 @@ function ChecklistBody({
           </span>
         )}
         <span className="flex-1" />
+        <Button variant="ghost" size="xs" disabled={isFetching} onClick={() => void refetch()}>
+          <RefreshCw aria-hidden />
+          Refresh
+        </Button>
         {!phone && (
           <HeaderButton
             label={pinned ? "Unpin" : "Pin to the side"}

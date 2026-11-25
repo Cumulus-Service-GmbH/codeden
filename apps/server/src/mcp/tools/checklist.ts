@@ -25,26 +25,42 @@ export const readChecklist = defineTool({
     if (!session?.projectId || session.role !== role) {
       throw new ToolError("This tool needs a session in your project");
     }
-    return formatChecklist(services.checklist.get(session.projectId), session);
+    return formatChecklist(services.checklist.get(session.projectId, "plan"), session);
   },
 });
 
 export const updateChecklistItem = defineTool({
   name: "update_checklist_item",
   description:
-    "Update a checklist item's status, progress note, ETA, or owner action. Use null to clear ETA or owner action. PMs can set task text or create an item with a new itemId and text in their project. Structural edits to approved checklists require owner approval. Agents can update progress on items linked to their session or their parent session.",
+    "Update a checklist item's status, progress note, ETA, or owner action. Use null to clear ETA or owner action. PMs can set task text or create an item with a new itemId and text in their project. Structural edits to approved checklists require owner approval. PMs can also replace sessionIds or workKeys (empty arrays unlink), or separately report a linked session healthy after install. Agents can update progress on items linked to their session or their parent session.",
   roles: ["pm", "agent"],
   scope: "session",
   isAvailable: (services, caller, role) =>
     role === "pm" ? !caller || Boolean(caller.projectId) : hasChecklist(services, caller),
   input: UpdateChecklistItemInput,
-  handler: async ({ itemId, text, ...change }, { services, sessionId, projectId, role }) => {
+  handler: async (
+    { itemId, text, installHealthySessionId, ...change },
+    { services, sessionId, projectId, role },
+  ) => {
     const session = services.sessionRepo.find(sessionId)?.session;
     if (!projectId || !session || session.projectId !== projectId || session.role !== role) {
       throw new ToolError("This tool needs a session in your project");
     }
+    if (installHealthySessionId !== undefined) {
+      if (role !== "pm") throw new ToolError("Only the project manager can report install health");
+      if (text !== undefined || Object.values(change).some((value) => value !== undefined)) {
+        throw new ToolError("Report install health as a separate update");
+      }
+      return formatChecklist(
+        services.checklist.reportInstallHealthy(projectId, installHealthySessionId, itemId),
+        session,
+      );
+    }
     if (text !== undefined) {
       if (role !== "pm") throw new ToolError("Only PMs can edit checklist text or add items");
+      if (change.sessionIds !== undefined || change.workKeys !== undefined) {
+        throw new ToolError("Edit checklist links as a separate update");
+      }
       const previous = services.checklist.get(projectId);
       const pending = previous?.pending;
       if (

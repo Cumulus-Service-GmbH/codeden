@@ -67,13 +67,15 @@ function NeedsOwner({ needsOwner }: { needsOwner: NonNullable<ChecklistItem["nee
 function ItemDetails({ item }: { item: ChecklistItem }) {
   const { data } = useSnapshot();
   const sessionIds = item.sessionIds ?? [];
-  const meta = item.scopeAddition !== undefined || item.eta !== undefined || sessionIds.length > 0;
+  const workKeys = item.workKeys ?? [];
+  const meta =
+    item.scopeAddition || item.eta || item.autoUpdatedAt || sessionIds.length || workKeys.length;
   return (
     <>
       <span className="mt-0.5 truncate text-2xs text-muted-foreground" title={statusLine(item)}>
         {statusLine(item)}
       </span>
-      {meta && (
+      {Boolean(meta) && (
         <span className="mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-2xs text-muted-foreground">
           {item.scopeAddition && (
             <span
@@ -88,6 +90,19 @@ function ItemDetails({ item }: { item: ChecklistItem }) {
               ETA {localTime(item.eta)}
             </span>
           )}
+          {item.autoUpdatedAt && (
+            <time
+              dateTime={item.autoUpdatedAt}
+              title={new Date(item.autoUpdatedAt).toLocaleString()}
+            >
+              Auto-updated {localTime(item.autoUpdatedAt)}
+            </time>
+          )}
+          {workKeys.map((key) => (
+            <span key={key} className="max-w-44 truncate font-mono" title={key}>
+              {key}
+            </span>
+          ))}
           {sessionIds.map((sessionId) => {
             const label = sessionLabel(sessionId, data?.sessions);
             const short = sessionId.slice(0, 8);

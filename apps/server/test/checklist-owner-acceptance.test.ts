@@ -121,7 +121,9 @@ it("clears the automatic owner flag after a restart and preserves manual flags",
       needsOwner,
     ]);
     expect(checklist.get(projectId)?.changes).toEqual([
-      { itemId: "a", text: "A", from: "todo", to: "todo", at, needsOwner: true },
+      { itemId: "a", text: "A", from: "todo", to: "blocked", at },
+      { itemId: "a", text: "A", from: "blocked", to: "blocked", at, needsOwner: true },
+      { itemId: "b", text: "B", from: "todo", to: "blocked", at },
     ]);
     listener.stop();
     checklist = new ChecklistService(db.db, store);

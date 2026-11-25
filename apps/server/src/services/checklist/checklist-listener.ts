@@ -31,7 +31,7 @@ export class ChecklistListener {
           const work = previous?.work === signal.work ? undefined : status;
           const waiting =
             (previous?.waiting ?? false) === signal.waiting ? undefined : signal.waiting;
-          if (!work && waiting === undefined) {
+          if (previous?.work === signal.work && waiting === undefined) {
             this.lastSignal.set(session.id, signal);
             return;
           }
@@ -53,7 +53,8 @@ export class ChecklistListener {
   onWorkSignal(sessionId: string, signal: "started" | "done" | "blocked"): void {
     const session = this.repo.find(sessionId)?.session;
     if (session && !session.archivedAt) {
-      this.checklist.markWork(session, signal === "started" ? "doing" : signal);
+      if (signal === "started") this.checklist.markWork(session, "doing");
+      else this.checklist.markWork(session, signal, undefined, undefined, true);
     }
   }
 
@@ -66,7 +67,14 @@ export class ChecklistListener {
 
 function signalFor(session: Session, status: ChecklistStatus | undefined) {
   return {
-    work: `${status ?? ""}:${session.result?.at ?? ""}`,
+    work: JSON.stringify([
+      status,
+      session.status,
+      Boolean(session.archivedAt),
+      session.result,
+      session.startError?.message,
+      session.workKey,
+    ]),
     waiting: !session.archivedAt && session.status === "waiting",
   };
 }

@@ -13,18 +13,27 @@ const progress = {
 export const updateChecklist = defineTool({
   name: "update_checklist",
   description:
-    "Update a project's checklist. Use items to replace it, or patch and/or remove to edit by item ID. New items default to todo and need text. Use null to clear ETA or owner action. Omit an ID in items to generate one. Use requestApproval to ask the owner to approve a draft. Structural edits to an approved checklist wait for an owner decision. Set replacePending to replace an open proposal.",
+    "Update a project's checklist. Use items to replace it in plan order, or patch and/or remove to edit by item ID. New items default to todo and need text. Use null to clear ETA or owner action. Omit an ID in items to generate one. Use requestApproval to ask the owner to approve a draft. Structural edits to an approved checklist wait for an owner decision. Set replacePending to replace an open proposal. In patch, replace sessionIds or workKeys (empty arrays unlink). To mark a linked session LIVE after a healthy install, send installHealthySessionId by itself with projectId.",
   roles: ["orchestrator"],
   scope: "global",
   input: z
     .object({
       projectId: Id,
+      installHealthySessionId: Id.optional(),
       items: z
         .array(z.object({ id: id.optional(), text, ...progress }))
         .max(200)
         .optional(),
       patch: z
-        .array(z.object({ id, text: text.optional(), ...progress }))
+        .array(
+          z.object({
+            id,
+            text: text.optional(),
+            ...progress,
+            sessionIds: ChecklistItem.shape.sessionIds,
+            workKeys: ChecklistItem.shape.workKeys,
+          }),
+        )
         .max(200)
         .optional(),
       remove: z.array(id).max(200).optional(),
@@ -32,14 +41,43 @@ export const updateChecklist = defineTool({
       reason: ChecklistProposal.shape.reason,
       replacePending: z.boolean().optional(),
     })
-    .refine(({ items, patch, remove, requestApproval }) => {
-      const edit = patch !== undefined || remove !== undefined;
-      return items !== undefined ? !edit : edit || requestApproval === true;
-    }, "Provide items, patch and/or remove, or requestApproval"),
+    .refine(
+      ({
+        items,
+        patch,
+        remove,
+        requestApproval,
+        installHealthySessionId,
+        reason,
+        replacePending,
+      }) => {
+        if (installHealthySessionId !== undefined)
+          return [items, patch, remove, requestApproval, reason, replacePending].every(
+            (value) => value === undefined,
+          );
+        const edit = patch !== undefined || remove !== undefined;
+        return items !== undefined ? !edit : edit || requestApproval === true;
+      },
+      "Provide checklist edits, requestApproval, or an install-health report",
+    ),
   handler: async (
-    { projectId, items, patch, remove, requestApproval, reason, replacePending },
+    {
+      projectId,
+      items,
+      patch,
+      remove,
+      requestApproval,
+      reason,
+      replacePending,
+      installHealthySessionId,
+    },
     { services },
   ) => {
+    if (installHealthySessionId !== undefined) {
+      return formatChecklist(
+        services.checklist.reportInstallHealthy(projectId, installHealthySessionId),
+      );
+    }
     const previous = services.checklist.get(projectId)?.pending?.id;
     const checklist = services.checklist.update(projectId, items ? { items } : { patch, remove }, {
       requestApproval,
