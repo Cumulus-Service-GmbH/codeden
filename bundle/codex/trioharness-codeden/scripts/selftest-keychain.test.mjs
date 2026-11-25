@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
-import { basename, dirname, isAbsolute } from 'node:path';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, dirname, isAbsolute, join } from 'node:path';
 import { test } from 'node:test';
 
 const source = name => readFileSync(new URL('./' + name, import.meta.url), 'utf8');
@@ -57,6 +58,26 @@ test('native HOME mismatch skips before consulting security', async () => {
 
 const options = run => ({
   platform: 'darwin', home: '/owner', accountHome: '/owner', prepare: () => '/test-helper', run
+});
+
+test('a canonical temporary path that macOS can classify as login is refused', { skip: process.platform === 'win32' }, async () => {
+  const { withSelftestKeychain } = await import('./selftest-keychain.mjs');
+  const root = mkdtempSync(join(tmpdir(), 'selftest-search-list-'));
+  const previous = process.env.TMPDIR;
+  try {
+    const destination = join(root, 'login.keychain-fixture');
+    const alias = join(root, 'scratch');
+    mkdirSync(destination);
+    symlinkSync(destination, alias);
+    process.env.TMPDIR = alias;
+    const result = withSelftestKeychain(options(() => assert.fail('started a Keychain process')),
+      () => assert.fail('entered Keychain test'));
+    assert.match(result.skip, /search list/);
+  } finally {
+    if (previous === undefined) delete process.env.TMPDIR;
+    else process.env.TMPDIR = previous;
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('every operation targets the created file and cleanup runs on exercise failure', async () => {

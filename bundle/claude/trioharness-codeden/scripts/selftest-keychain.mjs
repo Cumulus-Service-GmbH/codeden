@@ -30,8 +30,12 @@ export function withSelftestKeychain({
   if (!home || !accountHome || resolve(home) !== resolve(accountHome)) return { skip: 'HOME is missing or redirected' };
 
   let directory;
-  try { directory = mkdtempSync(join(realpathSync(tmpdir()), 'trioharness-selftest-keychain-')); }
-  catch { return { skip: 'could not create a private temporary directory' }; }
+  try {
+    const base = realpathSync(tmpdir());
+    // Security.framework treats any path containing this component prefix as a login Keychain.
+    if (/\/login\.keychain/i.test(base)) return { skip: 'temporary path could affect the Keychain search list' };
+    directory = mkdtempSync(join(base, 'trioharness-selftest-keychain-'));
+  } catch { return { skip: 'could not create a private temporary directory' }; }
 
   const keychain = join(directory, 'selftest.keychain-db');
   const owner = lstatSync(directory).uid;
