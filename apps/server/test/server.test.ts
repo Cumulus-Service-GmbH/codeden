@@ -10,6 +10,7 @@ import {
   SessionTranscriptExport,
   Settings,
   Snapshot,
+  TeamDiagnostics,
 } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import WebSocket from "ws";
@@ -39,6 +40,40 @@ afterEach(async () => {
 });
 
 const auth = { authorization: `Bearer ${TOKEN}` };
+
+it("reports saved Team overrides and merged sources through the authenticated API", async () => {
+  const { settings, projects, factory } = server.services;
+  const { project } = await projects.create({ source: { type: "local", path: home } });
+  const writer = {
+    role: "writer",
+    provider: "codex",
+    model: "global-writer",
+    effort: "high",
+  } as const;
+  const operator = { ...writer, role: "operator", model: "global-operator" } as const;
+  settings.update({ teamSetup: { remembered: true, team: [writer, operator] } });
+  const loop = factory.data.loopOrNew(project.id);
+  const override = { ...writer, provider: "fake", model: "project-writer" };
+  factory.data.saveLoop({ ...loop, tuning: { ...loop.tuning, team: [override] } });
+
+  const url = `${server.url}/api/settings/team`;
+  expect((await fetch(url)).status).toBe(401);
+  const read = async (path: string) => {
+    const result = await fetch(path, { headers: auth });
+    expect(result.status).toBe(200);
+    return TeamDiagnostics.parse(await result.json());
+  };
+  expect(await read(url)).toEqual({
+    team: [writer, operator],
+    sources: { writer: "default", operator: "default" },
+    overrides: { writer: 1 },
+  });
+  expect(await read(`${url}?${new URLSearchParams({ projectId: project.id })}`)).toEqual({
+    team: [override, operator],
+    sources: { writer: "project", operator: "default" },
+    overrides: {},
+  });
+});
 
 describe("security", () => {
   it("serves health without a token", async () => {

@@ -105,12 +105,16 @@ export function pickReviewer(input: ReviewerInput): ReviewerChoice | ReviewerWai
         },
       )
     : "no reviewer with a verified distinct model vendor is available.";
-  if (tuning.reviewerFallback === "any") {
-    const fallback = teamMember(tuning.team, "reviewerFallback");
-    if (fallback && other.includes(fallback.provider)) {
-      return choose(fallback.provider, fallback.model, reason, fallback.effort);
-    }
-    const provider = primary ? undefined : preferred(other);
+  const fallback = teamMember(tuning.team, "reviewerFallback");
+  if (
+    fallback &&
+    other.includes(fallback.provider) &&
+    (tuning.reviewerFallback === "any" || (primary && !eligible(primary.provider)))
+  ) {
+    return choose(fallback.provider, fallback.model, reason, fallback.effort);
+  }
+  if (!primary && tuning.reviewerFallback === "any") {
+    const provider = preferred(other);
     if (provider) return choose(provider, null, reason);
   }
   return { wait: true, note: `Waiting: ${reason}` };

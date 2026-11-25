@@ -186,10 +186,12 @@ describe("api routes", () => {
     ).json() as {
       project: { id: string };
     };
+    const request = { projectId: project.project.id, input: { text: "hi" } };
+    const unresolved = await call("POST", "/sessions", request);
+    expect(unresolved.status).toBe(400);
+    expect(unresolved.json()).toMatchObject({ error: { code: "unknown_provider" } });
     const start = StartSessionResponse.parse(
-      (
-        await call("POST", "/sessions", { projectId: project.project.id, input: { text: "hi" } })
-      ).json(),
+      (await call("POST", "/sessions", { ...request, provider: "claude" })).json(),
     );
     if (start.status !== "started") throw new Error("expected started");
     await server.services.sessions.launching.get(start.sessionId);

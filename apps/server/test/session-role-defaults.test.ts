@@ -37,7 +37,7 @@ const info = (id: string, reasoningEffort = true): ProviderInfo => ({
   id,
   displayName: id,
   models: [],
-  capabilities: { ...caps, reasoningEffort },
+  capabilities: { ...caps, reasoningEffort, chrome: id === "claude" },
 });
 
 type Start = (over: Partial<StartSessionRequestInit>) => Promise<string>;
@@ -88,6 +88,9 @@ function withService(
 }
 
 describe("PM Browser Operator launch consent", () => {
+  const teamSettings = (provider: string): SettingsInput => ({
+    teamSetup: { remembered: true, team: [{ role: "browserOperator", provider }] },
+  });
   const request = StartSessionRequest.parse({
     projectId: "p1",
     title: "[Browser Operator] Open the documentation",
@@ -96,7 +99,7 @@ describe("PM Browser Operator launch consent", () => {
   });
 
   it.each([true, false])("only dispatches the Claude launch after consent returns %s", (approved) =>
-    withService({}, async (_start, repo, service) => {
+    withService(teamSettings("claude"), async (_start, repo, service) => {
       const confirmChrome = vi.fn(async () => approved);
       const result = await service.start(request, { confirmChrome });
       expect(confirmChrome).toHaveBeenCalledOnce();
@@ -112,7 +115,7 @@ describe("PM Browser Operator launch consent", () => {
 
   it(
     "does not allow an unconfirmed PM launch",
-    withService({}, async (_start, repo, service) => {
+    withService(teamSettings("claude"), async (_start, repo, service) => {
       expect(await service.start(request)).toEqual({
         status: "skipped",
         reason: "Chrome requires owner approval.",
@@ -123,7 +126,7 @@ describe("PM Browser Operator launch consent", () => {
 
   it(
     "does not prompt when the resolved provider is not Claude",
-    withService({ providers: { agent: { provider: "codex" } } }, async (_start, repo, service) => {
+    withService(teamSettings("codex"), async (_start, repo, service) => {
       const confirmChrome = vi.fn(async () => true);
       const result = await service.start(request, { confirmChrome });
       expect(confirmChrome).not.toHaveBeenCalled();

@@ -364,7 +364,7 @@ export class SessionService {
       }
       // Recheck the project and conflicts after waiting for the user, with the provider fixed.
       return this.start(
-        { ...req, provider: browserProvider, chrome: req.chrome ?? true },
+        { ...req, provider: browserProvider },
         {
           ...options,
           chromeApproved: true,

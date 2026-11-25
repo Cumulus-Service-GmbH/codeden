@@ -496,7 +496,7 @@ export function createMockClient(opts: MockClientOptions = {}): CodeDenClient {
         const teams = world.snapshot.projects.find((project) => project.id === id)?.teams;
         return (
           teams?.teams.find((team) => team.id === teams.defaultTeamId)?.team ??
-          world.factory.get(id)?.tuning.team ??
+          world.factoryTeams.get(id)?.team ??
           []
         );
       };
