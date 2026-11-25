@@ -195,6 +195,11 @@ export class ClaudeSession implements ProviderSession {
     return this.mapper.resumeToken ?? this.opts.resumeToken;
   }
 
+  /** A Supervised start is ready only after the query acknowledges its native mode. */
+  async confirmStartup(): Promise<void> {
+    await this.withConfirmedPermissionMode();
+  }
+
   /**
    * A subagent's streamed messages don't carry their calls' final output counts; its
    * transcript does. Read it once the run finished and let the card take the final figures.
@@ -256,10 +261,14 @@ export class ClaudeSession implements ProviderSession {
       throw new ProviderSessionError("turn_running", "A turn is already running");
     const message = toSdkUserMessage(input);
     const prompts = this.ensureQuery();
-    this.steered.clear();
-    const turnId = this.mapper.beginTurn();
-    this.emitUserMessage(turnId, input);
-    prompts.push(message);
+    await this.withConfirmedPermissionMode(() => {
+      if (this.mapper.turnId)
+        throw new ProviderSessionError("turn_running", "A turn is already running");
+      this.steered.clear();
+      const turnId = this.mapper.beginTurn();
+      this.emitUserMessage(turnId, input);
+      prompts.push(message);
+    });
   }
 
   /**
@@ -272,21 +281,30 @@ export class ClaudeSession implements ProviderSession {
     if (this.mapper.turnId)
       throw new ProviderSessionError("turn_running", "A turn is already running");
     const prompts = this.ensureQuery();
-    this.steered.clear();
-    this.mapper.beginCompaction();
-    prompts.push(toSdkUserMessage({ text: COMPACT_COMMAND, attachments: [] }));
+    await this.withConfirmedPermissionMode(() => {
+      if (this.mapper.turnId)
+        throw new ProviderSessionError("turn_running", "A turn is already running");
+      this.steered.clear();
+      this.mapper.beginCompaction();
+      prompts.push(toSdkUserMessage({ text: COMPACT_COMMAND, attachments: [] }));
+    });
   }
 
   /** Queue input into the running turn; the CLI folds it in at the next tool boundary. */
   async steer(input: UserInput): Promise<void> {
     const turnId = this.mapper.turnId;
-    if (!turnId || !this.prompts) throw new ProviderSessionError("no_turn", "No turn is running");
+    const prompts = this.prompts;
+    if (!turnId || !prompts) throw new ProviderSessionError("no_turn", "No turn is running");
     const message = toSdkUserMessage(input);
-    // A uuid lets a Stop cancel it while it still waits in the CLI's queue.
-    const uuid = randomUUID();
-    this.steered.add(uuid);
-    this.emitUserMessage(turnId, input);
-    this.prompts.push({ ...message, uuid });
+    await this.withConfirmedPermissionMode(() => {
+      if (this.mapper.turnId !== turnId)
+        throw new ProviderSessionError("no_turn", "No turn is running");
+      // A uuid lets a Stop cancel it while it still waits in the CLI's queue.
+      const uuid = randomUUID();
+      this.steered.add(uuid);
+      this.emitUserMessage(turnId, input);
+      prompts.push({ ...message, uuid });
+    });
   }
 
   /**
@@ -343,6 +361,30 @@ export class ClaudeSession implements ProviderSession {
 
   // ---------------------------------------------------------------- internals
 
+  /** Check the latest native write and perform the input operation in the same continuation. */
+  private async withConfirmedPermissionMode(action?: () => void): Promise<void> {
+    if (this.autonomy === "supervised") {
+      const { q, modeRevision } = this;
+      const unconfirmed = () =>
+        new ProviderSessionError(
+          "config_unconfirmed",
+          "Claude has not confirmed its permission mode",
+        );
+      for (;;) {
+        const update = this.modeUpdate;
+        try {
+          await update;
+        } catch {
+          throw unconfirmed();
+        }
+        if (!q || this.q !== q || this.closed || this.modeRevision !== modeRevision)
+          throw unconfirmed();
+        if (this.modeUpdate === update) break;
+      }
+    }
+    action?.();
+  }
+
   /**
    * Put the CLI in the permission mode for the current level and plan state. Without a running
    * CLI there is nothing to do: the next query starts in that mode. When the CLI refuses
@@ -356,7 +398,8 @@ export class ClaudeSession implements ProviderSession {
     // Serialize writes to this query, and read current state when each write is dispatched.
     const active = () => this.q === q && !this.closed;
     this.pendingModeUpdates++;
-    const update = this.modeUpdate.then(async () => {
+    const previous = this.modeUpdate.catch(() => {});
+    const update = previous.then(async () => {
       if (!active()) return;
       const revision = this.modeRevision;
       const mode = permissionModeFor(this.autonomy, this.planMode);
@@ -378,7 +421,7 @@ export class ClaudeSession implements ProviderSession {
         if (active()) this.settingMode = undefined;
       }
     });
-    this.modeUpdate = update.catch(() => {});
+    this.modeUpdate = update;
     try {
       await update;
     } finally {

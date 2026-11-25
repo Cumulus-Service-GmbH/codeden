@@ -9,10 +9,17 @@ import type {
 } from "@anthropic-ai/claude-agent-sdk";
 import type { AgentEvent, SessionOptions } from "@codeden/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ClaudeAdapter } from "../src/claude/adapter";
 import { ClaudeSession } from "../src/claude/session";
 
 /** A stand-in for the SDK's `query()`: records options and permission-mode changes. */
-function stubSdk(opts: { refuseBypass?: boolean; dispose?: () => Promise<void> } = {}) {
+function stubSdk(
+  opts: {
+    refuseBypass?: boolean;
+    dispose?: () => Promise<void>;
+    setMode?: (mode: PermissionMode) => Promise<void>;
+  } = {},
+) {
   const launches: Options[] = [];
   const modes: PermissionMode[] = [];
   /** Ends the latest query, as if the CLI exited. */
@@ -35,6 +42,7 @@ function stubSdk(opts: { refuseBypass?: boolean; dispose?: () => Promise<void> }
       setPermissionMode: async (mode: PermissionMode) => {
         if (opts.refuseBypass && mode === "bypassPermissions") throw new Error("not allowed");
         modes.push(mode);
+        await opts.setMode?.(mode);
       },
       interrupt: async () => undefined,
       supportedModels: async () => [],
@@ -113,7 +121,7 @@ function open(sdk: ReturnType<typeof stubSdk>, opts: Partial<SessionOptions> = {
   };
   const approvals = () =>
     events.filter((e) => e.type === "item.started" && e.item.kind === "approval_request");
-  return { session, preToolUse, permission, approvals };
+  return { session, events, preToolUse, permission, approvals };
 }
 
 it("joins concurrent closes until the SDK is finished disposing", async () => {
@@ -146,6 +154,130 @@ it.each([
 const settle = () => new Promise((r) => setTimeout(r, 20));
 const forcePush = { command: "git push --force" };
 const writeOutside = { file_path: outside, content: "x" };
+
+it.each([undefined, "prior-session"])(
+  "waits for Supervised mode before acknowledging an open with resume token %s",
+  async (resumeToken) => {
+    const { promise, resolve } = Promise.withResolvers<void>();
+    const sdk = stubSdk({ setMode: () => promise });
+    const adapter = new ClaudeAdapter({
+      executable: { kind: "native", path: "/synthetic/claude" },
+      loadSdk: async () => ({
+        query: sdk.query,
+        forkSession: vi.fn(),
+        getSessionMessages: vi.fn(),
+      }),
+    });
+    const opened = vi.fn();
+    const opening = adapter.openSession({ ...base, autonomy: "supervised", resumeToken });
+    void opening.then(opened, opened);
+    try {
+      await vi.waitFor(() => expect(sdk.modes).toEqual(["default"]));
+      expect(sdk.launches[0]?.permissionMode).toBe("default");
+      expect(sdk.launches[0]?.resume).toBe(resumeToken);
+      expect(sdk.launches[0]?.allowDangerouslySkipPermissions).toBeUndefined();
+      expect(opened).not.toHaveBeenCalled();
+    } finally {
+      resolve();
+      await (await opening).close();
+    }
+  },
+);
+
+it("refuses a Supervised restore and disposes the query if the native write fails", async () => {
+  const dispose = vi.fn(async () => {});
+  const sdk = stubSdk({
+    dispose,
+    setMode: async () => {
+      throw new Error("Synthetic mode refusal");
+    },
+  });
+  const adapter = new ClaudeAdapter({
+    executable: { kind: "native", path: "/synthetic/claude" },
+    loadSdk: async () => ({
+      query: sdk.query,
+      forkSession: vi.fn(),
+      getSessionMessages: vi.fn(),
+    }),
+  });
+  const opened = adapter.openSession({ ...base, autonomy: "supervised", resumeToken: "prior" });
+  try {
+    await expect(opened).rejects.toMatchObject({ code: "config_unconfirmed" });
+    expect(dispose).toHaveBeenCalledTimes(1);
+  } finally {
+    await opened.then(
+      (session) => session.close(),
+      () => {},
+    );
+  }
+});
+
+it("waits for the current Supervised mode after reopening a formerly Full query", async () => {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  const restartMode = vi.fn(() => Promise.resolve());
+  const sdk = stubSdk({ setMode: restartMode });
+  const { session, events } = open(sdk, { autonomy: "full", resumeToken: "prior" });
+  await session.setAutonomy("supervised");
+  sdk.exit();
+  await new Promise<void>((done) => setImmediate(done));
+  restartMode.mockReturnValue(promise);
+  const sent = vi.fn();
+  const sending = session.send({ text: "Continue", attachments: [] }).then(sent);
+  try {
+    await vi.waitFor(() => expect(sdk.modes).toEqual(["default", "default"]));
+    expect(sdk.launches[1]).toMatchObject({ permissionMode: "default", resume: "prior" });
+    expect(sdk.launches[1]?.allowDangerouslySkipPermissions).toBeUndefined();
+    expect(sent).not.toHaveBeenCalled();
+    expect(events.some((event) => event.type === "turn.started")).toBe(false);
+  } finally {
+    resolve();
+    await sending;
+  }
+});
+
+it("rejects input that was waiting across a change from Supervised to Full", async () => {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  const sdk = stubSdk({ setMode: (mode) => (mode === "default" ? promise : Promise.resolve()) });
+  const { session } = open(sdk, { autonomy: "supervised" });
+  const sending = session.send({ text: "Continue", attachments: [] });
+  const proof = expect(sending).rejects.toMatchObject({ code: "config_unconfirmed" });
+  const switching = session.setAutonomy("full");
+  resolve();
+  await switching;
+  await proof;
+  await expect(session.send({ text: "Full input", attachments: [] })).resolves.toBeUndefined();
+});
+
+it("refuses input after a failed tightening until a reconfigure confirms Supervised mode", async () => {
+  const setMode = vi.fn<(mode: PermissionMode) => Promise<void>>();
+  setMode.mockRejectedValueOnce(new Error("Synthetic mode refusal"));
+  const sdk = stubSdk({ setMode });
+  const { session, events } = open(sdk, { autonomy: "full" });
+  await expect(session.setAutonomy("supervised")).rejects.toThrow("Synthetic mode refusal");
+  await expect(session.compact()).rejects.toMatchObject({ code: "config_unconfirmed" });
+  expect(events.some((event) => event.type === "turn.started")).toBe(false);
+
+  setMode.mockResolvedValue(undefined);
+  await session.setAutonomy("supervised");
+  await expect(session.compact()).resolves.toBeUndefined();
+  expect(sdk.modes).toEqual(["default", "default"]);
+});
+
+it("serializes competing input after the query confirms Supervised mode", async () => {
+  const { promise, resolve } = Promise.withResolvers<void>();
+  const sdk = stubSdk({ setMode: () => promise });
+  const { session } = open(sdk, { autonomy: "supervised" });
+  const sending = session.send({ text: "Continue", attachments: [] });
+  const compacting = session.compact();
+  const result = Promise.allSettled([sending, compacting]);
+  resolve();
+  const outcomes = await result;
+  expect(outcomes.filter((outcome) => outcome.status === "fulfilled")).toHaveLength(1);
+  expect(outcomes).toContainEqual({
+    status: "rejected",
+    reason: expect.objectContaining({ code: "turn_running" }),
+  });
+});
 
 it.each([
   ["computer", { action: "type", text: "example" }],
