@@ -53,9 +53,15 @@ export function RoleSessionMenu({
       ),
     false,
   );
+  const projectArchived = useSnapshotData(
+    (snap) => snap.projects.some((project) => project.id === session.projectId && project.archivedAt),
+    false,
+  );
   if (!current || session.archivedAt) return null;
   const blocked =
-    session.status === "waiting" || hasOpenQuestion
+    projectArchived
+      ? "This project is archived."
+      : session.status === "waiting" || hasOpenQuestion
       ? "Resolve the open question first."
       : running || ["created", "starting", "queued", "running"].includes(session.status)
         ? "Wait for the current work to finish."

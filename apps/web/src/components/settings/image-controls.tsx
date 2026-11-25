@@ -1,4 +1,9 @@
-import type { ImageEngineSetting, ImageTestResponse } from "@codeden/contracts";
+import {
+  FORK_BUILD,
+  type ImageEngineSetting,
+  type ImageTestResponse,
+  SUBSCRIPTION_ONLY,
+} from "@codeden/contracts";
 import { FlaskConical } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -36,11 +41,19 @@ export function EngineSelect({
       </SelectTrigger>
       <SelectContent>
         {inherit && <SelectItem value="inherit">Same as global</SelectItem>}
-        {ENGINE_OPTIONS.map((o) => (
-          <SelectItem key={o.value} value={o.value}>
-            {o.label}
-          </SelectItem>
-        ))}
+        {ENGINE_OPTIONS.map((o) => {
+          const disabled = FORK_BUILD && (o.value === "gemini" || o.value === "openai");
+          return (
+            <SelectItem
+              key={o.value}
+              value={o.value}
+              disabled={disabled}
+              title={disabled ? SUBSCRIPTION_ONLY : undefined}
+            >
+              {o.label}
+            </SelectItem>
+          );
+        })}
       </SelectContent>
     </Select>
   );

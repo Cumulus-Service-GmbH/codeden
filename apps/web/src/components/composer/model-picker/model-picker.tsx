@@ -129,7 +129,8 @@ export function ModelPicker({
     switchHint,
   });
   const openTabs = openProviderTabs(tabs);
-  const tab: PickerTab | undefined = tabs.find((t) => t.id === tabId) ?? openTabs[0];
+  const tab: PickerTab | undefined =
+    tabs.find((t) => t.id === tabId && !t.lockedReason) ?? openTabs[0];
   const provider = providers.find((p) => p.id === shown?.provider);
   const resolved = resolveModel(provider, shown?.model ?? null);
   const model = shown ? resolved.model : undefined;

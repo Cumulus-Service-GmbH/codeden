@@ -1,4 +1,5 @@
 import {
+  AddTrustedOriginRequest,
   type AuthStatus,
   SetNetworkAccessRequest,
   SetNetworkPasswordRequest,
@@ -9,10 +10,10 @@ import {
 import { type Context, Hono } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import type { NetworkAccess } from "../network/access";
-import { PasswordRuleError } from "../network/store";
-import { isRemoteRequest, peerAddress } from "../security";
+import { PasswordRuleError, TrustedOriginError } from "../network/store";
+import { isRemoteRequest, peerAddress, proxyClientOf, trustedOriginOf } from "../security";
 import { badRequest, forbidden, notFound } from "../services/errors";
-import { tokensEqual } from "../token";
+import { proxyInstallProof, tokensEqual } from "../token";
 import { jsonBody } from "./validate";
 
 export interface NetworkRouteContext {
@@ -26,7 +27,14 @@ export interface NetworkRouteContext {
 
 /** Session id of a remote caller, from its cookie. */
 function remoteSessionId(c: Context, ctx: NetworkRouteContext): string | null {
-  return ctx.network.store.verifySession(getCookie(c, ctx.sessionCookie()))?.id ?? null;
+  const token = getCookie(c, ctx.sessionCookie());
+  if (
+    trustedOriginOf(c) &&
+    (!token || !tokensEqual(getCookie(c, ctx.tokenCookie()), proxyInstallProof(ctx.token, token)))
+  ) {
+    return null;
+  }
+  return ctx.network.store.verifySession(token)?.id ?? null;
 }
 
 /** Changing network access is for this machine only (and the CLI). */
@@ -48,11 +56,31 @@ export function networkRoutes(ctx: NetworkRouteContext) {
     .get("/", (c) => c.json(statusFor(c)))
     .put("/", jsonBody(SetNetworkAccessRequest), async (c) => {
       requireLocal(c);
-      const { enabled } = c.req.valid("json");
+      const { enabled, loopbackOnly } = c.req.valid("json");
       if (enabled && !network.store.passwordSet) {
         throw badRequest("Set a password before turning network access on.", "password_required");
       }
-      await network.setEnabled(enabled);
+      // One serialized step: save both choices, then move the listener once.
+      await network.update({ enabled, loopbackOnly });
+      return c.json(statusFor(c));
+    })
+    .post("/origins", jsonBody(AddTrustedOriginRequest), async (c) => {
+      requireLocal(c);
+      try {
+        network.store.addTrustedOrigin(c.req.valid("json").url);
+      } catch (error) {
+        if (error instanceof TrustedOriginError) throw badRequest(error.message, error.code);
+        throw error;
+      }
+      await network.applyBinding();
+      return c.json(statusFor(c));
+    })
+    .delete("/origins", (c) => {
+      requireLocal(c);
+      const url = c.req.query("url") ?? "";
+      if (!network.store.removeTrustedOrigin(url)) throw notFound("No such trusted origin");
+      // Whoever signed in through it keeps a cookie that no longer reaches anything.
+      network.dropProxied();
       return c.json(statusFor(c));
     })
     .post("/password", jsonBody(SetNetworkPasswordRequest), async (c) => {
@@ -93,7 +121,11 @@ export function authRoutes(ctx: NetworkRouteContext) {
       return c.json(body);
     })
     .post("/sign-in", jsonBody(SignInRequest), async (c) => {
-      const address = peerAddress(c);
+      const proxy = proxyClientOf(c);
+      const client = proxy
+        ? { address: proxy.address ?? "", viaProxy: true }
+        : { address: peerAddress(c), viaProxy: false };
+      const address = client.address;
       const refuse = (
         status: 401 | 403 | 429,
         code: SignInError["error"]["code"],
@@ -113,7 +145,7 @@ export function authRoutes(ctx: NetworkRouteContext) {
           "Sign-in is for other devices; this computer uses its own link.",
         );
       }
-      const gate = network.limiter.check(address);
+      const { gate, release } = network.beginSignIn(client);
       if (!gate.allowed) {
         const seconds = Math.ceil(gate.retryAfterMs / 1000);
         return gate.reason === "locked_out"
@@ -130,21 +162,45 @@ export function authRoutes(ctx: NetworkRouteContext) {
               gate.retryAfterMs,
             );
       }
-      const { password } = c.req.valid("json");
-      if (!(await network.store.checkPassword(password))) {
-        network.limiter.fail(address);
-        network.recordFailedSignIn(address, "wrong password");
-        return refuse(401, "invalid_password", "That password is not right.");
+      const { password, installToken } = c.req.valid("json");
+      // The reservation lasts through the (slow) check and the failure it may record.
+      try {
+        if (
+          (proxy && !tokensEqual(installToken, ctx.token)) ||
+          !(await network.store.checkPassword(password))
+        ) {
+          network.failSignIn(client);
+          network.recordFailedSignIn(address, "wrong password", client.viaProxy);
+          return refuse(
+            401,
+            "invalid_password",
+            proxy ? "Check the password and install token." : "That password is not right.",
+          );
+        }
+        network.succeedSignIn(client);
+      } finally {
+        release();
       }
-      network.limiter.succeed(address);
       const { token, session } = network.store.createSession({
         label: c.req.header("user-agent") ?? "",
         address: address || null,
+        addressViaProxy: client.viaProxy && address !== "",
       });
+      if (proxy) {
+        setCookie(c, ctx.tokenCookie(), proxyInstallProof(ctx.token, token), {
+          httpOnly: true,
+          sameSite: "Strict",
+          secure: true,
+          path: "/",
+          maxAge: Math.floor((Date.parse(session.expiresAt) - Date.now()) / 1000),
+        });
+      }
       setCookie(c, ctx.sessionCookie(), token, {
         httpOnly: true,
         sameSite: "Lax",
-        secure: new URL(c.req.url).protocol === "https:",
+        // Behind a proxy the request URL is http; the matched trusted origin says what the browser used.
+        secure:
+          trustedOriginOf(c)?.startsWith("https://") ?? new URL(c.req.url).protocol === "https:",
         path: "/",
         maxAge: Math.floor((Date.parse(session.expiresAt) - Date.now()) / 1000),
       });
@@ -154,6 +210,7 @@ export function authRoutes(ctx: NetworkRouteContext) {
       const id = remoteSessionId(c, ctx);
       if (id) network.store.revoke(id);
       deleteCookie(c, ctx.sessionCookie(), { path: "/" });
+      if (trustedOriginOf(c)) deleteCookie(c, ctx.tokenCookie(), { path: "/", secure: true });
       return c.json({ ok: true as const });
     });
 }

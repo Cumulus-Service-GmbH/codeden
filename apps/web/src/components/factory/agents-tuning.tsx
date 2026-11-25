@@ -1,8 +1,11 @@
 import {
   type FactoryTuning,
+  FORK_BUILD,
   type ProviderInfo,
   type ReviewerFallback,
+  reportsApiKeyLogin,
   type SetupCheck,
+  SUBSCRIPTION_ONLY,
   teamMember,
 } from "@codeden/contracts";
 import { type ReactNode, useId } from "react";
@@ -166,6 +169,8 @@ export function AgentPicker({
 }) {
   const providers = useSnapshotData((s) => s.runner.providers, []);
   const checks = useSetupStatus({ staleTime: 60_000 }).data?.checks;
+  const keyProvider =
+    FORK_BUILD && reportsApiKeyLogin(checks?.find((check) => check.id === provider)?.authMethod);
   return (
     <>
       <ProviderSelect
@@ -188,7 +193,8 @@ export function AgentPicker({
         value={model}
         staleModel={staleModel}
         describedBy={modelDescribedBy}
-        disabled={setByTeam}
+        disabled={setByTeam || keyProvider}
+        title={keyProvider ? SUBSCRIPTION_ONLY : undefined}
         onChange={(next) => onChange(provider, next)}
       />
     </>
@@ -253,11 +259,20 @@ function ProviderSelect({
         onChange={(e) => onChange(e.target.value)}
       >
         <option value={autoValue}>{autoLabel}</option>
-        {providers.map((p) => (
-          <option key={p.id} value={p.id}>
-            {providerOptionLabel(p.displayName, providerAvailability(p.id, checks))}
-          </option>
-        ))}
+        {providers.map((p) => {
+          const availability = providerAvailability(p.id, checks);
+          const blocked = availability.detail === SUBSCRIPTION_ONLY;
+          return (
+            <option
+              key={p.id}
+              value={p.id}
+              disabled={blocked}
+              title={blocked ? SUBSCRIPTION_ONLY : undefined}
+            >
+              {providerOptionLabel(p.displayName, availability)}
+            </option>
+          );
+        })}
         {!chosen && value !== autoValue && <option value={value}>{value} (not connected)</option>}
       </select>
     </Field>
@@ -271,6 +286,7 @@ function ModelSelect({
   value,
   disabled,
   staleModel,
+  title,
   describedBy,
   onChange,
 }: {
@@ -279,6 +295,7 @@ function ModelSelect({
   provider: ProviderInfo | undefined;
   value: string | null;
   disabled?: boolean;
+  title?: string;
   staleModel?: boolean;
   describedBy?: string;
   onChange: (model: string | null) => void;
@@ -291,6 +308,7 @@ function ModelSelect({
       <select
         id={id}
         aria-describedby={describedBy}
+        title={title}
         className={SELECT}
         value={listedModel?.id ?? value ?? ""}
         disabled={disabled || !provider}

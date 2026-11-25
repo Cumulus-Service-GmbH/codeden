@@ -1,4 +1,4 @@
-import type { AutonomyLevel, Session, Snapshot } from "@codeden/contracts";
+import { type AutonomyLevel, FORK_BUILD, type Session, type Snapshot } from "@codeden/contracts";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
@@ -153,7 +153,9 @@ export function SessionsKeepingLevel({
       target,
       snapshot.runner.providers,
     );
-    return expected === proposalKey(projectId, current) ? current : undefined;
+    return (!FORK_BUILD || target !== "full") && expected === proposalKey(projectId, current)
+      ? current
+      : undefined;
   };
   const start = () => {
     const current = currentProposal(key);
@@ -172,6 +174,7 @@ export function SessionsKeepingLevel({
   const reasons = failed?.level === level ? failed.reasons : new Map<string, string>();
   const notChanged = keeping.filter((s) => reasons.has(s.id));
   const short = AUTONOMY[level].short;
+  const fullBlocked = FORK_BUILD && level === "full";
 
   return (
     <div className="mt-2 space-y-2 text-2xs leading-relaxed text-muted-foreground">
@@ -192,16 +195,21 @@ export function SessionsKeepingLevel({
             ({AUTONOMY[s.autonomy].short})
           </span>
         ))}
-        {keeping.length > SHOWN && ` and ${keeping.length - SHOWN} more`}. Apply {short} to{" "}
-        {keeping.length === 1 ? "it" : "them"} here, or open a session and use the Permissions
-        picker under its message box: either applies while the session runs.
+        {keeping.length > SHOWN && ` and ${keeping.length - SHOWN} more`}.{" "}
+        {fullBlocked
+          ? "Use the session’s Permissions picker to review changes individually."
+          : "Apply the project’s level here or use the session’s Permissions picker."}
       </p>
       <Button
         size="xs"
         variant="outline"
         onClick={start}
-        disabled={apply.isPending}
-        title={`Set ${keeping.length === 1 ? "this session" : `these ${keeping.length} sessions`} to ${short}, as each one's Permissions picker would`}
+        disabled={fullBlocked || apply.isPending}
+        title={
+          fullBlocked
+            ? "Bulk Full is disabled because it can override session autonomy floors."
+            : `Apply ${short} to open sessions`
+        }
         data-testid="apply-level"
       >
         {apply.isPending ? "Applying…" : `Apply ${short} to open sessions`}

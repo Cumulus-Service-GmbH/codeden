@@ -279,6 +279,7 @@ export class SessionService {
       checklistItemId?: string;
       /** A role conversation this one replaces ("Start fresh"): archived as this one starts. */
       replacesRoleId?: string;
+      usageLimitTarget?: RoleDefaults;
       /**
        * The caller chose this session's provider or model itself (not filled from the Team): only
        * then is it the session's own layer of its Team (`sessionTeamMember`).
@@ -323,6 +324,16 @@ export class SessionService {
       }
     }
     const roleSettings = this.roleSettings(req.role, req.projectId, options.teamId);
+    const limitTarget = options.usageLimitTarget;
+    if (
+      limitTarget &&
+      (!this.deps.settings.get().providers.autoSwitchOnLimit ||
+        roleSettings.provider !== limitTarget.provider ||
+        roleSettings.model !== limitTarget.model ||
+        roleSettings.effort !== limitTarget.effort)
+    ) {
+      throw conflict("The role’s Team selection changed", "role_selection_changed");
+    }
     const selectedRole = req.teamRole ?? teamRoleOfTitle(req.title);
     if (selectedRole) {
       req = withTeamRole(req, {
@@ -966,7 +977,7 @@ export class SessionService {
    * Queue messages taken from another session (`stopKeepingQueue`) for this one, in their
    * order and each with its sender. They are delivered like any queued message.
    */
-  adoptQueued(id: string, messages: QueuedMessage[]): void {
+  adoptQueued(id: string, messages: Pick<QueuedMessage, "input" | "from">[]): void {
     for (const message of messages) this.deps.outbox.push(id, message.input, message.from);
     if (messages.length > 0) this.flushIfSettled(id);
   }

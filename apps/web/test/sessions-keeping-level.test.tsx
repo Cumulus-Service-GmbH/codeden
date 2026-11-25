@@ -27,7 +27,7 @@ function Settings() {
   return <SessionsKeepingLevel projectId={projectId} level={level} />;
 }
 
-async function setup(autonomy: "full" | "supervised" = "full", from = session) {
+async function setup(autonomy: "full" | "auto" | "supervised" = "auto", from = session) {
   const client = createMockClient();
   const initial = await client.getSnapshot();
   const snapshot: Snapshot = {
@@ -57,7 +57,7 @@ it.each([
     change: "project level",
     update: (s: Snapshot): Snapshot => ({
       ...s,
-      projects: s.projects.map((p) => (p.id === projectId ? { ...p, autonomy: "auto" } : p)),
+      projects: s.projects.map((p) => (p.id === projectId ? { ...p, autonomy: "supervised" } : p)),
     }),
   },
   { change: "session level", update: sessionWith({ autonomy: "read_only" }) },
@@ -84,7 +84,7 @@ it("accepts the same proposal after an unrelated session update", async () => {
   });
   await waitFor(() =>
     expect(updateSession).toHaveBeenCalledExactlyOnceWith(session.id, {
-      autonomy: "full",
+      autonomy: "auto",
     }),
   );
 });
@@ -111,4 +111,12 @@ it("rejects a lowering proposal that became a raise before the click", async () 
       autonomy: "supervised",
     }),
   );
+});
+
+it("disables applying Full to open sessions and explains the floor override", async () => {
+  const { start, updateSession } = await setup("full");
+  expect((start as HTMLButtonElement).disabled).toBe(true);
+  expect(start.getAttribute("title")).toContain("autonomy floors");
+  fireEvent.click(start);
+  expect(updateSession).not.toHaveBeenCalled();
 });

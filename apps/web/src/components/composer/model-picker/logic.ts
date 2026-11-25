@@ -5,6 +5,7 @@ import type {
   ReasoningEffort,
   SetupCheck,
 } from "@codeden/contracts";
+import { FORK_BUILD, reportsApiKeyLogin, SUBSCRIPTION_ONLY } from "@codeden/contracts";
 import { aliasFor, DEFAULT_MODEL_ID } from "./alias";
 
 /**
@@ -180,6 +181,9 @@ export function providerAvailability(
   checks: readonly SetupCheck[] | undefined,
 ): Availability {
   const check = checks?.find((c) => c.id === providerId);
+  if (FORK_BUILD && reportsApiKeyLogin(check?.authMethod)) {
+    return { ready: false, reason: "API-key login", detail: SUBSCRIPTION_ONLY, command: null };
+  }
   if (!check || check.state === "ok" || check.state === "warning") return READY;
   const reason = !check.installed
     ? check.broken?.length
@@ -298,7 +302,10 @@ export function providerTabs(
     provider,
     availability:
       projectRefusal(provider, opts.project) ?? providerAvailability(provider.id, checks),
-    ...lockedTab(provider, lockedProvider, opts.handoff, opts.switchHint),
+    ...(FORK_BUILD &&
+    reportsApiKeyLogin(checks?.find((check) => check.id === provider.id)?.authMethod)
+      ? { lockedReason: SUBSCRIPTION_ONLY }
+      : lockedTab(provider, lockedProvider, opts.handoff, opts.switchHint)),
   }));
   return opts.favorites
     ? [{ kind: "favorites", id: FAVORITES_TAB, lockedReason: null }, ...tabs]
@@ -365,7 +372,7 @@ export function tabRows(
   providers: readonly ProviderInfo[],
   favorites: readonly ModelRef[],
 ): ModelRow[] {
-  if (!tab) return [];
+  if (!tab || tab.lockedReason) return [];
   return tab.kind === "favorites" ? favoriteRows(favorites, providers) : rows(tab.provider);
 }
 

@@ -360,3 +360,11 @@ describe("favourites", () => {
     ]);
   });
 });
+
+it("locks API-key providers and removes their models from the picker", () => {
+  const checks = [check({ id: "codex", authMethod: "api key" })];
+  const [tab] = providerTabs([codex], checks, undefined);
+  expect(tab?.lockedReason).toContain("API keys are disabled");
+  expect(tabRows(tab, [codex], [])).toEqual([]);
+  expect(providerAvailability("codex", checks).ready).toBe(false);
+});

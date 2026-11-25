@@ -1,4 +1,4 @@
-import { READ_ALOUD_FULL_MAX_CHARS } from "@codeden/contracts";
+import { FORK_BUILD, READ_ALOUD_FULL_MAX_CHARS, SUBSCRIPTION_ONLY } from "@codeden/contracts";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { Volume2 } from "lucide-react";
 import { useEffect, useState } from "react";
@@ -121,8 +121,18 @@ export function VoiceSettings() {
                     : "Browser (unavailable)",
               },
               { value: "local", label: "Local (Whisper)" },
-              { value: "elevenlabs", label: "ElevenLabs" },
-              { value: "openai", label: "OpenAI" },
+              {
+                value: "elevenlabs",
+                label: "ElevenLabs",
+                disabled: FORK_BUILD,
+                title: FORK_BUILD ? SUBSCRIPTION_ONLY : undefined,
+              },
+              {
+                value: "openai",
+                label: "OpenAI",
+                disabled: FORK_BUILD,
+                title: FORK_BUILD ? SUBSCRIPTION_ONLY : undefined,
+              },
             ]}
           />
         </SettingRow>
@@ -228,7 +238,12 @@ export function VoiceSettings() {
             onChange={(engine) => update({ voice: { readAloud: { engine, voice: null } } })}
             options={[
               { value: "browser", label: "Browser (free)" },
-              { value: "elevenlabs", label: "ElevenLabs" },
+              {
+                value: "elevenlabs",
+                label: "ElevenLabs",
+                disabled: FORK_BUILD,
+                title: FORK_BUILD ? SUBSCRIPTION_ONLY : undefined,
+              },
             ]}
           />
         </SettingRow>

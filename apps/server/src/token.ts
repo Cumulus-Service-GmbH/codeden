@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "node:crypto";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 
 /** Generate a random URL-safe token (hex). */
@@ -26,4 +26,9 @@ export function tokensEqual(a: string | undefined | null, b: string): boolean {
   const left = Buffer.from(a);
   const right = Buffer.from(b);
   return left.length === right.length && timingSafeEqual(left, right);
+}
+
+/** Bind the install-token credential to this HTTPS session without sending the install token back. */
+export function proxyInstallProof(installToken: string, sessionToken: string): string {
+  return createHmac("sha256", installToken).update(sessionToken).digest("hex");
 }

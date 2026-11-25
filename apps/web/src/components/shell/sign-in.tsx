@@ -24,6 +24,8 @@ function useCountdown(): [number, (seconds: number) => void] {
 export function SignInScreen({ onSignedIn }: { onSignedIn?: () => void }) {
   const client = useClient();
   const [password, setPassword] = useState("");
+  const [installToken, setInstallToken] = useState("");
+  const viaProxy = window.location.protocol === "https:";
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -31,11 +33,12 @@ export function SignInScreen({ onSignedIn }: { onSignedIn?: () => void }) {
 
   async function submit(e: FormEvent) {
     e.preventDefault();
-    if (!password || busy || wait > 0) return;
+    if (!password || (viaProxy && !installToken) || busy || wait > 0) return;
     setBusy(true);
     setError(null);
     try {
-      await client.auth.signIn(password);
+      if (viaProxy) await client.auth.signIn(password, installToken);
+      else await client.auth.signIn(password);
       if (onSignedIn) onSignedIn();
       else window.location.reload();
     } catch (err) {
@@ -69,6 +72,18 @@ export function SignInScreen({ onSignedIn }: { onSignedIn?: () => void }) {
           Enter the network access password you set on the computer running CodeDen.
         </p>
 
+        {viaProxy && (
+          <label htmlFor="codeden-install-token" className="mt-6 block text-[13px] font-medium">
+            Install token
+            <Input
+              type="password"
+              id="codeden-install-token"
+              autoComplete="off"
+              value={installToken}
+              onChange={(event) => setInstallToken(event.target.value)}
+            />
+          </label>
+        )}
         <label htmlFor="codeden-password" className="mt-7 mb-1.5 block text-[13px] font-medium">
           Password
         </label>
@@ -108,7 +123,7 @@ export function SignInScreen({ onSignedIn }: { onSignedIn?: () => void }) {
         <Button
           type="submit"
           className="mt-5 h-12 w-full text-base"
-          disabled={!password || busy || wait > 0}
+          disabled={!password || (viaProxy && !installToken) || busy || wait > 0}
         >
           {busy && <Loader2 className="animate-spin" />}
           {wait > 0 ? `Try again in ${wait} s` : "Sign in"}

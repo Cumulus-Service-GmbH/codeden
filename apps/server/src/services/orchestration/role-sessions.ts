@@ -16,6 +16,7 @@ import { ServiceError } from "../errors";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
 import type { RunnerPort } from "../runner-port";
+import { stricter } from "../sessions/autonomy-policy";
 import type { SessionRepo, StoredStartMeta } from "../sessions/repo";
 import type { SessionService } from "../sessions/session-service";
 
@@ -206,6 +207,11 @@ export class RoleSessions {
     role: OrchestrationRole,
     projectId: string | null,
     always: boolean,
+    limit?: {
+      target: RoleDefaults;
+      first?: Pick<QueuedMessage, "input" | "from">;
+      moved: (replacement: Session) => void;
+    },
   ): Promise<Session | undefined> {
     const key = keyOf(role, projectId);
     const queued = existing ? await this.retire(existing) : [];
@@ -213,16 +219,24 @@ export class RoleSessions {
     if (!always && queued.length === 0) return undefined;
     let created: Session;
     try {
-      created = await this.create(role, projectId, undefined, this.retired.get(key)?.id);
+      created = await this.create(
+        role,
+        projectId,
+        undefined,
+        this.retired.get(key)?.id,
+        limit,
+        existing,
+      );
     } catch (error) {
-      if (existing && queued.length > 0) {
+      if (existing && (queued.length > 0 || limit)) {
         this.deps.repo.update(existing.id, (s) => ({ ...s, archivedAt: null }));
         this.deps.sessions.restoreQueued(queued);
         this.retired.delete(key);
       }
       throw error;
     }
-    this.deps.sessions.adoptQueued(created.id, queued);
+    limit?.moved(created);
+    this.deps.sessions.adoptQueued(created.id, limit?.first ? [limit.first, ...queued] : queued);
     const replaced = this.retired.get(key);
     this.retired.delete(key);
     if (replaced) this.deps.onMoved?.(replaced, created);
@@ -318,6 +332,32 @@ export class RoleSessions {
     }
   }
 
+  async fallBack(
+    source: Session,
+    ready: ReadonlySet<string>,
+    first: Pick<QueuedMessage, "input" | "from"> | undefined,
+    moved: (replacement: Session) => void,
+  ): Promise<Session | undefined> {
+    if (source.role === "agent") return;
+    const { role, projectId } = source;
+    const key = keyOf(role, projectId);
+    if (this.changing.has(key) || this.find(role, projectId)?.id !== source.id) return;
+    const current = this.deps.repo.find(source.id);
+    if (current?.session.status !== "failed" || this.deps.sessions.isDelivering(source.id)) return;
+    const teamId = current.startMeta?.teamId;
+    const target = this.deps.sessions.roleSettings(role, projectId, teamId);
+    if (!target.model || target.provider === source.provider || !ready.has(target.provider)) return;
+    if (
+      !this.deps.runner
+        .providers()
+        .some((provider) => provider.id === target.provider && provider.capabilities.readOnly)
+    )
+      return;
+    return this.exclusive(key, () =>
+      this.replace(source, role, projectId, true, { target, first, moved }),
+    );
+  }
+
   async startFresh(id: string): Promise<Session> {
     const pending = this.replacing.get(id);
     if (pending) return pending;
@@ -350,11 +390,14 @@ export class RoleSessions {
     projectId: string | null,
     previous?: Session,
     teamSourceId = previous?.id,
+    limit?: { target: RoleDefaults },
+    source?: Session,
   ): Promise<Session> {
     const project = role === "pm" && projectId ? this.deps.projects.get(projectId) : null;
     if (role === "pm" && !project) {
       throw new ServiceError(400, "project_required", "A PM needs a project");
     }
+    const sourceMeta = teamSourceId ? this.deps.repo.find(teamSourceId)?.startMeta : undefined;
     const request = StartSessionRequest.parse({
       projectId: role === "pm" ? (projectId as string) : null,
       role,
@@ -363,11 +406,20 @@ export class RoleSessions {
       workKey: previous?.workKey ?? (project ? `pm:${project.slug}` : "orchestrator:main"),
       startedBy: { kind: "user" },
       title: project ? `PM · ${project.name}` : "Orchestrator",
-      autonomy: "auto",
+      autonomy: stricter((source ?? previous)?.autonomy ?? "auto", sourceMeta?.autonomyFloor),
+      ...(limit && {
+        provider: limit.target.provider,
+        model: limit.target.model,
+        effort: limit.target.effort ?? undefined,
+      }),
     });
     const result = await this.deps.sessions.start(request, {
       replacesRoleId: previous?.id,
-      teamId: teamSourceId ? this.deps.repo.find(teamSourceId)?.startMeta?.teamId : undefined,
+      ...(limit && { usageLimitTarget: limit.target, ownTeamPins: false }),
+      teamId: sourceMeta?.teamId,
+      ...(sourceMeta?.autonomyFloor && { autonomyFloor: sourceMeta.autonomyFloor }),
+      ...(sourceMeta?.guardedInstall && { guardedInstall: true }),
+      ...(sourceMeta?.readOnlyScope && { readOnlyScope: true }),
     });
     // Queued for a free slot is a started conversation too: it runs once one opens.
     if (result.status !== "started" && result.status !== "queued") {

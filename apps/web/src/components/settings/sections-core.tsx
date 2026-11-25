@@ -273,6 +273,15 @@ export function ProviderSettings() {
             </SettingRow>
           );
         })}
+        <SettingRow
+          label="Switch provider automatically when a limit is hit"
+          help="When a role hits a limit, CodeDen can retry on its current Team provider and pinned model if they differ and the provider has a verified subscription login. The switch appears in chat and the inbox."
+        >
+          <Switch
+            checked={settings.providers.autoSwitchOnLimit}
+            onCheckedChange={(v) => update({ providers: { autoSwitchOnLimit: v } })}
+          />
+        </SettingRow>
       </SettingsSection>
       <ModelVisibilitySettings />
       <CustomModelSettings />

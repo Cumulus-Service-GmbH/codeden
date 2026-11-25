@@ -1,6 +1,12 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { defaultTeam, messageFrom, type Session, type Team } from "@codeden/contracts";
+import {
+  defaultTeam,
+  hasSubscriptionLogin,
+  messageFrom,
+  type Session,
+  type Team,
+} from "@codeden/contracts";
 import { createImageEngineRegistry, type ImageEngineRegistry } from "@codeden/providers";
 import type { Db } from "../db/client";
 import type { EventStore } from "../events/store";
@@ -470,7 +476,25 @@ export function createServices(opts: ServicesOptions): AppServices {
     trustedAuthors,
     automation: opts.orchestration?.automation ?? automations,
     timezone: () => usage.timezone(),
-    // The factory is created below; the digest asks it at wake time.
+    // The factory is created below; a role's fallback and the digest ask it when needed.
+    readyProviders: async () => {
+      const status = await setup.status({ refresh: true });
+      const choices = await factory.providerChoices();
+      return choices.flatMap((choice) => {
+        const check = status.checks.find((entry) => entry.id === choice.id);
+        return choice.checked &&
+          choice.runnable &&
+          check?.loggedIn &&
+          hasSubscriptionLogin(choice.id, check.authMethod) &&
+          !Object.keys(process.env).some((name) =>
+            /^(ANTHROPIC_(API_KEY|AUTH_TOKEN|BASE_URL)|OPENAI_(API_KEY|BASE_URL)|CODEX_API_KEY|CURSOR_API_KEY|GEMINI_API_KEY|GOOGLE_API_KEY|CLAUDE_CODE_USE_(BEDROCK|VERTEX|FOUNDRY))$/i.test(
+              name,
+            ),
+          )
+          ? [choice.id]
+          : [];
+      });
+    },
     factoryLoop: (projectId) => factory.loopSummary(projectId),
     resultSummaryBytes: (projectId) =>
       factory.data.loop(projectId)?.tuning.resultSummaryBytes ?? null,
