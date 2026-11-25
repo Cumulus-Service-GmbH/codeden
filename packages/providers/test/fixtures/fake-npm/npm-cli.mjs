@@ -6,15 +6,19 @@ import { join } from "node:path";
 const args = process.argv.slice(2);
 const prefix = args[args.indexOf("--prefix") + 1];
 appendFileSync(join(prefix, "calls.log"), `${JSON.stringify(args)}\n`);
-if (process.env.FAKE_NPM_RECORD_CONFIG === "1") writeFileSync(
-  join(prefix, "config.json"),
-  JSON.stringify({
-    global: process.env.npm_config_global,
-    location: process.env.npm_config_location,
-    dryRun: process.env.npm_config_dry_run,
-    registry: process.env.npm_config_registry,
-  }),
-);
+if (process.env.FAKE_NPM_RECORD_CONFIG === "1") {
+  writeFileSync(
+    join(prefix, "config.json"),
+    JSON.stringify({
+      global: process.env.npm_config_global,
+      location: process.env.npm_config_location,
+      dryRun: process.env.npm_config_dry_run,
+      registry: process.env.npm_config_registry,
+      hasRegistryAuth: process.env.NPM_CONFIG__AUTHTOKEN === "registry-fixture",
+      hasScopedAuth: process.env["npm_config_//registry.example.invalid/:_authToken"] === "scoped-fixture",
+    }),
+  );
+}
 await new Promise((r) => setTimeout(r, Number(process.env.FAKE_NPM_DELAY_MS ?? 0)));
 if (process.env.FAKE_NPM_FAIL === "1") {
   console.error("npm error code E404\nnpm error 404 Not Found");

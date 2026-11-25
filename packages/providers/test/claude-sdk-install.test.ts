@@ -76,11 +76,15 @@ describe("Claude SDK on-demand install", () => {
     vi.stubEnv("npm_config_global", "true");
     vi.stubEnv("npm_config_dry_run", "true");
     vi.stubEnv("npm_config_registry", "https://registry.example.invalid");
+    vi.stubEnv("NPM_CONFIG__AUTHTOKEN", "registry-fixture");
+    vi.stubEnv("npm_config_//registry.example.invalid/:_authToken", "scoped-fixture");
     await installClaudeSdk({ depsDir: dir, npm: fakeNpm });
     expect(JSON.parse(readFileSync(join(dir, "config.json"), "utf8"))).toEqual({
       global: "false",
       location: "project",
       registry: "https://registry.example.invalid",
+      hasRegistryAuth: true,
+      hasScopedAuth: true,
     });
   });
 

@@ -12,6 +12,14 @@ const inheritedNpmConfig = new Set([
   "ca",
   "strict_ssl",
   "userconfig",
+  "globalconfig",
+  "_auth",
+  "_authtoken",
+  "always_auth",
+  "cert",
+  "certfile",
+  "key",
+  "keyfile",
 ]);
 
 export interface RunNpmOptions {
@@ -42,7 +50,10 @@ export function runNpm(npm: ResolvedCommand, args: string[], opts: RunNpmOptions
             const setting = name.slice(npmConfigPrefix.length);
             return (
               inheritedNpmConfig.has(setting.replaceAll("-", "_")) ||
-              /^@[^/:]+:registry$/.test(setting)
+              /^@[^/:]+:registry$/.test(setting) ||
+              /^\/\/.+\/:(?:_auth|_authtoken|username|_password|email|always[-_]auth|certfile|keyfile|cafile)$/.test(
+                setting,
+              )
             );
           }),
         ),
