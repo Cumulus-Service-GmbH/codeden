@@ -113,6 +113,7 @@ async function start(
       repo: sessionRepo,
       projects: services.projects,
       settings: services.settings,
+      projectAutonomyPolicy: () => opts.teamPolicy,
       outbox: new Outbox(database.db, store),
       runner: {
         isConnected: () => true,
@@ -373,18 +374,98 @@ it("refuses an installer join when the target provider cannot be verified", asyn
   });
 });
 
-it("keeps the owner's explicit autonomy override when a PM session resumes", async () => {
+it("retains the joined work floor on later autonomy updates and resume", async () => {
+  const workKey = "request:retain-join-floor";
+  const { resumed } = await start(
+    { workKey },
+    {
+      autonomy: "supervised",
+      resumeWith: "full",
+      afterStart: async (ctx, child) => {
+        ctx.services.sessionRepo.update(child.id, (session) => ({ ...session, status: "running" }));
+        await expect(
+          startSession.handler(
+            startSession.input.parse({
+              workKey,
+              prompt: "Follow up",
+              purpose: "Provision tooling",
+              conflict: { resolution: "join", sessionId: child.id },
+            }),
+            ctx,
+          ),
+        ).resolves.toMatchObject({ status: "joined" });
+        await expect(
+          setSessionAutonomy.handler(
+            {
+              sessionId: child.id,
+              autonomy: "full",
+              reason: "Change autonomy",
+            },
+            ctx,
+          ),
+        ).rejects.toThrow("Autonomy policy requires supervised");
+      },
+    },
+  );
+  expect(resumed?.autonomy).toBe("supervised");
+});
+
+it.each([
+  [undefined, "supervised", undefined, "supervised"],
+  ["full", undefined, "read_only", "read_only"],
+] as const)(
+  "rechecks live role and project policy on resume with choice %s",
+  async (autonomy, role, project, expected) => {
+    const roleFloors: RoleAutonomyFloors = {};
+    const teamPolicy: AutonomyPolicy = {};
+    const { resumed } = await start(
+      { autonomy, title: "[Writer] Work" },
+      {
+        project: [writer],
+        roleFloors,
+        teamPolicy,
+        resumeWith: "full",
+        afterStart: async () => {
+          if (role) roleFloors.writer = role;
+          if (project) teamPolicy.writer = { "*": project };
+        },
+      },
+    );
+    expect(resumed?.autonomy).toBe(expected);
+  },
+);
+
+it("preserves a stricter legacy PM session level when its policy permits Full", async () => {
+  const { resumed } = await start(
+    { autonomy: "supervised" },
+    {
+      resumeWith: "full",
+      afterStart: async (ctx, child) => {
+        const repo = ctx.services.sessionRepo;
+        const meta = repo.find(child.id)?.startMeta;
+        if (!meta) throw new Error("Expected PM session metadata");
+        repo.setStartMeta(child.id, () => ({ ...meta, autonomyChoice: undefined }));
+      },
+    },
+  );
+  expect(resumed?.autonomy).toBe("supervised");
+});
+
+it("retains the owner's explicit override while clamping resume to the live policy", async () => {
   const { resumed } = await start(
     {},
     {
       autonomy: "read_only",
       resumeWith: "read_only",
-      afterStart: async (_ctx, child, sessions) => {
+      afterStart: async (ctx, child, sessions) => {
         await sessions.update(child.id, { autonomy: "full" }, { owner: true });
+        expect(ctx.services.sessionRepo.find(child.id)?.startMeta?.ownerAutonomyOverride).toBe(
+          "full",
+        );
       },
     },
   );
-  expect(resumed?.autonomy).toBe("full");
+  expect(resumed?.autonomy).toBe("read_only");
 });
 
 it("refuses a request below the purpose policy", async () => {

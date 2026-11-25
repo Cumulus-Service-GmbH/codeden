@@ -51,6 +51,67 @@ describe("Codex approvals", () => {
   });
 
   it.each([
+    { additionalPermissions: { network: { enabled: true } } },
+    { networkApprovalContext: {} },
+    { proposedNetworkPolicyAmendments: [{}] },
+    { proposedExecpolicyAmendment: {} },
+    { environmentId: "remote" },
+    { kind: "humanCommand" },
+    { reason: "[codeden-card v1 scope=db-read class=owner-only]" },
+  ])("keeps an escalated command owner-only at Full or when raised to Full: %j", async (patch) => {
+    for (const autonomy of ["full", "supervised"] as const) {
+      const events: AgentEvent[] = [];
+      const broker = new ApprovalBroker((event) => events.push(event));
+      const request = commandRequest("cat README.md");
+      const pending = handleServerRequest(
+        { ...request, params: { ...request.params, ...patch } } as ServerRequest,
+        {
+          broker,
+          risk: { cwd: "/w", platform: "linux" },
+          ctx: () => ctx,
+          filePaths: () => [],
+          autonomy: () => autonomy,
+        },
+      );
+      expect(events[0]?.type).toBe("item.started");
+      broker.approvePendingForAutonomy("full");
+      expect(broker.has("command")).toBe(true);
+      broker.respond("command", { kind: "approval", decision: "deny", decidedBy: "user" });
+      await expect(pending).resolves.toEqual({ decision: "decline" });
+    }
+  });
+
+  it("keeps a pending permissions grant open when autonomy is raised", async () => {
+    const events: AgentEvent[] = [];
+    const broker = new ApprovalBroker((event) => events.push(event));
+    const pending = handleServerRequest(
+      {
+        method: "item/permissions/requestApproval",
+        id: 1,
+        params: {
+          threadId: T,
+          turnId: TURN,
+          itemId: "permissions",
+          cwd: "/w",
+          permissions: { network: { enabled: true } },
+        },
+      } as ServerRequest,
+      {
+        broker,
+        risk: { cwd: "/w", platform: "linux" },
+        ctx: () => ctx,
+        filePaths: () => [],
+        autonomy: () => "supervised",
+      },
+    );
+    expect(events[0]?.type).toBe("item.started");
+    broker.approvePendingForAutonomy("full");
+    expect(broker.has("permissions")).toBe(true);
+    broker.respond("permissions", { kind: "approval", decision: "deny", decidedBy: "user" });
+    await expect(pending).resolves.toEqual({ permissions: {}, scope: "turn" });
+  });
+
+  it.each([
     ["cat README.md", {}, true],
     ["cat README.md", { reason: "[codeden-card v1 scope=db-read class=owner-only]" }, false],
     ["cat README.md", { kind: "writeStdin" }, false],

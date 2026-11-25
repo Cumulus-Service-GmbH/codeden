@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type {
   AutonomyLevel,
+  AutonomyPolicy,
   CompactSessionResponse,
   ForkSessionRequest,
   ForkSessionResponse,
@@ -55,7 +56,7 @@ import {
 import type { UtilityService } from "../utility";
 import type { SessionAdmission } from "./admission";
 import { assertProjectActive, inArchivedProject } from "./archived-project";
-import { assertAutonomy, stricter } from "./autonomy-policy";
+import { assertAutonomy, policyFloorForSession, stricter } from "./autonomy-policy";
 import { freezeChecks, roundAfter, withRound } from "./checks";
 import { compactingRefusal, compactionRunning, compactRefusal, startCompaction } from "./compact";
 import { derivePurpose, deriveWorkKey, findConflicts, firstPurposeLine } from "./conflicts";
@@ -87,6 +88,7 @@ export interface SessionServiceDeps extends RunnerDeps {
   admission?: SessionAdmission;
   projects: ProjectService;
   projectTeam?: (projectId: string, teamId?: string) => Team;
+  projectAutonomyPolicy?: (projectId: string) => AutonomyPolicy | undefined;
   checklist?: Pick<ChecklistService, "get">;
   inbox: InboxService;
   artifacts: ArtifactService;
@@ -401,9 +403,11 @@ export class SessionService {
           if (target.projectId !== req.projectId) {
             throw badRequest("Can only join a session in the same project", "join_mismatch");
           }
-          assertAutonomy(target.autonomy, stricter(floor, req.autonomy));
+          const meta = repo.find(target.id)?.startMeta;
+          const joinFloor = stricter(floor, req.autonomy);
+          const keptFloor = stricter(meta?.autonomyFloor, joinFloor);
+          assertAutonomy(target.autonomy, keptFloor);
           if (options.readOnlyScope || options.guardedInstall) {
-            const meta = repo.find(target.id)?.startMeta;
             if (options.readOnlyScope && !meta?.readOnlyScope) {
               throw badRequest("Join requires a session with a read-only scope", "join_mismatch");
             }
@@ -419,6 +423,12 @@ export class SessionService {
             if (options.readOnlyScope) {
               this.assertReadOnlySupported(target.role, target.provider, "read_only", target.id);
             }
+          }
+          if (keptFloor !== meta?.autonomyFloor) {
+            repo.setStartMeta(target.id, (meta) => ({
+              ...(meta ?? emptyStartMeta()),
+              autonomyFloor: stricter(meta?.autonomyFloor, joinFloor),
+            }));
           }
           if (req.input) {
             await this.send(target.id, { input: req.input, whenBusy: "queue" }, req.startedBy.kind);
@@ -842,7 +852,11 @@ export class SessionService {
     this.delivering.add(id);
     try {
       await startCompaction(
-        { repo: this.deps.repo, launcher: this.deps.launcher, runnerOf: (s) => this.runnerOf(s) },
+        {
+          repo: this.deps.repo,
+          resume: (id) => this.resumeSession(id, this.runnerOf(id)),
+          runnerOf: (id) => this.runnerOf(id),
+        },
         session,
       );
     } finally {
@@ -1160,8 +1174,7 @@ export class SessionService {
       // Cleanup removed the worktree (§9), or a container session's start failed and took its
       // container with it: make it again, then resume through the provider.
       if (session.worktreeRemovedAt || this.needsSandbox(session)) {
-        if (previous !== "stopped") await this.refreshAutonomy(session.id, runner);
-        await this.deps.launcher.resume(this.deps.repo.get(session.id), input);
+        await this.resumeSession(session.id, runner, input);
         return;
       }
       try {
@@ -1175,8 +1188,7 @@ export class SessionService {
       } catch (error) {
         // The runner no longer hosts it (restart, stopped): resume through the provider.
         if (runnerErrorCode(error) !== "unknown_session") throw error;
-        if (previous !== "stopped") await this.refreshAutonomy(session.id, runner);
-        await this.deps.launcher.resume(this.deps.repo.get(session.id), input);
+        await this.resumeSession(session.id, runner, input);
       }
     } catch (error) {
       // Refused because the provider is running a turn: the session is running, so it stays so
@@ -1190,21 +1202,34 @@ export class SessionService {
     }
   }
 
+  private async resumeSession(id: string, runner: RunnerPort, input?: UserInput): Promise<void> {
+    await this.refreshAutonomy(id, runner);
+    await this.deps.launcher.resume(this.deps.repo.get(id), input);
+  }
+
   private async refreshAutonomy(id: string, runner: RunnerPort): Promise<void> {
-    const { repo, projects, settings } = this.deps;
+    const { repo, projects, settings, projectAutonomyPolicy } = this.deps;
     const found = repo.find(id);
-    const choice = found?.startMeta?.autonomyChoice;
-    const ownerOverride = found?.startMeta?.ownerAutonomyOverride;
-    const projectId = found?.session.projectId;
-    if (!found || (choice === undefined && ownerOverride === undefined) || !projectId) return;
+    if (!found) return;
     const { session, startMeta } = found;
-    const projectDefault = projects.get(projectId).autonomy;
-    const autonomy =
-      ownerOverride ??
-      (projectDefault === "read_only"
-        ? projectDefault
-        : (choice ??
-          stricter(projectDefault ?? settings.get().autonomy.default, startMeta?.autonomyFloor)));
+    const projectId = session.projectId;
+    if (!projectId || (session.startedBy.kind !== "pm" && !startMeta?.autonomyFloor)) return;
+    const project = projects.get(projectId);
+    const autonomySettings = settings.get().autonomy;
+    const floor = policyFloorForSession(
+      session,
+      project,
+      autonomySettings,
+      projectAutonomyPolicy?.(projectId),
+      startMeta,
+    );
+    const choice = startMeta?.autonomyChoice;
+    const preferred =
+      startMeta?.ownerAutonomyOverride ??
+      (choice === undefined
+        ? session.autonomy
+        : (choice ?? project.autonomy ?? autonomySettings.default));
+    const autonomy = stricter(preferred, floor);
     if (autonomy === undefined || autonomy === session.autonomy) return;
     this.assertReadOnlySupported(session.role, session.provider, autonomy, id);
     this.assertSupervisedSupported(session.provider, autonomy, id);

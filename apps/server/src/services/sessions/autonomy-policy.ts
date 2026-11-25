@@ -4,6 +4,7 @@ import {
   AutonomyLevel,
   type AutonomyPolicy,
   autonomyPolicyReason,
+  type Project,
   REVIEW_TEAM_ROLES,
   roleAutonomyFloor,
   type Session,
@@ -14,6 +15,7 @@ import {
 } from "@codeden/contracts";
 import type { AppServices } from "../container";
 import { badRequest } from "../errors";
+import type { StoredStartMeta } from "./repo";
 
 export function stricter(a?: AutonomyLevel, b?: AutonomyLevel): AutonomyLevel | undefined {
   if (!a || !b) return a ?? b;
@@ -94,15 +96,29 @@ export function sessionAutonomyFloor(
   }: Pick<AppServices, "factory" | "projects" | "sessionRepo" | "settings">,
   session: Session,
 ): AutonomyLevel | undefined {
-  const meta = sessionRepo.find(session.id)?.startMeta;
-  const project = session.projectId ? projects.get(session.projectId) : undefined;
+  return policyFloorForSession(
+    session,
+    session.projectId ? projects.get(session.projectId) : undefined,
+    settings.get().autonomy,
+    session.projectId ? factory.data.loop(session.projectId)?.tuning.autonomyPolicy : undefined,
+    sessionRepo.find(session.id)?.startMeta,
+  );
+}
+
+export function policyFloorForSession(
+  session: Session,
+  project: Pick<Project, "path" | "autonomy"> | undefined,
+  settings: Settings["autonomy"],
+  projectPolicy: AutonomyPolicy | undefined,
+  meta?: StoredStartMeta | null,
+): AutonomyLevel | undefined {
   const { floor: current } = resolveAutonomy(
     teamRoleOfTitle(session.title ?? undefined),
     session.purpose,
     session.scope,
     project?.path,
-    settings.get().autonomy,
-    session.projectId ? factory.data.loop(session.projectId)?.tuning.autonomyPolicy : undefined,
+    settings,
+    projectPolicy,
     meta ?? {},
   );
   const projectFloor = project?.autonomy === "read_only" ? "read_only" : undefined;

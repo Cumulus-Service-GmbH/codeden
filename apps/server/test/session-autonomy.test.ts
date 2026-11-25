@@ -209,10 +209,8 @@ describe("updateSession with autonomy", () => {
       startCompaction(
         {
           repo,
-          launcher: {
-            resume: async () => {
-              throw new Error("Must not resume after a refused configure");
-            },
+          resume: async () => {
+            throw new Error("Must not resume after a refused configure");
           },
           runnerOf: () => runner.port,
         },

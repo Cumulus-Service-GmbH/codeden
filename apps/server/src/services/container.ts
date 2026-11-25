@@ -346,6 +346,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     admission,
     checklist,
     projectTeam,
+    projectAutonomyPolicy: (id) => factory.data.loop(id)?.tuning.autonomyPolicy,
     repo: sessionRepo,
     projects,
     runner: opts.runner,

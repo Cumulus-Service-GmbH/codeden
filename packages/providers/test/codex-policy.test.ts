@@ -202,7 +202,7 @@ describe("Codex requests under CodeDen's policy (§11.2)", () => {
     }
   });
 
-  it("approves patches and permissions inside the worktree, and asks outside it", async () => {
+  it("approves in-worktree patches but asks for additional permissions", async () => {
     const patch = (grantRoot?: string) => ({
       method: "item/fileChange/requestApproval",
       id: 1,
@@ -236,8 +236,8 @@ describe("Codex requests under CodeDen's policy (§11.2)", () => {
     expect(
       await decide(permissions({ network: { enabled: true }, fileSystem: null }), "auto"),
     ).toMatchObject({
-      result: { permissions: { network: { enabled: true } }, scope: "turn" },
-      asked: false,
+      result: { permissions: {}, scope: "turn" },
+      asked: true,
     });
     expect(
       (
@@ -246,7 +246,7 @@ describe("Codex requests under CodeDen's policy (§11.2)", () => {
           "auto",
         )
       ).asked,
-    ).toBe(false);
+    ).toBe(true);
     expect(
       (
         await decide(

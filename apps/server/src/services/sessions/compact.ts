@@ -1,7 +1,6 @@
 import type { ProviderInfo, Session, Turn } from "@codeden/contracts";
 import { conflict, type ServiceError } from "../errors";
 import { type RunnerPort, runnerErrorCode, toServiceError } from "../runner-port";
-import type { SessionLauncher } from "./launcher";
 import { isTurnRunningError } from "./outbox-holds";
 import { applyPendingConfig, assertConfigRevision } from "./reconfigure";
 import type { SessionRepo } from "./repo";
@@ -91,7 +90,7 @@ export function compactingRefusal(): ServiceError {
 
 export interface CompactContext {
   repo: SessionRepo;
-  launcher: Pick<SessionLauncher, "resume">;
+  resume: (sessionId: string) => Promise<void>;
   /** The runner hosting the session now (a resume may move it). */
   runnerOf: (sessionId: string) => RunnerPort;
 }
@@ -115,7 +114,7 @@ export async function startCompaction(ctx: CompactContext, session: Session): Pr
       await request();
     } catch (error) {
       if (runnerErrorCode(error) !== "unknown_session") throw error;
-      await ctx.launcher.resume(ctx.repo.get(session.id));
+      await ctx.resume(session.id);
       await request();
     }
   } catch (error) {

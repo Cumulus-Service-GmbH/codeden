@@ -65,7 +65,19 @@ export async function handleServerRequest(
           { cwd: p.cwd, stdin: p.kind === "writeStdin" },
         );
       const risk = assess();
-      const policyCanAccept = canAccept && (p.command == null || rawCommand !== undefined);
+      const policyContextAllows =
+        (p.environmentId == null || p.environmentId === "local") &&
+        (p.kind === undefined || p.kind === "command" || p.kind === "writeStdin") &&
+        !p.reason?.includes("[codeden-card") &&
+        !p.reason?.includes("A hook asked for approval") &&
+        p.networkApprovalContext == null &&
+        (p.proposedNetworkPolicyAmendments == null ||
+          (Array.isArray(p.proposedNetworkPolicyAmendments) &&
+            p.proposedNetworkPolicyAmendments.length === 0)) &&
+        p.proposedExecpolicyAmendment == null &&
+        p.additionalPermissions == null;
+      const policyCanAccept =
+        policyContextAllows && canAccept && (p.command == null || rawCommand !== undefined);
       const item: ApprovalItem = {
         id: `approval-${p.approvalId ?? p.itemId}`,
         kind: "approval_request",
@@ -92,11 +104,7 @@ export async function handleServerRequest(
         p.approvalId == null &&
         (p.kind === undefined || p.kind === "command") &&
         !p.reason &&
-        !p.networkApprovalContext &&
-        !p.proposedNetworkPolicyAmendments?.length &&
-        p.proposedExecpolicyAmendment == null &&
-        p.additionalPermissions == null &&
-        canAccept &&
+        policyCanAccept &&
         (!p.commandActions?.length ||
           (p.commandActions.length === 1 && p.commandActions[0]?.command === exact))
           ? { ...item, command: exact, toolInput: { command: exact } }
@@ -238,15 +246,7 @@ export async function handleServerRequest(
       };
       // Granted for this turn only, so the next request is judged again.
       const risk = permissionsRisk(p.permissions, ac.risk);
-      if (approvedByPolicy(ac, p, item, risk)) return { permissions: granted, scope: "turn" };
-      const response = await ac.broker.request(
-        ac.ctx(p.threadId, p.turnId),
-        withRisk(item, risk),
-        undefined,
-        {
-          canAutoApprove: (level) => levelAllows(level, risk),
-        },
-      );
+      const response = await ac.broker.request(ac.ctx(p.threadId, p.turnId), withRisk(item, risk));
       const decision = decisionOf(response);
       if (decision === "allow_once" || decision === "allow_session") {
         return { permissions: granted, scope: decision === "allow_session" ? "session" : "turn" };
