@@ -26,7 +26,8 @@ const sensitive =
   /(?:secret|credential|password|token|keyvault|(?:^|[/.\s'":])(?:env|pem|key|p12|pfx|kdbx)(?:[/.\s'"]|$))/i;
 /** Paths blocked even when physically inside a worktree. */
 export function isPrivateReadPath(value: string): boolean {
-  return privatePath.test(value.replaceAll("\\", "/")) || sensitive.test(value);
+  const normalized = value.replaceAll("\\", "/");
+  return privatePath.test(normalized) || sensitive.test(normalized);
 }
 const safeTarget = (value: string) => path.test(value) && !isPrivateReadPath(value);
 const flags = {

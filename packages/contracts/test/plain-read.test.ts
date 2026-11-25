@@ -1,5 +1,10 @@
 import { expect, it } from "vitest";
-import { type ItemOf, plainReadTargets, sessionApprovalBlockReason } from "../src";
+import {
+  type ItemOf,
+  isPrivateReadPath,
+  plainReadTargets,
+  sessionApprovalBlockReason,
+} from "../src";
 
 it.each([
   ["cat README.md", ["README.md"]],
@@ -35,6 +40,19 @@ it.each([
   "git status",
 ])("refuses unsafe or unverifiable input %s", (command) => {
   expect(plainReadTargets({ action: "command", toolName: "Bash", command })).toBeUndefined();
+});
+
+it.each([
+  ["worktree/.codeden/settings.json", true],
+  ["worktree/.git/config", true],
+  ["Library/Keychains/login.keychain-db", true],
+  ["worktree/env/notes.md", true],
+  ["worktree/key/notes.md", true],
+  ["worktree/p12/notes.md", true],
+  ["worktree/docs/guide.md", false],
+] as const)("classifies private path %s consistently across separators", (path, expected) => {
+  expect(isPrivateReadPath(path)).toBe(expected);
+  expect(isPrivateReadPath(path.replaceAll("/", "\\"))).toBe(expected);
 });
 
 it("does not widen release 1 standing grants", () => {
