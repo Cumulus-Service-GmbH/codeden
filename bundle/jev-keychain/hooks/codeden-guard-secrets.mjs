@@ -1,6 +1,6 @@
 import { closeSync, constants, fstatSync, openSync, readSync, realpathSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, resolve } from "node:path";
+import { delimiter, isAbsolute, resolve, sep } from "node:path";
 
 export const SCRIPT_SECRET_FAMILY = /keyvault|secret|appsettings|connection.string|security|sqlcmd|ERPURE.SQL/i;
 export const resolveScriptPath = (cwd, path) => path.startsWith("~/") ? resolve(homedir(), path.slice(2)) : resolve(cwd, path);
@@ -10,11 +10,12 @@ const JEV_FILE = resolve(homedir(), ".config", "trioharness", "jev.env");
 const JEV_FILE_TEXT = /(?:^|[^\w.-])(?:\.config\/)?trioharness\/jev\.env(?![\w.-])/i;
 const JEV_NATIVE_ACCESS = /\b(?:keyring|getPassword|SecItemCopyMatching|SecKeychainFindGenericPassword)\b/i;
 const JEV_ENTRY = /typesafe\.apiKey/i;
-const JEV_READER_PATH = resolve(homedir(), ".config", "trioharness", "jev-keyring-runtime", "bin", "jev-keychain-reader");
+const JEV_RUNTIME_PATH = resolve(homedir(), ".config", "trioharness", "jev-keyring-runtime");
+const JEV_READER_PATH = resolve(JEV_RUNTIME_PATH, "bin", "jev-keychain-reader");
 const realPath = path => {
   try { return realpathSync(path); } catch { return null; }
 };
-const JEV_READER = /\bjev-keychain-reader\b[\s\S]*?\bread\b/i;
+const JEV_RUNTIME_TEXT = /(?:^|[^\w.-])(?:jev-keyring-runtime|jev-keychain-reader)(?![\w.-])/i;
 const JEV_SCRIPTS = new Set([
   ".claude/skills/trioharness-codeden/scripts/jev.mjs",
   ".claude/skills/trioharness-lean/scripts/jev.mjs",
@@ -23,7 +24,7 @@ const JEV_SCRIPTS = new Set([
 
 function jevCredentialText(text, trustedJev = false) {
   return JEV_FILE_TEXT.test(text.replace(/["'\\]/g, "")) ||
-    !trustedJev && (JEV_READER.test(text) || (JEV_NATIVE_ACCESS.test(text) && JEV_ENTRY.test(text))) ? JEV_CREDENTIAL_DENIAL : null;
+    !trustedJev && (JEV_RUNTIME_TEXT.test(text.replace(/["'\\]/g, "")) || (JEV_NATIVE_ACCESS.test(text) && JEV_ENTRY.test(text))) ? JEV_CREDENTIAL_DENIAL : null;
 }
 
 export const programName = (word = "") => word.split(/[\\/]/).at(-1).toLowerCase().replace(/\.(?:cmd|exe|ps1)$/, "");
@@ -296,12 +297,27 @@ export function checkExecution(program, args, isPlainWord, inspect, options = {}
   const values = args.map(({ value }) => value);
   const targets = [...values, ...(options.redirects ?? []).map(redirect => redirect.target?.value ?? "")];
   const readerPath = realPath(JEV_READER_PATH);
-  const isReader = value => value && (programName(value) === "jev-keychain-reader" ||
-    (readerPath && realPath(resolveScriptPath(scriptCwd ?? "/", value)) === readerPath));
-  if (targets.some(isReader) ||
-      (isReader(program.value) && (values.length !== 1 || values[0] !== "present" || !isPlainWord(args[0].syntax)))) {
-    return JEV_CREDENTIAL_DENIAL;
-  }
+  const runtimePath = realPath(JEV_RUNTIME_PATH);
+  const targetPath = value => resolveScriptPath(scriptCwd ?? "/", value.replace(/^\$\{?HOME\}?\//, "~/"));
+  const inside = (path, root) => root && path && (path === root || path.startsWith(root + sep));
+  const touchesRuntime = value => {
+    if (!value) return false;
+    if (JEV_RUNTIME_TEXT.test(value)) return true;
+    const operand = value.replace(/^[\w-]+=/, "");
+    const path = targetPath(operand);
+    const actual = runtimePath ? realPath(path) : null;
+    return inside(path, JEV_RUNTIME_PATH) || inside(actual, runtimePath) ||
+      (/^(?:cp|dd|ditto|ln|mv|rsync|tar)$/.test(name) && operand.includes("/") &&
+        (inside(JEV_RUNTIME_PATH, path) || inside(runtimePath, actual)));
+  };
+  const programPath = targetPath(program.value);
+  const canonicalProgram = readerPath && realPath(programPath) === readerPath;
+  const pathAlias = readerPath && !program.value.includes("/") &&
+    (process.env.PATH || "").split(delimiter).some(entry => realPath(resolve(entry, program.value)) === readerPath);
+  const metadataOnly = programPath === JEV_READER_PATH && canonicalProgram && isPlainWord(program.syntax) &&
+    values.length === 1 && values[0] === "present" && isPlainWord(args[0].syntax);
+  if (targets.some(touchesRuntime) ||
+      (!metadataOnly && (canonicalProgram || pathAlias || touchesRuntime(program.value)))) return JEV_CREDENTIAL_DENIAL;
   if (targets.some(value => JEV_FILE_TEXT.test(value) ||
       resolveScriptPath(scriptCwd ?? "/", value) === JEV_FILE)) return JEV_CREDENTIAL_DENIAL;
   const evaluator = launcherTarget(name, values);

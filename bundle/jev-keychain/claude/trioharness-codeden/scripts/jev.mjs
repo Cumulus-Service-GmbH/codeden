@@ -227,10 +227,10 @@ const KEY_MISSING = 'JEV_KEY_MISSING: configure the codeden Keychain item or TYP
 const keyDirectory = join(homedir(), '.config', 'trioharness');
 const KEYCHAIN_ACCESS_REQUIRED = 'JEV_KEYCHAIN_ACCESS_REQUIRED: the Jev key needs the owner’s one-time access grant for the non-interactive Keychain reader';
 
-function keychainPassword({
+function keychainTransport({
   platform = process.platform, accountHome = userInfo().homedir, home = homedir(),
   security = join(accountHome, '.config', 'trioharness', 'jev-keyring-runtime', 'bin', 'jev-keychain-reader'),
-  run = spawnSync, timeout = 1500
+  run = spawnSync, timeout = 1500, requestTimeout = 22000
 } = {}) {
   if (platform !== 'darwin' || resolve(home) !== resolve(accountHome)) return null;
   const reader = lstatSync(security, { throwIfNoEntry: false });
@@ -238,33 +238,46 @@ function keychainPassword({
   if (!reader.isFile() || reader.nlink !== 1 || reader.uid !== process.getuid?.() || (reader.mode & 0o022)) {
     throw new Error(KEYCHAIN_ACCESS_REQUIRED);
   }
-  const opts = { encoding: 'utf8', timeout, killSignal: 'SIGKILL', maxBuffer: 8192,
+  const opts = { encoding: 'utf8', timeout, killSignal: 'SIGKILL', maxBuffer: 1024 * 1024 + 4,
     stdio: ['ignore', 'pipe', 'ignore'], env: {} };
   const metadata = run(security, ['present'], opts);
   if (metadata.error || metadata.signal || metadata.stdout) throw new Error(KEYCHAIN_ACCESS_REQUIRED);
   if (metadata.status === 44) return null;
   if (metadata.status !== 0) throw new Error(KEYCHAIN_ACCESS_REQUIRED);
 
-  const result = run(security, ['read'], opts);
-  if (result.error || result.signal || result.status !== 0 || !result.stdout || /[\r\n\0]/.test(result.stdout)) {
-    throw new Error(KEYCHAIN_ACCESS_REQUIRED);
-  }
-  return result.stdout;
+  return {
+    verify() {
+      const result = run(security, ['ready'], opts);
+      if (result.error || result.signal || result.status !== 0 || result.stdout) throw new Error(KEYCHAIN_ACCESS_REQUIRED);
+    },
+    send(request) {
+      const result = run(security, ['request'], { ...opts, timeout: requestTimeout,
+        stdio: ['pipe', 'pipe', 'ignore'], input: JSON.stringify(request) });
+      if (result.signal === 'SIGALRM') throw new Error(KEYCHAIN_ACCESS_REQUIRED);
+      if (result.error || result.signal || result.status === 69) throw new Error('JEV_UNREACHABLE');
+      if (result.status === 65) throw new Error('JEV_RESPONSE_INVALID');
+      if (result.status !== 0) throw new Error(KEYCHAIN_ACCESS_REQUIRED);
+      const frame = /^([1-5][0-9]{2})\n([\s\S]*)$/.exec(result.stdout);
+      if (!frame) throw new Error('JEV_RESPONSE_INVALID');
+      const status = Number(frame[1]);
+      return { status, ok: status >= 200 && status < 300, json: () => JSON.parse(frame[2]) };
+    }
+  };
 }
 
-async function readKey(env = process.env, { keyring = keychainPassword, readFile = readFileSync } = {}) {
-  let keychain;
-  try { keychain = await keyring(); }
+async function loadJevSource(env = process.env, { keychain = keychainTransport, readFile = readFileSync } = {}) {
+  let transport;
+  try { transport = await keychain(); }
   catch { throw new Error(KEYCHAIN_ACCESS_REQUIRED); }
-  if (keychain) return keychain;
+  if (transport) return transport;
   const key = env.TYPESAFE_API_KEY || env.TYPE_SAFE_API_KEY || env.JEV_API_KEY;
-  if (key) return key;
+  if (key) return { key };
   try {
     const contents = readFile(env.JEV_KEY_FILE || join(keyDirectory, 'jev.env'), 'utf8');
     const match = contents.match(/^\s*(?:TYPESAFE_API_KEY|TYPE_SAFE_API_KEY|JEV_API_KEY)\s*=\s*["']?([^"'\r\n]+)/m);
-    return match ? match[1].trim() : '';
+    return { key: match ? match[1].trim() : '' };
   } catch (error) {
-    if (error.code === 'ENOENT') return '';
+    if (error.code === 'ENOENT') return { key: '' };
     throw new Error('JEV_KEY_FILE_UNREADABLE');
   }
 }
@@ -278,14 +291,18 @@ function validAnswers(questions, answers) {
   return true;
 }
 
-export async function ask(request, { key, fetchImpl = fetch, retries = 3 } = {}) {
-  if (!key) throw new Error(KEY_MISSING);
+export async function ask(request, { key, send, fetchImpl = fetch, retries = 3 } = {}) {
+  if (!key && !send) throw new Error(KEY_MISSING);
   for (let attempt = 0; ; attempt++) {
     let res;
     try {
-      res = await fetchImpl(ENDPOINT, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(20000),
+      res = send ? await send(request) : await fetchImpl(ENDPOINT, { method: 'POST', redirect: 'error', signal: AbortSignal.timeout(20000),
         headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' }, body: JSON.stringify(request) });
-    } catch { if (attempt < retries) { await sleep(attempt); continue; } throw new Error('JEV_UNREACHABLE'); }
+    } catch (error) {
+      if (send && [KEYCHAIN_ACCESS_REQUIRED, 'JEV_RESPONSE_INVALID'].includes(error?.message)) throw error;
+      if (attempt < retries) { await sleep(attempt); continue; }
+      throw new Error('JEV_UNREACHABLE');
+    }
     if ((res.status === 429 || res.status === 529) && attempt < retries) { await sleep(attempt); continue; }
     if (!res.ok) throw new Error(`JEV_HTTP_${res.status}`);
     try { return await res.json(); }
@@ -324,11 +341,11 @@ export async function runGate(gateName, input, opts = {}) {
   if (Buffer.byteLength(stateText) > STATE_MAX_BYTES) throw new Error('STATE_TOO_LARGE: send only the evidence this decision needs');
   const request = { model: MODEL, state, questions };
   if (opts.dryRun) return { gate: gateName, dryRun: true, request: opts.showState ? request : { model: MODEL, questionCount: Object.keys(questions).length, stateBytes: Buffer.byteLength(stateText), stateSha256: createHash('sha256').update(stateText).digest('hex') } };
-  const key = opts.key ?? await opts.loadKey?.();
-  const data = await ask(request, { ...opts, key });
+  const source = opts.key ? { key: opts.key } : await opts.loadSource?.();
+  const data = await ask(request, { ...opts, ...source });
   if (!validAnswers(questions, data?.answers)) throw new Error('JEV_INVALID_ANSWER');
   const decision = gate.decide(data.answers, input);
-  const clean = value => redactCredential(value, key);
+  const clean = value => source?.key ? redactCredential(value, source.key) : value;
   const jev = { model: clean(data.model), answers: clean(data.answers), usage: clean(data.usage) };
   return { gate: gateName, ...decision, jev,
     inputSha256: gateName === 'check' && input.mode === 'audit' ? auditCheckDigest(input) : createHash('sha256').update(stateText).digest('hex').slice(0, 16), ...(input.mode === 'audit' ? { mode: 'audit', audit: input.audit } : {}) };
@@ -384,12 +401,17 @@ async function main(escalation = null) {
       auditTarget = { repo: resolve(opt('--audit-repo')), run: opt('--audit-run'), state: auditState };
       input = auditState.prepareAuditCheck(auditTarget.repo, auditTarget.run, resolve(inputPath));
     } else if (input.mode === 'audit') throw new Error('AUDIT_FLAGS_REQUIRED');
-    let keyPromise;
-    const loadKey = () => keyPromise ??= readKey();
+    let sourcePromise;
+    const loadSource = () => sourcePromise ??= loadJevSource();
+    const verifySource = async () => {
+      const source = await loadSource();
+      if (source.verify) source.verify();
+      else if (!source.key) throw new Error(KEY_MISSING);
+    };
     if (auditTarget) {
       await runGate(gateName, input, { dryRun: true });
       if (!flag('--dry-run')) {
-        if (!await loadKey()) throw new Error(KEY_MISSING);
+        await verifySource();
         const reservation = auditTarget.state.reserveAuditCheck(auditTarget.repo, auditTarget.run, resolve(inputPath), logPath);
         input = reservation.input; auditTarget.submission = reservation.submission;
       }
@@ -399,7 +421,7 @@ async function main(escalation = null) {
       input.attempt = 1;
       await runGate(gateName, input, { dryRun: true });
       if (!flag('--dry-run')) {
-        if (!await loadKey()) throw new Error(KEY_MISSING);
+        await verifySource();
         attemptState = await import('./run-state.mjs');
         const submission = randomUUID();
         const digest = inputDigest('plan', input);
@@ -409,7 +431,7 @@ async function main(escalation = null) {
       }
     }
     if (gateName === 'plan') outcomeInputDigest = inputDigest('plan', input);
-    out = await runGate(gateName, input, { loadKey, dryRun: flag('--dry-run'), showState: flag('--show-state') });
+    out = await runGate(gateName, input, { loadSource, dryRun: flag('--dry-run'), showState: flag('--show-state') });
     // A user's recorded exception (gate-exception.mjs grant) turns ONE rejected plan input into an accepted one. Plan gate only,
     // only for the exact input the user saw rejected, never when Jev was unavailable (that is exit 3 above, never a pass).
     if (!out.dryRun && !out.pass && gateName === 'plan' && hasException) {

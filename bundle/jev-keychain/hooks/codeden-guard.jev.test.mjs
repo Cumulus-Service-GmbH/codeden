@@ -46,7 +46,7 @@ test('Jev credential reads return hard-deny through the Claude and Codex hooks',
   }
 });
 
-test('reader aliases and copies are denied while metadata-only present is allowed',
+test('9.R1 and 10.R2: aliases, directory operands and globs are denied; present is allowed',
   { skip: process.platform === 'win32' && 'requires POSIX symlinks' }, t => {
     const cwd = mkdtempSync(join(process.cwd(), '.guard-jev-reader-'));
     t.after(() => rmSync(cwd, { recursive: true, force: true }));
@@ -65,11 +65,29 @@ test('reader aliases and copies are denied while metadata-only present is allowe
       for (const command of [
         './fixture-alias read',
         'cp ./fixture-alias ./fixture-copy',
-        'cat < ./fixture-alias'
-      ]) if (!/Jev credential/i.test(check(command) || '')) process.exit(1);
-      if (check('./fixture-alias present')) process.exit(2);
+        'cat < ./fixture-alias',
+        'cp ~/.config/trioharness/jev-keyring-runtime/bin/* ./fixture-copy',
+        'cp -R ~/.config/trioharness/jev-keyring-runtime/bin ./fixture-copy',
+        'dd if=./fixture-alias of=./fixture-copy',
+        'env -C "$HOME" cp .config/trioharness/jev-keyring-runtime/bin/* ./fixture-copy',
+        'cp -R ~/.config/trioharness ./fixture-copy',
+        'fixture-alias read'
+      ]) {
+        const denial = check(command);
+        if (!denial) { console.error(command); process.exit(1); }
+      }
+      if (!/Jev credential/i.test(check('./fixture-alias present') || '')) process.exit(2);
+      if (check(${JSON.stringify(JSON.stringify(reader) + ' present')})) process.exit(3);
     `;
     const result = spawnSync(process.execPath, ['--input-type=module', '-e', script],
-      { env: { HOME: home, PATH: process.env.PATH }, cwd, encoding: 'utf8' });
+      { env: { HOME: home, PATH: cwd + (process.env.PATH ? ':' + process.env.PATH : '') }, cwd, encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
   });
+
+
+test('9.R3 and 10.R1: reader references in interpreter source are denied regardless of argument order', () => {
+  const mode = 'fixture-operation';
+  const program = 'm = ' + JSON.stringify(mode) +
+    '; from subprocess import run; run(["/fixture/jev-keyring-runtime/bin/jev-keychain-reader", m])';
+  assert.match(checkCommand('python3 -c ' + JSON.stringify(program), targets), /Jev credential/i);
+});
