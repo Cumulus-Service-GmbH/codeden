@@ -390,6 +390,44 @@ describe("Claude plan mode", () => {
     expect(sdk.modes).toEqual(["default"]);
   });
 
+  it.each(["plan approval", "autonomy change"] as const)(
+    "ends in Supervised when the %s comes first",
+    async (first) => {
+      const sdk = stubSdk();
+      const { session, permission, preToolUse, items } = open(sdk, { autonomy: "full" });
+      await session.send({ text: "Plan this change", attachments: [] });
+      const exitPlan = permission("ExitPlanMode", { plan: "Change x" }, "exit");
+      await vi.waitFor(() => expect(items("approval_request")).toHaveLength(1));
+      const write = Promise.withResolvers<void>();
+      sdk.beforeMode.mockImplementationOnce(() => write.promise);
+      const approve = async () => {
+        await session.respond("r-exit", { kind: "approval", decision: "allow_once" });
+        return exitPlan;
+      };
+      const earlyApproval = first === "plan approval" ? await approve() : undefined;
+      const switching = session.setAutonomy("supervised");
+      const changeMode = earlyApproval ? "default" : "plan";
+      await vi.waitFor(() => expect(sdk.beforeMode).toHaveBeenCalledWith(changeMode));
+      const approval = earlyApproval ?? (await approve());
+      const exitMode = earlyApproval ? "acceptEdits" : "default";
+      expect(approval).toMatchObject({
+        behavior: "allow",
+        updatedPermissions: [{ type: "setMode", mode: exitMode, destination: "session" }],
+      });
+      // The CLI applies the approval's mode while the explicit write is still pending.
+      sdk.modes.push(exitMode);
+      await preToolUse("Read", inWorktree, exitMode);
+      sdk.deliver(toolResult("exit"));
+      write.resolve();
+      await switching;
+      await vi.waitFor(() => expect(sdk.modes.at(-1)).toBe("default"));
+      await settle();
+      expect(sdk.modes).toEqual([exitMode, changeMode, "default"]);
+      expect(sdk.beforeMode.mock.calls).toEqual([[changeMode], ["default"]]);
+      expect(items("notice")).toEqual([]);
+    },
+  );
+
   it("reasserts default after approving a plan in Supervised", async () => {
     const sdk = stubSdk();
     const { session, permission, items } = open(sdk, { autonomy: "supervised" });

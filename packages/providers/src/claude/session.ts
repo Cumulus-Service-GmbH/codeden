@@ -400,10 +400,11 @@ export class ClaudeSession implements ProviderSession {
     if (this.q !== q || this.closed || !reported || this.correctingMode) return;
     const expected = permissionModeFor(this.autonomy, this.planMode);
     if (reported === expected) return;
-    // The CLI can report the old or new mode before it acknowledges a write.
+    // The CLI can report the previous mode or the plan approval's mode while a write is pending.
     if (
       reported === this.settingMode ||
-      (this.pendingModeUpdates > 0 && reported === this.appliedMode)
+      (this.pendingModeUpdates > 0 &&
+        (reported === this.appliedMode || reported === this.planExit?.mode))
     )
       return;
     if (
