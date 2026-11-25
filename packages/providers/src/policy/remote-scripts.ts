@@ -53,6 +53,18 @@ const SHELL: Interpreter = {
     ["--rcfile", "--init-file", "-C", "--init-command"].includes(f),
 };
 
+/** The POSIX shell's script operand, after options and their values. */
+export function shellScriptFile(args: string[]): string | undefined {
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i] as string;
+    if (arg === "--") return args[i + 1];
+    if (!/^[-+]./.test(arg)) return arg;
+    if (SHELL.program(arg) || SHELL.stdin?.(arg)) return undefined;
+    if (SHELL.valued(arg)) i += 1;
+  }
+  return undefined;
+}
+
 const PYTHON: Interpreter = {
   program: (f) => /^-[bBdEiIOqsSuvxRP]*[cm]$/.test(f),
   valued: (f) => f === "-W" || f === "-X" || f === "--check-hash-based-pycs",
@@ -83,6 +95,11 @@ const PERL: Interpreter = {
 const RUBY: Interpreter = {
   program: (f) => /^-[nplacdvwys]*e$/.test(f),
   valued: (f) => ["-I", "-r", "-C", "-E"].includes(f),
+};
+
+const PHP: Interpreter = {
+  program: (f) => /^-[rfBRFE]$/.test(f),
+  valued: (f) => ["-c", "-d", "-z"].includes(f),
 };
 
 const PWSH_SWITCHES = new Set([
@@ -119,6 +136,7 @@ const INTERPRETERS = new Map<string, Interpreter>([
   ["nodejs", NODE],
   ["perl", PERL],
   ["ruby", RUBY],
+  ["php", PHP],
   ["pwsh", POWERSHELL],
   ["powershell", POWERSHELL],
   ["source", SOURCE],
@@ -132,17 +150,37 @@ const interpreter = (bin: string): Interpreter | undefined =>
 const isStdin = (arg: string | undefined): boolean =>
   arg === undefined || arg === "-" || arg === "/dev/stdin" || arg === "/proc/self/fd/0";
 
+/** A queue (`-q`) or timestamp (`-t`) consumes the rest of its option word or the next word. */
+function schedulesStdin(args: string[]): boolean {
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i] as string;
+    if (arg === "--") break;
+    if (!/^-[a-zA-Z]/.test(arg)) continue;
+    for (let at = 1; at < arg.length; at += 1) {
+      const flag = arg[at] as string;
+      if ("fclrd".includes(flag)) return false;
+      if (flag !== "q" && flag !== "t") continue;
+      if (at === arg.length - 1) i += 1;
+      break;
+    }
+  }
+  return true;
+}
+
 /**
  * True when the command runs what it reads on stdin as code: an interpreter given no program
  * (no `-c`/`-e` code, module or script file), or told to read it from stdin (`-`, `sh -s`).
  */
-function runsStdin(cmd: SimpleCommand): boolean {
+export function runsStdin(cmd: SimpleCommand): boolean {
   const { tokens } = unwrap(cmd.words);
   const bin = binName(tokens[0]);
   if (bin === "iex" || bin === "invoke-expression") return true;
   // cmd runs the lines it reads unless `/c` gives it a command (#550). `/k` runs its command,
   // if any, and then goes on reading.
   if (bin === "cmd") return !tokens.slice(1).some((a) => /^\/\/?c$/i.test(a));
+  // `at now` and `batch` read the commands they schedule on stdin, unless `-f` names a file or
+  // they only list, show or remove jobs (`-l`, `-c`, `-r`, `-d`).
+  if (bin === "at" || bin === "batch") return schedulesStdin(tokens.slice(1));
   const spec = interpreter(bin);
   if (!spec) return false;
   const args = tokens.slice(1);
