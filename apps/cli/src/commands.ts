@@ -70,7 +70,14 @@ export async function runCommand(args: string[], parsed: ParsedCli): Promise<num
     return 2;
   }
   let server: RunningServer;
-  const shutdown = () => void server.close().then(() => process.exit(0));
+  const shutdown = () =>
+    void server.close().then(
+      () => process.exit(0),
+      (error: unknown) => {
+        console.error(error);
+        process.exit(1);
+      },
+    );
   try {
     server = await startServer({
       port,

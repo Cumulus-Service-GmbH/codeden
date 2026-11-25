@@ -1,5 +1,6 @@
 import { expect, it, vi } from "vitest";
 import { startRunner } from "../src";
+import { TerminalHost } from "../src/pty/terminal-host";
 import { SessionHost } from "../src/session-host";
 import { removeDir, TestServer, tempDir } from "./helpers";
 
@@ -30,12 +31,15 @@ it("closes the server connection and reports failure when closing sessions rejec
   const closeAll = vi
     .spyOn(SessionHost.prototype, "closeAll")
     .mockRejectedValueOnce(new Error("close failed"));
+  const closeTerminals = vi.spyOn(TerminalHost.prototype, "closeAll");
   try {
     await server.request({ name: "runner.shutdown" });
     await vi.waitFor(() => expect(onShutdown).toHaveBeenCalledWith(1));
     await expect(TestServer.connect(runner)).rejects.toThrow("ECONNREFUSED");
+    expect(closeTerminals).toHaveBeenCalledOnce();
   } finally {
     closeAll.mockRestore();
+    closeTerminals.mockRestore();
     await server.close();
     await runner.close().catch(() => undefined);
     removeDir(home);

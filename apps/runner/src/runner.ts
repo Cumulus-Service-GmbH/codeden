@@ -412,10 +412,14 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
       loopDelay.disable();
       stopProviderUpdates();
       const graceful = (async () => {
-        await host.closeAll();
-        await terminals.closeAll();
-        files.closeAll();
-        await browserManager.shutdown().catch((error: unknown) => log(`browser: ${String(error)}`));
+        const results = await Promise.allSettled([
+          host.closeAll(),
+          terminals.closeAll(),
+          Promise.resolve().then(() => files.closeAll()),
+          browserManager.shutdown().catch((error: unknown) => log(`browser: ${String(error)}`)),
+        ]);
+        const failure = results.find((result) => result.status === "rejected");
+        if (failure) throw failure.reason;
       })();
       // A session that never finishes closing must not keep the runner alive (#588): its
       // processes are ended below with everything else. A replaced runner ends them at once
