@@ -7,6 +7,10 @@ import { ReasoningEffort } from "./common";
  * starts and another when it ends. It has no `CODEDEN_` prefix because those are not passed to agents.
  */
 export const CHILD_RUNS_FILE_ENV = "CHILD_RUNS_FILE";
+/** Loopback endpoint and write-only session credential passed to local launchers. */
+export const WORKER_REPORT_PATH = "/worker-report";
+export const WORKER_REPORT_URL_ENV = "CODEDEN_WORKER_URL";
+export const WORKER_REPORT_TOKEN_ENV = "CODEDEN_WORKER_TOKEN";
 
 /** Where a worker run stands. */
 export const ChildRunStatus = z.enum(["running", "succeeded", "failed"]);
@@ -20,12 +24,17 @@ export const ChildRunReport = z.object({
   role: z.string().min(1).max(60),
   provider: z.string().min(1).max(40),
   // As long as a Team member's model may be.
-  model: z.string().min(1).nullable(),
+  model: z.string().min(1).max(160).nullable(),
   effort: ReasoningEffort.nullable(),
   status: ChildRunStatus,
   at: z.iso.datetime({ offset: true }),
   /** A short outcome or reason, e.g. the verdict or an exit code. */
   detail: z.string().max(500).nullable().default(null),
+  /** A bounded receipt identifier or digest, never the receipt contents. */
+  receipt: z
+    .string()
+    .regex(/^[A-Za-z0-9_.:-]{1,128}$/)
+    .nullish(),
 });
 export type ChildRunReport = z.infer<typeof ChildRunReport>;
 
@@ -41,6 +50,7 @@ export const ChildRun = z.object({
   startedAt: z.string().nullable(),
   endedAt: z.string().nullable(),
   detail: z.string().nullable(),
+  receipt: ChildRunReport.shape.receipt,
 });
 export type ChildRun = z.infer<typeof ChildRun>;
 
@@ -52,6 +62,23 @@ export const ChildRunList = z.object({
   available: z.boolean().default(true),
 });
 export type ChildRunList = z.infer<typeof ChildRunList>;
+
+/** Apply one report, preserving the original start and the first terminal outcome. */
+export function childRunOf(r: ChildRunReport, known?: ChildRun): ChildRun {
+  if (known && (known.status !== "running" || r.status === "running")) return known;
+  return {
+    id: r.id,
+    role: known?.role ?? r.role,
+    provider: known?.provider ?? r.provider,
+    model: known ? known.model : r.model,
+    effort: known ? known.effort : r.effort,
+    status: r.status,
+    startedAt: r.status === "running" ? r.at : (known?.startedAt ?? null),
+    endedAt: r.status === "running" ? null : r.at,
+    detail: r.detail ?? known?.detail ?? null,
+    ...(r.receipt ? { receipt: r.receipt } : {}),
+  };
+}
 
 /**
  * Fold a child-run log into runs: the first line of an id starts the run, a later line with an
@@ -75,28 +102,9 @@ export function foldChildRuns(lines: readonly string[]): ChildRunList {
     }
     const r = parsed.data;
     const known = runs.get(r.id);
-    if (!known) {
-      runs.set(r.id, {
-        id: r.id,
-        role: r.role,
-        provider: r.provider,
-        model: r.model,
-        effort: r.effort,
-        status: r.status,
-        startedAt: r.status === "running" ? r.at : null,
-        endedAt: r.status === "running" ? null : r.at,
-        detail: r.detail,
-      });
-    } else if (known.status === "running" && r.status !== "running") {
-      runs.set(r.id, {
-        ...known,
-        status: r.status,
-        endedAt: r.at,
-        detail: r.detail ?? known.detail,
-      });
-    } else {
-      skipped++;
-    }
+    const next = childRunOf(r, known);
+    if (next === known) skipped++;
+    else runs.set(r.id, next);
   }
   return { runs: [...runs.values()].reverse(), skipped, available: true };
 }

@@ -1,9 +1,12 @@
-import { TeamRun } from "@codeden/contracts";
-import { render, screen, within } from "@testing-library/react";
+import { type ChildRunList, TeamRun } from "@codeden/contracts";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { ChecklistSidebar } from "@/components/checklist/checklist-sidebar";
+import { ThreadHeader } from "@/components/thread/thread-header";
 import { TeamRunProgress, TeamWorkers } from "@/components/workbench/team-workers";
 
+import { createMockClient } from "@/lib/api/mock";
+import { makeSession } from "@/lib/api/mock/fixtures/helpers";
 import { useLayoutStore } from "@/stores/layout";
 import { renderWithClient } from "./utils";
 
@@ -137,4 +140,60 @@ it("shows each Team's progress in the checklist sidebar", () => {
   const release = within(sidebar.getByRole("region", { name: "Release progress" }));
   expect(release.getByRole("heading", { name: "Release · 1/1" })).toBeTruthy();
   expect(release.getByRole("listitem").textContent).toContain("[x] Prepare release");
+});
+
+it("shows registered workers in the pane and header as the shared list changes", async () => {
+  const session = makeSession({
+    id: "workers",
+    rootThreadId: "root",
+    status: "running",
+    role: "agent",
+    provider: "codex",
+    purpose: "Review the change",
+    workKey: "workers",
+  });
+  const client = createMockClient();
+  vi.spyOn(client, "listChildRuns").mockResolvedValue({ runs: [], skipped: 0, available: true });
+  const { queryClient } = renderWithClient(
+    <>
+      <ThreadHeader session={session} running />
+      <TeamWorkers sessionId={session.id} session={session} />
+    </>,
+    client,
+    { withRouter: true },
+  );
+  await screen.findByText("No worker runs recorded for this session yet.");
+
+  const run = {
+    id: "reviewer",
+    provider: "codex",
+    role: "codeReviewer",
+    model: "gpt-test",
+    effort: "high",
+    status: "running",
+    startedAt: "2026-11-22T21:00:00.000Z",
+    endedAt: null,
+    detail: null,
+  } as const;
+  const update = (worker: ChildRunList["runs"][number]) =>
+    act(() => {
+      queryClient.setQueryData<ChildRunList>(["child-runs", session.id], {
+        runs: [worker],
+        skipped: 0,
+        available: true,
+      });
+    });
+  update(run);
+  fireEvent.click(await screen.findByRole("button", { name: "Workers 1 active" }));
+  expect(useLayoutStore.getState().rightTab).toBe("workers");
+  expect(screen.getByText("codeReviewer")).toBeTruthy();
+  expect(screen.getByText(/gpt-test.*high/)).toBeTruthy();
+  update({
+    ...run,
+    status: "succeeded",
+    receipt: "review-123",
+    endedAt: "2026-11-22T21:05:00.000Z",
+  });
+  await screen.findByText("Receipt review-123");
+  expect(screen.getByRole("button", { name: "Workers 1" })).toBeTruthy();
 });

@@ -1,4 +1,4 @@
-import { createHash, randomBytes, randomUUID } from "node:crypto";
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import type { McpTokenClaims, Role } from "@codeden/contracts";
 import { and, eq, isNull, ne } from "drizzle-orm";
 import type { Db } from "../db/client";
@@ -9,6 +9,10 @@ const PREFIX = "cdm_";
 
 function hash(token: string): string {
   return createHash("sha256").update(token).digest("hex");
+}
+
+function workerSignature(id: string, tokenHash: string): Buffer {
+  return createHmac("sha256", tokenHash).update(`codeden-worker:${id}`).digest();
 }
 
 /**
@@ -22,6 +26,28 @@ function hash(token: string): string {
  */
 export class McpTokenStore {
   constructor(private readonly db: Db) {}
+
+  /** A write-only worker bearer tied to the same lifetime as a provider's MCP token. */
+  workerToken(token: string): string | undefined {
+    const claims = this.verify(token);
+    if (claims)
+      return `cdw_${claims.jti}.${workerSignature(claims.jti, hash(token)).toString("hex")}`;
+  }
+
+  workerSession(token: string): string | undefined {
+    const match = /^cdw_([a-f0-9-]{36})\.([a-f0-9]{64})$/.exec(token);
+    const id = match?.[1];
+    const signature = match?.[2];
+    if (!id || !signature) return undefined;
+    const row = this.db
+      .select({ token: mcpTokens })
+      .from(mcpTokens)
+      .innerJoin(sessions, eq(sessions.id, mcpTokens.sessionId))
+      .where(and(eq(mcpTokens.id, id), isNull(mcpTokens.revokedAt), isNull(sessions.archivedAt)))
+      .get()?.token;
+    if (row && timingSafeEqual(workerSignature(id, row.tokenHash), Buffer.from(signature, "hex")))
+      return row.sessionId;
+  }
 
   /** Issue a token for a session; returns the secret (store it only in the agent config). */
   mint(claims: { role: Role; sessionId: string; projectId: string | null }): string {

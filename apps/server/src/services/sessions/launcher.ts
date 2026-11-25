@@ -11,6 +11,8 @@ import {
   teamRoleOfTitle,
   tokenSaverLevel,
   type UserInput,
+  WORKER_REPORT_TOKEN_ENV,
+  WORKER_REPORT_URL_ENV,
   type WorkspaceRequest,
 } from "@codeden/contracts";
 import type { SandboxService } from "../../execution/sandboxes";
@@ -82,6 +84,7 @@ export interface LauncherDeps extends RunnerDeps {
   teamFiles?: TeamFileDeps;
   /** Where sessions on this disk log the worker runs their tools start (`CHILD_RUNS_FILE`). */
   childRunsDir?: string;
+  workerReportUrl?: () => string;
 }
 
 /** Whether this session starts Claude in Chrome on the home runner. */
@@ -425,6 +428,8 @@ export class SessionLauncher {
     const runner = runnerForSession(this.deps, session.id);
     const proxyUrl = runner.mcpProxyUrl();
     const home = runner === (this.deps.runners?.home() ?? this.deps.runner);
+    const workerUrl = home && mcpToken ? this.deps.workerReportUrl?.() : undefined;
+    const workerToken = workerUrl && mcpToken ? this.deps.tokens.workerToken(mcpToken) : undefined;
     const mcpServers: McpServerConfig[] = [];
     if (proxyUrl && mcpToken) {
       mcpServers.push({
@@ -459,7 +464,20 @@ export class SessionLauncher {
       ...(ownBranch(session) ? { ownBranch: ownBranch(session) } : {}),
       ...(project?.agentCiEnv === false ? { ciEnv: false } : {}),
       ...(project?.allowUnenforcedProviders ? { allowUnenforcedProviders: true } : {}),
-      ...(home ? { env: { ...this.teamEnv(session), ...this.childRunsEnv(session) } } : {}),
+      ...(home
+        ? {
+            env: {
+              ...this.teamEnv(session),
+              ...this.childRunsEnv(session),
+              ...(workerUrl && workerToken
+                ? {
+                    [WORKER_REPORT_URL_ENV]: workerUrl,
+                    [WORKER_REPORT_TOKEN_ENV]: workerToken,
+                  }
+                : {}),
+            },
+          }
+        : {}),
       ...(home && startsWithChrome(session, this.deps.repo) ? { chrome: true } : {}),
     });
   }

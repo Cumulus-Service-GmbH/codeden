@@ -54,15 +54,10 @@ export function TeamWorkers({ sessionId, session }: { sessionId: string; session
       run.coordinatorId === sessionId ||
       run.workers.some((worker) => worker.sessionId === sessionId),
   );
-  const factory = session?.startedBy.kind === "pm" && session.startedBy.id === "factory";
-  if (factory && !runs?.length) return <ChildRuns session={session} />;
-  if (!runs?.length) {
-    return <p className="text-xs text-muted-foreground">No Team workers for this session</p>;
-  }
   return (
     <>
-      {factory && <ChildRuns session={session} />}
-      {runs.map((run) => (
+      {session && <ChildRuns session={session} showEmpty={!runs?.length} />}
+      {runs?.map((run) => (
         <section key={run.id} className="space-y-1 text-xs" aria-label={`${run.teamName} workers`}>
           <h3 className="font-medium">{run.teamName}</h3>
           <ul className="space-y-1">

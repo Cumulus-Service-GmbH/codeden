@@ -283,6 +283,7 @@ const RULES: readonly Rule[] = [
         "AIza[0-9A-Za-z_-]{30,}",
         "hf_[A-Za-z0-9]{30,}",
         "cd[ms]_[A-Za-z0-9_-]{32,}",
+        "cdw_[a-f0-9-]{36}\\.[a-f0-9]{64}",
       ]
         .map((p) => `\\b${p}`)
         .join("|"),

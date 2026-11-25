@@ -147,8 +147,19 @@ export function sessionRoutes(s: AppServices, installToken: string) {
       // The worker runs this session's tools logged (`CHILD_RUNS_FILE`), newest first.
       .get("/:id/child-runs", (c) => {
         const id = c.req.param("id");
-        s.sessionRepo.get(id);
-        const body: ChildRunList = readChildRuns(join(s.paths.home, "child-runs"), id);
+        const found = s.sessionRepo.find(id);
+        if (!found) throw notFound(`No session ${id}`, "session_not_found");
+        const { session, startMeta } = found;
+        const legacy = readChildRuns(join(s.paths.home, "child-runs"), id);
+        const runs = [
+          ...(startMeta?.workerRuns ?? []),
+          ...s.sessionRepo.subagentWorkers(session),
+          ...legacy.runs,
+        ].sort(
+          (a, b) =>
+            Date.parse(b.startedAt ?? b.endedAt ?? "") - Date.parse(a.startedAt ?? a.endedAt ?? ""),
+        );
+        const body: ChildRunList = { ...legacy, runs };
         return c.json(body);
       })
       // The queued-message tray. Each answers 409 `already_sent` once delivery took the message.

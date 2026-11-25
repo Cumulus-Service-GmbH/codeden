@@ -5,6 +5,7 @@ import {
   type ServerLock,
   TeamReviewLimitsAudit,
   TerminalQuery,
+  WORKER_REPORT_PATH,
 } from "@codeden/contracts";
 import { ImageEngineRegistry } from "@codeden/providers";
 import { createAdaptorServer, upgradeWebSocket } from "@hono/node-server";
@@ -29,6 +30,7 @@ import { TerminalBridge } from "./realtime/terminals";
 import { createApi } from "./routes/api";
 import { findWebDir, mountWeb } from "./routes/static";
 import { queryOf } from "./routes/validate";
+import { workerReportRoute } from "./routes/worker-report";
 import type { RunnerClient } from "./runner/client";
 import { RunnerHub } from "./runner/hub";
 import {
@@ -250,6 +252,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
     settings,
     paths,
     runner: runners.home(),
+    workerReportUrl: () => `http://127.0.0.1:${port}${WORKER_REPORT_PATH}`,
     runners,
     sandboxes,
     secrets,
@@ -328,9 +331,9 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
       cookieName: tokenCookie,
       allowedOrigins,
       // `/mcp` authenticates agents with per-session tokens instead of the install token.
-      publicPaths: new Set(["/api/health", "/mcp"]),
+      publicPaths: new Set(["/api/health", "/mcp", WORKER_REPORT_PATH]),
       // Agents and the desktop app only: never reachable from another device.
-      loopbackOnlyPaths: new Set(["/mcp", ...BROWSER_LOOPBACK_ONLY_PATHS]),
+      loopbackOnlyPaths: new Set(["/mcp", WORKER_REPORT_PATH, ...BROWSER_LOOPBACK_ONLY_PATHS]),
       remote: {
         enabled: () => network.enabled,
         ownHosts: () => network.ownHosts(),
@@ -358,6 +361,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
     },
   });
   app.route("/api", api);
+  app.route("/", workerReportRoute(services.mcpTokens, services.sessionRepo, opts.token));
   const mcp = createMcpHandler({ tokens: services.mcpTokens, registry: services.tools, log });
   app.all("/mcp", (c) => mcp(c.req.raw));
   app.get(

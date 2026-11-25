@@ -50,3 +50,11 @@ it("leaves the start unknown when only a run's end line was read", () => {
   ]);
   expect(runs[0]).toMatchObject({ status: "failed", startedAt: null, endedAt: start.at });
 });
+
+it("round-trips a terminal receipt and preserves it in the worker list", () => {
+  const receipt = "receipt-123";
+  const end = ChildRunReport.parse({ ...start, status: "succeeded", receipt });
+  expect(ChildRunReport.parse(JSON.parse(JSON.stringify(end)))).toMatchObject({ receipt });
+  const list = foldChildRuns([JSON.stringify(start), JSON.stringify(end)]);
+  expect(ChildRunList.parse(JSON.parse(JSON.stringify(list))).runs[0]).toMatchObject({ receipt });
+});

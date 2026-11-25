@@ -1,6 +1,9 @@
 import {
   type AutonomyLevel,
   agentEventToNewEvent,
+  type ChildRun,
+  type ChildRunReport,
+  childRunOf,
   type Item,
   type ItemOf,
   type ItemRecord,
@@ -74,6 +77,8 @@ export type PendingConfig = {
 };
 
 export type StoredStartMeta = SessionStartMeta & {
+  /** Authenticated worker reports from the local launchers attached to this session. */
+  workerRuns?: ChildRun[];
   /** The new Claude agent session was explicitly titled as a Browser Operator. */
   chromeOptIn?: true;
   /** The user selected a Chrome setting when starting this session from the composer. */
@@ -286,6 +291,51 @@ export class SessionRepo {
   setStartMeta(id: string, change: (meta: StoredStartMeta | null) => StoredStartMeta): void {
     const meta = change(this.find(id)?.startMeta ?? null);
     this.db.update(sessions).set({ startMeta: meta }).where(eq(sessions.id, id)).run();
+  }
+
+  recordWorker(id: string, report: ChildRunReport): void {
+    this.setStartMeta(id, (meta) => {
+      const current = meta?.workerRuns ?? [];
+      const known = current.find((run) => run.id === report.id);
+      const next = childRunOf(report, known);
+      return {
+        ...(meta ?? {
+          workspaceMode: "worktree",
+          workspaceFallback: null,
+          forced: null,
+          queuedBehind: [],
+        }),
+        workerRuns: [next, ...current.filter((run) => run.id !== next.id)].slice(0, 100),
+      };
+    });
+  }
+
+  /** Provider-native workers already projected from live transcript events. */
+  subagentWorkers(session: Session): ChildRun[] {
+    return this.db
+      .select()
+      .from(items)
+      .where(and(eq(items.sessionId, session.id), eq(items.kind, "subagent")))
+      .orderBy(desc(items.createdAt))
+      .limit(100)
+      .all()
+      .flatMap(({ data, createdAt, updatedAt }): ChildRun[] => {
+        if (data.kind !== "subagent") return [];
+        const active = data.status === "in_progress";
+        return [
+          {
+            id: `subagent:${data.id}`,
+            role: data.agentType ?? "Subagent",
+            provider: session.provider,
+            model: data.stats?.usage?.find((entry) => entry.model)?.model ?? null,
+            effort: null,
+            status: active ? "running" : data.status === "completed" ? "succeeded" : "failed",
+            startedAt: createdAt,
+            endedAt: active ? null : updatedAt,
+            detail: null,
+          },
+        ];
+      });
   }
 
   /** Every session in one of these statuses (all, or one project's), with no page limit. */

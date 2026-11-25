@@ -89,6 +89,7 @@ import { WorkbenchService } from "./workbench/workbench-service";
 import { remoteWorkspaceFs, type WorkspaceFs, workspaceFsFor } from "./workspace-fs/workspace-fs";
 
 export interface ServicesOptions {
+  workerReportUrl?: () => string;
   teamRuns?: TeamRunIntegrations;
   db: Db;
   store: EventStore;
@@ -317,6 +318,7 @@ export function createServices(opts: ServicesOptions): AppServices {
 
     teamFiles,
     childRunsDir: join(opts.paths.home, "child-runs"),
+    workerReportUrl: opts.workerReportUrl,
     log: opts.log,
   });
   // Before the session service: a start in a project the start-up check hasn't reached checks it.

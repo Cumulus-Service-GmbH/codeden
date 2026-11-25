@@ -1,8 +1,8 @@
 import type { ChildRun, Session } from "@codeden/contracts";
 import { useQuery } from "@tanstack/react-query";
-import { useEffect } from "react";
 import { ProviderMark } from "@/components/common/bits";
 import { useClient } from "@/lib/api";
+import { useChildRuns } from "@/lib/child-runs";
 import { useFactoryStatus } from "@/lib/factory";
 import { ago, duration } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -20,12 +20,9 @@ const statusDot: Record<ChildRun["status"], string> = {
   failed: "bg-rose-500",
 };
 
-const ACTIVE = new Set<Session["status"]>(["starting", "running", "waiting"]);
-
 /** The worker runs this session's tools started (review and role scripts), newest first. */
-export function ChildRuns({ session }: { session: Session }) {
+export function ChildRuns({ session, showEmpty }: { session: Session; showEmpty?: boolean }) {
   const client = useClient();
-  const active = ACTIVE.has(session.status);
   const factory = useFactoryStatus(
     session.projectId ?? "",
     Boolean(
@@ -47,18 +44,7 @@ export function ChildRuns({ session }: { session: Session }) {
   const limit =
     independent?.limit ?? Math.min(policy?.reviewerRounds ?? 2, policy?.totalRounds ?? 8);
   const arbitration = review?.arbitration;
-  const runs = useQuery({
-    queryKey: ["child-runs", session.id],
-    queryFn: () => client.listChildRuns(session.id),
-    // Poll while the session works or a listed worker still runs.
-    refetchInterval: (query) =>
-      active || query.state.data?.runs.some((run) => run.status === "running") ? 5000 : false,
-  });
-  // One more read when the session stops working, so a worker that ended between polls shows it.
-  const { refetch } = runs;
-  useEffect(() => {
-    if (!active) void refetch();
-  }, [active, refetch]);
+  const runs = useChildRuns(session);
   const list = runs.data?.runs ?? [];
   const skipped = runs.data?.skipped ?? 0;
   if (runs.isError) {
@@ -66,7 +52,14 @@ export function ChildRuns({ session }: { session: Session }) {
       <p className="text-3xs text-destructive">Workers could not be listed: {String(runs.error)}</p>
     );
   }
-  if (!round && !arbitration && !review?.jev && !list.length && skipped === 0) return null;
+  if (!round && !arbitration && !review?.jev && !list.length && skipped === 0) {
+    if (!showEmpty) return null;
+    return (
+      <p className="text-xs text-muted-foreground">
+        {runs.isPending ? "Loading workers…" : "No worker runs recorded for this session yet."}
+      </p>
+    );
+  }
   return (
     <section aria-labelledby="child-runs-heading" className="space-y-2">
       <h3
@@ -123,20 +116,32 @@ export function ChildRuns({ session }: { session: Session }) {
                 <span className="text-2xs text-muted-foreground">{statusText[run.status]}</span>
               </span>
               <span className="flex items-center gap-1 text-2xs text-muted-foreground">
-                <ProviderMark provider={run.provider} /> {run.provider} · {run.model ?? "default"}
+                <ProviderMark provider={run.provider} /> {run.provider}
+                {run.model ? ` · ${run.model}` : ""}
                 {run.effort ? ` · ${run.effort}` : ""}
               </span>
               <span className="block text-3xs text-muted-foreground/80">
-                {run.startedAt
-                  ? ago(run.startedAt)
-                  : run.endedAt
-                    ? `ended ${ago(run.endedAt)}`
-                    : ""}
+                {run.startedAt && (
+                  <>
+                    Started <time dateTime={run.startedAt}>{ago(run.startedAt)}</time>
+                  </>
+                )}
+                {run.endedAt && (
+                  <>
+                    {run.startedAt && " · "}Ended{" "}
+                    <time dateTime={run.endedAt}>{ago(run.endedAt)}</time>
+                  </>
+                )}
                 {run.startedAt && run.endedAt
                   ? ` · took ${duration(Date.parse(run.endedAt) - Date.parse(run.startedAt))}`
                   : ""}
                 {run.detail ? ` · ${run.detail}` : ""}
               </span>
+              {run.receipt && (
+                <span className="block break-all text-3xs text-muted-foreground">
+                  Receipt {run.receipt}
+                </span>
+              )}
             </span>
           </li>
         ))}

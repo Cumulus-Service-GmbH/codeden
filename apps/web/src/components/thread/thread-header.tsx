@@ -36,6 +36,7 @@ import {
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { SessionCostChip } from "@/components/usage/session-cost";
 import { useClient } from "@/lib/api";
+import { useChildRuns } from "@/lib/child-runs";
 import { copyWithFeedback } from "@/lib/copy";
 import { forkOriginLabel, isHandoff, isReview } from "@/lib/fork-origin";
 import { statusLabel } from "@/lib/format";
@@ -111,6 +112,8 @@ export function ThreadHeader({ session, running }: { session: Session; running: 
   const layout = useLayoutStore();
   const { sheetPanels, phone } = useViewport();
   const panelOpen = sheetPanels ? layout.rightSheetOpen : layout.rightOpen;
+  const workers = useChildRuns(session).data?.runs;
+  const activeWorkers = workers?.filter((worker) => worker.status === "running").length ?? 0;
   const [roleDialog, setRoleDialog] = useState<RoleSessionDialog | null>(null);
   const archivedRole = session.role !== "agent" && Boolean(session.archivedAt);
   const stop = useMutation({
@@ -194,6 +197,17 @@ export function ThreadHeader({ session, running }: { session: Session; running: 
       </div>
 
       <div className="ml-auto flex shrink-0 items-center gap-0.5">
+        {Boolean(workers?.length) && (
+          <Button
+            size="xs"
+            variant="ghost"
+            className="text-muted-foreground"
+            disabled={!hasRightPanel(session)}
+            onClick={() => layout.openRightTab("workers")}
+          >
+            Workers {activeWorkers > 0 ? `${activeWorkers} active` : workers?.length}
+          </Button>
+        )}
         {running && !archivedRole && (
           <Button
             size="xs"

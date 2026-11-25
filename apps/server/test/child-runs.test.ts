@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import {
   appendFileSync,
   constants,
@@ -8,8 +9,9 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { CHILD_RUNS_FILE_ENV } from "@codeden/contracts";
+import { CHILD_RUNS_FILE_ENV, ChildRunList, WORKER_REPORT_PATH } from "@codeden/contracts";
 import { afterEach, beforeEach, expect, it } from "vitest";
+import { startServer } from "../src/server";
 import { childRunsFile, readChildRuns } from "../src/services/sessions/child-runs";
 import { type LauncherDeps, SessionLauncher } from "../src/services/sessions/launcher";
 import { sampleSession } from "./helpers";
@@ -92,4 +94,98 @@ it("is unavailable, never read through a link, where no-follow opening is missin
   mkdirSync(runs, { recursive: true });
   writeFileSync(childRunsFile(runs, "s5"), line("running", "2026-11-22T21:00:00.000Z"));
   expect(readChildRuns(runs, "s5", 0)).toEqual({ runs: [], skipped: 0, available: false });
+});
+
+it("registers only against the live bearer's parent and lists provider subagents with it", async () => {
+  const log: string[] = [];
+  const token = randomUUID();
+  const server = await startServer({
+    port: 0,
+    dataDir: dir,
+    token,
+    runner: false,
+    checkSetupOnStart: false,
+    log: (message) => log.push(message),
+  });
+  try {
+    const parent = { ...sampleSession, id: "parent" };
+    const sibling = { ...sampleSession, id: "sibling" };
+    for (const session of [parent, sibling]) {
+      server.store.append([
+        { type: "session.created", sessionId: session.id, payload: { session } },
+      ]);
+    }
+    const tokens = server.services.mcpTokens;
+    const mcp = tokens.mint({ role: "agent", sessionId: parent.id, projectId: parent.projectId });
+    const worker = tokens.workerToken(mcp);
+    expect(worker).toBeDefined();
+    expect(tokens.verify(worker)).toBeUndefined();
+
+    const report = JSON.parse(line("running", "2026-11-22T21:00:00.000Z"));
+    const post = (token: string | undefined, body: unknown) =>
+      fetch(server.url + WORKER_REPORT_PATH, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify(body),
+      });
+    const list = async (id: string) => {
+      const response = await fetch(`${server.url}/api/sessions/${id}/child-runs`, {
+        headers: { authorization: `Bearer ${token}` },
+      });
+      expect(response.status).toBe(200);
+      return ChildRunList.parse(await response.json()).runs;
+    };
+    expect((await post(undefined, report)).status).toBe(401);
+    expect((await post(mcp, report)).status).toBe(401);
+    expect((await post(worker, { ...report, detail: worker })).status).toBe(400);
+    expect((await post(worker, { ...report, sessionId: sibling.id })).status).toBe(204);
+    expect(await list(parent.id)).toMatchObject([{ id: "w1", status: "running" }]);
+    expect(await list(sibling.id)).toEqual([]);
+
+    expect(
+      (
+        await post(worker, {
+          ...report,
+          status: "succeeded",
+          at: "2026-11-22T21:05:00.000Z",
+          receipt: "review-123",
+        })
+      ).status,
+    ).toBe(204);
+    const native = {
+      type: "item.completed",
+      threadId: "root",
+      turnId: "turn",
+      item: {
+        kind: "subagent",
+        id: "worker",
+        status: "completed",
+        childThreadId: "child",
+        agentType: "investigator",
+      },
+    } as const;
+    server.store.append([{ type: "agent.item.completed", sessionId: parent.id, payload: native }]);
+    expect(await list(parent.id)).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "w1",
+          status: "succeeded",
+          receipt: "review-123",
+          startedAt: report.at,
+        }),
+        expect.objectContaining({
+          id: "subagent:worker",
+          role: "investigator",
+          status: "succeeded",
+        }),
+      ]),
+    );
+    tokens.revoke(mcp);
+    expect((await post(worker, report)).status).toBe(401);
+    expect(log.some((message) => message.includes(worker ?? "") || message.includes(mcp))).toBe(
+      false,
+    );
+  } finally {
+    await server.close();
+  }
 });
