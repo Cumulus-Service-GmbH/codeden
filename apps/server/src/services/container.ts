@@ -532,7 +532,14 @@ export function createServices(opts: ServicesOptions): AppServices {
     ...opts.unwatchedApprovals,
     log: opts.log,
   });
-  const decisions = new DecisionApprovals(opts.store, githubApprovalPort(github.client));
+  const decisions = new DecisionApprovals(
+    opts.store,
+    githubApprovalPort(github.client, async () =>
+      opts.secrets.backend === "keyring"
+        ? opts.secrets.get("github.ownerApprovalPrivateKey")
+        : null,
+    ),
+  );
   const services: AppServices = {
     projectTeam,
     db: opts.db,

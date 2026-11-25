@@ -833,6 +833,8 @@ export const SecretKey = z.enum([
   "typesafe.apiKey",
   /** Fallback GitHub token when `gh auth token` is unavailable (§9). */
   "github.token",
+  /** Server-side GitHub App signing key for opt-in owner approval checks. */
+  "github.ownerApprovalPrivateKey",
 ]);
 export type SecretKey = z.infer<typeof SecretKey>;
 

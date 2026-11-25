@@ -33,6 +33,7 @@ const StoredDecisionConfirmation = DecisionConfirmation.extend({
 });
 
 interface GithubApprovalPort {
+  mergeVerifyMode?: GitHubCommentResult["mode"];
   check(target: GitHubApprovalTarget): Promise<void>;
   post(
     target: GitHubApprovalTarget,
@@ -263,14 +264,15 @@ export class DecisionApprovals {
     }
     const { target } = state.card.request;
     const { sessionId } = actor;
-    const comment = target.kind === "merge_verify";
+    const mergeVerify = target.kind === "merge_verify";
+    const mode = this.github.mergeVerifyMode ?? "comment";
     const refusePost = (message: string): never => {
-      if (comment) {
+      if (mergeVerify) {
         this.store.append([
           {
             type: "decision.github_refused",
             sessionId,
-            payload: { id, mode: "comment", outcome: "failed" },
+            payload: { id, mode, outcome: "failed" },
           },
         ]);
       }
@@ -278,7 +280,7 @@ export class DecisionApprovals {
     };
     const unusedRequired = "An unused owner approval for this project's GitHub gate is required";
     if (state.claimed) refusePost(unusedRequired);
-    if (comment) {
+    if (mergeVerify) {
       if (state.ownerWords === undefined) refuse("The card has no recorded owner words");
       const words = OwnerApprovalWords.safeParse(state.ownerWords);
       if (!words.success) {
@@ -298,11 +300,11 @@ export class DecisionApprovals {
     });
     if (!claim.length) refusePost(unusedRequired);
     const outcome = await this.github.post(target, id, state.ownerWords);
-    if (!comment) {
+    if (!mergeVerify) {
       this.store.append([{ type: "decision.github_posted", sessionId, payload: { id } }]);
       return;
     }
-    const result = { mode: "comment", outcome } as const;
+    const result = { mode, outcome } satisfies GitHubCommentResult;
     this.store.append([
       {
         type: outcome === "posted" ? "decision.github_posted" : "decision.github_post_result",

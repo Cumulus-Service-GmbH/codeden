@@ -123,6 +123,11 @@ export function secretRoutes(s: {
   const writableKey = (c: Context, raw: string) => {
     const key = SecretKey.safeParse(raw);
     if (!key.success) throw badRequest("Unknown secret", "unknown_secret");
+    if (key.data === "github.ownerApprovalPrivateKey" && isRemoteRequest(c)) {
+      throw forbidden(
+        "The owner approval key can only be changed on the computer running CodeDen.",
+      );
+    }
     if (key.data === "typesafe.apiKey" && isRemoteRequest(c)) {
       throw forbidden("The TypeSafe API key can only be changed on the computer running CodeDen.");
     }
@@ -138,7 +143,10 @@ export function secretRoutes(s: {
     })
     .put("/:key", jsonBody(SetSecretRequest), async (c) => {
       const key = writableKey(c, c.req.param("key"));
-      if (key === "typesafe.apiKey" && s.secrets.backend !== "keyring") {
+      if (
+        (key === "typesafe.apiKey" || key === "github.ownerApprovalPrivateKey") &&
+        s.secrets.backend !== "keyring"
+      ) {
         throw new ServiceError(503, "keychain_unavailable", "The OS keychain is unavailable.");
       }
       await s.secrets.set(key, c.req.valid("json").value);

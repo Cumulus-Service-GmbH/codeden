@@ -45,10 +45,9 @@ describe("approval bindings", () => {
     ).toThrow(/owner words allowlist/i);
   });
 
-  it.each(["posted", "failed", "unknown"] as const)(
-    "round-trips a %s comment outcome",
-    (outcome) => {
-      const result = { mode: "comment", outcome };
+  it.each(["comment", "check_run"] as const)("round-trips %s posting outcomes", (mode) => {
+    for (const outcome of ["posted", "failed", "unknown"] as const) {
+      const result = { mode, outcome };
       const event = {
         type: outcome === "posted" ? "decision.github_posted" : "decision.github_post_result",
         payload: { id: "card", ...result },
@@ -58,8 +57,8 @@ describe("approval bindings", () => {
       };
       expect(GitHubCommentResult.parse(JSON.parse(JSON.stringify(result)))).toEqual(result);
       expect(EventEnvelope.parse(JSON.parse(JSON.stringify(event)))).toEqual(event);
-    },
-  );
+    }
+  });
 
   it("round-trips an owner decision bound to an exact PR head", () => {
     const record = {

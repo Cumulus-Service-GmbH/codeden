@@ -58,6 +58,23 @@ describe("decision approvals", () => {
     await expect(service().postGithub(card.id, pm)).rejects.toThrow();
   });
 
+  it("records a signed check result only after the owner approved its card", async () => {
+    const { store, check, post } = setup();
+    const decisions = new DecisionApprovals(store, { check, post, mergeVerifyMode: "check_run" });
+    const card = decisions.raise(pm, "project", { kind: "github", target });
+    await expect(decisions.postGithub(card.id, pm)).rejects.toThrow("unused owner approval");
+    expect(post).not.toHaveBeenCalled();
+    await decisions.confirm(card.id, owner, undefined, { ownerWords: "Approved" });
+    await expect(decisions.postGithub(card.id, pm)).resolves.toEqual({
+      mode: "check_run",
+      outcome: "posted",
+    });
+    expect(post).toHaveBeenCalledExactlyOnceWith(target, card.id, "Approved");
+    expect(store.listTypes(["decision.github_posted"])).toMatchObject([
+      { payload: { id: card.id, mode: "check_run", outcome: "posted" } },
+    ]);
+  });
+
   it("refuses a moved head without posting a review", async () => {
     const { service, check, post } = setup();
     check.mockRejectedValueOnce(new ServiceError(409, "stale_approval", "PR head moved"));

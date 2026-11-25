@@ -85,11 +85,11 @@ export const DecisionConfirmationInput = z.strictObject({
 });
 export type DecisionConfirmationInput = z.infer<typeof DecisionConfirmationInput>;
 
-/** The result of attempting to publish the owner approval comment. */
+/** The result of attempting to publish the owner approval. */
 export const GitHubCommentOutcome = z.enum(["posted", "failed", "unknown"]);
 export type GitHubCommentOutcome = z.infer<typeof GitHubCommentOutcome>;
 export const GitHubCommentResult = z.strictObject({
-  mode: z.literal("comment"),
+  mode: z.enum(["comment", "check_run"]),
   outcome: GitHubCommentOutcome,
 });
 export type GitHubCommentResult = z.infer<typeof GitHubCommentResult>;

@@ -5,14 +5,20 @@ import {
 } from "@codeden/contracts";
 import { ServiceError } from "../errors";
 import { type GithubClient, isDefiniteGithubRejection } from "./client";
+import { ownerApprovalCheck } from "./owner-approval-check";
 
 function repository(target: GitHubApprovalTarget) {
   const slash = target.repository.indexOf("/");
   return { owner: target.repository.slice(0, slash), repo: target.repository.slice(slash + 1) };
 }
 
-export function githubApprovalPort(client: GithubClient) {
+export function githubApprovalPort(
+  client: GithubClient,
+  readKey = async (): Promise<string | null> => null,
+) {
+  const publishCheck = ownerApprovalCheck(readKey);
   return {
+    mergeVerifyMode: publishCheck ? ("check_run" as const) : ("comment" as const),
     async check(target: GitHubApprovalTarget) {
       const repo = repository(target);
       if (target.kind === "merge_verify") {
@@ -43,6 +49,7 @@ export function githubApprovalPort(client: GithubClient) {
     ): Promise<GitHubCommentOutcome> {
       const repo = repository(target);
       if (target.kind === "merge_verify") {
+        if (publishCheck) return publishCheck(target, cardId);
         if (ownerWords === undefined)
           throw new ServiceError(403, "decision_refused", "Missing owner words");
         const words = OwnerApprovalWords.safeParse(ownerWords);
