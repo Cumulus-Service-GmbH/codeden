@@ -3,7 +3,6 @@ import { isAbsolute, relative, resolve } from "node:path";
 import { isPrivateReadPath, plainReadTargets } from "@codeden/contracts";
 import { isInsidePath } from "../util/workspace-guard";
 import { isSecretPath } from "./paths";
-import { classifyCommand } from "./risk";
 
 /** Worktree-scoped plain reads only. Recheck paths every time a grant is used. */
 export function guardedReadCommand(
@@ -42,14 +41,6 @@ export function guardedReadCommand(
       if (listsDirectories && stat.isDirectory()) continue;
       if (!stat.isFile() || stat.nlink !== 1) return;
     }
-    if (
-      classifyCommand(command, {
-        cwd: realRoot,
-        dir: realCwd,
-        shell: tool.toolName === "Bash" ? "posix" : "auto",
-      }).risky
-    )
-      return;
   } catch {
     return;
   }

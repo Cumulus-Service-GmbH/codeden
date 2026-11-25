@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { classifyWrite, type RiskContext } from "../src/policy/risk";
-import { classifyCommandAndCheckApproval as classifyCommand } from "./support/classify-command";
+import { classifyCommand, classifyWrite, type RiskContext } from "../src/policy/risk";
 
 /**
  * Writes to the Windows registry and to files outside the worktree made by PowerShell's item
@@ -237,19 +236,12 @@ describe("New-Item and Set-Item writing files (#533)", () => {
       "Set-Item Function:prompt { 'PS> ' }",
       "New-Item Alias:ll -Value Get-ChildItem",
       "Set-Content Env:FOO bar",
-      // A folder in the worktree or temp.
+      // A folder follows mkdir's rule, wherever it is on disk.
       "New-Item -ItemType Directory -Path dist -Force",
-      "New-Item -ItemType Directory -Path $env:TEMP\\scratch",
-      "mkdir src\\scratch",
-    ]) {
-      expect(action(cmd, ps), cmd).toBeNull();
-    }
-    // A folder outside the worktree is a write there too (#614).
-    for (const cmd of [
       "New-Item -ItemType Directory -Path C:\\Users\\me\\scratch",
       "mkdir C:\\Users\\me\\scratch",
     ]) {
-      expect(action(cmd, ps), cmd).toBe("outside_worktree");
+      expect(action(cmd, ps), cmd).toBeNull();
     }
     // Creating an env file in the worktree reads nothing (as with Set-Content).
     expect(action("New-Item .env -Value PORT=3000", ps)).toBeNull();

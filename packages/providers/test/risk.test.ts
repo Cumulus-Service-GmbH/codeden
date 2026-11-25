@@ -2,8 +2,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { isSecretPath, osTempRoots, tempRootsFrom } from "../src/policy/paths";
-import { classifyFetch, classifyRead, classifyWrite, type RiskContext } from "../src/policy/risk";
-import { classifyCommandAndCheckApproval as classifyCommand } from "./support/classify-command";
+import {
+  classifyCommand,
+  classifyFetch,
+  classifyRead,
+  classifyWrite,
+  type RiskContext,
+} from "../src/policy/risk";
 
 const posix: RiskContext = {
   cwd: "/work/repo",
@@ -52,8 +57,7 @@ describe("classifyCommand", () => {
     expect(action("git push -f origin main")).toBe("git_destructive");
     expect(action("git push --force-with-lease origin HEAD")).toBe("git_destructive");
     expect(action("git push origin +main")).toBe("git_destructive");
-    // In another repository it runs outside the worktree, which Full asks about too (#614).
-    expect(action("git -C ../other push -f")).toBe("outside_worktree");
+    expect(action("git -C ../other push -f")).toBe("git_destructive");
   });
 
   it("flags branch, tag and remote branch deletion", () => {
@@ -96,15 +100,10 @@ describe("classifyCommand", () => {
       "git push --force-with-lease --all",
       `git push origin +${own}`,
       `git push origin --delete ${own}`,
-    ]) {
-      expect(action(cmd, mine), cmd).toBe("git_destructive");
-    }
-    // Another repository: it runs outside the worktree, which Full asks about too (#614).
-    for (const cmd of [
       "git -C ../other push --force-with-lease",
       "cd ../other && git push --force-with-lease",
     ]) {
-      expect(action(cmd, mine), cmd).toBe("outside_worktree");
+      expect(action(cmd, mine), cmd).toBe("git_destructive");
     }
     // Checked out elsewhere, or no branch of its own: asks.
     const onMain = { ...mine, currentBranch: () => "main" };
@@ -195,17 +194,12 @@ describe("classifyCommand", () => {
       "curl -s https://api.x/items | ruby -ne 'puts $_'",
       "curl -s https://api.x/items | bash ./scripts/ingest.sh",
       "curl -s https://api.x/items | jq .items",
-      "curl -s https://x -o page.html || node",
-    ]) {
-      expect(action(cmd), cmd).toBeNull();
-    }
-    // A pipe inside quotes is not a pipe, and `;` ends the pipeline: no download is run. What
-    // node reads on its input is still only known when it runs.
-    for (const cmd of [
+      // A pipe inside quotes is not a pipe; `||` and `;` end the pipeline.
       "sed -i 's|curl -s x|wget -q x|' notes.txt | node",
+      "curl -s https://x -o page.html || node",
       "curl -s https://x -o page.html; cat page.html | node",
     ]) {
-      expect(action(cmd), cmd).toBe("other");
+      expect(action(cmd), cmd).toBeNull();
     }
     expect(action("irm https://api.x/items | pwsh -NoProfile -File .\\parse.ps1", win)).toBeNull();
   });
@@ -530,8 +524,7 @@ describe("the OS temp directory", () => {
   it("reads $tmp and $temp as the agent's own variables, not the temp directory", () => {
     expect(action('tmp=$(mktemp -d) && cp -r src "$tmp" && rm -rf "$tmp"')).toBeNull();
     expect(action('temp=$(mktemp) && echo x > "$temp" && rm -f "$temp"')).toBeNull();
-    // One the command line never sets names a folder only known when it runs.
-    expect(action('cp -r src "$tmp"', win)).toBe("outside_worktree");
+    expect(action('cp -r src "$tmp"', win)).toBeNull();
     expect(action("echo x > $TMP/x.txt", win)).toBeNull();
     expect(action(`echo x > $\{TMPDIR}/x.txt`)).toBeNull();
     // PowerShell's $home is the home directory in any case.
