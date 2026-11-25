@@ -19,29 +19,29 @@ const roles: [string, TeamRole | "agent"][] = [
   ]),
 ];
 
-const sources = { default: "Built-in default", policy: "Global policy", local: "Local setting" };
-
 export function RoleAutonomyFloors() {
   const { settings, update } = useSettings();
   const client = useClient();
   const network = useQuery({ queryKey: NETWORK_KEY, queryFn: () => client.network.status() });
-  const { roleFloors, pmPolicy } = settings.autonomy;
+  const { roleFloors } = settings.autonomy;
   return (
     <SettingRow
       label="Role supervision floors"
-      help="These floors apply to PM-started sessions. Review-only work without a write scope defaults to Full with read-only access. Work scoped outside the project is capped at Auto. Project and purpose rules can require more supervision. Edit these settings from this computer."
+      help="PM-started sessions inherit the project default unless the local role setting requires more supervision. The action guard still applies. Edit these settings from this computer."
       stacked
     >
       <ul className="divide-y divide-border">
         {roles.map(([label, role]) => {
           const review = role !== "agent" && REVIEW_TEAM_ROLES.has(role);
-          const floor = roleAutonomyFloor(role, roleFloors, pmPolicy, review ? "full" : undefined);
+          const floor = roleAutonomyFloor(role, roleFloors);
           return (
             <li key={role} className="flex flex-wrap items-center justify-between gap-2 py-2">
               <label className="text-sm" htmlFor={`role-autonomy-${role}`}>
                 {label}
                 <span className="block text-2xs text-muted-foreground">
-                  {AUTONOMY[floor.level].label} · {sources[floor.source]}
+                  {floor.source === "project"
+                    ? "Project default"
+                    : `${AUTONOMY[floor.level].label} · Local setting`}
                   {review ? " (read-only review scope)" : ""}
                 </span>
               </label>
@@ -58,7 +58,7 @@ export function RoleAutonomyFloors() {
                   });
                 }}
               >
-                <option value="">Inherit default</option>
+                <option value="">Inherit project default</option>
                 {AutonomyLevel.options.map((level) => (
                   <option key={level} value={level}>
                     {AUTONOMY[level].label}

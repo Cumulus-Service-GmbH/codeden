@@ -382,6 +382,7 @@ export const FactoryTuning = z.object({
   /** Per-project review limits. */
   reviewPolicy: ReviewPolicy.optional(),
   team: Team.default([]),
+  /** Legacy policy retained for compatibility with saved factory tuning. */
   autonomyPolicy: AutonomyPolicy.default({}),
   /** UTF-8 byte cap for PM-facing summaries. Null leaves them uncapped. */
   resultSummaryBytes: z.int().min(256).max(65536).nullable().default(null),

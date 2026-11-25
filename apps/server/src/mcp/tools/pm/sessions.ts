@@ -4,6 +4,7 @@ import {
   messageFrom,
   PmStartSessionInput,
   resolveTeam,
+  roleAutonomyFloor,
   SessionStatus,
   SetSessionAutonomyInput,
   StartedBy,
@@ -18,7 +19,7 @@ import type { AppServices } from "../../../services/container";
 import { applyTeamRole } from "../../../services/factory/team-role";
 import {
   assertAutonomy,
-  resolveAutonomy,
+  scopeEnforcement,
   stricter,
 } from "../../../services/sessions/autonomy-policy";
 import { defineTool, type ToolAvailabilityContext, ToolError } from "../../define";
@@ -68,7 +69,7 @@ function canStartSessions(services: AppServices, caller?: ToolAvailabilityContex
 export const startSession = defineTool({
   name: "start_session",
   description:
-    "Start an agent session in its own worktree to do one piece of work. Specify autonomy to request more supervision. The policy opens card-gated purposes as supervised by default. Always pass a workKey (issue:<n>, pr:<n>, automation:<name> or request:<slug>) and a one-line purpose; add scope (paths or area) when known. For an issue whose author isn't trusted (not a trusted author, not CodeDen's GitHub account, no write access), it starts only in a turn the user's own message started; otherwise it is refused and you put the issue in the user's inbox with report_triage (decision 'ready'). If matching work is already running or queued, nothing starts and the result is 'conflict' with the existing work: choose the resolution yourself and call again with conflict = {resolution: 'wait'} (queue behind it), {resolution: 'skip'} (it is the same work), {resolution: 'join', sessionId} (send the prompt to the existing session) or {resolution: 'force', reason}.",
+    "Start an agent session in its own worktree to do one piece of work. Sessions inherit the project's permissions by default, subject to the owner's role floor. Request Supervised for work that requires an owner card. Always pass a workKey (issue:<n>, pr:<n>, automation:<name> or request:<slug>) and a one-line purpose; add scope (paths or area) when known. For an issue whose author isn't trusted (not a trusted author, not CodeDen's GitHub account, no write access), it starts only in a turn the user's own message started; otherwise it is refused and you put the issue in the user's inbox with report_triage (decision 'ready'). If matching work is already running or queued, nothing starts and the result is 'conflict' with the existing work: choose the resolution yourself and call again with conflict = {resolution: 'wait'} (queue behind it), {resolution: 'skip'} (it is the same work), {resolution: 'join', sessionId} (send the prompt to the existing session) or {resolution: 'force', reason}.",
   roles: ["pm", "agent"],
   isAvailable: (services, caller, role) => role === "pm" || canStartSessions(services, caller),
   scope: "project",
@@ -121,17 +122,15 @@ export const startSession = defineTool({
     });
     const role = teamRoleOfTitle(input.title);
     const member = teamMember(team, role);
-    const {
-      floor: autonomyFloor,
-      readOnlyScope,
-      guardedInstall,
-    } = resolveAutonomy(
+    const { level: autonomyFloor } = roleAutonomyFloor(
+      role ?? "agent",
+      settings.autonomy.roleFloors,
+    );
+    const { readOnlyScope, guardedInstall } = scopeEnforcement(
       role,
       input.purpose,
       input.scope,
       project.path,
-      settings.autonomy,
-      tuning?.autonomyPolicy,
     );
     assertAutonomy(input.autonomy, autonomyFloor);
     if (
@@ -295,16 +294,11 @@ export const setSessionAutonomy = defineTool({
     if (ENDED.has(session.status) || session.archivedAt) {
       throw new ToolError("The agent session has ended.");
     }
-    const { settings, factory, sessionRepo } = ctx.services;
+    const { settings, sessionRepo } = ctx.services;
     const meta = sessionRepo.find(session.id)?.startMeta;
-    const { floor: currentFloor } = resolveAutonomy(
-      teamRoleOfTitle(session.title ?? undefined),
-      session.purpose,
-      session.scope,
-      session.scope.paths?.length ? projectFor(ctx.services, ctx.projectId).path : undefined,
-      settings.get().autonomy,
-      factory.data.loop(ctx.projectId)?.tuning.autonomyPolicy,
-      meta ?? {},
+    const { level: currentFloor } = roleAutonomyFloor(
+      teamRoleOfTitle(session.title ?? undefined) ?? "agent",
+      settings.get().autonomy.roleFloors,
     );
     assertAutonomy(autonomy, stricter(currentFloor, meta?.autonomyFloor));
     const updated = await ctx.services.sessions.update(

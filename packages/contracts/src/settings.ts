@@ -126,6 +126,7 @@ export const Settings = z.object({
   autonomy: z
     .object({
       default: AutonomyLevel.default("auto"),
+      /** Legacy policy retained for compatibility with saved settings. */
       pmPolicy: AutonomyPolicy.optional(),
       roleFloors: RoleAutonomyFloors.default({}),
     })

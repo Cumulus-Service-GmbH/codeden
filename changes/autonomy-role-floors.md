@@ -2,4 +2,4 @@
 section: changed
 ---
 
-- Settings → Autonomy now shows each Team role's minimum supervision and lets you change it from the local app. Review roles without a write scope can use Full with read-only provider access. Work scoped outside the project can use up to Auto.
+- Settings → Autonomy shows where each Team role's permission floor comes from and lets you set it locally. PM-started sessions inherit the project default unless a local role setting requires more supervision. The action guard still applies.

@@ -203,9 +203,10 @@ it.each([
   "Provisioning",
   "Database migration",
   "Install requiring an owner card",
-])("opens card-gated work supervised for %s", async (purpose) => {
-  const { started } = await start({ purpose }, {});
-  expect(started[0]?.autonomy).toBe("supervised");
+])("leaves action approval to the guard when the purpose says %s", async (purpose) => {
+  expect((await start({ purpose }, {})).started[0]?.autonomy).toBe("full");
+  const requested = await start({ purpose, autonomy: "supervised" }, {});
+  expect(requested.started[0]?.autonomy).toBe("supervised");
 });
 
 it("accepts an explicit request for supervision", async () => {
@@ -224,7 +225,7 @@ it.each([
   async (autonomy, floor, choice, want) => {
     const { started } = await start(
       { autonomy: choice },
-      { autonomy, pmPolicy: floor ? { agent: { "*": floor } } : undefined },
+      { autonomy, roleFloors: floor ? { agent: floor } : undefined },
     );
     expect(started[0]?.autonomy).toBe(want);
   },
@@ -240,7 +241,7 @@ it.each([
   async (autonomy, resumeWith, floor, want) => {
     const { resumed } = await start(
       { autonomy },
-      { autonomy: "full", resumeWith, pmPolicy: floor ? { agent: { "*": floor } } : undefined },
+      { autonomy: "full", resumeWith, roleFloors: floor ? { agent: floor } : undefined },
     );
     expect(resumed?.autonomy).toBe(want);
   },
@@ -252,58 +253,20 @@ it("refuses an explicit request below a Read-only project default", async () => 
   );
 });
 
-it("refuses a request below the purpose policy", async () => {
-  await expect(start({ purpose: "Provisioning", autonomy: "full" }, {})).rejects.toThrow(
-    "supervised",
-  );
-});
-
-it("resolves the PM and Team policies for the role and purpose", async () => {
+it("uses a local role override independently of legacy policies", async () => {
   const { started } = await start(
     { title: "[Writer] Fix it", purpose: "documentation" },
     {
       project: [writer],
-      pmPolicy: { writer: { "*": "full" } },
-      teamPolicy: { writer: { documentation: "auto" } },
+      roleFloors: { writer: "auto" },
+      pmPolicy: { writer: { "*": "read_only" } },
+      teamPolicy: { writer: { documentation: "supervised" } },
     },
   );
   expect(started[0]?.autonomy).toBe("auto");
 });
 
-it("keeps each role's configured autonomy for work without owner cards", async () => {
-  const opts = {
-    project: [writer, { ...writer, role: "planReviewer" as const }],
-    teamPolicy: { writer: { "*": "full" }, planReviewer: { "*": "read_only" } } as const,
-  };
-  const input = { purpose: "Documentation" };
-  const writerRun = await start({ ...input, title: "[Writer] Work" }, opts);
-  const reviewerRun = await start({ ...input, title: "[Plan Reviewer] Work" }, opts);
-  expect(writerRun.started[0]?.autonomy).toBe("full");
-  expect(reviewerRun.started[0]?.autonomy).toBe("read_only");
-});
-
-it("uses the strictest matching purpose rule in a free-text purpose", async () => {
-  const { started } = await start(
-    { title: "[Writer] Fix it", purpose: "Update USER TABLE documentation" },
-    {
-      project: [writer],
-      teamPolicy: {
-        writer: { "*": "full", documentation: "auto", "user table": "supervised" },
-      },
-    },
-  );
-  expect(started[0]?.autonomy).toBe("supervised");
-});
-
-it("does not match purpose keys inside another word", async () => {
-  const { started } = await start(
-    { title: "[Writer] Fix it", purpose: "Update documentation" },
-    { project: [writer], teamPolicy: { writer: { "*": "auto", doc: "supervised" } } },
-  );
-  expect(started[0]?.autonomy).toBe("auto");
-});
-
-it("applies current policy to a running agent with no stored floor", async () => {
+it("applies the current local role floor to a running agent with no stored floor", async () => {
   const database = openDatabase(":memory:");
   try {
     const repo = new SessionRepo(database.db, new EventStore(database.db));
@@ -323,13 +286,9 @@ it("applies current policy to a running agent with no stored floor", async () =>
     const update = vi.fn(async () => ({ autonomy: "full" }));
     const services = {
       sessionRepo: repo,
-      projects: { get: () => ({ path: process.cwd() }) },
       sessions: { update },
-      settings: { get: () => Settings.parse({}) },
-      factory: {
-        data: {
-          loop: () => ({ tuning: { autonomyPolicy: { writer: { documentation: "supervised" } } } }),
-        },
+      settings: {
+        get: () => Settings.parse({ autonomy: { roleFloors: { writer: "supervised" } } }),
       },
     } as unknown as AppServices;
     await expect(
@@ -470,45 +429,13 @@ it.each(["planReviewer", "reviewer", "reviewerFallback", "investigator", "arbite
   },
 );
 
-it("caps explicit outside-worktree scope at Auto with or without a legacy wildcard", async () => {
-  const input = { title: "[Writer] Work", scope: { paths: ["~/.config/tool"] } };
-  const opts = { project: [writer], pmPolicy: { writer: { "*": "supervised" as const } } };
-  expect((await start(input, opts)).started[0]?.autonomy).toBe("auto");
-  await expect(start({ ...input, autonomy: "full" }, opts)).rejects.toThrow(
-    "Autonomy policy requires auto",
-  );
-  expect(
-    (await start({ ...input, scope: { paths: ["docs/file"] } }, opts)).started[0]?.autonomy,
-  ).toBe("supervised");
-  expect((await start(input, { ...opts, autonomy: "read_only" })).started[0]?.autonomy).toBe(
-    "read_only",
-  );
-});
-
-it.each(["PRD installation", "Read secrets", "Run dbops", "Create Azure resources"])(
-  "keeps %s supervised even for outside-worktree scopes",
-  async (purpose) => {
-    const input = { purpose, scope: { paths: ["/tmp/installer"] }, autonomy: "auto" };
-    await expect(start(input, {})).rejects.toThrow("Autonomy policy requires supervised");
-  },
-);
-
-it("allows a guarded outside installer at Auto and keeps mixed install scopes supervised", async () => {
+it("requires guard coverage for Full installer sessions scoped outside the worktree", async () => {
   const pure = { purpose: "Install tooling", scope: { paths: ["/tmp/installer"] } };
-  expect((await start(pure, {})).started[0]?.autonomy).toBe("auto");
-  await expect(start(pure, { guard: false })).rejects.toThrow("isn't covered");
   const mixed = { ...pure, scope: { paths: ["/tmp/installer", "scripts/setup"] } };
-  await expect(start({ ...mixed, autonomy: "auto" }, {})).rejects.toThrow(
-    "Autonomy policy requires supervised",
-  );
-});
-
-it("keeps a legacy purpose rule ahead of its wildcard for other roles", async () => {
-  const { started } = await start(
-    { title: "[Writer] Work", purpose: "Documentation" },
-    { project: [writer], pmPolicy: { writer: { "*": "supervised", documentation: "auto" } } },
-  );
-  expect(started[0]?.autonomy).toBe("auto");
+  for (const input of [pure, mixed]) {
+    expect((await start(input, {})).started[0]?.autonomy).toBe("full");
+    await expect(start(input, { guard: false })).rejects.toThrow("isn't covered");
+  }
 });
 
 it("applies a local override independently of the review lane default", async () => {
@@ -522,3 +449,44 @@ it("applies a local override independently of the review lane default", async ()
     "Autonomy policy requires auto",
   );
 });
+
+it.each([
+  {
+    lane: "review CLI wording",
+    input: {
+      title: "[Writer] Review operator",
+      purpose: "Launch team-review CLI",
+      scope: { paths: ["scripts/review.mjs"] },
+    },
+    pmPolicy: { writer: { "team-review CLI": "supervised" } },
+  },
+  {
+    lane: "MCP tools scope",
+    input: {
+      title: "[Writer] Update MCP tools",
+      purpose: "Update session routing",
+      scope: { paths: ["apps/server/src/mcp/tools/"] },
+    },
+    teamPolicy: { writer: { "*": "supervised" } },
+  },
+  {
+    lane: "outside-worktree scope",
+    input: {
+      title: "[Writer] Update skills",
+      purpose: "Prepare installer",
+      scope: { paths: ["~/.codex/skills", "/tmp/installer"] },
+    },
+  },
+] satisfies Array<{
+  lane: string;
+  input: Record<string, unknown>;
+  pmPolicy?: AutonomyPolicy;
+  teamPolicy?: AutonomyPolicy;
+}>)(
+  "starts the $lane lane at Full under a Full project",
+  async ({ input, pmPolicy, teamPolicy }) => {
+    const opts = { project: [writer], pmPolicy, teamPolicy };
+    expect((await start(input, opts)).started[0]?.autonomy).toBe("full");
+    expect((await start({ ...input, autonomy: "full" }, opts)).started[0]?.autonomy).toBe("full");
+  },
+);

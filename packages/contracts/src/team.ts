@@ -17,7 +17,7 @@ export const TeamRole = z.enum([
 ]);
 export type TeamRole = z.infer<typeof TeamRole>;
 
-/** Minimum supervision by Team role and purpose. "agent" covers untagged sessions. */
+/** Legacy role and purpose policy, retained for stored settings. "agent" covers untagged sessions. */
 export const AutonomyPolicy = z.partialRecord(
   TeamRole.or(z.literal("agent")),
   z.record(z.string().trim().min(1).max(300), AutonomyLevel),
@@ -31,19 +31,12 @@ export const RoleAutonomyFloors = z.partialRecord(
 );
 export type RoleAutonomyFloors = z.infer<typeof RoleAutonomyFloors>;
 
-/** The role's baseline before scope and purpose rules apply. */
-export function roleAutonomyFloor(
-  role: TeamRole | "agent",
-  floors: RoleAutonomyFloors,
-  policy?: AutonomyPolicy,
-  scopeDefault?: AutonomyLevel,
-) {
+/** The local role cap, or the unrestricted cap when the project supplies the default. */
+export function roleAutonomyFloor(role: TeamRole | "agent", floors: RoleAutonomyFloors) {
   const override = floors[role];
-  if (override) return { level: override, source: "local" } as const;
-  if (scopeDefault) return { level: scopeDefault, source: "default" } as const;
-  const legacy = policy?.[role]?.["*"];
-  if (legacy) return { level: legacy, source: "policy" } as const;
-  return { level: "full", source: "default" } as const;
+  return override
+    ? ({ level: override, source: "local" } as const)
+    : ({ level: "full", source: "project" } as const);
 }
 
 /** Team roles eligible for read-only review scope. */
