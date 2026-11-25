@@ -891,7 +891,10 @@ it("keeps a regression pause set by the tick when Stop now interrupts its CI che
     pausedReason: expect.stringContaining(`${regressionPausePrefix("main")}${pr.ref.number};`),
     lastControl: { action: "stop" },
   });
-  expect(await call("factory_resume", input())).toMatchObject({ isError: true });
+  expect(await call("factory_resume", input())).toEqual({
+    isError: true,
+    text: `Not resumed: ${loop().pausedReason}. That halt clears when its cause does.`,
+  });
 });
 
 it.each(["project", "global"] as const)(

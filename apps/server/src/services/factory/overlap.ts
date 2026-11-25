@@ -14,14 +14,32 @@ import { ownedPr } from "./pr-status";
 
 /** Files changed by the factory's open PRs as last read from GitHub (verification, ownership). */
 export class PrFiles {
-  private readonly files = new Map<string, readonly string[]>();
+  private readonly files = new Map<
+    string,
+    { paths: readonly string[]; completeHead: string | null }
+  >();
 
-  set(projectId: string, prNumber: number, files: readonly string[]): void {
-    this.files.set(`${projectId}#${prNumber}`, files);
+  set(
+    projectId: string,
+    prNumber: number,
+    paths: readonly string[],
+    completeHead: string | null = null,
+  ): void {
+    this.files.set(`${projectId}#${prNumber}`, { paths, completeHead });
   }
 
   get(projectId: string, prNumber: number): readonly string[] | undefined {
-    return this.files.get(`${projectId}#${prNumber}`);
+    return this.files.get(`${projectId}#${prNumber}`)?.paths;
+  }
+
+  /** Scope decisions require a complete changed-file list for the head under review. */
+  forReview(
+    projectId: string,
+    prNumber: number,
+    head: string | null,
+  ): readonly string[] | undefined {
+    const entry = this.files.get(`${projectId}#${prNumber}`);
+    return head && entry?.completeHead === head ? entry.paths : undefined;
   }
 }
 

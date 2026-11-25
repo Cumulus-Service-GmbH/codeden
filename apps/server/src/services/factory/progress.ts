@@ -18,7 +18,6 @@ import {
   startRevertAgent,
 } from "./revert-start";
 import { awaitRevertCi, revertStillRed } from "./revert-watch";
-import { reviewAuthorProvider } from "./reviewer-choice";
 import { advanceSpec } from "./spec-approval";
 import { builderOpenPr, holdEarlyPr } from "./spec-early-pr";
 import { REVERTED_AT, revertedAt } from "./stats";
@@ -283,7 +282,7 @@ async function regression(
       ...base,
       stage: "verifying",
       pr: revertPr,
-      builderProvider: reviewAuthorProvider(ctx, item),
+      builderProvider: null,
       nudges: { verifying: at },
     });
     revertNote = `revert PR #${revertPr.number} is open`;

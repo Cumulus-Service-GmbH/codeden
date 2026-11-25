@@ -1,4 +1,4 @@
-import { agentEventToNewEvent, type FactoryTuningPatch } from "@codeden/contracts";
+import { agentEventToNewEvent, type FactoryTuningPatch, ReviewVerdict } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
 import { APPROVE, factorySteps } from "./support/factory-steps";
@@ -27,7 +27,8 @@ async function build(tuning: FactoryTuningPatch = {}, before: () => void = () =>
   await tick();
   expect(item(created.id).stage).toBe("building");
   before();
-  await openPr(created.id);
+  const { pr } = await openPr(created.id);
+  pr.headSha = "a".repeat(40);
   await tick();
   expect(item(created.id).stage).toBe("verifying");
   return created.id;
@@ -53,7 +54,7 @@ describe("factory reviewer availability and fallback", () => {
 
   it("restarts a reviewer that hit its usage limit on a different vendor, without failing the item", async () => {
     env = createFactoryEnv({ providers: ["claude", "codex", "gemini"] });
-    const id = await build({ reviewerFallback: "any" });
+    const id = await build({ reviewerProvider: "codex", reviewerFallback: "any" });
     const first = item(id).reviewerSessionId as string;
     expect(item(id).reviewerProvider).toBe("codex");
     // The Codex reviewer's turn fails on the weekly limit.
@@ -78,6 +79,15 @@ describe("factory reviewer availability and fallback", () => {
     expect(current.stage).toBe("verifying");
     expect(current.reviewerSessionId).not.toBe(first);
     expect(current.reviewerProvider).toBe("gemini");
+    expect(current.reviewerNote).toMatch(/codex is at its usage limit/);
+    expect(env.starts.at(-1)?.workspace).toMatchObject({
+      mode: "worktree",
+      detachedSha: "a".repeat(40),
+      fetch: true,
+    });
+    expect(() =>
+      env.factory.submitReview(env.repo.get(first), ReviewVerdict.parse(APPROVE)),
+    ).toThrow("You are not reviewing a factory pull request");
     // Neither a revise round nor the reviewer's restarts were used.
     expect(current.attempts).toBe(0);
     expect(current.nudges.reviewer_failed_1).toBeUndefined();

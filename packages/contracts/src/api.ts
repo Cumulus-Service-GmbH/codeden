@@ -156,6 +156,11 @@ export const WorkspaceRequest = z.object({
   path: z.string().min(1).optional(),
   branch: z.string().min(1).optional(),
   baseRef: z.string().min(1).optional(),
+  /** Detach a new worktree at this exact commit. */
+  detachedSha: z
+    .string()
+    .regex(/^[a-f0-9]{40}$/)
+    .optional(),
   setupCommands: z.array(z.string()).optional(),
   /**
    * Fetch `origin` before creating the worktree (for a `baseRef` such as `origin/<branch>`

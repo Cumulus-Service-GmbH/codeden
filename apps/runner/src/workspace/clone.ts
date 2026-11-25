@@ -21,6 +21,15 @@ const SAFE = ["-c", "protocol.ext.allow=never"];
  */
 const READY_FILE = "codeden-clone-ready";
 
+export async function assertDetachedWorkspace(path: string, sha: string): Promise<void> {
+  if ((await currentBranch(path)) || (await gitText(path, ["rev-parse", "HEAD"])) !== sha) {
+    throw new CommandError(
+      "workspace_head_mismatch",
+      "Workspace is not detached at the requested commit",
+    );
+  }
+}
+
 function isReady(path: string): boolean {
   return existsSync(join(path, ".git", READY_FILE));
 }
@@ -83,6 +92,7 @@ export async function prepareClone(
       throw new CommandError("path_exists", `${path} exists and is not a clone of the project`);
     }
     if (isReady(path)) {
+      if (cmd.detachedSha) await assertDetachedWorkspace(path, cmd.detachedSha);
       if (cmd.fetch) {
         await git(path, [...SAFE, "fetch", "--prune", "origin"], auth).catch(() => undefined);
       }
@@ -95,7 +105,13 @@ export async function prepareClone(
   try {
     const depth = cmd.depth ? ["--depth", String(cmd.depth), "--no-single-branch"] : [];
     await git(join(home, "ws"), [...SAFE, "clone", "-q", ...depth, "--", remoteUrl, path], auth);
-    const branch = await checkoutBranch(cmd, path, short);
+    let branch: string | null = null;
+    if (cmd.detachedSha) {
+      await git(path, ["checkout", "-q", "--detach", cmd.detachedSha]);
+      await assertDetachedWorkspace(path, cmd.detachedSha);
+    } else {
+      branch = await checkoutBranch(cmd, path, short);
+    }
     await writeFile(join(path, ".git", READY_FILE), `${branch}\n`);
     return { cwd: path, branch, created: true };
   } catch (error) {

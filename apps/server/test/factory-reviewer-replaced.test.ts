@@ -2,6 +2,7 @@ import { agentEventToNewEvent, type ReviewVerdictInit } from "@codeden/contracts
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { REVIEWER_NUDGE } from "../src/services/factory/prompts";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
+import { sha } from "./support/factory-jev-fixture";
 import { APPROVE, factorySteps } from "./support/factory-steps";
 
 /**
@@ -172,7 +173,7 @@ describe("a replacement reviewer after its predecessor was nudged (#247)", () =>
     // The PR conflicts after the approval: the builder resolves it, the reviewer re-checks.
     pr.mergeable = "conflicting";
     await tick();
-    env.gh.rebase(pr, "resolved", "pending");
+    env.gh.rebase(pr, sha("resolved"), "pending");
     setStatus(builder, "idle");
     await tick();
     expect(lastMessageTo(first)).toContain("git range-diff");

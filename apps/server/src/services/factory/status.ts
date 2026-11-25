@@ -30,6 +30,7 @@ import { scoutNowBlocker, scoutNowFacts } from "./scout";
 import { isBusy } from "./sessions";
 import { spotCheckStatus } from "./spot-checks";
 import { factoryStats, viewRecentItems, viewWindow } from "./stats";
+import { endedByStop } from "./stops";
 import { ACTIVE_STAGES, DONE_STAGES, VIEW_ITEMS, WAITING_STAGES } from "./store";
 import { wipOf } from "./wip";
 
@@ -81,6 +82,7 @@ export function workItem(
     finishedAt: i.finishedAt,
     ownedPr: owned,
     recovering: recoverable(i),
+    ...(endedByStop(i) ? { stoppedOnPurpose: true } : {}),
     checks:
       i.checks.length === 0
         ? null

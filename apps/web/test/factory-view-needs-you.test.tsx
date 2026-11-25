@@ -193,3 +193,12 @@ describe("the Factory view's needs-you lane (#265)", () => {
     await waitFor(() => expect(retry).toHaveBeenCalledWith("p1", "rounds", {}));
   });
 });
+
+it("keeps draft waits and intentional stops out of Needs you", () => {
+  const f = status([
+    w("draft", 31, { stage: "escalated", pr: { ...prRef(31), state: "draft" } }),
+    w("stopped", 32, { stoppedOnPurpose: true }),
+    w("failure", 33, {}),
+  ]);
+  expect(viewPipeline(f, new Map(), NOW).needsYou.map((card) => card.item.id)).toEqual(["failure"]);
+});

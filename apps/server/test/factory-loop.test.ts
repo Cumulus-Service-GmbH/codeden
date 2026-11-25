@@ -5,6 +5,7 @@ import { ReviewVerdict } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import type { ServiceError } from "../src/services/errors";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
+import { sha } from "./support/factory-jev-fixture";
 
 const APPROVE: ReviewVerdictInit = {
   verdict: "approve",
@@ -374,8 +375,7 @@ describe("factory loop state machine (§10.1)", () => {
 
   it("opens a revert PR and pauses when main CI fails after a merge", async () => {
     env = createFactoryEnv();
-    // Not an exact revert (someone pushed to it), so it gets the normal review
-    // (`factory-revert.test.ts` covers the exact one's automated check).
+    // An inexact API revert has no reviewer until its provenance is established.
     env.gh.revertsExact = false;
     enable();
     const it1 = backlogItem();
@@ -393,21 +393,18 @@ describe("factory loop state machine (§10.1)", () => {
     const loop = env.factory.data.loopOrNew(env.project.id);
     expect(loop.state).toBe("paused");
     expect(env.inbox.find(`inbox:factory-regression:${it1.id}`)?.priority).toBe("high");
-    expect(revert.builderProvider).toBe(merged.builderProvider);
+    expect(revert.builderProvider).toBeNull();
     await tick();
-    expect(item(revert.id).reviewerProvider).toBe("codex");
-    // No builder worktree: the reviewer gets one on the revert PR's head, fetched by CodeDen,
-    // so the review itself is offline.
-    const reviewStart = env.starts.find((s) => s.workKey === `factory:review:${revert.pr?.number}`);
-    const revertHead = (await env.gh.prDetails(env.project.id, revert.pr?.number ?? 0)).headBranch;
-    expect(reviewStart?.workspace).toMatchObject({
-      mode: "worktree",
-      baseRef: `origin/${revertHead}`,
-      fetch: true,
-    });
-    expect(reviewStart?.input?.text).toContain("Do not use the network");
-    review(item(revert.id));
+    expect(item(revert.id).reviewerSessionId).toBeNull();
+    expect(env.inbox.find(`inbox:factory-stuck:${revert.id}`)?.status).toBe("open");
+    expect(env.gh.merges).toHaveLength(1);
+
+    const revertPr = env.gh.prs.get(revert.pr?.number ?? 0);
+    if (!revertPr || !merged.mergeSha) throw new Error("Missing revert fixture");
+    env.gh.push(revertPr, sha("corrected-revert"));
+    env.gh.exactReverts.set(sha("corrected-revert"), merged.mergeSha);
     await tick();
+    expect(env.inbox.find(`inbox:factory-stuck:${revert.id}`)?.status).toBe("resolved");
     expect(item(revert.id).stage).toBe("watching");
     expect(env.gh.merges).toHaveLength(2);
   });

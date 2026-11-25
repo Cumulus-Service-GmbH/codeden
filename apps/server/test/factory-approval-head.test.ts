@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
 import { ReviewVerdict } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
+import { ToolRegistry } from "../src/mcp/registry";
+import { factorySubmitReview } from "../src/mcp/tools/factory/builder";
 import { reviewedHead, settleApproval, verdictHead } from "../src/services/factory/approval";
 import { recheckOf, recheckSentFor } from "../src/services/factory/recheck";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
@@ -159,17 +161,20 @@ describe("an approval covers one head commit", () => {
     env = createFactoryEnv();
     await enable();
     const { id } = await verifying("pending");
-    const { reviewSpec } = item(id);
+    const { reviewSpec, investigation, summary, title, reviewerSessionId } = item(id);
+    if (!investigation || !reviewerSessionId) throw new Error("Expected a reviewed plan");
+    expect(investigation.details).not.toBe(summary);
+    expect(investigation.details).not.toBe(title);
     expect(reviewSpec).toEqual({
       planSha: createHash("sha256")
-        .update(JSON.stringify(["A counter", ["Counter increments"]]))
+        .update(JSON.stringify([investigation.details, ["Counter increments"]]))
         .digest("hex"),
       scope: ["src/counter.ts", "test/counter.test.ts"],
       security: false,
     });
 
     const blocking = {
-      location: "src/counter.ts (line 12)",
+      location: "src/unlisted.ts (line 12)",
       severity: "HIGH" as const,
       summary: "The counter crashes on reset.",
       failure_scenario: "Resetting an empty counter throws.",
@@ -177,12 +182,31 @@ describe("an approval covers one head commit", () => {
     };
     const debt = {
       location: "src/export.ts:8",
-      severity: "HIGH" as const,
+      severity: "LOW" as const,
       summary: "Exporting empty results loses the header.",
       failure_scenario: "An empty result set produces a blank export.",
       repro: "Export an empty result set and check for the header.",
     };
-    await submitReview(id, { ...APPROVE, verdict: "request_changes", findings: [debt, blocking] });
+    env.factory.data.updateItem(id, (current) => ({
+      ...current,
+      investigation: { ...investigation, details: "A revised plan" },
+      acceptanceCriteria: ["A revised criterion"],
+    }));
+    await tick();
+    const services = { sessionRepo: env.repo, factory: env.factory };
+    const registry = new ToolRegistry([factorySubmitReview], services as never);
+    const result = await registry.call(
+      "factory_submit_review",
+      { ...APPROVE, verdict: "request_changes", findings: [debt, blocking] },
+      {
+        role: "agent",
+        sessionId: reviewerSessionId,
+        projectId: env.project.id,
+        caller: "mcp",
+        signal: new AbortController().signal,
+      },
+    );
+    expect(result.isError).not.toBe(true);
 
     expect(item(id).reviewSpec).toEqual(reviewSpec);
     expect(item(id).review).toMatchObject({

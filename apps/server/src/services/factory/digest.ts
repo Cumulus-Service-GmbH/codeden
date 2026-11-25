@@ -30,6 +30,7 @@ import { specInboxId, specPending } from "./spec-approval";
 import { digestSpotChecks, spotCheckInboxId } from "./spot-checks";
 import { lastMergeReverted } from "./stats";
 import { factoryHalt } from "./status";
+import { endedByStop } from "./stops";
 import { OWNED_STAGES } from "./store";
 import { DECISION_INBOX_PREFIX } from "./unattended";
 
@@ -101,6 +102,10 @@ export function needsYouItems(ctx: FactoryContext, projectId: string): DigestNee
       now,
       ownsOpenPr: open !== null,
       recovering: recoverable(item),
+      stoppedOnPurpose: endedByStop(item),
+      prWaiting:
+        open?.state === "draft" ||
+        item.checks.some((c) => c.name === "ci" && c.state === "pending"),
       specPending: specPending(item),
     });
     if (!kind) return [];

@@ -70,6 +70,7 @@ export async function prepareCloneWorkspace(
       remoteUrl,
       branch,
       baseRef,
+      detachedSha: req.detachedSha,
       fetch: true,
       setupCommands: req.setupCommands ?? [],
       seenSetups: seenSetups(project),

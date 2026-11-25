@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { PrFiles } from "../src/services/factory/overlap";
 import {
   applyReviewFindingPolicy,
   MAX_REVIEW_LINES,
@@ -48,13 +49,56 @@ describe("shared review controls", () => {
       },
     ];
     const spec = { planSha: "a".repeat(64), scope: ["src/"] };
-    const deferred = sortReviewFindings(spec, findings, "defer");
+    const deferred = sortReviewFindings(spec, findings, "defer", ["src/a.ts"]);
     expect(deferred.fix.map((f) => f.summary)).toEqual(["Fails"]);
     expect(deferred.debt.map((f) => f.summary)).toEqual(["Outside the spec", "Missing evidence"]);
-    expect(sortReviewFindings(spec, findings, "fix").fix.map((f) => f.summary)).toEqual([
-      "Missing evidence",
-      "Fails",
-    ]);
+    expect(
+      sortReviewFindings(spec, findings, "fix", ["src/a.ts"]).fix.map((f) => f.summary),
+    ).toEqual(["Missing evidence", "Fails"]);
+  });
+});
+
+describe("scope of consequential review findings", () => {
+  const spec = { planSha: "a".repeat(64), scope: ["src/changed.ts"] };
+  const finding = {
+    location: "src/caller.ts:8",
+    severity: "HIGH" as const,
+    summary: "The caller crashes.",
+    failure_scenario: "An empty input aborts the request.",
+    repro: "Open the page with an empty input.",
+  };
+
+  it("keeps a HIGH finding when the diff is unavailable", () => {
+    expect(sortReviewFindings(spec, [finding], "defer")).toEqual({ fix: [finding], debt: [] });
+  });
+
+  it.each(["src/caller.ts?line=8", "src//caller.ts:8", "src/caller.ts;L8"])(
+    "keeps a HIGH finding when its location cannot be parsed: %s",
+    (location) => {
+      const unreadable = { ...finding, location };
+      expect(sortReviewFindings(spec, [unreadable], "defer", ["src/changed.ts"])).toEqual({
+        fix: [unreadable],
+        debt: [],
+      });
+    },
+  );
+
+  it("keeps a HIGH finding on an unchanged caller when the repro names a changed file", () => {
+    const caller = { ...finding, repro: "Pass an empty input through `src/changed.ts`." };
+    expect(sortReviewFindings(spec, [caller], "defer", ["src/changed.ts"])).toEqual({
+      fix: [caller],
+      debt: [],
+    });
+  });
+
+  it("uses only a complete diff at the reviewed head to defer a finding", () => {
+    const files = new PrFiles();
+    files.set("project", 1, ["src/changed.ts"], "head-a");
+    expect(files.forReview("project", 1, "head-b")).toBeUndefined();
+    expect(files.forReview("project", 1, "head-a")).toEqual(["src/changed.ts"]);
+    files.set("project", 1, ["src/changed.ts"]);
+    expect(files.forReview("project", 1, "head-a")).toBeUndefined();
+    expect(files.get("project", 1)).toEqual(["src/changed.ts"]);
   });
 });
 

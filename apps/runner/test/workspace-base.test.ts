@@ -95,3 +95,22 @@ describe("the base of a new worktree", () => {
     expect(await freshestBase(clone, "main")).toBe("origin/main");
   });
 });
+
+it("prepares a detached reviewer at the verified head without taking the original branch", async () => {
+  const { upstream, clone, ctx } = clonedBehind();
+  const head = sh(upstream, "rev-parse", "HEAD");
+  const original = sh(clone, "rev-parse", "HEAD");
+  const cmd = prepare("sess-review", clone, { branch: "main", detachedSha: head, fetch: true });
+  const result = await prepareWorkspace(cmd, ctx);
+  expect(result.branch).toBeNull();
+  expect(sh(result.cwd, "rev-parse", "HEAD")).toBe(head);
+  expect(sh(clone, "symbolic-ref", "--short", "HEAD")).toBe("main");
+  expect(sh(clone, "rev-parse", "HEAD")).toBe(original);
+  await expect(prepareWorkspace(cmd, ctx)).resolves.toMatchObject({
+    cwd: result.cwd,
+    branch: null,
+  });
+  await expect(prepareWorkspace({ ...cmd, detachedSha: original }, ctx)).rejects.toThrow(
+    "Workspace is not detached at the requested commit",
+  );
+});

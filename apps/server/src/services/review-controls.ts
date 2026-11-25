@@ -45,28 +45,36 @@ export function reviewRound(
   };
 }
 
+function findingPath(location: string): string | undefined {
+  const path = /^(?:\.\/)*([\w.@-]+(?:\/[\w.@-]+)*)(?::\d+(?::\d+|-\d+)?|#L\d+(?:-L?\d+)?)$/.exec(
+    location,
+  )?.[1];
+  if (path?.split("/").every((part) => part !== "." && part !== "..")) return path;
+}
+
 export function sortReviewFindings(
   input: ReviewAcceptanceSpec | undefined,
   findings: readonly ReviewFinding[],
   lowPolicy: "fix" | "defer",
-  changedFiles: readonly string[] = [],
+  changedFiles?: readonly string[],
 ): { fix: ReviewFinding[]; debt: ReviewFinding[] } {
   const spec = input && ReviewAcceptanceSpec.parse(input);
+  const inScope = (path: string) =>
+    changedFiles?.includes(path) ||
+    spec?.scope.some((entry) => (entry.endsWith("/") ? path.startsWith(entry) : path === entry));
   const fix: ReviewFinding[] = [];
   const debt: ReviewFinding[] = [];
   for (const input of findings) {
     const finding = ReviewFinding.parse(input);
-    const path = finding.location
-      .replace(/^(?:\.\/)+/, "")
-      .replace(/(?::\d+(?::\d+|-\d+)?|#L\d+(?:-L?\d+)?)$/, "");
+    const path = findingPath(finding.location);
+    // An unchanged caller can still expose a regression in the reviewed change.
+    const related = [finding.summary, finding.failure_scenario, finding.repro].some((evidence) =>
+      evidence
+        ?.match(/[\w.@/-]+/g)
+        ?.some((word) => inScope(word.replace(/^\.\//, "").replace(/\.$/, ""))),
+    );
     const outOfScope =
-      spec &&
-      path.length > 0 &&
-      !path.startsWith("/") &&
-      !/[\\\s:`(),]/.test(path) &&
-      !path.split("/").some((part) => part === ".." || part === ".") &&
-      !changedFiles.includes(path) &&
-      !spec.scope.some((entry) => (entry.endsWith("/") ? path.startsWith(entry) : path === entry));
+      spec && changedFiles !== undefined && path !== undefined && !inScope(path) && !related;
     (!outOfScope && (finding.severity !== "LOW" || lowPolicy === "fix") ? fix : debt).push(finding);
   }
   return { fix, debt };
@@ -89,7 +97,7 @@ export function applyReviewFindingPolicy(
   verdict: ReviewVerdict,
   spec: ReviewAcceptanceSpec | undefined,
   lowPolicy: "fix" | "defer",
-  changedFiles: readonly string[] = [],
+  changedFiles?: readonly string[],
 ): ReviewVerdict {
   if (!verdict.findings?.length) return verdict;
   const { fix, debt } = sortReviewFindings(spec, verdict.findings, lowPolicy, changedFiles);

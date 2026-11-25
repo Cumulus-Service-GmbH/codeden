@@ -272,6 +272,7 @@ export class SessionService {
        * then is it the session's own layer of its Team (`sessionTeamMember`).
        */
       ownTeamPins?: boolean;
+      runTeam?: import("@codeden/contracts").Team;
       autonomyFloor?: AutonomyLevel;
       teamArchitect?: boolean;
     } = {},
@@ -399,6 +400,7 @@ export class SessionService {
         ...(options.teamArchitect ? { teamArchitect: true } : {}),
         ...(options.autonomyFloor ? { autonomyFloor: options.autonomyFloor } : {}),
         ...(options.ownTeamPins ? { ownTeamPins: true as const } : {}),
+        ...(options.runTeam ? { runTeam: options.runTeam } : {}),
         ...(req.tokenSaver ? { tokenSaver: req.tokenSaver } : {}),
         ...(req.role !== "agent" && {
           roleProvider: this.deps.settings.get().providers[req.role].provider,

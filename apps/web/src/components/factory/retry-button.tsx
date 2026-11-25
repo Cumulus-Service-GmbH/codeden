@@ -28,7 +28,7 @@ export function RetryButton({
 }) {
   const retry = useRetryItem(projectId, item.id, mode);
   const can = stoppedRetry(item);
-  if (!can) return null;
+  if (!can || (item.stage === "verifying" && mode === "rebuild")) return null;
   const pr = can.pr;
   const rebuild = (mode ?? can.mode) === "rebuild";
   const title =

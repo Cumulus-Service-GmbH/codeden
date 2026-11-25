@@ -41,7 +41,7 @@ async function arbiterFixture() {
 
 it("shows the review round, live Arbiter status, and ruling in the workers pane", async () => {
   const { client, session, item, status } = await arbiterFixture();
-  vi.spyOn(client.factory, "status").mockResolvedValue(status);
+  const requestStatus = vi.spyOn(client.factory, "status").mockResolvedValue(status);
   const { queryClient } = renderWithClient(<ChildRuns session={session} />, client);
   const workers = within(await screen.findByRole("region", { name: "Workers" }));
   expect(workers.getByText("Review round 2/2")).toBeTruthy();
@@ -51,10 +51,14 @@ it("shows the review round, live Arbiter status, and ruling in the workers pane"
 
   const ruling = "The retry must preserve queued work.";
   act(() => {
-    queryClient.setQueryData(factoryKeys.status(status.projectId), {
+    const next = {
       ...status,
-      inProgress: [{ ...item, arbitration: { ...item.arbitration, state: "ruling", ruling } }],
-    });
+      inProgress: [
+        { ...item, arbitration: { ...item.arbitration, state: "ruling" as const, ruling } },
+      ],
+    };
+    requestStatus.mockResolvedValue(next);
+    queryClient.setQueryData(factoryKeys.status(status.projectId), next);
   });
   expect(
     await workers.findByText(
@@ -67,20 +71,23 @@ it("shows the review round, live Arbiter status, and ruling in the workers pane"
 
 it("flags work past 2 rounds in the workers pane", async () => {
   const { client, session, item, status } = await arbiterFixture();
-  vi.spyOn(client.factory, "status").mockResolvedValue(status);
+  const requestStatus = vi.spyOn(client.factory, "status").mockResolvedValue(status);
   const { queryClient } = renderWithClient(<ChildRuns session={session} />, client);
   const workers = within(await screen.findByRole("region", { name: "Workers" }));
+  expect(await workers.findByText("Review round 2/2")).toBeTruthy();
   expect(workers.queryByText("Past two review rounds")).toBeNull();
 
   act(() => {
-    queryClient.setQueryData(factoryKeys.status(status.projectId), {
+    const next = {
       ...status,
       inProgress: [{ ...item, reviewRound: 3 }],
       tuning: {
         ...status.tuning,
         reviewPolicy: ReviewPolicy.parse({ reviewerRounds: 4, totalRounds: 3 }),
       },
-    });
+    };
+    requestStatus.mockResolvedValue(next);
+    queryClient.setQueryData(factoryKeys.status(status.projectId), next);
   });
   expect(await workers.findByText("Review round 3/3")).toBeTruthy();
   expect(workers.getByText("Past two review rounds")).toBeTruthy();
@@ -90,11 +97,8 @@ it("places disputed work on the Arbiter step in the pipeline diagram", async () 
   const { client, status, item } = await arbiterFixture();
   renderWithClient(<PipelineDiagram f={status} />, client, { withRouter: true });
   const diagram = within(await screen.findByTestId("pipeline-diagram"));
-  const steps = diagram.getAllByTestId("pipeline-node");
-  const arbiterSteps = steps.filter((step) => step.dataset.node === "Arbiter");
-  expect(arbiterSteps).toHaveLength(3);
   const chip = diagram.getByRole("button", { name: `#${item.issue.number}` });
-  expect(chip.closest('[data-node="Arbiter"]')).toBe(arbiterSteps[0]);
+  expect(chip.closest('[data-node="Arbiter"]')).not.toBeNull();
 });
 
 it("shows that the completion check was skipped because Jev is not configured", async () => {

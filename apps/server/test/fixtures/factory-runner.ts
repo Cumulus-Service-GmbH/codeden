@@ -8,7 +8,8 @@ const capabilities = builder.capabilities();
 builder.capabilities = () => ({ ...capabilities, modelVendor: "anthropic" });
 reviewer.capabilities = () => ({ ...capabilities, modelVendor: "openai" });
 
-const home = process.argv[process.argv.indexOf("--home") + 1];
+const homeIndex = process.argv.indexOf("--home");
+const home = homeIndex < 0 ? undefined : process.argv[homeIndex + 1];
 if (!home) throw new Error("Missing runner home");
 const runner = await startRunner({
   home,

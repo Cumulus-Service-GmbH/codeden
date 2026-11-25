@@ -66,8 +66,7 @@ describe("a request for changes that cites only the reviewer's environment, with
   it("when it happens again, recovers as an infrastructure failure with a reviewer in a clean worktree", async () => {
     env = createFactoryEnv();
     await enable();
-    const { id } = await verifying("success");
-    const prNumber = item(id).pr?.number;
+    const { id, pr } = await verifying("success");
     const first = item(id).reviewerSessionId as string;
     review(id, ENVIRONMENT_ONLY);
     const res = await review(id, ENVIRONMENT_ONLY);
@@ -91,7 +90,7 @@ describe("a request for changes that cites only the reviewer's environment, with
     // Not the author's worktree this time: a new one on the PR's head.
     expect(env.starts.at(-1)?.workspace).toMatchObject({
       mode: "worktree",
-      baseRef: `origin/codeden/pr-${prNumber}`,
+      detachedSha: pr.headSha,
     });
   });
 

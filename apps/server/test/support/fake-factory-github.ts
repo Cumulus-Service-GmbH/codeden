@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type {
   ChecksState,
   GitHubIssueRef,
@@ -263,7 +264,7 @@ export class FakeFactoryGithub implements FactoryGithub {
       ref,
       title: opts.title,
       body: opts.body ?? "Fixes the issue\n\n## Test results\n- `pnpm test`: passed",
-      headSha: `head${number}`,
+      headSha: createHash("sha1").update(`head${number}`).digest("hex"),
       // What the PR itself changes: kept by update-branch and rebases, changed by a push.
       diffKey: `diff${number}`,
       headBranch: `codeden/pr-${number}`,
@@ -346,7 +347,7 @@ export class FakeFactoryGithub implements FactoryGithub {
       throw new ServiceError(422, "github_validation", "merge conflict between base and head");
     this.updates.push({ number, expectedHeadSha });
     Object.assign(pr, {
-      headSha: `${pr.headSha}-up${this.updates.length}`,
+      headSha: createHash("sha1").update(`${pr.headSha}-up${this.updates.length}`).digest("hex"),
       baseSha: this.main.sha,
       checks: this.ciAfterUpdate,
     });

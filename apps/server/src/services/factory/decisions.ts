@@ -144,6 +144,12 @@ export function retry(
   if (!can) {
     throw conflict(`Only stopped items can be retried (this one is ${item.stage})`, "not_stopped");
   }
+  if (item.stage === "verifying" && (by !== "user" || mode === "rebuild")) {
+    throw conflict(
+      "Only the owner can retry this blocked review on its current pull request",
+      "owner_decision",
+    );
+  }
   const pr = can.pr;
   if ((mode ?? can.mode) === "rereview") {
     if (!pr) {
@@ -159,6 +165,7 @@ export function retry(
     });
   }
   const earlier = item.sessionsArchivedAt ? [] : sessionsToArchive(ctx, item).map((s) => s.id);
+  closeInboxFor(ctx, item.id, "Back in the queue");
   return ctx.store.updateItem(item.id, (i) => ({
     ...i,
     stage: i.type ? "backlog" : "candidate",
@@ -269,8 +276,10 @@ export function submitReview(
     throw badRequest(APPROVE_WITH_CONCERNS, "approve_with_concerns");
   }
   const lowPolicy = ctx.projects.get(item.projectId).factoryLimits.lowFindings;
-  const files = item.pr && ctx.prFiles.get(item.projectId, item.pr.number);
-  const settled = applyReviewFindingPolicy(verdict, item.reviewSpec, lowPolicy, files ?? []);
+  const files = item.pr
+    ? ctx.prFiles.forReview(item.projectId, item.pr.number, reviewedHead(item))
+    : undefined;
+  const settled = applyReviewFindingPolicy(verdict, item.reviewSpec, lowPolicy, files);
   if (item.jevReviewHead) {
     const recorded = submitJevReview(ctx, item, settled);
     return {

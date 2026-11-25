@@ -213,3 +213,18 @@ describe("brokered git credentials", () => {
     });
   });
 });
+
+it("prepares and reuses a clone detached at the exact reviewer commit", async () => {
+  const { work, bare, ctx } = setup();
+  const sha = sh(work, "rev-parse", "HEAD");
+  const cmd = clone("sess-review-clone", bare, { detachedSha: sha });
+  const result = await prepareWorkspace(cmd, ctx);
+  expect(result.branch).toBeNull();
+  expect(sh(result.cwd, "rev-parse", "HEAD")).toBe(sha);
+  await expect(prepareWorkspace(cmd, ctx)).resolves.toMatchObject({ branch: null });
+  sh(result.cwd, "checkout", "-b", "wrong");
+  await expect(prepareWorkspace(cmd, ctx)).rejects.toMatchObject({
+    code: "workspace_head_mismatch",
+  });
+  expect(sh(result.cwd, "symbolic-ref", "--short", "HEAD")).toBe("wrong");
+});

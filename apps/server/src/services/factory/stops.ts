@@ -6,6 +6,7 @@ import {
   factoryStopReason,
 } from "@codeden/contracts";
 import type { FactoryContext } from "./context";
+import { closeInboxFor } from "./merge";
 import { failItem } from "./outcomes";
 
 /** The steps that end an item as a stop made on purpose (`progress.ts`, `verify.ts`). */
@@ -73,6 +74,7 @@ export function endStopped(ctx: FactoryContext, loop: FactoryLoop, item: Factory
   const stop = stored(ctx, item).stop;
   const reason = stop ? factoryStopReason(stop) : "Stopped on purpose";
   ctx.log?.(`factory: ${item.id}: ${reason}`);
+  closeInboxFor(ctx, item.id, reason);
   return failItem(ctx, loop, item, reason, { countsAsFailure: false, notify: false });
 }
 

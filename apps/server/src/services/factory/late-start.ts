@@ -3,8 +3,9 @@ import { errorMessage } from "../errors";
 import { startWentUnanswered, unansweredStartAt } from "../sessions/unanswered-start";
 import { untilText } from "./availability";
 import type { FactoryContext } from "./context";
+import { trackedHead } from "./rebase";
 import { recheckOf } from "./recheck";
-import { canReviewItem } from "./reviewer-choice";
+import { reviewVendorIsDistinct } from "./reviewer-choice";
 import { isBusy, REVIEW_WORK_KEY_PREFIX } from "./sessions";
 import { ACTIVE_STAGES, OWNED_STAGES, WAITING_STAGES } from "./store";
 import { BUILDER_FAILED_REASON } from "./turn-race";
@@ -125,23 +126,27 @@ async function settleOne(
     current &&
     !s.archivedAt &&
     wantsReviewer(current) &&
-    canReviewItem(ctx, current, s.provider)
+    (s.branch !== null || s.baseBranch === trackedHead(current))
   ) {
-    ctx.store.updateItem(current.id, (i) => {
-      if (!wantsReviewer(i)) return i;
-      // A nudge for a verdict went to an earlier reviewer, not to this one.
-      const { reviewer: _nudged, ...nudges } = i.nudges;
-      return {
-        ...i,
-        reviewerSessionId: s.id,
-        reviewerProvider: s.provider,
-        earlierSessionIds: i.earlierSessionIds.filter((id) => id !== s.id),
-        note: ADOPTED_REVIEWER,
-        nudges,
-      };
-    });
-    ctx.log?.(`factory: ${current.id}: its reviewer ${s.id} started late and is adopted`);
-    return;
+    const distinct = reviewVendorIsDistinct(ctx, current, s.provider);
+    if (distinct === undefined) return;
+    if (distinct) {
+      ctx.store.updateItem(current.id, (i) => {
+        if (!wantsReviewer(i)) return i;
+        // A nudge for a verdict went to an earlier reviewer, not to this one.
+        const { reviewer: _nudged, ...nudges } = i.nudges;
+        return {
+          ...i,
+          reviewerSessionId: s.id,
+          reviewerProvider: s.provider,
+          earlierSessionIds: i.earlierSessionIds.filter((id) => id !== s.id),
+          note: ADOPTED_REVIEWER,
+          nudges,
+        };
+      });
+      ctx.log?.(`factory: ${current.id}: its reviewer ${s.id} started late and is adopted`);
+      return;
+    }
   }
   // Another session took its place, or its work is over: one job, one agent.
   ctx.log?.(`factory: session ${s.id} started late after it was replaced; stopping it`);
