@@ -362,6 +362,7 @@ export class ClaudeSession implements ProviderSession {
     this.markedHookAsks.clear();
     this.prompts?.close();
     this.q = undefined;
+    this.startupMode = undefined;
     this.planExit = undefined;
     this.prompts = undefined;
   }
@@ -370,7 +371,7 @@ export class ClaudeSession implements ProviderSession {
     if (this.queryDisposal) return this.queryDisposal;
     const { q, abort } = this;
     if (!q) return Promise.resolve();
-    this.prompts?.close();
+    this.clearQuery();
     this.queryDisposal = (async () => {
       try {
         if (q[Symbol.asyncDispose]) await q[Symbol.asyncDispose]();
@@ -379,7 +380,6 @@ export class ClaudeSession implements ProviderSession {
         abort?.abort();
       }
     })().finally(() => {
-      if (this.q === q) this.clearQuery();
       this.queryDisposal = undefined;
     });
     return this.queryDisposal;

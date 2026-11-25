@@ -261,6 +261,44 @@ it.each(["send", "compact"] as const)(
   },
 );
 
+it("detaches a refused Supervised replacement while its disposal is pending", async () => {
+  const disposing = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  const dispose = vi
+    .fn<() => Promise<void>>()
+    .mockResolvedValue(undefined)
+    .mockImplementationOnce(() => {
+      disposing.resolve();
+      return release.promise;
+    });
+  const setMode = vi.fn<(mode: PermissionMode) => Promise<void>>().mockResolvedValue(undefined);
+  const sdk = stubSdk({ dispose, setMode });
+  const { session } = open(sdk, { autonomy: "supervised", resumeToken: "prior" });
+  await session.confirmStartup();
+  sdk.exit();
+  await new Promise<void>((done) => setImmediate(done));
+  setMode.mockRejectedValueOnce(new Error("Synthetic mode refusal"));
+
+  const input = { text: "Continue", attachments: [] };
+  const refused = expect(session.send(input)).rejects.toMatchObject({ code: "config_unconfirmed" });
+  try {
+    await disposing.promise;
+    await expect(session.send(input)).rejects.toMatchObject({ code: "config_unconfirmed" });
+    await expect(session.compact()).rejects.toMatchObject({ code: "config_unconfirmed" });
+    await expect(session.steer(input)).rejects.toMatchObject({ code: "no_turn" });
+    await session.configure({});
+    expect(sdk.modes).toEqual(["default", "default"]);
+    expect(sdk.launches).toHaveLength(2);
+  } finally {
+    release.resolve();
+    await refused;
+  }
+
+  await expect(session.send(input)).resolves.toBeUndefined();
+  expect(sdk.launches).toHaveLength(3);
+  expect(sdk.modes).toEqual(["default", "default", "default"]);
+});
+
 it("rejects input that was waiting across a change from Supervised to Full", async () => {
   const { promise, resolve } = Promise.withResolvers<void>();
   const sdk = stubSdk({ setMode: (mode) => (mode === "default" ? promise : Promise.resolve()) });
