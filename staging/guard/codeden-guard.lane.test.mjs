@@ -12,6 +12,12 @@ import { matchPrdCard } from "./codeden-guard-prd-cards.mjs";
 const targets = loadAzureTargets(new URL("./fixtures/azure-targets.json", import.meta.url));
 const match = (command, cwd = process.cwd()) => matchPrdCard(command, cwd, () => targets);
 
+test("legacy data-plane container create entries cannot raise cards", () => {
+  const legacyCreates = targets.allowedCreates.filter(command => command.startsWith("az storage container create "));
+  assert.equal(legacyCreates.length, 4);
+  for (const command of legacyCreates) assert.equal(match(command), null);
+});
+
 test("protection and ruleset requests reject credential names and linked input", t => {
   const directory = mkdtempSync(join(realpathSync(tmpdir()), "guard-input-"));
   t.after(() => rmSync(directory, { recursive: true, force: true }));

@@ -676,7 +676,7 @@ const verifierPrincipalId = "d63529e0-761c-441b-8c71-a01560b42d99";
 const evidencePinPrefix = "az keyvault secret set --vault-name kv-erpure-mobile-test -n report-attachment-evidence-pin-prod --value '{}' --content-type application/json --tags purpose=bootstrap --expires ";
 const mobileIssuerPath = "scripts/mobile-release/issue-migration-authority.mjs";
 const mobileIssuerSha = "8e34829bb1a19231638d2ccf17ca999e9dfd48ed4eb923945a19ff8566b4a9a8";
-const mobileIssuerSource = "tcp:149.97.246.130,59917";
+const mobileIssuerSource = /^tcp:149\.97\.246\.130,59917$/;
 const mobileIssuerScope = "mobile migration authority issuance";
 const mobileIssuerLockDigests = {
   "run-lock.mjs": "c70392231721dc1ccde51324bb111f25e78a89ff84bd5f9437f7ffaf8d3e3aab",
@@ -802,7 +802,7 @@ function matchMobileIssuer(words, cwd) {
     "--env": /^(?:TEST|PROD)$/,
     "--sha": /^[a-f0-9]{40}$/,
     "--evidence": issuerArtifact,
-    "--data-source": /^tcp:149\.97\.246\.130,59917$/,
+    "--data-source": mobileIssuerSource,
     "--initial-catalog": /^ERPureAI$/,
     "--attestation-ref": /^codeden-[A-Za-z0-9_-]+:(?:test|prod)-a0-attest:\d{8}$/,
     "--authorize": /^a0:(?:TEST|PROD):[a-f0-9]{12}:[a-f0-9]{12}$/,
@@ -816,6 +816,7 @@ function matchMobileIssuer(words, cwd) {
   const evidence = flags.get("--evidence");
   const receipt = flags.get("--receipt");
   const candidate = flags.get("--sha");
+  const sqlIdentity = flags.get("--data-source");
   if (firstVersion !== (environment === "PROD") || flags.get("--generation") !== (firstVersion ? "1" : "2") ||
       words[9] !== `a0-migration-authority-${lower}` || !flags.get("--attestation-ref").includes(`:${lower}-a0-attest:`) ||
       !flags.get("--authorize").startsWith(`a0:${environment}:${candidate.slice(0, 12)}:`) ||
@@ -826,10 +827,12 @@ function matchMobileIssuer(words, cwd) {
   } catch { return null; }
 
   const result = mobileCard(mobileIssuerScope, [cwd, mobileIssuerSha, pins, evidenceApproval[1], actionApproval[1], [...flags].sort()],
-    `Environment ${environment}, candidate ${candidate}, issuer ${script}, issuer sha256 ${mobileIssuerSha}, evidence sha256 ${evidenceApproval[1]}, action sha256 ${actionApproval[1]}`);
+    `Environment ${environment}, candidate ${candidate}, SQL target ${sqlIdentity}/${flags.get("--initial-catalog")}, ` +
+    `issuer ${script}, issuer sha256 ${mobileIssuerSha}, evidence ${evidence}, evidence sha256 ${evidenceApproval[1]}, ` +
+    `receipt ${receipt}, action sha256 ${actionApproval[1]}`);
   return {
     ...result,
-    sqlIdentity: mobileIssuerSource,
+    sqlIdentity,
     command: [...words.slice(0, 6), "--import", `'${pinModuleAtLoad(lockPath, mobileIssuerLockDigests["run-lock.mjs"], pins.slice(1))}'`,
       ...words.slice(6, 12), "--import", `'${pinModuleAtLoad(script, mobileIssuerSha, [])}'`, ...words.slice(12)].join(" "),
   };
@@ -850,7 +853,8 @@ function matchMobileCard(command, targets) {
     try {
       if (hash(readRegularFile(script, 64 * 1024)) === authoritySha) {
         const card = mobileCard(authorityName, args,
-          `Deploy ${mount.app}--${mount.suffix} at zero traffic in ${mobileGroup}. Secret reference ${mount.alias} at ${mount.secretUri}, mount ${mountPath}, script sha256 ${authoritySha}`);
+          `Deploy ${mount.app}--${mount.suffix} at zero traffic in ${mobileGroup}, keep active ${mount.active.join(", ")}. ` +
+          `Secret reference ${mount.alias} at ${mount.secretUri}, mount ${mount.mountPath}/${mount.file}, script sha256 ${authoritySha}`);
         return { ...card, details(sessionId) {
           if (!mountSession.test(sessionId ?? "")) return { denial: "deploy card requires a valid session ID" };
           const claim = randomUUID();
