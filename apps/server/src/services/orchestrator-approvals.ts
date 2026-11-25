@@ -62,6 +62,7 @@ export class OrchestratorApprovals {
     private readonly decisions: DecisionApprovals,
     private readonly sessions: Pick<SessionService, "respond">,
     private readonly store: Pick<EventStore, "appendFrom">,
+    private readonly isRemote: (sessionId: string) => boolean,
   ) {}
 
   list(): ListPendingApprovalsOutput {
@@ -230,11 +231,13 @@ export class OrchestratorApprovals {
     }
     const classification = classifyApproval({ ...item, kind });
     const session = this.repo.find(sessionId)?.session;
-    const root = session?.worktreePath ?? session?.cwd;
+    const root = session?.worktreePath;
     const verified =
       !classification.delegable ||
       item.action !== "command" ||
-      (session?.provider === "claude" &&
+      (((session?.provider === "claude" && item.toolName === "Bash") ||
+        (session?.provider === "codex" && item.toolName === "shell")) &&
+        !this.isRemote(sessionId) &&
         item.toolInput !== undefined &&
         root &&
         guardedReadCommand(item, item.cwd, root));

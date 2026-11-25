@@ -18,8 +18,17 @@ type Tool = Partial<
 >;
 
 const path = /^(?:[a-zA-Z0-9_][a-zA-Z0-9_.-]*\/)*[a-zA-Z0-9_][a-zA-Z0-9_.-]*\/?$/;
+const privatePath = /(?:^|\/)(?:\.codeden|\.git|keychains?)(?:\/|$)|keychain/i;
+const gitReadPrefix = ["--no-pager", "--no-optional-locks", "-c", "core.fsmonitor=false"];
+const unquote = (word: string) => word.replace(/^['"]|['"]$/g, "");
+
 const sensitive =
   /(?:secret|credential|password|token|keyvault|(?:^|[/.\s'":])(?:env|pem|key|p12|pfx|kdbx)(?:[/.\s'"]|$))/i;
+/** Paths blocked even when physically inside a worktree. */
+export function isPrivateReadPath(value: string): boolean {
+  return privatePath.test(value.replaceAll("\\", "/")) || sensitive.test(value);
+}
+const safeTarget = (value: string) => path.test(value) && !isPrivateReadPath(value);
 const flags = {
   cat: /^-[benstuv]+$/,
   ls: /^-[aAldh1]+$/,
@@ -27,11 +36,11 @@ const flags = {
 };
 
 /** Only simple shell words and explicitly listed argument forms may be delegated. */
-export function plainReadTargets(tool: Tool): string[] | undefined {
+export function plainReadTargets(tool: Tool, standing = false): string[] | undefined {
   const command = tool.command;
   if (
     tool.action !== "command" ||
-    tool.toolName !== "Bash" ||
+    (tool.toolName !== "Bash" && (standing || tool.toolName !== "shell")) ||
     !command ||
     tool.url !== undefined ||
     tool.singleUse ||
@@ -40,13 +49,15 @@ export function plainReadTargets(tool: Tool): string[] | undefined {
     (tool.paths?.length ?? 0) > 0 ||
     tool.reason?.includes("[codeden-card") ||
     tool.reason?.includes("A hook asked for approval") ||
-    !/^[\w ./'"@:=-]+$/.test(command) ||
+    !/^[\w ./'"@:=,-]+$/.test(command) ||
+    (standing && command.includes(",")) ||
     sensitive.test(command) ||
     redactSecrets(command) !== command
   )
     return;
 
   const input = tool.toolInput;
+  if (tool.toolName === "shell" && input === undefined) return;
   if (
     input !== undefined &&
     (!input ||
@@ -62,24 +73,67 @@ export function plainReadTargets(tool: Tool): string[] | undefined {
 
   const source = command.trim();
   const matches = [
-    ...source.matchAll(/(?:^| +)("[\w ./:@=-]+"|'[\w ./:@=-]+'|[\w./:@=-]+)(?= |$)/g),
+    ...source.matchAll(/(?:^| +)("[\w ./:@=,-]+"|'[\w ./:@=,-]+'|[\w./:@=,-]+)(?= |$)/g),
   ];
   if (matches.map(([word]) => word).join("") !== source) return;
   const words = matches.map(([, word]) => word ?? "");
   const [name, ...args] = words;
   if (name === "git") {
-    const [sub, ...rest] = args;
-    if (sub !== "show" || rest.length !== 1) return;
-    const [ref = "", file, extra] = (rest[0] ?? "").split(":");
-    return extra === undefined &&
-      /^(?:HEAD|[a-f0-9]{4,64})$/.test(ref) &&
-      file &&
-      !sensitive.test(file) &&
-      path.test(file)
-      ? [file]
-      : undefined;
+    if (tool.toolName === "shell") {
+      if (!gitReadPrefix.every((flag, index) => args[index] === flag)) return;
+      args.splice(0, gitReadPrefix.length);
+    }
+    const sub = args.shift();
+    if (sub === "show") {
+      if (tool.toolName === "shell" && !takeDiffGuards(args)) return;
+      if (args.length !== 1) return;
+      const [ref = "", file, extra] = (args[0] ?? "").split(":");
+      return extra === undefined &&
+        /^(?:HEAD|[a-f0-9]{4,64})$/.test(ref) &&
+        file &&
+        safeTarget(file)
+        ? [file]
+        : undefined;
+    }
+    if (standing) return;
+    if (sub === "log") {
+      if (tool.toolName === "shell") {
+        const guards = ["--no-show-signature", "--no-notes", "--no-decorate"];
+        if (!guards.every((flag, index) => args[index] === flag)) return;
+        args.splice(0, guards.length);
+      }
+      return args.length === 2 &&
+        /^-[1-9][0-9]{0,2}$/.test(args[0] ?? "") &&
+        args[1] === "--oneline"
+        ? []
+        : undefined;
+    }
+    // Comparing committed and staged objects avoids worktree clean filters. A path keeps
+    // content from unrelated staged files out of the result.
+    if (sub === "diff") {
+      if (tool.toolName === "shell" && !takeDiffGuards(args)) return;
+      const file = args[2] ?? "";
+      return args.length === 3 && args[0] === "--cached" && args[1] === "--" && safeTarget(file)
+        ? [file]
+        : undefined;
+    }
+    return;
+  }
+  if (!standing && (name === "sed" || name === "nl" || name === "head" || name === "tail")) {
+    const file = unquote(args.at(-1) ?? "");
+    if (!safeTarget(file)) return;
+    if ((name === "head" || name === "tail") && args.length === 1) return [file];
+    if (name === "nl") return args.length === 2 && args[0] === "-ba" ? [file] : undefined;
+    if (args.length !== 3 || args[0] !== "-n") return;
+    const option = unquote(args[1] ?? "");
+    const valid =
+      name === "sed"
+        ? /^[1-9][0-9]*(?:,[1-9][0-9]*)?p$/.test(option)
+        : /^[1-9][0-9]*$/.test(option);
+    return valid ? [file] : undefined;
   }
   if (name !== "cat" && name !== "ls" && name !== "rg") return;
+  if (name === "rg" && tool.toolName === "shell" && args[0] !== "--no-config") return;
   const targets: string[] = [];
   let patternSeen = false;
   for (const word of args) {
@@ -94,11 +148,17 @@ export function plainReadTargets(tool: Tool): string[] | undefined {
       patternSeen = true;
       continue;
     }
-    if (!path.test(value) && value !== ".") return;
+    if (!safeTarget(value) && value !== ".") return;
     targets.push(value);
   }
   if (name !== "ls" && targets.length === 0) return;
   return targets;
+}
+
+function takeDiffGuards(args: string[]): boolean {
+  if (args[0] !== "--no-ext-diff" || args[1] !== "--no-textconv") return false;
+  args.splice(0, 2);
+  return true;
 }
 
 export function isPlainReadApproval(tool: Tool): boolean {
@@ -107,6 +167,7 @@ export function isPlainReadApproval(tool: Tool): boolean {
 
 /** Why the provider must ask separately for each call. */
 export function sessionApprovalBlockReason(item: ItemOf<"approval_request">): string | undefined {
-  if (item.options.includes("allow_session") && isPlainReadApproval(item)) return undefined;
+  if (item.options.includes("allow_session") && plainReadTargets(item, true) !== undefined)
+    return undefined;
   return "This action requires a separate approval each time.";
 }

@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { AgentEvent, type SessionOptions } from "@codeden/contracts";
 import { describe, expect, it } from "vitest";
 import { ApprovalBroker } from "../src/approvals";
@@ -33,6 +36,91 @@ describe("Codex approvals", () => {
     broker.respond(started.item.requestId, answer as never);
     return { result: await pending, events };
   };
+
+  it.each([
+    ["cat README.md", {}, true],
+    ["cat README.md", { reason: "[codeden-card v1 scope=db-read class=owner-only]" }, false],
+    ["cat README.md", { kind: "writeStdin" }, false],
+    ["cat README.md", { networkApprovalContext: {} }, false],
+    ["cat README.md", { commandActions: [{ command: "cat different.md" }] }, false],
+    ["cat README.md > out", {}, false],
+    ["cat README.md > out", { commandActions: [{ command: "cat README.md" }] }, false],
+    ["cat README.md", { environmentId: "remote" }, false],
+    ["cat README.md", { approvalId: "subcommand" }, false],
+    ["git show HEAD:README.md", {}, false],
+    [
+      "git --no-pager --no-optional-locks -c core.fsmonitor=false show --no-ext-diff --no-textconv HEAD:README.md",
+      {},
+      true,
+    ],
+    [
+      "git --no-pager --no-optional-locks -c core.fsmonitor=false log --no-show-signature --no-notes --no-decorate -5 --oneline",
+      {},
+      true,
+    ],
+    [
+      "git --no-pager --no-optional-locks -c core.fsmonitor=false diff --no-ext-diff --no-textconv --cached -- README.md",
+      {},
+      true,
+    ],
+    ["rg --no-config needle README.md", {}, true],
+    ["rg needle README.md", {}, false],
+    ["cat jev.env", {}, false],
+    ["python3 - <<'PY'\nprint(42)\nPY", {}, false],
+  ] as const)("rechecks orchestrator eligibility for %s %j", async (command, patch, allowed) => {
+    const root = mkdtempSync(join(tmpdir(), "codex-verified-read-"));
+    try {
+      writeFileSync(join(root, "README.md"), "fixture");
+      writeFileSync(join(root, ".git"), "gitdir: fixture");
+      const events: AgentEvent[] = [];
+      const broker = new ApprovalBroker((event) => events.push(event));
+      const pending = handleServerRequest(
+        {
+          method: "item/commandExecution/requestApproval",
+          id: 0,
+          params: {
+            threadId: T,
+            turnId: TURN,
+            itemId: "approval",
+            command,
+            cwd: root,
+            environmentId: null,
+            kind: "command",
+            startedAtMs: 1,
+            ...patch,
+          },
+        } as ServerRequest,
+        {
+          broker,
+          risk: { cwd: root },
+          ctx: () => ctx,
+          filePaths: () => [],
+        },
+      );
+      const started = events[0];
+      if (started?.type !== "item.started" || started.item.kind !== "approval_request") {
+        throw new Error("Expected a pending approval");
+      }
+      const { requestId } = started.item;
+      const decide = () =>
+        broker.respond(requestId, {
+          kind: "approval",
+          decision: "allow_once",
+          decidedBy: "orchestrator",
+        });
+      if (allowed) {
+        expect(started.item.toolInput).toEqual({ command });
+        decide();
+      } else {
+        expect(started.item.toolInput).toBeUndefined();
+        expect(decide).toThrow("requires the owner");
+        broker.respond(requestId, { kind: "approval", decision: "deny" });
+      }
+      expect(await pending).toEqual({ decision: allowed ? "accept" : "decline" });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 
   it("maps command approvals both ways and flags risky commands", async () => {
     const { result, events } = await run(

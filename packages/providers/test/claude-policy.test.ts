@@ -35,6 +35,22 @@ it("does not delegate a Git blob read of a provider login file", () => {
   }
 });
 
+it.each([
+  ["git log -5 --oneline", "log --no-show-signature --no-notes --no-decorate -5 --oneline"],
+  ["git diff --cached -- README.md", "diff --no-ext-diff --no-textconv --cached -- README.md"],
+] as const)("hardens one-time Git commands before Claude executes %s", (command, args) => {
+  const root = mkdtempSync(join(tmpdir(), "codeden-git-read-"));
+  try {
+    mkdirSync(join(root, ".git"));
+    writeFileSync(join(root, "README.md"), "fixture");
+    expect(guardedReadCommand({ action: "command", toolName: "Bash", command }, root, root)).toBe(
+      `command git --no-pager --no-optional-locks -c core.fsmonitor=false ${args}`,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 describe("ClaudePolicy", () => {
   const ctx = {
     cwd: "/work/repo",

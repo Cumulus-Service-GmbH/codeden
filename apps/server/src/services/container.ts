@@ -659,6 +659,7 @@ export function createServices(opts: ServicesOptions): AppServices {
       decisions,
       sessions,
       opts.store,
+      (sessionId) => isRemoteRunner(runners.forSession(sessionId)),
     ),
     orchestration,
     automations,
