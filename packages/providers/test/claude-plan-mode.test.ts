@@ -428,6 +428,32 @@ describe("Claude plan mode", () => {
     },
   );
 
+  it("restores a newer plan-mode choice when the pending exit completes", async () => {
+    const sdk = stubSdk();
+    const { session, permission, preToolUse, items, planUpdates } = open(sdk);
+    await session.send({ text: "Plan this change", attachments: [] });
+    const exitPlan = permission("ExitPlanMode", { plan: "Change x" }, "exit");
+    await vi.waitFor(() => expect(items("approval_request")).toHaveLength(1));
+    await session.respond("r-exit", { kind: "approval", decision: "allow_once" });
+    await expect(exitPlan).resolves.toMatchObject({
+      behavior: "allow",
+      updatedPermissions: [{ type: "setMode", mode: "acceptEdits", destination: "session" }],
+    });
+
+    await session.setPlanMode(true);
+    // The CLI applies the older approval after acknowledging the newer plan-mode choice.
+    sdk.modes.push("acceptEdits");
+    sdk.deliver(toolResult("unrelated"));
+    await settle();
+    expect(sdk.modes).toEqual(["plan", "acceptEdits"]);
+
+    sdk.deliver(toolResult("exit"));
+    await settle();
+    expect(sdk.modes).toEqual(["plan", "acceptEdits", "plan"]);
+    expect(planUpdates()).toEqual([{ type: "session.updated", planMode: false }]);
+    expect(await preToolUse("Write", inWorktree, "plan")).toBe("deny");
+  });
+
   it("reasserts default after approving a plan in Supervised", async () => {
     const sdk = stubSdk();
     const { session, permission, items } = open(sdk, { autonomy: "supervised" });

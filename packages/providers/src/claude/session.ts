@@ -457,14 +457,12 @@ export class ClaudeSession implements ProviderSession {
    * Reapply the configured mode after ExitPlanMode, or at turn end if its result was omitted.
    */
   private afterMessage(message: unknown): void {
-    if (!this.planExit) return;
-    if (str(message, "type") !== "result" && !carriesToolResult(message, this.planExit.toolUseId))
-      return;
-    const { mode } = this.planExit;
+    const exit = this.planExit;
+    if (!exit) return;
+    if (str(message, "type") !== "result" && !carriesToolResult(message, exit.toolUseId)) return;
     this.planExit = undefined;
-    if (this.planMode) return;
-    // The CLI took the approval's mode before yielding the result.
-    this.appliedMode = mode;
+    // The CLI took the approval's mode before yielding the result, even if planning resumed.
+    this.appliedMode = exit.mode;
     void this.applyPermissionModeInBackground();
   }
 
