@@ -46,9 +46,11 @@ test('CodeDen skill documents owner policy and the installed review gate', () =>
 
 test('review uses exact Team roles and the G-B host runner from sandboxed sessions', () => {
   const skill = readFileSync(join(root, 'SKILL.md'), 'utf8');
-  for (const rule of ['agy / Gemini 4 Neon / high', 'claude / Opus 5.5 / high',
-    'claude / Opus 5.5 / xhigh', 'host-side review runner (G-B)', 'ad-hoc `claude -p`',
-    'substitute one role for another', 'review its own work']) {
+  for (const rule of ["effective Team's Code Reviewer and Code Reviewer Fallback",
+    "A reviewer must never share the writer's vendor", 'Never use ad-hoc substitutes',
+    'host-side review runner (G-B)', 'substitute one role for another', 'review its own work']) {
     assert.ok(skill.includes(rule), rule);
   }
+  assert.match(skill, /\*\*Sandboxed review\.\*\*[^\n]+`request_lane_review`[^\n]+`get_lane_review`/);
+  assert.match(skill, /\*\*Code review\.\*\*[^\n]+G-B[^\n]+ad-hoc review wrappers/);
 });
