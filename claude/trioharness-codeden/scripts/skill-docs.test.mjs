@@ -42,3 +42,13 @@ test('CodeDen skill documents owner policy and the installed review gate', () =>
   }
   assert.match(writer, /^## Package and config check$/m);
 });
+
+
+test('review uses exact Team roles and the G-B host runner from sandboxed sessions', () => {
+  const skill = readFileSync(join(root, 'SKILL.md'), 'utf8');
+  for (const rule of ['agy / Gemini 4 Neon / high', 'claude / Opus 5.5 / high',
+    'claude / Opus 5.5 / xhigh', 'host-side review runner (G-B)', 'ad-hoc `claude -p`',
+    'substitute one role for another', 'review its own work']) {
+    assert.ok(skill.includes(rule), rule);
+  }
+});
