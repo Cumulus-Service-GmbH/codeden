@@ -25,7 +25,7 @@ export const readChecklist = defineTool({
     if (!session?.projectId || session.role !== role) {
       throw new ToolError("This tool needs a session in your project");
     }
-    return formatChecklist(services.checklist.get(session.projectId), session);
+    return formatChecklist(services.checklist.get(session.projectId, "plan"), session);
   },
 });
 

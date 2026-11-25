@@ -13,7 +13,7 @@ const progress = {
 export const updateChecklist = defineTool({
   name: "update_checklist",
   description:
-    "Update a project's checklist. Use items to replace it in plan order, or patch and/or remove to edit by item ID. Reads display running items first. New items default to todo and need text. Use null to clear ETA or owner action. Omit an ID in items to generate one. Use requestApproval to ask the owner to approve a draft. Structural edits to an approved checklist wait for an owner decision. Set replacePending to replace an open proposal. In patch, replace sessionIds or workKeys (empty arrays unlink). To mark a linked session LIVE after a healthy install, send installHealthySessionId by itself with projectId.",
+    "Update a project's checklist. Use items to replace it in plan order, or patch and/or remove to edit by item ID. New items default to todo and need text. Use null to clear ETA or owner action. Omit an ID in items to generate one. Use requestApproval to ask the owner to approve a draft. Structural edits to an approved checklist wait for an owner decision. Set replacePending to replace an open proposal. In patch, replace sessionIds or workKeys (empty arrays unlink). To mark a linked session LIVE after a healthy install, send installHealthySessionId by itself with projectId.",
   roles: ["orchestrator"],
   scope: "global",
   input: z

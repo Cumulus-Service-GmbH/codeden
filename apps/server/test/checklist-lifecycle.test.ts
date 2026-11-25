@@ -7,7 +7,11 @@ import { EventStore } from "../src/events/store";
 import { ToolRegistry } from "../src/mcp/registry";
 import { allTools } from "../src/mcp/tools";
 import { updateChecklist } from "../src/mcp/tools/orchestrator/checklist";
-import { ChecklistService, WAITING_FOR_OWNER } from "../src/services/checklist/checklist-service";
+import {
+  ChecklistService,
+  formatChecklist,
+  WAITING_FOR_OWNER,
+} from "../src/services/checklist/checklist-service";
 import { InboxService } from "../src/services/inbox-service";
 import { SessionRepo } from "../src/services/sessions/repo";
 
@@ -131,9 +135,11 @@ it("scopes item edits in MCP and exposes no owner decision tool", async () => {
   expect(
     await tools.call("update_checklist_item", { itemId: "a", text: "B", status: "done" }, pmCaller),
   ).toMatchObject({ isError: true });
+  const beforeProgress = store.headSeq();
   expect(
     await tools.call("update_checklist_item", { itemId: "a", note: "Reviewing" }, pmCaller),
   ).toMatchObject({ isError: false });
+  expect(store.listAfter(beforeProgress).map(({ type }) => type)).toEqual(["checklist.updated"]);
   service.link(projectId, "a", agent);
   expect(
     await tools.call("update_checklist_item", { itemId: "a", sessionIds: [] }, agentCaller),
@@ -297,6 +303,8 @@ it("lists running checklist items first and preserves the order within each grou
   const expected = ["running-a", "running-b", "todo-a", "todo-b"];
   expect(service.list()[0]?.items.map(({ id }) => id)).toEqual(expected);
   expect(service.get(projectId)?.items.map(({ id }) => id)).toEqual(expected);
+  const planOutput = formatChecklist(service.get(projectId, "plan"));
+  expect(planOutput.indexOf("(todo-a)")).toBeLessThan(planOutput.indexOf("(running-a)"));
   expect(
     database.db
       .select()
@@ -362,12 +370,42 @@ it("lets the orchestrator link, report install health, and unlink through the ch
   };
   const edit = (payload: Record<string, unknown>) =>
     tools.call("update_checklist", { projectId, ...payload }, caller);
+  const before = store.headSeq();
   expect(await edit({ patch: [{ id: "lane", sessionIds: [session.id] }] })).toMatchObject({
     isError: false,
   });
   expect(service.get(projectId)?.items[0]?.status).toBe("doing");
+  expect(store.listAfter(before).map(({ type }) => type)).toEqual(["checklist.updated"]);
   expect(await edit({ installHealthySessionId: session.id })).toMatchObject({ isError: false });
   expect(service.get(projectId)?.items[0]?.status).toBe("done");
   expect(await edit({ patch: [{ id: "lane", sessionIds: [] }] })).toMatchObject({ isError: false });
   expect(service.get(projectId)?.items[0]?.sessionIds).toBeUndefined();
+});
+
+it("lets a retry supersede an earlier automatic attempt while keeping explicit links", () => {
+  const first = {
+    ...sampleSession,
+    projectId,
+    status: "idle" as const,
+    result: {
+      outcome: "failed" as const,
+      summary: "First attempt failed",
+      at: sampleSession.updatedAt,
+    },
+  };
+  const retry = { ...first, id: "retry", status: "completed" as const, result: null };
+  store.append(
+    [first, retry].map((session) => ({
+      type: "session.created",
+      sessionId: session.id,
+      payload: { session },
+    })),
+  );
+  service.update(projectId, { items: [{ id: "lane", text: "Build" }] });
+  service.link(projectId, "lane", first);
+  expect(service.get(projectId)?.items[0]?.status).toBe("blocked");
+  service.link(projectId, "lane", retry);
+  expect(service.get(projectId)?.items[0]?.status).toBe("done");
+  service.update(projectId, { patch: [{ id: "lane", sessionIds: [first.id, retry.id] }] });
+  expect(service.get(projectId)?.items[0]?.status).toBe("blocked");
 });

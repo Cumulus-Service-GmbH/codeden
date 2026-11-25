@@ -62,6 +62,10 @@ it("tracks linked sessions and their children using the result written by finish
 
     listener.onWorkSignal(session.id, "started");
     expect(statuses()).toEqual(["done", "todo"]);
+    listener.onWorkSignal(session.id, "blocked");
+    expect(statuses()).toEqual(["blocked", "todo"]);
+    listener.onWorkSignal(session.id, "done");
+    expect(statuses()).toEqual(["done", "todo"]);
   } finally {
     listener.stop();
     database.close();
@@ -130,6 +134,15 @@ it("preserves manual status when an existing session receives an unrelated updat
         note: "Verified",
       });
     }
+    repo.update(session.id, (entry) => ({ ...entry, status: "waiting" }));
+    await Promise.resolve();
+    expect(checklist.get(projectId)?.items[0]).toMatchObject({
+      status: "blocked",
+      note: "Waiting for your answer",
+    });
+    repo.update(session.id, (entry) => ({ ...entry, status: "running" }));
+    await Promise.resolve();
+    expect(checklist.get(projectId)?.items[0]).toMatchObject({ status: "done", note: "Verified" });
   } finally {
     listener.stop();
     database.close();

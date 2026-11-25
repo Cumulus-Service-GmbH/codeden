@@ -100,7 +100,7 @@ export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
     case "inbox.updated": {
       const { item } = e.payload;
       const previous =
-        item.status !== "open" && e.type === "inbox.updated"
+        (item.status === "resolved" || item.status === "dismissed") && e.type === "inbox.updated"
           ? tx
               .select({ status: inboxItems.status })
               .from(inboxItems)

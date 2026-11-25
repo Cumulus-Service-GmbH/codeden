@@ -79,7 +79,7 @@ export function SidebarFooter({ compact = false }: { compact?: boolean }) {
           <span className="sr-only">{label}</span>
         </div>
       )}
-      <ChecklistToggle />
+      <ChecklistToggle compact={compact} />
       <IconButton label="Keyboard shortcuts" onClick={() => openShortcuts(true)}>
         <Keyboard />
       </IconButton>

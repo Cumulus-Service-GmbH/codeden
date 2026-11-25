@@ -70,9 +70,9 @@ export class ChecklistService {
       .map(({ id }) => id);
   }
 
-  get(projectId: string): ProjectChecklist | undefined {
+  get(projectId: string, order: "progress" | "plan" = "progress"): ProjectChecklist | undefined {
     const checklist = this.read(projectId);
-    return checklist && orderedChecklist(checklist);
+    return checklist && order === "progress" ? orderedChecklist(checklist) : checklist;
   }
 
   private read(projectId: string): ProjectChecklist | undefined {
@@ -127,6 +127,7 @@ export class ChecklistService {
           explicitStatus === undefined
             ? old?.manuallyCompleted
             : explicitStatus === "done" || undefined,
+        manualCompletionNote: explicitStatus === undefined ? old?.manualCompletionNote : undefined,
       };
       const next = this.editLinks(projectId, entry, metadata);
       return old?.text === text && sameProgress(old, next) ? old : next;
@@ -140,7 +141,7 @@ export class ChecklistService {
           text,
           status ?? (id ? oldById.get(id)?.status : undefined) ?? "todo",
           metadata,
-          status,
+          id && oldById.get(id)?.status === status ? undefined : status,
         ),
       );
     } else {
@@ -476,6 +477,8 @@ export class ChecklistService {
             change.status === undefined
               ? entry.manuallyCompleted
               : change.status === "done" || undefined,
+          manualCompletionNote:
+            change.status === undefined ? entry.manualCompletionNote : undefined,
           ...itemMetadata(entry, change),
         },
         change,
@@ -539,7 +542,16 @@ export class ChecklistService {
   private editLinks(projectId: string, item: ChecklistItem, links: LaneLinks): ChecklistItem {
     const sessionIds = replaceLinks(item.sessionIds, links.sessionIds);
     const workKeys = replaceLinks(item.workKeys, links.workKeys);
-    if (sessionIds === item.sessionIds && workKeys === item.workKeys) return item;
+    const explicitSessionIds =
+      links.sessionIds === undefined
+        ? item.explicitSessionIds
+        : replaceLinks(item.explicitSessionIds, links.sessionIds);
+    if (
+      sessionIds === item.sessionIds &&
+      workKeys === item.workKeys &&
+      explicitSessionIds === item.explicitSessionIds
+    )
+      return item;
     if (sessionIds !== item.sessionIds && sessionIds?.length) {
       const local = this.db
         .select({ id: sessions.id })
@@ -549,7 +561,7 @@ export class ChecklistService {
       if (local.length !== sessionIds.length)
         throw badRequest("Linked sessions must belong to this project");
     }
-    return this.applyLaneProgress(projectId, { ...item, sessionIds, workKeys });
+    return this.applyLaneProgress(projectId, { ...item, sessionIds, workKeys, explicitSessionIds });
   }
 
   reportInstallHealthy(projectId: string, sessionId: string, itemId?: string): ProjectChecklist {
@@ -583,6 +595,7 @@ export class ChecklistService {
     status: ChecklistStatus | undefined,
     itemId?: string,
     waiting?: boolean,
+    explicitSignal = false,
   ): boolean {
     const projectId = session.projectId;
     const checklist = projectId ? this.read(projectId) : undefined;
@@ -598,7 +611,7 @@ export class ChecklistService {
     );
     if (!linked.length) return false;
     this.changeItems(checklist, linked, (item) =>
-      this.applyLaneProgress(projectId, item, session, status, waiting),
+      this.applyLaneProgress(projectId, item, session, status, waiting, explicitSignal),
     );
     return true;
   }
@@ -622,8 +635,21 @@ export class ChecklistService {
     if (eventSession && !candidates.some(({ id }) => id === eventSession.id)) {
       candidates.push(eventSession);
     }
+    const byId = new Map(candidates.map((session) => [session.id, session]));
+    const linked = ids.map((id) => byId.get(id));
     return [
-      ...ids.map((id) => candidates.find((session) => session.id === id)),
+      ...linked.filter((session, index) => {
+        if (!session || item.explicitSessionIds?.includes(session.id)) return true;
+        const inactive =
+          session.archivedAt ||
+          session.status === "failed" ||
+          session.status === "stopped" ||
+          session.result?.outcome === "failed" ||
+          session.result?.outcome === "blocked";
+        return (
+          !inactive || !linked.slice(index + 1).some((later) => later?.workKey === session.workKey)
+        );
+      }),
       ...keys.map((key) => candidates.find((session) => session.workKey === key)),
     ];
   }
@@ -634,6 +660,7 @@ export class ChecklistService {
     eventSession?: Session,
     signal?: ChecklistStatus,
     waiting?: boolean,
+    explicitSignal = false,
   ): ChecklistItem {
     const lanes = this.lanes(projectId, item, eventSession);
     if (
@@ -645,7 +672,9 @@ export class ChecklistService {
     ) {
       return item;
     }
-    const eventStatus = eventSession && this.laneStatus(eventSession);
+    const directSignal =
+      explicitSignal && (signal === "done" || signal === "blocked") ? signal : undefined;
+    const eventStatus = directSignal ?? (eventSession && this.laneStatus(eventSession));
     const liveSessionIds = replaceLinks(
       item.liveSessionIds,
       (item.liveSessionIds ?? []).filter(
@@ -658,6 +687,9 @@ export class ChecklistService {
     const state = lanes.map<{ status: ChecklistStatus; reason?: string; waiting?: boolean }>(
       (lane) => {
         if (!lane) return { status: "todo" as const };
+        if (directSignal && lane.id === eventSession?.id) {
+          return { status: directSignal, reason: this.laneReason(lane) };
+        }
         if (liveSessionIds?.includes(lane.id)) return { status: "done" as const };
         return {
           status: this.laneStatus(lane) ?? "todo",
@@ -678,22 +710,29 @@ export class ChecklistService {
       state.find((lane) => lane.status === "blocked" && !lane.waiting) ??
       state.find((lane) => lane.status === "blocked");
     const allDone = state.length > 0 && state.every((lane) => lane.status === "done");
-    if (blocked || (!allDone && (waitingOwnerId || (delegated && signal === "blocked")))) {
+    const delegatedFailure = delegated && signal === "blocked" && eventSession.status !== "waiting";
+    if (blocked || (!allDone && (waitingOwnerId || delegatedFailure))) {
       next.status = "blocked";
-      next.manuallyCompleted = undefined;
+      const temporaryWait =
+        !delegatedFailure && (blocked ? blocked.waiting : Boolean(waitingOwnerId));
+      if (!temporaryWait) {
+        next.manuallyCompleted = undefined;
+        next.manualCompletionNote = undefined;
+      } else if (item.manuallyCompleted && item.status === "done") {
+        next.manualCompletionNote = item.note;
+      }
       next.note =
-        blocked?.reason ??
-        (waitingOwnerId ? WAITING_FOR_OWNER : undefined) ??
-        (eventSession && this.laneReason(eventSession)) ??
-        "Linked work blocked";
+        (delegatedFailure && this.laneReason(eventSession)) ||
+        blocked?.reason ||
+        (temporaryWait ? WAITING_FOR_OWNER : "Linked work blocked");
+    } else if (item.manuallyCompleted) {
+      next.status = "done";
+      next.note = item.status === "blocked" ? item.manualCompletionNote : item.note;
+      next.manualCompletionNote = undefined;
     } else if (allDone) {
       next.status = "done";
-      if (!item.manuallyCompleted || liveSessionIds?.length) {
-        next.note = liveSessionIds?.length
-          ? "All linked work done or LIVE"
-          : "All linked work done";
-      }
-    } else if (!item.manuallyCompleted) {
+      next.note = liveSessionIds?.length ? "All linked work done or LIVE" : "All linked work done";
+    } else {
       if (
         state.some((lane) => lane.status === "doing" || lane.status === "done") ||
         (delegated && signal === "doing") ||
@@ -948,10 +987,12 @@ function sameProgress(old: ChecklistItem, next: ChecklistItem): boolean {
     old.status === next.status &&
     old.note === next.note &&
     old.sessionIds === next.sessionIds &&
+    old.explicitSessionIds === next.explicitSessionIds &&
     old.workKeys === next.workKeys &&
     old.liveSessionIds === next.liveSessionIds &&
     old.autoUpdatedAt === next.autoUpdatedAt &&
     old.manuallyCompleted === next.manuallyCompleted &&
+    old.manualCompletionNote === next.manualCompletionNote &&
     old.eta === next.eta &&
     old.needsOwner?.reason === next.needsOwner?.reason &&
     old.needsOwner?.sessionId === next.needsOwner?.sessionId &&
@@ -1034,7 +1075,7 @@ export function formatChecklist(
   const percent = items.length ? Math.round((done / items.length) * 100) : 0;
   return [
     `${done}/${items.length} done · ${percent}%`,
-    ...runningChecklistItemsFirst(items).map((item) => {
+    ...items.map((item) => {
       const { id, text, status } = item;
       const linked = caller && checklistLinked(item, caller) ? " · linked to your session" : "";
       return `- [${status}] ${text} (${id})${linked}`;

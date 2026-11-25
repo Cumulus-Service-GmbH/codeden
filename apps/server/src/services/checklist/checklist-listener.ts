@@ -53,7 +53,8 @@ export class ChecklistListener {
   onWorkSignal(sessionId: string, signal: "started" | "done" | "blocked"): void {
     const session = this.repo.find(sessionId)?.session;
     if (session && !session.archivedAt) {
-      this.checklist.markWork(session, signal === "started" ? "doing" : signal);
+      if (signal === "started") this.checklist.markWork(session, "doing");
+      else this.checklist.markWork(session, signal, undefined, undefined, true);
     }
   }
 

@@ -16,14 +16,18 @@ export const ChecklistItem = z.object({
   note: z.string().max(280).optional(),
   /** Sessions whose lane status contributes to this item. */
   sessionIds: z.array(Id).max(200).optional(),
+  /** Links explicitly selected in a checklist edit, even when they share a work key. */
+  explicitSessionIds: z.array(Id).max(200).optional(),
   /** Work keys tracked within this item's project. */
   workKeys: z.array(WorkKey).max(200).optional(),
   /** Linked session IDs with an accepted install-health report. */
   liveSessionIds: z.array(Id).max(400).optional(),
   /** When linked work last changed this item's progress. */
   autoUpdatedAt: Timestamp.optional(),
-  /** An explicit completion remains done when work restarts. A failure can still block it. */
+  /** An explicit completion resumes after a temporary wait. A failure can override it. */
   manuallyCompleted: z.literal(true).optional(),
+  /** The completion note to restore when a temporary wait ends. */
+  manualCompletionNote: z.string().max(280).optional(),
   startPurpose: singleLine.max(300).optional(),
   /** Estimated completion time. */
   eta: Timestamp.optional(),
