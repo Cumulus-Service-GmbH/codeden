@@ -182,6 +182,7 @@ export class CodexSession implements ProviderSession {
     this.turnPending = true;
     try {
       const rpc = await this.ensureServer();
+      await this.ensureGitLocks(rpc);
       await this.unpark(rpc);
       const before = this.rootTurns.count;
       await rpc.request("thread/compact/start", { threadId: this.threadId() });
@@ -375,9 +376,15 @@ export class CodexSession implements ProviderSession {
     started = rpc;
     this.rpc = rpc;
     // The thread may still be archived through a short-lived app-server after a crash.
-    await this.parked?.archived;
-    await this.ensureGitLocks(rpc);
-    await this.openThread(rpc, { report: true });
+    try {
+      await this.parked?.archived;
+      await this.ensureGitLocks(rpc);
+      await this.openThread(rpc, { report: true });
+    } catch (error) {
+      if (this.rpc === rpc) this.rpc = undefined;
+      await rpc.close().catch(() => {});
+      throw error;
+    }
     if (this.config.onModels) {
       rpc.request<{ data: Model[] }>("model/list", {}).then(
         (r) => this.config.onModels?.(r.data),

@@ -1,7 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { SessionOptions } from "@codeden/contracts";
 import { afterEach, expect, it } from "vitest";
 import { CodexSession } from "../src/codex/session";
@@ -18,7 +25,7 @@ afterEach(async () => {
   for (const dispose of cleanup.splice(0).reverse()) await dispose();
 });
 
-function lane(autonomy: SessionOptions["autonomy"] = "auto") {
+function lane(autonomy: SessionOptions["autonomy"] = "auto", bare = false) {
   const root = mkdtempSync(join(realpathSync(tmpdir()), "codeden-codex-git-"));
   cleanup.push(async () => rmSync(root, { recursive: true, force: true }));
   const git = (...args: string[]) => execFileSync("git", args, { cwd: root, stdio: "pipe" });
@@ -34,8 +41,10 @@ function lane(autonomy: SessionOptions["autonomy"] = "auto") {
     "-qm",
     "start",
   );
-  git("worktree", "add", "-qb", branch, "lane");
-  const common = join(root, ".git");
+  if (bare) git("clone", "--bare", ".", "bare.git");
+  const common = join(root, bare ? "bare.git" : ".git");
+  const repoGit = (...args: string[]) => git("--git-dir", common, ...args);
+  repoGit("worktree", "add", "-qb", branch, "lane");
   const gitDir = join(common, "worktrees", "lane");
   const ref = join(common, "refs", "heads", branch);
   const reflog = join(common, "logs", "refs", "heads", branch);
@@ -61,7 +70,7 @@ function lane(autonomy: SessionOptions["autonomy"] = "auto") {
     { executable },
   );
   cleanup.push(() => session.close());
-  return { session, requests, gitDir, gitRoots };
+  return { session, requests, gitDir, gitRoots, ref, repoGit };
 }
 
 it("grants exact worktree Git roots and keeps them when a turn changes to Full", async () => {
@@ -88,6 +97,10 @@ it("surfaces an occupied index lock before opening the thread", async () => {
   await expect(session.start()).rejects.toThrow(/Git lock preflight failed.*index\.lock/s);
   expect(requests().some((request) => request.method === "thread/start")).toBe(false);
   expect(readFileSync(lock, "utf8")).toBe("occupied");
+  await expect(session.start()).rejects.toThrow(/Git lock preflight failed.*index\.lock/s);
+  rmSync(lock);
+  await session.start();
+  expect(requests().some((request) => request.method === "thread/start")).toBe(true);
 });
 
 it.each(["read_only", "supervised"] as const)(
@@ -119,4 +132,21 @@ it("rejects metadata without a backlink to the session's worktree", async () => 
     "Git metadata does not belong to this linked worktree",
   );
   expect(requests().some((request) => request.method === "command/exec")).toBe(false);
+});
+
+it("opens a linked worktree backed by a bare repository", async () => {
+  const { session, requests, gitRoots } = lane("auto", true);
+  await session.start();
+  const start = requests().find((request) => request.method === "thread/start");
+  expect(start.params.config["sandbox_workspace_write.writable_roots"]).toEqual([
+    ...new Set([...gitRoots, ...osTempRoots()]),
+  ]);
+});
+
+it("restores the owned branch's ref parent after Git packs its refs", async () => {
+  const { session, ref, repoGit } = lane();
+  repoGit("pack-refs", "--all");
+  expect(existsSync(dirname(ref))).toBe(false);
+  await session.start();
+  expect(existsSync(dirname(ref))).toBe(true);
 });

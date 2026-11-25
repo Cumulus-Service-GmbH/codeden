@@ -1,4 +1,4 @@
-import { lstat, readFile, realpath } from "node:fs/promises";
+import { lstat, mkdir, readFile, realpath } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
 import type { SessionOptions } from "@codeden/contracts";
 import { codexSandboxPolicy } from "./config";
@@ -39,9 +39,11 @@ async function worktreeGitRoots(
     realpath(resolve(gitDir, (await readFile(join(gitDir, name), "utf8")).trim()));
   if (
     basename(dirname(gitDir)) !== "worktrees" ||
-    basename(common) !== ".git" ||
     (await metadataPath("commondir")) !== common ||
-    (await metadataPath("gitdir")) !== gitFile
+    (await metadataPath("gitdir")) !== gitFile ||
+    !(await lstat(join(common, "HEAD"))).isFile() ||
+    !(await lstat(join(common, "objects"))).isDirectory() ||
+    !(await lstat(join(common, "refs"))).isDirectory()
   ) {
     throw new Error("Git metadata does not belong to this linked worktree");
   }
@@ -94,6 +96,10 @@ export async function prepareWorktreeGit(rpc: CodexRpc, opts: SessionOptions): P
     });
     if (result.exitCode !== 0)
       throw new Error(result.stderr.trim() || `Git exited ${result.exitCode}`);
+    // Git can prune empty ref directories when it packs refs. Recreate the parents of the
+    // validated files once the index probe passes, without adding them to the writable roots.
+    const parents = new Set(roots.slice(1).map((path) => dirname(path)));
+    await Promise.all([...parents].map((path) => mkdir(path, { recursive: true })));
     return roots;
   } catch (error) {
     throw new Error(`Git lock preflight failed for ${opts.cwd}: ${String(error)}`, {
