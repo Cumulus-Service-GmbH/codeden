@@ -174,6 +174,12 @@ export async function forkPushPreflight(
     const { cwd } = cmd;
     const remotes = await gitText(cwd, ["remote"], { timeoutMs: 1_000 });
     if (!remotes.split(/\r?\n/).includes("fork")) return { status: "missing_fork" };
+    const targets = await gitText(cwd, ["remote", "get-url", "--push", "--all", "fork"], {
+      timeoutMs: 1_000,
+    });
+    if (!targets || targets.split(/\r?\n/).some((target) => /^[a-z][\w+.-]*::/i.test(target))) {
+      return { status: "inconclusive" };
+    }
     const ref = `refs/heads/${cmd.branch}`;
     const current = await gitText(cwd, ["symbolic-ref", "--quiet", "HEAD"], { timeoutMs: 1_000 });
     if (current !== ref) return { status: "inconclusive" };
@@ -206,7 +212,7 @@ export async function forkPushPreflight(
     if (result.code === 0) return { status: "passed" };
     const refusedRef = /^!\t[^\n]*\t\[(?:remote )?rejected\]/m.test(result.stdout.toString("utf8"));
     const refusedIdentity =
-      /Authentication failed|Permission denied \(publickey\)|Write access to repository not granted|returned error: (?:401|403)\b/.test(
+      /Authentication failed|Permission denied \(publickey\)|Permission to [^\r\n]+ denied to\b|Write access to repository not granted|returned error: (?:401|403)\b/.test(
         result.stderr,
       );
     return { status: refusedRef || refusedIdentity ? "rejected" : "inconclusive" };

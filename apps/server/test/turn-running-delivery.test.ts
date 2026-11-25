@@ -255,6 +255,22 @@ it("rejects a new steer once shutdown suspends priority delivery", async () => {
   expect(texts()).toEqual([]);
 });
 
+it("returns the shutdown error when the first steer is still awaiting its reply", async () => {
+  const { sessions, request } = providerLike({ steer: true });
+  repo.update("s1", (s) => ({ ...s, status: "running" }));
+  const reply = Promise.withResolvers<Record<string, unknown>>();
+  request.mockImplementationOnce(() => reply.promise);
+  const steering = sessions.send("s1", { input: input("interrupted"), whenBusy: "steer" });
+  await settle();
+  expect(request).toHaveBeenCalledTimes(1);
+  sessions.suspendPriorityDelivery();
+  reply.resolve({
+    waitingFor: { itemId: "sleep", turnId: "turn", threadId: "thread", rootTurnId: "turn" },
+  });
+  await expect(steering).rejects.toMatchObject({ code: "priority_suspended" });
+  expect(texts()).toEqual([]);
+});
+
 it("keeps a waiting steer ahead of messages queued during its first request", async () => {
   const { sessions, request } = providerLike({ steer: true });
   repo.update("s1", (s) => ({ ...s, status: "running" }));

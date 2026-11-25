@@ -220,4 +220,6 @@ it("forces every session, including the orchestrator, onto the Fake provider whe
     "fake",
     "fake",
   ]);
+  settings.update({ providers: { pm: { provider: CLAUDE.id, model: "different-model" } } });
+  expect((await roles.ensure("pm", env.localProject.id)).id).toBe(pm.id);
 });

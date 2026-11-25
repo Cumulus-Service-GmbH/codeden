@@ -134,6 +134,10 @@ describe("project tech debt", () => {
           id: original.id,
           text: "Use the shared build helper.",
         });
+        const seq = env.store.headSeq();
+        read.mockResolvedValueOnce({ body, date });
+        expect(await service.importIssue(project, issue)).toEqual(view);
+        expect(env.store.headSeq()).toBe(seq);
       }
       read.mockResolvedValueOnce({ body, date });
       const closed = await service.act(project, { action: "fixed", id: original.id });

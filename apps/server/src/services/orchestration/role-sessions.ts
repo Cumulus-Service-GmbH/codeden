@@ -167,9 +167,13 @@ export class RoleSessions {
 
   /** Whether the session is to be retired now: its role moved, and no turn is under way. */
   private shouldRetire(session: Session): boolean {
-    if (this.deps.forceFakeProvider && session.provider !== "fake") {
+    if (this.deps.forceFakeProvider) {
       const { runner } = this.deps;
-      return runner.isConnected() && runner.providers().some((provider) => provider.id === "fake");
+      return (
+        session.provider !== "fake" &&
+        runner.isConnected() &&
+        runner.providers().some((provider) => provider.id === "fake")
+      );
     }
     const underWay = isActiveSession(session) || this.deps.sessions.isDelivering(session.id);
     return !underWay && this.moveTarget(session);

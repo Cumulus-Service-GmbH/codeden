@@ -1,6 +1,7 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, expect, it, vi } from "vitest";
+import * as gitExec from "../src/git/exec";
 import { forkPushPreflight } from "../src/git/ops";
 import { makeRepo, removeDir, sh, tempDir } from "./helpers";
 
@@ -37,6 +38,21 @@ it("distinguishes existing-ref rejection, a changed checkout and a missing fork"
   });
   sh(command.cwd, "remote", "rename", "fork", "origin");
   expect(await forkPushPreflight(command)).toEqual({ status: "missing_fork" });
+});
+
+it("reports an authenticated SSH write denial as rejected without exposing its output", async () => {
+  const { fork: _fork, ...command } = withFork();
+  const request = vi.spyOn(gitExec, "git").mockResolvedValueOnce({
+    code: 128,
+    stdout: Buffer.alloc(0),
+    stderr:
+      "ERROR: Permission to owner/repo.git denied to another-user.\nfatal: Could not read from remote repository.",
+  });
+  try {
+    expect(await forkPushPreflight(command)).toEqual({ status: "rejected" });
+  } finally {
+    request.mockRestore();
+  }
 });
 
 it.skipIf(process.platform === "win32")(
