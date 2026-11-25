@@ -1,9 +1,10 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { ClaudePolicy, permissionModeFor } from "../src/claude/permissions";
 import { guardedReadCommand } from "../src/policy/delegated-read";
+import * as risk from "../src/policy/risk";
 
 it("delegates explicit file searches without loading ripgrep config", () => {
   const cwd = import.meta.dirname;
@@ -14,6 +15,27 @@ it("delegates explicit file searches without loading ripgrep config", () => {
   );
   expect(command).toBe("command rg --no-config needle claude-policy.test.ts");
 });
+
+it.each(["Bash", "shell"])(
+  "refuses a delegable %s read when the classifier marks it risky",
+  (toolName) => {
+    const cwd = import.meta.dirname;
+    const command = "cat claude-policy.test.ts";
+    const approval = { action: "command" as const, toolName, command, toolInput: { command } };
+    expect(guardedReadCommand(approval, cwd, cwd)).toBeDefined();
+
+    const classifier = vi.spyOn(risk, "classifyCommand").mockReturnValue({
+      risky: true,
+      action: "outside_worktree",
+      reason: "Classifier rejected this command",
+    });
+    try {
+      expect(guardedReadCommand(approval, cwd, cwd)).toBeUndefined();
+    } finally {
+      classifier.mockRestore();
+    }
+  },
+);
 
 it("does not delegate a Git blob read of a provider login file", () => {
   const cwd = mkdtempSync(join(tmpdir(), "codeden-read-approval-"));
