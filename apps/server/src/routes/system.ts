@@ -12,10 +12,11 @@ import {
   type SecretsStatus,
   SetSecretRequest,
 } from "@codeden/contracts";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { z } from "zod";
+import { isRemoteRequest } from "../security";
 import type { AppServices } from "../services/container";
-import { badRequest } from "../services/errors";
+import { badRequest, forbidden, ServiceError } from "../services/errors";
 import { listDirectories } from "../services/files/fs-browser";
 import { refreshProviderModels } from "../services/runner-port";
 import { contentDisposition } from "./content-disposition";
@@ -115,10 +116,16 @@ export function artifactRoutes(s: AppServices) {
 }
 
 /** `/api/secrets`: which keychain secrets are set; set and delete. Values are never returned. */
-export function secretRoutes(s: AppServices) {
-  const keyParam = (raw: string) => {
+export function secretRoutes(s: {
+  secrets: AppServices["secrets"];
+  images: Pick<AppServices["images"], "invalidate">;
+}) {
+  const writableKey = (c: Context, raw: string) => {
     const key = SecretKey.safeParse(raw);
     if (!key.success) throw badRequest("Unknown secret", "unknown_secret");
+    if (key.data === "typesafe.apiKey" && isRemoteRequest(c)) {
+      throw forbidden("The TypeSafe API key can only be changed on the computer running CodeDen.");
+    }
     return key.data;
   };
   return new Hono()
@@ -130,12 +137,16 @@ export function secretRoutes(s: AppServices) {
       return c.json(body);
     })
     .put("/:key", jsonBody(SetSecretRequest), async (c) => {
-      await s.secrets.set(keyParam(c.req.param("key")), c.req.valid("json").value);
+      const key = writableKey(c, c.req.param("key"));
+      if (key === "typesafe.apiKey" && s.secrets.backend !== "keyring") {
+        throw new ServiceError(503, "keychain_unavailable", "The OS keychain is unavailable.");
+      }
+      await s.secrets.set(key, c.req.valid("json").value);
       s.images.invalidate();
       return c.json({ ok: true as const });
     })
     .delete("/:key", async (c) => {
-      await s.secrets.delete(keyParam(c.req.param("key")));
+      await s.secrets.delete(writableKey(c, c.req.param("key")));
       s.images.invalidate();
       return c.json({ ok: true as const });
     });

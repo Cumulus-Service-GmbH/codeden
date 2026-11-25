@@ -822,6 +822,8 @@ export const SecretKey = z.enum([
   "openai.apiKey",
   "gemini.apiKey",
   "anthropic.apiKey",
+  /** TypeSafe API key for Jev, written from local Settings. */
+  "typesafe.apiKey",
   /** Fallback GitHub token when `gh auth token` is unavailable (§9). */
   "github.token",
 ]);
