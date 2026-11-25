@@ -122,3 +122,15 @@ describe("new worktrees of a GitHub project", () => {
     expect(prepared().fetch).toBeUndefined();
   });
 });
+
+it("keeps a Full review scope read-only in provider options", () => {
+  const session = env.addSession({ autonomy: "full" });
+  env.repo.setStartMeta(session.id, (meta) => {
+    if (!meta) throw new Error("Expected saved start metadata");
+    return { ...meta, readOnlyScope: true };
+  });
+  const options = launcher.sessionOptions(session);
+  expect(options).toMatchObject({ autonomy: "full", readOnly: true });
+  expect(options.systemPrompt).toContain("Your review scope is read-only.");
+  expect(options.systemPrompt).not.toContain("edit files, run the project's checks and commit");
+});

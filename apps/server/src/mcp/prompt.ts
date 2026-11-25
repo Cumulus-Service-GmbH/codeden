@@ -5,7 +5,9 @@ import { CODEDEN_HOME_RULE, rolePrompt } from "../services/orchestration/prompts
 export const MCP_SERVER_NAME = "codeden";
 
 /** What the CodeDen system prompt depends on: who started the session and where it works. */
-export type PromptSession = Pick<Session, "role" | "startedBy" | "worktreePath" | "autonomy">;
+export type PromptSession = Pick<Session, "role" | "startedBy" | "worktreePath" | "autonomy"> & {
+  readOnlyScope?: boolean;
+};
 
 /** The session's project, when it has one: GitHub projects get the pull request flow. */
 export type PromptProject = Pick<Project, "kind"> | null;
@@ -43,6 +45,9 @@ function workspaceLine(session: PromptSession): string {
  * that approvals ask the user by themselves, so the agent doesn't ask first.
  */
 function permissionLine(session: PromptSession): string {
+  if (session.readOnlyScope) {
+    return "- Your review scope is read-only. Inspect the work and report findings. Do not edit files, commit, push or open a pull request.";
+  }
   const where = session.worktreePath ? "your worktree" : "your working directory";
   switch (session.autonomy) {
     case "read_only":
@@ -58,6 +63,7 @@ function permissionLine(session: PromptSession): string {
 
 /** Committing and pull requests: free in the agent's own worktree, opt-in elsewhere. */
 function gitLines(session: PromptSession, project: PromptProject): string[] {
+  if (session.readOnlyScope) return [];
   if (!session.worktreePath) {
     return [
       "- Others may be working in this directory: don't commit, switch branches, stash or discard changes unless you're asked to.",

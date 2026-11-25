@@ -8,7 +8,10 @@ function available(services: AppServices, caller?: ToolAvailabilityContext): boo
   if (!inGithubProject(services, caller)) return false;
   if (!caller?.sessionId) return true;
   try {
-    return services.sessions.detail(caller.sessionId).session.autonomy !== "read_only";
+    return (
+      services.sessions.detail(caller.sessionId).session.autonomy !== "read_only" &&
+      !services.sessionRepo.find(caller.sessionId)?.startMeta?.readOnlyScope
+    );
   } catch {
     return true;
   }

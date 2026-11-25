@@ -309,7 +309,10 @@ export class GithubService {
     input: CreatePullRequestInput,
   ): Promise<CreatePullRequestResult> {
     const session = this.deps.repo.get(sessionId);
-    if (session.role === "agent" && session.autonomy === "read_only") {
+    if (
+      session.role === "agent" &&
+      (session.autonomy === "read_only" || this.deps.repo.find(sessionId)?.startMeta?.readOnlyScope)
+    ) {
       throw conflict(
         "This session has read-only permissions: it cannot commit, push or open a pull request",
         "read_only",

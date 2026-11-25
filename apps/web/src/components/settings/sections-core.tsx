@@ -18,6 +18,7 @@ import { ModelVisibilitySettings } from "./model-visibility";
 import { NETWORK_KEY } from "./network-password";
 import { ProviderHistorySettings } from "./provider-history";
 import { ProviderSecuritySettings } from "./provider-security";
+import { RoleAutonomyFloors } from "./role-autonomy-floors";
 import { SecretField } from "./secret-field";
 import { Segmented, SettingRow, SettingsSection, useSettings } from "./settings-ui";
 import { TokenSaverSettingsSection } from "./token-saver";
@@ -323,6 +324,7 @@ export function AutonomySettings() {
       >
         <span className="text-2xs text-muted-foreground">Always ask</span>
       </SettingRow>
+      <RoleAutonomyFloors />
     </SettingsSection>
   );
 }

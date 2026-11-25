@@ -423,6 +423,7 @@ export class SessionLauncher {
   sessionOptions(session: Session, mcpToken: string | null = null): SessionOptions {
     const project = this.projectOf(session);
     const runner = runnerForSession(this.deps, session.id);
+    const meta = this.deps.repo.find(session.id)?.startMeta;
     const proxyUrl = runner.mcpProxyUrl();
     const home = runner === (this.deps.runners?.home() ?? this.deps.runner);
     const mcpServers: McpServerConfig[] = [];
@@ -445,10 +446,10 @@ export class SessionLauncher {
       autonomy: session.autonomy,
       planMode: session.planMode ?? false,
       resumeToken: session.resumeToken ?? undefined,
-      systemPrompt: this.systemPrompt(session, project),
+      systemPrompt: this.systemPrompt(session, project, meta?.readOnlyScope),
       // The orchestrator and PMs never write project code (§11.2). Agent sessions at the
       // `read_only` level carry it in `autonomy`, so it can change live.
-      readOnly: session.role !== "agent",
+      readOnly: session.role !== "agent" || meta?.readOnlyScope === true,
       // Where the machine's security rules cover worktrees only (the guard): is this one?
       ...(this.deps.worktreesDir && session.cwd && isInside(session.cwd, this.deps.worktreesDir)
         ? { inCodedenWorktree: true }
@@ -458,7 +459,9 @@ export class SessionLauncher {
       mcpServers,
       ...(ownBranch(session) ? { ownBranch: ownBranch(session) } : {}),
       ...(project?.agentCiEnv === false ? { ciEnv: false } : {}),
-      ...(project?.allowUnenforcedProviders ? { allowUnenforcedProviders: true } : {}),
+      ...(project?.allowUnenforcedProviders && !meta?.guardedInstall
+        ? { allowUnenforcedProviders: true }
+        : {}),
       ...(home ? { env: { ...this.teamEnv(session), ...this.childRunsEnv(session) } } : {}),
       ...(home && startsWithChrome(session, this.deps.repo) ? { chrome: true } : {}),
     });
@@ -493,9 +496,9 @@ export class SessionLauncher {
    * goes only to providers with `capabilities.systemPrompt`, where it holds on resume and after
    * compaction; the others get CodeDen's prompt unchanged.
    */
-  private systemPrompt(session: Session, project: Project | null): string {
+  private systemPrompt(session: Session, project: Project | null, readOnlyScope?: boolean): string {
     const base = [
-      codedenSystemPrompt(session, project),
+      codedenSystemPrompt({ ...session, readOnlyScope }, project),
       "Run long waits in the background and check their progress between short steps to keep the turn responsive to new messages.",
     ].join("\n\n");
     const settings = this.deps.tokenSaver?.();

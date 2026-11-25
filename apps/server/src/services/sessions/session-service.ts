@@ -213,6 +213,7 @@ export class SessionService {
     session: Session,
     workspace: WorkspaceRequest,
     archived?: Session,
+    guardedInstall?: boolean,
   ): void {
     const project = session.projectId ? this.deps.projects.get(session.projectId) : null;
     // On the runner that hosts the role's conversations (the old one's), not only the home one.
@@ -228,7 +229,12 @@ export class SessionService {
     }
     // A worktree session runs in a CodeDen worktree (the runner checks the real folder too).
     const inWorktree = workspace.mode === "worktree";
-    const unenforced = securityRulesUnenforced(provider, project, session.role, inWorktree);
+    const unenforced = securityRulesUnenforced(
+      provider,
+      guardedInstall ? null : project,
+      session.role,
+      inWorktree,
+    );
     if (unenforced) throw badRequest(unenforced, "security_rules_unenforced");
     this.assertSupervisedSupported(session.provider, session.autonomy);
     this.assertReadOnlySupported(session.role, session.provider, session.autonomy);
@@ -273,6 +279,8 @@ export class SessionService {
       ownTeamPins?: boolean;
       runTeam?: import("@codeden/contracts").Team;
       autonomyFloor?: AutonomyLevel;
+      readOnlyScope?: boolean;
+      guardedInstall?: boolean;
       teamArchitect?: boolean;
     } = {},
   ): Promise<StartSessionResponse> {
@@ -400,6 +408,8 @@ export class SessionService {
         chromeRequested: req.chrome,
         ...(options.teamArchitect ? { teamArchitect: true } : {}),
         ...(options.autonomyFloor ? { autonomyFloor: options.autonomyFloor } : {}),
+        ...(options.readOnlyScope ? { readOnlyScope: true } : {}),
+        ...(options.guardedInstall ? { guardedInstall: true } : {}),
         ...(pmStart ? { autonomyChoice: req.autonomy ?? null } : {}),
         ...(options.ownTeamPins ? { ownTeamPins: true as const } : {}),
         ...(options.runTeam ? { runTeam: options.runTeam } : {}),
@@ -462,7 +472,10 @@ export class SessionService {
   ): boolean {
     const { admission, repo } = this.deps;
     // Every new session (a start, a fork, a handoff to another provider) passes here.
-    this.assertProviderAllowed(session, workspace, archived);
+    this.assertProviderAllowed(session, workspace, archived, meta.guardedInstall);
+    if (meta.readOnlyScope) {
+      this.assertReadOnlySupported(session.role, session.provider, "read_only");
+    }
     const waitingForConflict = session.status === "queued";
     const waitingForSlot = !waitingForConflict && !this.reserve(session);
     try {
@@ -504,8 +517,10 @@ export class SessionService {
     this.assertForcedProvider(repo.get(id));
     await this.sourceProjectChecked(id);
     const plan = await planFork({ repo, projects, runner: this.runnerOf(id) }, id, req);
-    const floor = repo.find(id)?.startMeta?.autonomyFloor;
-    if (floor) plan.meta.autonomyFloor = floor;
+    const sourceMeta = repo.find(id)?.startMeta;
+    if (sourceMeta?.autonomyFloor) plan.meta.autonomyFloor = sourceMeta.autonomyFloor;
+    if (sourceMeta?.readOnlyScope) plan.meta.readOnlyScope = true;
+    if (sourceMeta?.guardedInstall) plan.meta.guardedInstall = true;
     this.createAndLaunch(plan.session, plan.meta, plan.start.workspace, undefined, plan.start.fork);
     return { sessionId: plan.session.id };
   }
@@ -523,8 +538,10 @@ export class SessionService {
       req = { ...req, provider: "fake", model: undefined, effort: undefined };
     }
     const plan = await planHandoff({ repo, projects, runner: this.runnerOf(id), utility }, id, req);
-    const floor = repo.find(id)?.startMeta?.autonomyFloor;
-    if (floor) plan.meta.autonomyFloor = floor;
+    const sourceMeta = repo.find(id)?.startMeta;
+    if (sourceMeta?.autonomyFloor) plan.meta.autonomyFloor = sourceMeta.autonomyFloor;
+    if (sourceMeta?.readOnlyScope) plan.meta.readOnlyScope = true;
+    if (sourceMeta?.guardedInstall) plan.meta.guardedInstall = true;
     this.createAndLaunch(plan.session, plan.meta, plan.start.workspace, undefined, plan.start.fork);
     return { sessionId: plan.session.id };
   }

@@ -74,6 +74,21 @@ const call = async (method: string, path: string, body?: unknown) => {
   };
 };
 
+it("saves role autonomy floors locally and rejects an MCP token", async () => {
+  const patch = { autonomy: { roleFloors: { writer: "supervised" } } };
+  const saved = await call("PATCH", "/settings", patch);
+  expect(saved.status).toBe(200);
+  expect(Settings.parse(saved.json()).autonomy.roleFloors).toEqual(patch.autonomy.roleFloors);
+  const token = server.services.mcpTokens.mint({ role: "pm", projectId: "p1", sessionId: "pm1" });
+  const denied = await fetch(`${server.url}/api/settings`, {
+    method: "PATCH",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+    body: JSON.stringify({ autonomy: { roleFloors: { writer: "full" } } }),
+  });
+  expect(denied.status).toBe(401);
+  expect(server.services.settings.get().autonomy.roleFloors.writer).toBe("supervised");
+});
+
 it("commits owner review limits with an audit and refuses agent and PM writes", async () => {
   const project = await server.services.projects.create({
     source: { type: "local", path: join(home, "user", "work", "app") },

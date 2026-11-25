@@ -118,3 +118,15 @@ describe("Settings.sessions", () => {
     expect(Settings.safeParse({ sessions: { prFeedback: "yes" } }).success).toBe(false);
   });
 });
+
+it("round-trips local role autonomy overrides and defaults to inherited floors", () => {
+  const settings = Settings.parse({
+    autonomy: { roleFloors: { writer: "supervised", investigator: null } },
+  });
+  expect(settings.autonomy.roleFloors).toEqual({ writer: "supervised", investigator: null });
+  expect(Settings.parse(JSON.parse(JSON.stringify(settings)))).toEqual(settings);
+  expect(defaultSettings().autonomy.roleFloors).toEqual({});
+  expect(Settings.safeParse({ autonomy: { roleFloors: { writer: "unknown" } } }).success).toBe(
+    false,
+  );
+});
