@@ -330,7 +330,12 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
       // `/mcp` authenticates agents with per-session tokens instead of the install token.
       publicPaths: new Set(["/api/health", "/mcp"]),
       // Agents and the desktop app only: never reachable from another device.
-      loopbackOnlyPaths: new Set(["/mcp", ...BROWSER_LOOPBACK_ONLY_PATHS]),
+      loopbackOnlyPaths: new Set([
+        "/mcp",
+        "/api/disk-hygiene",
+        "/api/disk-hygiene/",
+        ...BROWSER_LOOPBACK_ONLY_PATHS,
+      ]),
       remote: {
         enabled: () => network.enabled,
         ownHosts: () => network.ownHosts(),
@@ -442,6 +447,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
 
   // Sessions in containers from before this start continue there, through new links.
   void sandboxes.reattach();
+  services.diskHygiene.start();
 
   async function close(closeOpts: { stopRunner?: boolean } = {}): Promise<void> {
     closing ??= (async () => {
@@ -465,6 +471,7 @@ export async function startServer(opts: StartServerOptions): Promise<RunningServ
       services.updates.stop();
       await searchBackfill.stop();
       await services.localStt.stop();
+      await services.diskHygiene.stop();
       await redetectorStopped;
       stopUpdateEvents();
       stopTerminalEvents();

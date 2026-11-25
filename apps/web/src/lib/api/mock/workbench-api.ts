@@ -7,6 +7,7 @@ import {
   speechExcerpt,
 } from "@codeden/contracts";
 import type { CodeDenClient } from "../client";
+import { mockDiskHygieneApi } from "../disk-hygiene-api";
 import { mockAuthApi, mockNetworkApi } from "../network-api";
 import { mockUpdatesApi } from "../updates-api";
 import { mockTerminal } from "./channels";
@@ -46,6 +47,7 @@ type WorkbenchApi = Pick<
   | "getSetupStatus"
   | "getUpdates"
   | "updates"
+  | "diskHygiene"
   | "network"
   | "auth"
   | "loginCommand"
@@ -184,6 +186,7 @@ export function workbenchApi(world: MockWorld): WorkbenchApi {
       return delay({ providerId, hidden, missing: [], failed: [] }, 700);
     },
     updates: mockUpdatesApi(),
+    diskHygiene: mockDiskHygieneApi(),
     network: mockNetworkApi(),
     auth: mockAuthApi(),
     loginCommand: (tool) => {

@@ -1,8 +1,15 @@
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
-import { defaultTeam, messageFrom, type Session, type Team } from "@codeden/contracts";
+import {
+  CODEDEN_VERSION,
+  defaultTeam,
+  messageFrom,
+  type Session,
+  type Team,
+} from "@codeden/contracts";
 import { createImageEngineRegistry, type ImageEngineRegistry } from "@codeden/providers";
 import type { Db } from "../db/client";
+import { sessions as sessionRows } from "../db/schema-core";
 import type { EventStore } from "../events/store";
 import { noSandboxes, type SandboxService } from "../execution/sandboxes";
 import { ToolRegistry } from "../mcp/registry";
@@ -19,6 +26,8 @@ import { BrowserService } from "./browser/browser-service";
 import { ChecklistListener } from "./checklist/checklist-listener";
 import { ChecklistService } from "./checklist/checklist-service";
 import { DecisionApprovals } from "./decision-approvals";
+import { HygieneGit } from "./disk-hygiene/git";
+import { DiskHygiene } from "./disk-hygiene/service";
 import { type Exec, runTool } from "./exec";
 import { type FactoryOptions, FactoryService } from "./factory/factory-service";
 import { type FactoryGithub, GithubFactoryPort } from "./factory/github-port";
@@ -217,6 +226,7 @@ export interface AppServices {
   usage: UsageService;
   /** Automations: definitions, scheduler, runs and issue triage (§10). */
   automations: AutomationService;
+  diskHygiene: DiskHygiene;
   /** Autonomy modes and the dark-factory loop (§10.1). */
   factory: FactoryService;
   /** Session archive and worktree cleanup (§9). */
@@ -667,6 +677,29 @@ export function createServices(opts: ServicesOptions): AppServices {
     ),
     orchestration,
     automations,
+    diskHygiene: new DiskHygiene(
+      {
+        home: opts.paths.home,
+        userHome,
+        tempRoots: process.platform === "win32" ? [tmpdir()] : [tmpdir(), "/tmp"],
+        version: CODEDEN_VERSION,
+        projects: () => projects.list({ includeArchived: true }),
+        sessionAreas: () =>
+          opts.db
+            .select({
+              path: sessionRows.worktreePath,
+              projectId: sessionRows.projectId,
+              removedAt: sessionRows.worktreeRemovedAt,
+            })
+            .from(sessionRows)
+            .all()
+            .flatMap((row) => (row.path ? [{ ...row, path: row.path }] : [])),
+        git: new HygieneGit(exec, opts.paths.home),
+        exec,
+      },
+      () => opts.settings.get().automations.enabled,
+      opts.log,
+    ),
     userHome,
     questions,
     mcpTokens,

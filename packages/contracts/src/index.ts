@@ -21,6 +21,7 @@ export * from "./common";
 export * from "./content-security";
 export * from "./decision-rights";
 export * from "./desktop";
+export * from "./disk-hygiene";
 export * from "./entities/artifact";
 export * from "./entities/automation";
 export * from "./entities/inbox";

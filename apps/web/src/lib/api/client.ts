@@ -68,6 +68,7 @@ import type {
   UserInputInit,
 } from "@codeden/contracts";
 import type { AutomationsApi } from "./automations-api";
+import type { DiskHygieneApi } from "./disk-hygiene-api";
 import type { FactoryApi } from "./factory-api";
 import type {
   AgentConfigApi,
@@ -289,6 +290,7 @@ export interface CodeDenClient {
   getUpdates(opts?: { refresh?: boolean }): Promise<UpdateStatus>;
   /** One-click self-update: install, restart, roll back, release notes (§16). */
   readonly updates: UpdatesApi;
+  readonly diskHygiene: DiskHygieneApi;
   loginCommand(tool: LoginToolId): Promise<LoginCommandResponse>;
   /** Ask a provider for its models again (a model was released, the CLI was updated). */
   refreshModels(providerId: string): Promise<RefreshModelsResponse>;

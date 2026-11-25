@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import { type ThemePreference, useThemeStore } from "@/stores/theme";
 import { AgentEnvironmentSettings } from "./agent-environment";
 import { CustomModelSettings } from "./custom-models";
+import { DiskHygieneSettings } from "./disk-hygiene";
 import { ModelVisibilitySettings } from "./model-visibility";
 import { NETWORK_KEY } from "./network-password";
 import { ProviderHistorySettings } from "./provider-history";
@@ -170,6 +171,7 @@ export function GeneralSettings() {
             days
           </div>
         </SettingRow>
+        <DiskHygieneSettings />
       </SettingsSection>
     </>
   );

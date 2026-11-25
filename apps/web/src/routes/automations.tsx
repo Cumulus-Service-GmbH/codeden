@@ -7,6 +7,7 @@ import { RunsTable } from "@/components/automations/runs-table";
 import { TemplatesGallery } from "@/components/automations/templates-gallery";
 import { SectionLabel } from "@/components/common/bits";
 import { NextRuns } from "@/components/project/now-next";
+import { DiskHygieneResult } from "@/components/settings/disk-hygiene";
 import { ProjectTile } from "@/components/shell/sidebar/project-group";
 import { Button } from "@/components/ui/button";
 import { useAutomations } from "@/lib/automations";
@@ -85,7 +86,10 @@ export function AutomationsPage({ projectId, tab }: { projectId: string; tab: Au
           {tab === "templates" ? (
             <TemplatesGallery projectId={projectId} />
           ) : tab === "runs" ? (
-            <RunsTable projectId={projectId} />
+            <>
+              <DiskHygieneResult projectId={projectId} />
+              <RunsTable projectId={projectId} />
+            </>
           ) : (
             <div className="grid grid-cols-[minmax(0,1fr)] gap-6 lg:grid-cols-[minmax(0,1fr)_300px]">
               <AutomationsPanel projectId={projectId} />

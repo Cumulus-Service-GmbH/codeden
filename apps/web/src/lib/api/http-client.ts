@@ -52,6 +52,7 @@ import {
 } from "@codeden/contracts";
 import { httpAutomationsApi } from "./automations-api";
 import type { CodeDenClient, SendMode } from "./client";
+import { httpDiskHygieneApi } from "./disk-hygiene-api";
 import { httpFactoryApi } from "./factory-api";
 import { createFetcher } from "./http";
 import {
@@ -271,6 +272,7 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
     getUpdates: (o) =>
       get(`/updates${o?.refresh ? "?refresh=1" : ""}`, (v) => UpdateStatus.parse(v)),
     updates: httpUpdatesApi(http, origin),
+    diskHygiene: httpDiskHygieneApi(http),
     async completeSetup() {
       await post("/setup/complete");
     },

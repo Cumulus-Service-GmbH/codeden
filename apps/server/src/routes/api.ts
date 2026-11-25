@@ -32,6 +32,7 @@ import { agentConfigRoutes, sessionAgentConfigRoutes } from "./agent-config";
 import { automationRoutes, projectAutomationRoutes } from "./automations";
 import { browserRoutes, sessionBrowserRoutes } from "./browser";
 import { checklistRoutes } from "./checklists";
+import { diskHygieneRoutes } from "./disk-hygiene";
 import { executionRoutes } from "./execution";
 import { factoryRoutes, projectFactoryRoutes } from "./factory";
 import { githubRoutes, projectGithubRoutes, prRoutes, sessionGithubRoutes } from "./github";
@@ -121,6 +122,7 @@ export function createApi(ctx: ApiContext) {
       .route("/setup", setupRoutes(s))
       .route("/providers", providerRoutes(s))
       .route("/updates", updateRoutes(s))
+      .route("/disk-hygiene", diskHygieneRoutes(s))
       .route("/artifacts", artifactRoutes(s))
       .route("/remote-image", remoteImageRoutes())
       .route("/secrets", secretRoutes(s))
