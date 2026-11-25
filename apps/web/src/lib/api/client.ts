@@ -167,7 +167,12 @@ export interface CodeDenClient {
    * (`output.truncated`): large outputs are fetched on demand, not pushed (§6).
    */
   getToolOutput(sessionId: string, itemId: string): Promise<ToolOutputResponse>;
-  sendMessage(sessionId: string, input: UserInputInit, mode: SendMode): Promise<void>;
+  sendMessage(
+    sessionId: string,
+    input: UserInputInit,
+    mode: SendMode,
+    submissionId?: string,
+  ): Promise<void>;
   interrupt(sessionId: string): Promise<void>;
   /**
    * "Compact now": the provider compacts the conversation as a turn of its own

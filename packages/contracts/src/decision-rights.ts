@@ -80,6 +80,14 @@ export const OwnerApprovalWords = z
     "Owner words must match the owner words allowlist (1–200 ASCII letters, digits, spaces or .,:;!?'()/-)",
   );
 
+export const OWNER_MERGE_APPROVAL_MARKER = "OWNER-APPROVED via CodeDen orchestrator:";
+
+/** The byte-exact merge verification comment shared by publishers and verifiers. */
+export function formatOwnerMergeApproval(headSha: string, createdAt: Date, words: string): string {
+  const timestamp = createdAt.toISOString().replace(/\.\d{3}Z$/, "Z");
+  return `${OWNER_MERGE_APPROVAL_MARKER} ${headSha} ${timestamp} "${OwnerApprovalWords.parse(words)}"`;
+}
+
 export const DecisionConfirmationInput = z.strictObject({
   ownerWords: OwnerApprovalWords.optional(),
 });

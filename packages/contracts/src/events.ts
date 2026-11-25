@@ -37,7 +37,7 @@ import { RunnerDeletedPayload, RunnerRecordRef, RunnerRegisteredPayload } from "
 import { Settings } from "./settings";
 import { TeamReviewLimitsAudit } from "./team";
 import { TeamRun } from "./team-run";
-import { TechDebtView } from "./tech-debt";
+import { TechDebtFinding, TechDebtView } from "./tech-debt";
 import { Checkpoint, QueuedMessage, SetupStep } from "./workbench";
 
 /**
@@ -90,6 +90,13 @@ export const EventEnvelope = z.discriminatedUnion("type", [
   // Domain events.
   globalEvent("team_run.updated", z.object({ run: TeamRun })),
   globalEvent("tech_debt.updated", z.object({ view: TechDebtView })),
+  globalEvent(
+    "tech_debt.changed",
+    z.object({
+      metadata: TechDebtView.omit({ findings: true }),
+      changes: z.array(TechDebtFinding),
+    }),
+  ),
   globalEvent("checklist.updated", z.object({ checklist: ProjectChecklist })),
   globalEvent("project.created", z.object({ project: Project })),
   globalEvent("project.updated", z.object({ project: Project })),
@@ -164,6 +171,11 @@ export const EventEnvelope = z.discriminatedUnion("type", [
   globalEvent(
     "message.edited",
     z.object({ sessionId: Id, messageId: Id, text: z.string(), at: Timestamp }),
+  ),
+  /** An attempt begins before the runner call; a definite non-delivery clears the marker. */
+  globalEvent(
+    "message.delivery",
+    z.object({ sessionId: Id, messageId: Id, uncertain: z.boolean() }),
   ),
   /** A typed orchestration notice for a PM or the orchestrator (§8.2). */
   globalEvent("notice.created", z.object({ notice: Notice })),

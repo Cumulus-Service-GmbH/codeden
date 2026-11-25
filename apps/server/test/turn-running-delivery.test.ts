@@ -51,6 +51,12 @@ const texts = () => outbox.list("s1").map((m) => m.input.text);
 /** Let pending `setImmediate` work (a scheduled queue flush) and its promises run. */
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
+const submission = {
+  input: input("priority"),
+  whenBusy: "steer" as const,
+  submissionId: "aca17489-09fa-4cef-9be5-48109d31dbd0",
+};
+
 /**
  * A session service over the real repo and outbox, with a runner that behaves like a provider
  * session: one turn at a time, and `session.send` during a turn fails the way runners before
@@ -65,7 +71,7 @@ function providerLike(
   } = {},
 ) {
   repo.update("s1", (s) => ({ ...s, status: "idle" }));
-  const state = { turn: opts.turnRunning ?? false };
+  const state = { turn: opts.turnRunning ?? false, connected: true };
   const sent: string[] = [];
   const request = vi.fn(async (command: { name: string; input?: UserInput }) => {
     if (command.name !== "session.send") return {};
@@ -75,7 +81,7 @@ function providerLike(
     return {};
   });
   const runner = {
-    isConnected: () => true,
+    isConnected: () => state.connected,
     providers: () =>
       opts.steer
         ? [{ id: "fake", capabilities: { steer: true, interruptToolCall: opts.interruptToolCall } }]
@@ -244,6 +250,48 @@ it("keeps waiting priority messages when the server shuts down", async () => {
   expect(request).toHaveBeenCalledTimes(1);
 });
 
+it("deduplicates a retried submission after the first HTTP response was lost", async () => {
+  const { sessions, request } = providerLike({ steer: true });
+  repo.update("s1", (s) => ({ ...s, status: "running" }));
+
+  // This request reached the server and provider, but its caller did not get the reply.
+  await sessions.send("s1", submission);
+  const restarted = providerLike({ steer: true });
+  await expect(restarted.sessions.send("s1", submission)).resolves.toEqual({ status: "sent" });
+  expect(request.mock.calls.map(([command]) => command.name)).toEqual(["session.steer"]);
+  expect(restarted.request).not.toHaveBeenCalled();
+
+  // A submission with no recorded attempt can still be sent normally.
+  await expect(
+    restarted.sessions.send("s1", {
+      ...submission,
+      submissionId: "5d191764-5124-4bf3-ada6-6fe935e839f2",
+    }),
+  ).resolves.toEqual({ status: "sent" });
+  expect(restarted.sent).toEqual(["priority"]);
+});
+
+it("keeps a timed-out steer visible without replaying it when the turn settles", async () => {
+  const { sessions, request, endTurn, sent } = providerLike({ steer: true });
+  repo.update("s1", (s) => ({ ...s, status: "running" }));
+  request.mockRejectedValueOnce(new RunnerCommandError("timeout", "Reply was lost"));
+
+  await expect(sessions.send("s1", submission)).resolves.toEqual({ status: "queued" });
+  const reopened = openDatabase(join(dir, "codeden.db"));
+  try {
+    const recovered = new Outbox(reopened.db, new EventStore(reopened.db));
+    expect(recovered.list("s1")).toMatchObject([
+      { input: { text: "priority" }, delivery: "uncertain" },
+    ]);
+  } finally {
+    reopened.close();
+  }
+  await endTurn();
+  await expect(sessions.send("s1", submission)).resolves.toEqual({ status: "queued" });
+  expect(sent).toEqual([]);
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
 it("rejects a new steer once shutdown suspends priority delivery", async () => {
   const { sessions, request } = providerLike({ steer: true });
   repo.update("s1", (s) => ({ ...s, status: "running" }));
@@ -291,16 +339,18 @@ it("keeps a waiting steer ahead of messages queued during its first request", as
   }
 });
 
-it("keeps a waiting priority message queued when the runner disconnects", async () => {
-  const { sessions, request, sent, endTurn } = providerLike({ steer: true, turnRunning: true });
+it("safely queues a waiting steer if the runner disconnects before the next attempt", async () => {
+  const { sessions, request, sent, endTurn, state } = providerLike({
+    steer: true,
+    turnRunning: true,
+  });
   repo.update("s1", (s) => ({ ...s, status: "running" }));
-  request
-    .mockResolvedValueOnce({
-      waitingFor: { itemId: "sleep", turnId: "turn", threadId: "thread", rootTurnId: "turn" },
-    })
-    .mockRejectedValueOnce(new RunnerCommandError("runner_unavailable", "Runner disconnected"));
+  request.mockResolvedValueOnce({
+    waitingFor: { itemId: "sleep", turnId: "turn", threadId: "thread", rootTurnId: "turn" },
+  });
   const sending = sessions.send("s1", { input: input("priority"), whenBusy: "steer" });
   await settle();
+  state.connected = false;
   store.append([
     {
       type: "runner.disconnected",
@@ -310,6 +360,9 @@ it("keeps a waiting priority message queued when the runner disconnects", async 
   ]);
   await expect(sending).resolves.toEqual({ status: "queued" });
   expect(texts()).toEqual(["priority"]);
+  expect(outbox.list("s1")[0]?.delivery).toBeUndefined();
+  expect(request).toHaveBeenCalledTimes(1);
+  state.connected = true;
   await endTurn();
   expect(sent).toEqual(["priority"]);
   expect(texts()).toEqual([]);

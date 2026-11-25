@@ -1,9 +1,25 @@
 import { createHash } from "node:crypto";
-import { appendFile, mkdtemp, readFile, rm } from "node:fs/promises";
+import { appendFile, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { runJevDone } from "../src/services/sessions/team-run-jev";
+import { pinTeamJevHelper, runJevDone } from "../src/services/sessions/team-run-jev";
+
+it("rejects changes to the pinned Team gate helper and sibling modules", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "team-jev-pin-"));
+  const script = join(dir, "jev.mjs");
+  const sibling = join(dir, "sibling.mjs");
+  try {
+    await writeFile(script, 'import "./sibling.mjs";\n', { mode: 0o600 });
+    await writeFile(sibling, "export const version = 1;\n", { mode: 0o600 });
+    const resolve = pinTeamJevHelper(script);
+    expect(resolve()).toEqual(expect.stringContaining("jev.mjs"));
+    await writeFile(sibling, "export const version = 2;\n");
+    expect(resolve()).toBeNull();
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
 
 it.each([
   [0, "proceed", "pass"],
@@ -23,7 +39,7 @@ it.each([
       "No such file",
     ];
     try {
-      const exec = vi.fn(async (_command: string, args: string[]) => {
+      const exec = vi.fn<import("../src/services/exec").Exec>(async (_command, args, options) => {
         expect(args).toEqual([
           "/installed/jev.mjs",
           "done",
@@ -31,6 +47,8 @@ it.each([
           "--log",
           `${historyPath}.jsonl`,
         ]);
+        expect(options).toMatchObject({ inheritEnv: false, env: { NODE_OPTIONS: "" } });
+        expect(options?.env?.NODE_PATH).toBeUndefined();
         const input = JSON.parse(await readFile(args[2] ?? "", "utf8"));
         const digest = createHash("sha256")
           .update(await readFile(historyPath))

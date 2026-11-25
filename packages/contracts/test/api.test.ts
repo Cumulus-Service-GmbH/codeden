@@ -346,6 +346,16 @@ describe("api schemas", () => {
     expect(() => StartSessionResponse.parse({ status: "skipped" })).toThrow();
   });
 
+  it("preserves an optional checklist link note on started and queued sessions", () => {
+    const note = "The session started, but its checklist item could not be linked.";
+    for (const outcome of [
+      { status: "started", sessionId: "s1", note },
+      { status: "queued", sessionId: "s1", behind: ["s0"], note },
+    ]) {
+      expect(roundTrip(StartSessionResponse, outcome)).toEqual(outcome);
+    }
+  });
+
   it("round-trips fork requests and responses", () => {
     expect(roundTrip(ForkSessionRequest, {})).toEqual({});
     expect(roundTrip(ForkSessionRequest, { title: "  Try OAuth instead " }).title).toBe(
@@ -519,6 +529,14 @@ describe("api schemas", () => {
     const tooMany = Array.from({ length: SESSION_LOOKUP_MAX + 1 }, (_, i) => `s-${i}`).join(",");
     expect(() => ListSessionsQuery.parse({ ids: tooMany })).toThrow();
     expect(SendMessageRequest.parse({ input: { text: "x" } }).whenBusy).toBe("queue");
+  });
+
+  it("round-trips a composer submission id without requiring it on existing clients", () => {
+    const id = "aca17489-09fa-4cef-9be5-48109d31dbd0";
+    expect(
+      roundTrip(SendMessageRequest, { input: { text: "x" }, submissionId: id }).submissionId,
+    ).toBe(id);
+    expect(roundTrip(SendMessageRequest, { input: { text: "x" } }).submissionId).toBeUndefined();
   });
 
   it("extends the UI websocket protocol additively", () => {

@@ -3,6 +3,7 @@ import {
   defaultTeam,
   ListConflictsQuery,
   ListNoticesQuery,
+  PublicUserInput,
   ResolveConflictRequest,
   RoleMessageRequest,
   type RoleMessageResponse,
@@ -39,8 +40,15 @@ export function orchestrationRoutes(s: AppServices) {
       c.json<Session>(await o.startFresh(c.req.param("id"))),
     )
     .post("/orchestrator/messages", jsonBody(RoleMessageRequest), async (c) => {
-      const { input, whenBusy } = c.req.valid("json");
-      const body: RoleMessageResponse = await o.sendToRole("orchestrator", null, input, whenBusy);
+      const { input, whenBusy, submission } = c.req.valid("json");
+      const body: RoleMessageResponse = await o.sendToRole(
+        "orchestrator",
+        null,
+        PublicUserInput.parse(input),
+        whenBusy,
+        "user",
+        submission,
+      );
       return c.json(body);
     })
     .get("/projects/:projectId/pm", (c) => c.json(pmSession(c.req.param("projectId"))))
@@ -52,8 +60,15 @@ export function orchestrationRoutes(s: AppServices) {
     .post("/projects/:projectId/pm/messages", jsonBody(RoleMessageRequest), async (c) => {
       const projectId = c.req.param("projectId");
       s.projects.get(projectId);
-      const { input, whenBusy } = c.req.valid("json");
-      const body: RoleMessageResponse = await o.sendToRole("pm", projectId, input, whenBusy);
+      const { input, whenBusy, submission } = c.req.valid("json");
+      const body: RoleMessageResponse = await o.sendToRole(
+        "pm",
+        projectId,
+        PublicUserInput.parse(input),
+        whenBusy,
+        "user",
+        submission,
+      );
       return c.json(body);
     })
     .get("/projects/:projectId/status", (c) => c.json(o.projectStatus(c.req.param("projectId"))))
@@ -73,6 +88,7 @@ export function conflictRoutes(s: AppServices) {
     .post("/:id/resolve", jsonBody(ResolveConflictRequest), async (c) => {
       const request = c.req.valid("json");
       const start = request.start;
+      if (start?.input) start.input = PublicUserInput.parse(start.input);
       if (start?.teamRole && start.chrome !== undefined) {
         request.start = withTeamRole(start, {
           defaults: defaultTeam(s.settings.get()),

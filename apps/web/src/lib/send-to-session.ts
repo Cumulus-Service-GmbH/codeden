@@ -11,12 +11,20 @@ export async function sendToSession(
   session: Session,
   input: UserInputInit,
   mode: SendMode,
+  submissionId?: string,
 ): Promise<void> {
-  if (session.role === "agent") return client.sendMessage(session.id, input, mode);
-  await client.orchestration.send(
-    session.role,
-    session.projectId,
-    input,
-    mode === "steer" ? "steer" : "queue",
-  );
+  if (session.role === "agent") {
+    return submissionId
+      ? client.sendMessage(session.id, input, mode, submissionId)
+      : client.sendMessage(session.id, input, mode);
+  }
+  const whenBusy = mode === "steer" ? "steer" : "queue";
+  if (submissionId) {
+    await client.orchestration.send(session.role, session.projectId, input, whenBusy, {
+      id: submissionId,
+      sessionId: session.id,
+    });
+  } else {
+    await client.orchestration.send(session.role, session.projectId, input, whenBusy);
+  }
 }

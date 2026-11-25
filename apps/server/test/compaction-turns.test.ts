@@ -12,6 +12,7 @@ import {
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { deriveNotices } from "../src/services/orchestration/notices";
 import { AutoRetry } from "../src/services/sessions/auto-retry";
+import { Outbox } from "../src/services/sessions/outbox";
 import { SessionService, type SessionServiceDeps } from "../src/services/sessions/session-service";
 import { createGithubEnv, type GithubEnv } from "./support/github-env";
 
@@ -222,7 +223,7 @@ describe("steering during a compaction", () => {
 
   const input: UserInput = { text: "Also fix the docs", attachments: [] };
   let steers: RunnerCommand[];
-  let queued: UserInput[];
+  let outbox: Outbox;
   /** What the runner answers `session.steer` with. */
   let runnerSteer: () => void;
 
@@ -242,10 +243,7 @@ describe("steering during a compaction", () => {
           return {};
         },
       },
-      outbox: {
-        count: () => queued.length,
-        push: (_id: string, message: UserInput) => queued.push(message),
-      },
+      outbox,
       artifacts: {
         externalizeAttachments: (i: UserInput) => i,
         resolveAttachments: (i: UserInput) => i,
@@ -263,7 +261,7 @@ describe("steering during a compaction", () => {
 
   beforeEach(() => {
     steers = [];
-    queued = [];
+    outbox = new Outbox(env.db.db, env.store);
     // What Codex answers `turn/steer` during a compaction, as the runner used to pass it on.
     runnerSteer = () => {
       throw Object.assign(new Error("active turn is not steerable (compact)"), {
@@ -285,7 +283,7 @@ describe("steering during a compaction", () => {
   it("from the composer or the PM (send, whenBusy steer) is queued until it ends", async () => {
     const id = compacting();
     expect(await service().send(id, { input, whenBusy: "steer" })).toEqual({ status: "queued" });
-    expect(queued).toEqual([input]);
+    expect(outbox.list(id).map((message) => message.input)).toEqual([input]);
     expect(steers).toEqual([]);
   });
 
@@ -299,7 +297,7 @@ describe("steering during a compaction", () => {
       code: "compacting",
     });
     expect(await service().send(s.id, { input, whenBusy: "steer" })).toEqual({ status: "queued" });
-    expect(queued).toEqual([input]);
+    expect(outbox.list(s.id).map((message) => message.input)).toEqual([input]);
   });
 
   it("a work turn is still steered as before", async () => {

@@ -10,7 +10,7 @@ import { useProjectArchived, useSnapshotData } from "@/lib/queries";
 import { sendToSession } from "@/lib/send-to-session";
 import { matchesCombo, shortcut } from "@/lib/shortcuts";
 import { cn } from "@/lib/utils";
-import { getDraft, useComposerStore } from "@/stores/composer";
+import { type Draft, getDraft, useComposerStore } from "@/stores/composer";
 import {
   ComposerBox,
   canSendDraft,
@@ -224,19 +224,47 @@ export function SessionComposer({
   const client = useClient();
   const providers = useSnapshotData((s) => s.runner.providers, []);
   const archived = useProjectArchived(session.projectId);
-  const { setText, clear } = useComposerStore.getState();
+  const { clear } = useComposerStore.getState();
   const provider = providers.find((p) => p.id === session.provider);
 
   // The input is captured at submit time: `onMutate` clears the draft before `mutationFn` runs.
   const send = useMutation({
     mutationKey: priorityDeliveryKey(session.id),
-    mutationFn: ({ sendMode, input }: { sendMode: SendMode; input: UserInputInit }) =>
-      sendToSession(client, session, input, sendMode),
+    mutationFn: ({
+      sendMode,
+      input,
+      draft,
+    }: {
+      sendMode: SendMode;
+      input: UserInputInit;
+      draft: Draft;
+    }) => sendToSession(client, session, input, sendMode, draft.submissionId),
     onMutate: () => clear(session.id),
-    onError: (e, { input }) => {
-      if (!getDraft(useComposerStore.getState(), session.id).text) setText(session.id, input.text);
-      if (e instanceof ApiRequestError && e.code === "priority_cancelled") return;
-      toast.error("Message not sent", { description: e.message });
+    onError: (e, { draft }) => {
+      const stopped = e instanceof ApiRequestError && e.code === "priority_cancelled";
+      const current = getDraft(useComposerStore.getState(), session.id);
+      if (!current.text && !current.attachments.length) {
+        const { text, attachments, submissionId } = draft;
+        useComposerStore.setState((s) => ({
+          drafts: {
+            ...s.drafts,
+            [session.id]: {
+              text,
+              attachments,
+              ...(submissionId && !stopped ? { submissionId } : {}),
+            },
+          },
+        }));
+      }
+      if (stopped) return;
+      toast.error(
+        draft.submissionId && !(e instanceof ApiRequestError)
+          ? "Delivery unconfirmed"
+          : "Message not sent",
+        {
+          description: e.message,
+        },
+      );
     },
   });
   const stop = useMutation({ mutationFn: () => client.interrupt(session.id) });
@@ -273,7 +301,12 @@ export function SessionComposer({
       stoppable={checking}
       canSteer={provider?.capabilities.steer ?? false}
       sending={send.isPending}
-      onSend={(input, sendMode) => send.mutate({ sendMode, input })}
+      onSend={(input, sendMode) => {
+        const draft = getDraft(useComposerStore.getState(), session.id);
+        const submissionId =
+          draft.submissionId ?? (sendMode === "steer" ? crypto.randomUUID() : undefined);
+        send.mutate({ sendMode, input, draft: { ...draft, submissionId } });
+      }}
       onStop={() => stop.mutate()}
     />
   );

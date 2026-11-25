@@ -236,7 +236,11 @@ export class ChecklistService {
     return saved;
   }
 
-  proposePlan(projectId: string, input: ReviewedChecklistPlan): ProjectChecklist {
+  proposePlan(
+    projectId: string,
+    input: ReviewedChecklistPlan,
+    replacePending = false,
+  ): ProjectChecklist {
     const plan = ReviewedChecklistPlan.parse(input);
     const tasks = plan.tasks.map(({ id, text }) => ({ id, text }));
     if (createHash("sha256").update(JSON.stringify(tasks)).digest("hex") !== plan.sha) {
@@ -254,6 +258,9 @@ export class ChecklistService {
       updatedAt: new Date().toISOString(),
     };
     if (current.plan?.sha === plan.sha || current.pending?.plan?.sha === plan.sha) return current;
+    if (current.pending && !replacePending) {
+      throw conflict("A checklist proposal is already pending. Set replacePending to replace it.");
+    }
     const previous = new Map(current.items.map((item) => [item.id, item]));
     const diff: ChecklistChange[] = [];
     for (const { id, text } of tasks) {

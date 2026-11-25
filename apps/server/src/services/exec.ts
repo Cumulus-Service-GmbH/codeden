@@ -20,6 +20,8 @@ export interface ExecOptions {
   timeoutMs?: number;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  /** Use only the supplied variables, for a trusted helper with a constrained environment. */
+  inheritEnv?: boolean;
   /** Max bytes kept per stream (default 1 MiB). */
   maxOutput?: number;
 }
@@ -124,7 +126,7 @@ function comspec(): string {
 }
 
 export const runTool: Exec = (command, args, opts = {}) => {
-  const env = mergeEnv(process.env, opts.env);
+  const env = mergeEnv(opts.inheritEnv === false ? {} : process.env, opts.env);
   const resolved = resolveTool(command, env);
   const empty = { stdout: "", stderr: "", timedOut: false };
   if (!resolved) return Promise.resolve({ ...empty, code: null, notFound: true, path: null });

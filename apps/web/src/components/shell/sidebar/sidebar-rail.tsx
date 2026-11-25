@@ -1,6 +1,7 @@
 import { Link } from "@tanstack/react-router";
 import { Bot, Inbox, ListTodo, PanelLeftOpen, Search } from "lucide-react";
 import { Fragment, type ReactNode } from "react";
+import { useDecisionCards } from "@/components/inbox/decision-cards";
 import { TechDebtBadge } from "@/components/project/tech-debt-badge";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useSnapshot } from "@/lib/queries";
@@ -54,7 +55,9 @@ export function SidebarRail({ onExpand }: { onExpand?: () => void } = {}) {
   const orchestratorActive = useIsActive("/");
   const inboxActive = useIsActive("/inbox");
   const techDebtActive = useIsActive("/tech-debt");
-  const inboxCount = data?.inbox.filter((i) => i.status === "open").length ?? 0;
+  const { data: decisions } = useDecisionCards();
+  const inboxCount =
+    (data?.inbox.filter((i) => i.status === "open").length ?? 0) + (decisions?.length ?? 0);
 
   return (
     <aside

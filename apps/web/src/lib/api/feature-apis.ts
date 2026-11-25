@@ -49,6 +49,7 @@ import type {
   Notice,
   Overview,
   ProjectStatus,
+  RoleMessageRequest,
   RoleMessageResponse,
   SecretKey,
   SecretsStatus,
@@ -212,6 +213,7 @@ export interface OrchestrationApi {
     projectId: string | null,
     input: UserInputInit,
     whenBusy?: "queue" | "steer" | "reject",
+    submission?: RoleMessageRequest["submission"],
   ): Promise<RoleMessageResponse>;
   projectStatus(projectId: string): Promise<ProjectStatus>;
   overview(): Promise<Overview>;

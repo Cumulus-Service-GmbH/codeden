@@ -1,12 +1,26 @@
 import { expect, it } from "vitest";
 import {
   ProjectTeams,
+  RunnerCommand,
   StartTeamRun,
   TeamRun,
   TeamRunSettings,
   TeamWorker,
   UserInput,
 } from "../src";
+
+it("requires the project repository for a legacy assembler merge request", () => {
+  const command = {
+    name: "git.mergeLegacyTeamWorker",
+    cwd: "/assembler",
+    repoPath: "/project",
+    assembler: "team/run",
+    workerBranch: "work/run/1",
+    head: "a".repeat(40),
+  };
+  expect(RunnerCommand.parse(JSON.parse(JSON.stringify(command)))).toEqual(command);
+  expect(RunnerCommand.safeParse({ ...command, repoPath: undefined }).success).toBe(false);
+});
 
 it("round-trips named Teams and requires exactly one designated default", () => {
   const limits = { maxParallel: 2, maxAssignments: 5, maxRounds: 3 };

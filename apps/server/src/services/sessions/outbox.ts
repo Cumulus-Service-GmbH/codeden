@@ -16,6 +16,7 @@ const toMessage = (r: Row): QueuedMessage => ({
   input: r.input,
   from: r.sender ?? "user",
   createdAt: r.createdAt,
+  ...(r.deliveryUncertain ? { delivery: "uncertain" as const } : {}),
 });
 
 /**
@@ -47,9 +48,10 @@ export class Outbox {
     input: UserInput,
     from: QueueSender = "user",
     at?: string,
+    id: string = randomUUID(),
   ): QueuedMessage {
     const message: QueuedMessage = {
-      id: randomUUID(),
+      id,
       sessionId,
       input,
       from,
@@ -83,7 +85,7 @@ export class Outbox {
 
   /** Oldest queued message of a session, if any. */
   peek(sessionId: string): QueuedMessage | undefined {
-    return this.list(sessionId)[0];
+    return this.list(sessionId).find((m) => m.delivery !== "uncertain" || this.steering.has(m.id));
   }
 
   get(sessionId: string, messageId: string): QueuedMessage | undefined {
@@ -96,11 +98,8 @@ export class Outbox {
   }
 
   count(sessionId: string): number {
-    return this.db
-      .select({ id: queuedMessages.id })
-      .from(queuedMessages)
-      .where(eq(queuedMessages.sessionId, sessionId))
-      .all().length;
+    return this.list(sessionId).filter((m) => m.delivery !== "uncertain" || this.steering.has(m.id))
+      .length;
   }
 
   /** Session ids with at least one queued message. */
@@ -146,9 +145,26 @@ export class Outbox {
     ]);
   }
 
+  /** Leave an acceptance marker on disk until the runner confirms the outcome. */
+  markDelivery(message: QueuedMessage, uncertain: boolean): void {
+    this.store.append([
+      {
+        type: "message.delivery",
+        sessionId: message.sessionId,
+        payload: { sessionId: message.sessionId, messageId: message.id, uncertain },
+      },
+    ]);
+  }
+
+  releaseSteer(message: QueuedMessage): void {
+    if (!this.steering.delete(message.id)) return;
+    const retained = this.get(message.sessionId, message.id);
+    if (retained) this.markDelivery(retained, retained.delivery === "uncertain");
+  }
+
   /** Drop every queued message of a session (interrupt, stop). Returns what was dropped. */
   clear(sessionId: string): QueuedMessage[] {
-    const dropped = this.list(sessionId);
+    const dropped = this.list(sessionId).filter((m) => m.delivery !== "uncertain");
     if (dropped.length === 0) return [];
     this.store.append(
       dropped.map((m) => ({

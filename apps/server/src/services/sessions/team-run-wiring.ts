@@ -1,10 +1,12 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { defaultTeam, EventEnvelope, StartSessionRequest } from "@codeden/contracts";
+import { defaultTeam, EventEnvelope, StartSessionRequest, type TeamRun } from "@codeden/contracts";
+import { awaitsRetryDecision } from "../../events/reducer/retry";
 import type { AppServices } from "../container";
+import { conflict } from "../errors";
 import type { Exec } from "../exec";
-import { runJevDone } from "./team-run-jev";
+import { pinTeamJevHelper, runJevDone } from "./team-run-jev";
 import { listTeamRuns, saveTeamRun } from "./team-run-projection";
 import { resolveApprovedTeamPlan } from "./team-run-scheduler";
 import { type TeamRunPorts, TeamRuns } from "./team-runs";
@@ -88,6 +90,13 @@ export function wireTeamRuns(
   log?: (message: string) => void,
 ): TeamRuns {
   const { admission, db, sessionRepo, sessions, store } = services;
+  const jevHelper = pinTeamJevHelper(
+    join(services.userHome, ".claude", "skills", "trioharness-codeden", "scripts", "jev.mjs"),
+  );
+  const assemblerPath = (run: TeamRun) => {
+    const { slug } = services.projects.get(run.projectId);
+    return join(services.paths.worktrees, slug, `team-${run.id}`);
+  };
   const runs = new TeamRuns(
     {
       approvedPlan: async (projectId, request) => {
@@ -139,9 +148,6 @@ export function wireTeamRuns(
         if (!run.coordinatorId || !worker.sessionId || !worker.branch) {
           throw new Error("Team assembler or worker worktree is unavailable");
         }
-        if (!run.assemblerWorktree) {
-          throw new Error("Team assembler worktree is unavailable");
-        }
         const runner = services.runners.forSession(run.coordinatorId);
         if (runner !== services.runners.forSession(worker.sessionId)) {
           throw new Error("Team assembler and worker must share a runner");
@@ -149,16 +155,30 @@ export function wireTeamRuns(
         if (worker.resolutionHead && !worker.resolutionBase) {
           throw new Error("Conflict resolution assembler base is unavailable");
         }
-        return runner.request({
-          name: "git.mergeTeamWorker",
-          cwd: run.assemblerWorktree,
+        const input = {
           assembler: run.assembler,
           workerBranch: worker.branch,
           head,
           ...(worker.resolutionHead && worker.resolutionBase
             ? { resolutionParents: [worker.resolutionHead, worker.resolutionBase] }
             : {}),
+        };
+        if (run.assemblerWorktree) {
+          return runner.request({
+            name: "git.mergeTeamWorker",
+            cwd: run.assemblerWorktree,
+            ...input,
+          });
+        }
+        const cwd = assemblerPath(run);
+        const result = await runner.request({
+          name: "git.mergeLegacyTeamWorker",
+          cwd,
+          repoPath: services.projects.get(run.projectId).path,
+          ...input,
         });
+        if (!result.conflict && !result.headMoved) run.assemblerWorktree = cwd;
+        return result;
       },
       verify: async () => {
         throw new Error("Team full-suite and browser verification are unavailable");
@@ -205,34 +225,33 @@ export function wireTeamRuns(
       },
       gate: async (_run, _worker, review, historyPath) => {
         if (!review.evidence || !historyPath) return { status: "unavailable" };
-        return runJevDone(
-          exec,
-          join(services.userHome, ".claude", "skills", "trioharness-codeden", "scripts", "jev.mjs"),
-          historyPath,
-          { ...review.evidence, head: review.head },
-        );
+        const script = jevHelper();
+        if (!script) return { status: "unavailable" };
+        return runJevDone(exec, script, historyPath, { ...review.evidence, head: review.head });
       },
       ownerDecision: (run, worker) => {
         const id = `team-owner-decision:${run.id}:${worker.itemId}`;
         if (services.inbox.find(id)) return;
         const now = new Date().toISOString();
         const item = run.items.find(({ id }) => id === worker.itemId);
-        const refusal = worker.jev?.receipt;
+        const refusal = worker.jev?.status === "owner decision" ? worker.jev.receipt : undefined;
         const criteria = item?.criteria?.map(
           (criterion, index) =>
             `${criterion} (met_${index}: ${refusal?.scores?.[`met_${index}`] ?? "unavailable"})`,
         );
         services.inbox.put({
           id,
-          kind: "message",
+          kind: "owner_decision",
           status: "open",
           priority: "high",
           notify: "needs_you",
           title: `${run.teamName} requires an owner decision`,
           body: [
-            `Jev refused assignment ${worker.itemId} again.`,
+            refusal
+              ? `Jev refused assignment ${worker.itemId} again.`
+              : `Assignment ${worker.itemId} is blocked: ${worker.checkpoint?.blocker ?? run.notice ?? "Team run requires intervention"}`,
             ...(refusal?.reasons ?? []),
-            ...(criteria ?? []),
+            ...(refusal ? (criteria ?? []) : []),
             refusal?.scores && JSON.stringify(refusal.scores),
           ]
             .filter(Boolean)
@@ -278,7 +297,15 @@ export function wireTeamRuns(
       save: (run) => saveTeamRun(store, run),
       hasWorkerSession: (id) => {
         const status = sessionRepo.find(id)?.session.status;
-        return status === "starting" || status === "running" || status === "waiting";
+        return (
+          status === "created" ||
+          status === "queued" ||
+          status === "starting" ||
+          status === "running" ||
+          status === "waiting" ||
+          status === "idle" ||
+          status === "interrupted"
+        );
       },
       prepareAssembler: async (run, coordinatorId) => {
         const project = services.projects.get(run.projectId);
@@ -287,7 +314,7 @@ export function wireTeamRuns(
           sessionId: run.id,
           repoPath: project.path,
           strategy: "worktree",
-          path: join(services.paths.worktrees, project.slug, `team-${run.id}`),
+          path: assemblerPath(run),
           branch: run.assembler,
           baseRef: project.defaultBranch ?? undefined,
           setupCommands: [],
@@ -298,7 +325,7 @@ export function wireTeamRuns(
           throw new Error("Team assembler branch unavailable");
         return workspace.cwd;
       },
-      launch: async (member, branch, base, run, item, packet) => {
+      launch: async (member, branch, base, run, item, packet, onStarted) => {
         const title = item ? `[Writer] ${item.text}` : `[Architect] ${run.teamName}`;
         const result = await sessions.start(
           StartSessionRequest.parse({
@@ -322,10 +349,22 @@ export function wireTeamRuns(
           }),
           { runTeam: run.team },
         );
-        if (result.status === "queued") await sessions.stop(result.sessionId);
+        if (result.status === "queued") {
+          try {
+            await sessions.stop(result.sessionId, { confirm: true });
+          } catch (error) {
+            onStarted?.(result.sessionId);
+            throw error;
+          }
+          throw conflict(
+            "Session launch: queued because no slot was available",
+            "team_launch_refused",
+          );
+        }
         if (result.status !== "started") {
           throw new Error(`Session launch: ${result.status}`);
         }
+        onStarted?.(result.sessionId);
         const workspace = await waitForWorktree(services, result.sessionId);
         if (!item) return workspace;
         const { branches } = await services.runners.forSession(result.sessionId).request({
@@ -356,6 +395,13 @@ export function wireTeamRuns(
   );
 
   store.subscribe((batch) => {
+    if (batch.some(({ type }) => type === "runner.connected")) {
+      queueMicrotask(() => {
+        void runs
+          .dispatchAvailable()
+          .catch((error) => log?.(`Team run dispatch: ${String(error)}`));
+      });
+    }
     for (const raw of batch) {
       if (!raw.sessionId) continue;
       const sessionId = raw.sessionId;
@@ -380,7 +426,16 @@ export function wireTeamRuns(
         ) {
           continue;
         }
-        if (sessionRepo.find(sessionId)?.session.rootThreadId !== event.payload.threadId) continue;
+        const session = sessionRepo.find(sessionId)?.session;
+        if (!session || session.rootThreadId !== event.payload.threadId) continue;
+        if (sessionRepo.turn(sessionId, event.payload.turnId)?.kind === "compact") continue;
+        if (
+          (event.type === "agent.turn.failed" &&
+            awaitsRetryDecision(session, event.payload.error)) ||
+          (event.type === "agent.turn.interrupted" && event.payload.reason === "runner_restart")
+        ) {
+          continue;
+        }
         failure =
           event.type === "agent.turn.completed"
             ? null

@@ -14,7 +14,11 @@ export const queueKey = (sessionId: string) => ["session-queue", sessionId] as c
 /** The session a `message.*` queue event belongs to, if it is one. */
 export function queueEventSession(env: EventEnvelope): string | undefined {
   if (env.type === "message.queued") return env.payload.message.sessionId;
-  if (env.type === "message.dequeued" || env.type === "message.edited") {
+  if (
+    env.type === "message.dequeued" ||
+    env.type === "message.edited" ||
+    env.type === "message.delivery"
+  ) {
     return env.payload.sessionId;
   }
   return undefined;

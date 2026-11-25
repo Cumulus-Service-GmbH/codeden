@@ -95,9 +95,12 @@ function QueuedRow({
     [message.input.attachments, client],
   );
   const busy = edit.isPending || remove.isPending || sendNow.isPending;
+  const steering = message.delivery === "steering";
+  const uncertain = message.delivery === "uncertain";
+  const editable = !steering && !uncertain;
   const from = senderLabel(message.from);
   const save = () => {
-    if (draft === null) return;
+    if (draft === null || !editable) return;
     if (draft.trim() === message.input.text.trim()) setDraft(null);
     else edit.mutate(draft.trim());
   };
@@ -109,11 +112,17 @@ function QueuedRow({
       aria-label={`${queuePosition(index)} queued message`}
     >
       <span className="mt-0.5 w-9 shrink-0 text-3xs font-medium text-muted-foreground uppercase">
-        {queuePosition(index)}
+        {steering || uncertain ? "—" : queuePosition(index)}
       </span>
       <div className="min-w-0 flex-1 space-y-1">
         {from && <div className="text-3xs font-medium text-primary/80">{from}</div>}
-        {draft === null ? (
+        {steering && <div className="text-xs text-muted-foreground">Delivering…</div>}
+        {uncertain && (
+          <div className="text-xs text-muted-foreground">
+            Delivery unconfirmed. This message will not resend automatically.
+          </div>
+        )}
+        {draft === null || !editable ? (
           message.input.text && (
             <p className="line-clamp-3 text-xs leading-relaxed whitespace-pre-wrap text-foreground">
               {message.input.text}
@@ -161,7 +170,7 @@ function QueuedRow({
           </ImageGallery>
         )}
       </div>
-      {draft === null && (
+      {(draft === null || !editable) && (
         <div className="flex shrink-0 items-center gap-0.5 opacity-70 transition-opacity group-hover:opacity-100 focus-within:opacity-100">
           {canSteer && (
             <Button
@@ -169,7 +178,7 @@ function QueuedRow({
               variant="ghost"
               aria-label="Send now"
               title="Send now, into the running turn"
-              disabled={busy}
+              disabled={busy || !editable}
               onClick={() => sendNow.mutate()}
             >
               <SendHorizontal />
@@ -180,7 +189,7 @@ function QueuedRow({
             variant="ghost"
             aria-label="Edit"
             title="Edit"
-            disabled={busy}
+            disabled={busy || !editable}
             onClick={() => setDraft(message.input.text)}
           >
             <Pencil />
@@ -188,9 +197,9 @@ function QueuedRow({
           <Button
             size="icon-xs"
             variant="ghost"
-            aria-label="Delete"
-            title="Delete"
-            disabled={busy}
+            aria-label={uncertain ? "Dismiss unconfirmed message" : "Delete"}
+            title={uncertain ? "Dismiss unconfirmed message" : "Delete"}
+            disabled={busy || steering}
             onClick={() => remove.mutate()}
           >
             <Trash2 />

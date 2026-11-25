@@ -204,6 +204,7 @@ it("sends a product refusal to the reviewer once and then to the owner inbox", a
         },
       },
       repo: { find: () => ({ session: reviewer }) },
+      github: { commitChecks: async () => "success" },
       settings: { get: () => ({ teamSetup: { remembered: false, team: [] } }) },
       sessions: { startTurn, list: () => [reviewer], models: () => [] },
       inbox: { find: () => undefined, put },

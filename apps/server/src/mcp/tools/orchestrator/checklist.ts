@@ -56,12 +56,16 @@ export const updateChecklist = defineTool({
 export const proposeChecklistPlan = defineTool({
   name: "propose_checklist_plan",
   description:
-    "After plan review, request owner approval for the exact reviewed tasks. Supply the review receipt reference and SHA-256 of the UTF-8 JSON array of task objects with keys id then text and no extra whitespace. An approved revision replaces the pin; only its scope diff needs approval.",
+    "Request owner approval for the exact proposed tasks. The review reference is proposer-supplied and not independently verified. Hash the UTF-8 bytes of ECMAScript JSON.stringify(tasks.map(({ id, text }) => ({ id, text }))) with SHA-256, without escaping non-ASCII characters. An approved revision replaces the pin. Set replacePending only to supersede the current pending proposal.",
   roles: ["orchestrator"],
   scope: "global",
-  input: z.object({ projectId: Id, plan: ReviewedChecklistPlan }),
-  handler: async ({ projectId, plan }, { services }) => {
-    const { pending } = services.checklist.proposePlan(projectId, plan);
+  input: z.object({
+    projectId: Id,
+    plan: ReviewedChecklistPlan,
+    replacePending: z.boolean().optional(),
+  }),
+  handler: async ({ projectId, plan, replacePending }, { services }) => {
+    const { pending } = services.checklist.proposePlan(projectId, plan, replacePending);
     return pending?.plan?.sha === plan.sha
       ? `Plan ${plan.sha} awaits owner approval (${pending.inboxItemId}).`
       : `Plan ${plan.sha} is already approved.`;

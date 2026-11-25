@@ -1,3 +1,4 @@
+import { formatOwnerMergeApproval } from "@codeden/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 import { type Database, openDatabase } from "../src/db/client";
@@ -39,6 +40,27 @@ function setup() {
 }
 
 describe("decision approvals", () => {
+  it("counts pending approval cards alongside ordinary inbox items", async () => {
+    const { service } = setup();
+    service().raise(pm, "project", { kind: "github", target });
+    const app = inboxRoutes({
+      decisions: service(),
+      inbox: { list: () => [], counts: () => ({ open: 0, byProject: {}, byKind: {} }) },
+    } as unknown as AppServices);
+    expect(await (await app.request("/counts")).json()).toEqual({
+      open: 1,
+      byProject: { project: 1 },
+      byKind: { owner_decision: 1 },
+    });
+  });
+
+  it("formats the shared merge approval wire line with a whole-second timestamp", () => {
+    expect(
+      formatOwnerMergeApproval("a".repeat(40), new Date("2026-11-20T10:00:00.123Z"), "Approved"),
+    ).toBe(
+      `OWNER-APPROVED via CodeDen orchestrator: ${"a".repeat(40)} 2026-11-20T10:00:00Z "Approved"`,
+    );
+  });
   it("only posts after the owner's click and consumes the card across service restarts", async () => {
     const { service, post } = setup();
     const card = service().raise(pm, "project", { kind: "github", target });

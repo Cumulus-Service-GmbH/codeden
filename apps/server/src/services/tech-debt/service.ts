@@ -261,7 +261,16 @@ export class TechDebtService {
   }
 
   private save(view: TechDebtView): TechDebtView {
-    this.store.append([{ type: "tech_debt.updated", sessionId: null, payload: { view } }]);
+    const { findings, ...metadata } = view;
+    const previous = new Map(
+      this.get(view.projectId).findings.map((finding) => [finding.id, JSON.stringify(finding)]),
+    );
+    const changes = findings.filter(
+      (finding) => previous.get(finding.id) !== JSON.stringify(finding),
+    );
+    this.store.append([
+      { type: "tech_debt.changed", sessionId: null, payload: { metadata, changes } },
+    ]);
     return view;
   }
 

@@ -19,8 +19,13 @@ import { EventStore } from "../src/events/store";
 import { ensureHome } from "../src/paths";
 import { sessionRoutes } from "../src/routes/sessions";
 import { createServices } from "../src/services/container";
+import { conflict } from "../src/services/errors";
 import type { RunnerPort } from "../src/services/runner-port";
-import { listTeamRuns, saveTeamRun } from "../src/services/sessions/team-run-projection";
+import {
+  listTeamRuns,
+  listTeamRunsForSnapshot,
+  saveTeamRun,
+} from "../src/services/sessions/team-run-projection";
 import { resolveApprovedTeamPlan } from "../src/services/sessions/team-run-scheduler";
 import { type TeamRunPorts, TeamRuns } from "../src/services/sessions/team-runs";
 import { SettingsStore } from "../src/settings-store";
@@ -48,6 +53,7 @@ function setup(
   criteria?: string[],
   itemIds = ["a", "b"],
   history?: TeamRunPorts["history"],
+  capture?: TeamRunPorts["capture"],
 ) {
   const merge = vi.fn(
     async (): Promise<{ conflict?: string; needsResolution?: boolean }> => ({
@@ -102,6 +108,7 @@ function setup(
       head,
       review,
       history,
+      capture,
       gate,
       ownerDecision,
       arbiter,
@@ -126,6 +133,85 @@ function setup(
     defer,
   };
 }
+
+it("refuses a captured review without authenticated reviewer provenance", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "codeden-team-receipt-"));
+  try {
+    const path = join(dir, "history.md");
+    writeFileSync(path, "");
+    const head = "a".repeat(40);
+    const { runs, gate, merge } = setup(
+      undefined,
+      [],
+      undefined,
+      ["a"],
+      async () => path,
+      async () => ({ head, history: "Candidate" }),
+    );
+    const run = await runs.start("project", { checklistId: "approved" });
+    const finished = await runs.finish(run.id, run.workers[0]?.sessionId ?? "", null);
+    expect(finished.workers[0]?.checkpoint?.blocker).toContain("reviewer receipt");
+    expect(gate).not.toHaveBeenCalled();
+    expect(merge).not.toHaveBeenCalled();
+  } finally {
+    await removeTree(dir);
+  }
+});
+
+it("raises an owner decision when the assignment exhausts its rounds", async () => {
+  const { runs, ownerDecision } = setup(undefined, [], undefined, ["a"]);
+  const first = await runs.start("project", { checklistId: "approved" });
+  const second = await runs.finish(first.id, first.workers[0]?.sessionId ?? "", "Build failed");
+  const last = await runs.finish(first.id, second.workers[0]?.sessionId ?? "", "Still failing");
+  expect(last.status).toBe("waiting");
+  expect(ownerDecision).toHaveBeenCalledOnce();
+  expect(ownerDecision).toHaveBeenCalledWith(
+    expect.objectContaining({ id: first.id }),
+    expect.objectContaining({ itemId: "a", status: "failed" }),
+  );
+});
+
+it("retries a refused launch that left no worker session", async () => {
+  const save = vi.fn();
+  const { runs, launch } = setup(save, [], undefined, ["a"]);
+  const launchWorker = launch.getMockImplementation();
+  if (!launchWorker) throw new Error("Missing launch fixture");
+  launch
+    .mockImplementationOnce(launchWorker)
+    .mockRejectedValueOnce(conflict("No slot was available", "team_launch_refused"));
+  const run = await runs.start("project", { checklistId: "approved" });
+  expect(run.status).toBe("running");
+  expect(run.workers[0]).toMatchObject({ status: "queued", attempt: 0, sessionId: null });
+  const restarted = setup(save, [run], undefined, ["a"]);
+  expect(restarted.launch).not.toHaveBeenCalled();
+  await restarted.runs.finishWorker("unrelated-session-that-freed-a-slot", null);
+  expect(restarted.launch).toHaveBeenCalledOnce();
+  expect(TeamRun.parse(save.mock.lastCall?.[0]).workers[0]).toMatchObject({
+    status: "running",
+    attempt: 1,
+    sessionId: expect.stringContaining("-1"),
+  });
+});
+
+it("limits ready Team history in snapshots while keeping all runs for recovery", async () => {
+  const env = createGithubEnv();
+  try {
+    const { runs } = setup();
+    const sample = await runs.start(env.localProject.id, { checklistId: "approved" });
+    saveTeamRun(env.store, sample);
+    for (let i = 0; i < 24; i++) {
+      saveTeamRun(env.store, { ...sample, id: `ready-${i}`, status: "ready" });
+    }
+    const snapshot = listTeamRunsForSnapshot(env.db.db);
+    expect(snapshot).toHaveLength(21);
+    expect(snapshot.map(({ id }) => id)).toContain(sample.id);
+    expect(snapshot.map(({ id }) => id)).toContain("ready-23");
+    expect(snapshot.map(({ id }) => id)).not.toContain("ready-0");
+    expect(listTeamRuns(env.db.db)).toHaveLength(25);
+  } finally {
+    await env.close();
+  }
+});
 
 it("keeps approved assignment criteria and valid UTF-8 in the bounded review history", async () => {
   const dir = mkdtempSync(join(tmpdir(), "codeden-team-review-"));
@@ -446,7 +532,17 @@ it("commits worker changes before review and handles a runner completion conflic
               message: "feat: complete Team assignment",
             }),
           ]);
-          return { head: "a".repeat(40) };
+          return {
+            head: "a".repeat(40),
+            record: {
+              head: "a".repeat(40),
+              provider: "fake",
+              model: "build-reviewer",
+              effort: "low",
+              slot: "primary",
+              receipt: "review-receipt",
+            },
+          };
         },
         verify: async () => {},
       },
@@ -511,6 +607,34 @@ it("commits worker changes before review and handles a runner completion conflic
     );
     const firstSessionId = run.workers[0]?.sessionId;
     if (!firstSessionId || !services.teamRuns) throw new Error("Worker was not launched");
+    env.store.append([
+      {
+        type: "agent.thread.started",
+        sessionId: firstSessionId,
+        payload: { type: "thread.started", thread: { id: "root" } },
+      },
+      {
+        type: "agent.turn.started",
+        sessionId: firstSessionId,
+        payload: { type: "turn.started", threadId: "root", turnId: "flaky" },
+      },
+      {
+        type: "agent.turn.failed",
+        sessionId: firstSessionId,
+        payload: {
+          type: "turn.failed",
+          threadId: "root",
+          turnId: "flaky",
+          error: { kind: "transient", message: "Temporary provider failure" },
+        },
+      },
+    ]);
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    expect(listTeamRuns(env.db.db).find(({ id }) => id === run.id)?.workers[0]).toMatchObject({
+      status: "running",
+      attempt: 1,
+      sessionId: firstSessionId,
+    });
     const retried = await services.teamRuns.finish(run.id, firstSessionId, "Retry needed");
     const retry = retried.workers[0];
     expect(retry).toMatchObject({ status: "running", attempt: 2 });
@@ -640,7 +764,7 @@ it("returns a product refusal to the reviewer once, then raises an owner decisio
 });
 
 it.each(["idle", "interrupted"] as const)(
-  "pauses a restored writing worker whose session is %s",
+  "preserves a restored writing worker whose session is %s",
   async (status) => {
     const env = createGithubEnv();
     try {
@@ -672,13 +796,12 @@ it.each(["idle", "interrupted"] as const)(
       });
 
       const [restored] = listTeamRuns(env.db.db);
-      const reason = "Team run interrupted by server restart";
-      expect(restored).toMatchObject({ status: "waiting", notice: reason });
+      expect(restored).toMatchObject({ status: "running", notice: null });
       expect(restored?.workers[0]).toMatchObject({
-        status: "waiting",
-        checkpoint: { blocker: reason },
+        status: "running",
+        sessionId: worker.sessionId,
+        reconciling: true,
       });
-      expect(restored?.workers[0]).not.toHaveProperty("reconciling");
     } finally {
       await env.close();
     }

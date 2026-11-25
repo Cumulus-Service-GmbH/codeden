@@ -41,8 +41,8 @@ export function httpOrchestrationApi(http: Fetcher): OrchestrationApi {
       post(rolePath(role, projectId), {}, (v) => RoleSessionResponse.parse(v).session),
     startFresh: (sessionId) =>
       post(`/orchestration/sessions/${enc(sessionId)}/start-fresh`, {}, (v) => Session.parse(v)),
-    send: (role, projectId, input, whenBusy = "queue") =>
-      post(`${rolePath(role, projectId)}/messages`, { input, whenBusy }, (v) =>
+    send: (role, projectId, input, whenBusy = "queue", submission) =>
+      post(`${rolePath(role, projectId)}/messages`, { input, whenBusy, submission }, (v) =>
         RoleMessageResponse.parse(v),
       ),
     projectStatus: (id) =>

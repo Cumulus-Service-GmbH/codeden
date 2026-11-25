@@ -1,5 +1,6 @@
 import type { RunnerCommandOf, RunnerCommandResult } from "@codeden/contracts";
 import { CommandError } from "../errors";
+import { worktreeState } from "../workspace/removal";
 import { snapshotTree } from "./checkpoints";
 import { diffTrees } from "./diff";
 import { git, gitOk, gitText, splitNul } from "./exec";
@@ -104,13 +105,16 @@ export async function branches(
   };
 }
 
-export async function mergeTeamWorker({
-  cwd,
-  assembler,
-  workerBranch,
-  head,
-  resolutionParents,
-}: RunnerCommandOf<"git.mergeTeamWorker">): Promise<RunnerCommandResult<"git.mergeTeamWorker">> {
+export async function mergeTeamWorker(
+  command: RunnerCommandOf<"git.mergeTeamWorker" | "git.mergeLegacyTeamWorker">,
+): Promise<RunnerCommandResult<"git.mergeTeamWorker">> {
+  const { cwd, assembler, workerBranch, head, resolutionParents } = command;
+  if (command.name === "git.mergeLegacyTeamWorker") {
+    const worktree = await worktreeState(command.repoPath, cwd);
+    if (worktree.state !== "registered" || worktree.containsOther) {
+      return { conflict: "Team assembler is not a registered worktree of this project" };
+    }
+  }
   const state = await status(cwd);
   if (
     state.branch !== assembler ||

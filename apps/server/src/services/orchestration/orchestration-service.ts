@@ -9,6 +9,7 @@ import {
   type ProjectStatus,
   type QueueSender,
   type RawEventEnvelope,
+  type RoleMessageRequest,
   type RoleMessageResponse,
   type Session,
   type UserInput,
@@ -18,7 +19,7 @@ import type { EventStore } from "../../events/store";
 import type { SettingsStore } from "../../settings-store";
 import type { ArtifactService } from "../artifacts";
 import { isValidTimezone, machineTimezone } from "../automations/cron";
-import { errorMessage } from "../errors";
+import { conflict, errorMessage } from "../errors";
 import type { TrustedAuthors } from "../github/review-trust";
 import type { InboxService } from "../inbox-service";
 import type { ProjectService } from "../projects/project-service";
@@ -292,10 +293,21 @@ export class OrchestrationService {
     input: UserInput,
     whenBusy: "queue" | "steer" | "reject" = "queue",
     from: QueueSender = "user",
+    submission?: RoleMessageRequest["submission"],
   ): Promise<RoleMessageResponse> {
     const ensured = await this.roles.ensure(role, projectId);
     const session = this.roles.find(role, projectId) ?? ensured;
-    const res = await this.deps.sessions.send(session.id, { input, whenBusy }, from);
+    if (submission && submission.sessionId !== session.id) {
+      throw conflict(
+        "This role's session changed. Open the current session before sending.",
+        "role_session_changed",
+      );
+    }
+    const res = await this.deps.sessions.send(
+      session.id,
+      { input, whenBusy, ...(submission ? { submissionId: submission.id } : {}) },
+      from,
+    );
     return { sessionId: session.id, status: res.status };
   }
 

@@ -28,13 +28,22 @@ export function inboxRoutes(s: AppServices) {
     })
     .get("/counts", queryOf(SnapshotQuery), (c) => {
       const capabilities = c.req.valid("query").capabilities?.split(",") ?? [];
-      if (inboxKindVisible("checklist_approval", capabilities)) return c.json(s.inbox.counts());
-      const counts: InboxCounts = { open: 0, byProject: {}, byKind: {} };
-      for (const { kind, projectId } of s.inbox.list({ status: "open" })) {
-        if (!inboxKindVisible(kind, capabilities)) continue;
+      const allKinds = inboxKindVisible("checklist_approval", capabilities);
+      const counts: InboxCounts = allKinds
+        ? s.inbox.counts()
+        : { open: 0, byProject: {}, byKind: {} };
+      if (!allKinds) {
+        for (const { kind, projectId } of s.inbox.list({ status: "open" })) {
+          if (!inboxKindVisible(kind, capabilities)) continue;
+          counts.open++;
+          if (projectId) counts.byProject[projectId] = (counts.byProject[projectId] ?? 0) + 1;
+          counts.byKind[kind] = (counts.byKind[kind] ?? 0) + 1;
+        }
+      }
+      for (const { projectId } of s.decisions.pending()) {
         counts.open++;
-        if (projectId) counts.byProject[projectId] = (counts.byProject[projectId] ?? 0) + 1;
-        counts.byKind[kind] = (counts.byKind[kind] ?? 0) + 1;
+        counts.byProject[projectId] = (counts.byProject[projectId] ?? 0) + 1;
+        counts.byKind.owner_decision = (counts.byKind.owner_decision ?? 0) + 1;
       }
       return c.json(counts);
     })

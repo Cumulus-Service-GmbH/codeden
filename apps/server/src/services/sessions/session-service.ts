@@ -30,7 +30,7 @@ import type { McpTokenStore } from "../../mcp/tokens";
 import type { SettingsStore } from "../../settings-store";
 import type { ArtifactService } from "../artifacts";
 import type { ChecklistService } from "../checklist/checklist-service";
-import { checklistStartItem } from "../checklist/start";
+import { checklistIsEnforced, checklistStartItem } from "../checklist/start";
 import { badRequest, conflict, ServiceError } from "../errors";
 import { isFactorySession } from "../factory/starter";
 import type { InboxService } from "../inbox-service";
@@ -42,6 +42,7 @@ import {
   type RunnerPort,
   runnerErrorCode,
   runnerForSession,
+  runnerUnavailable,
   toServiceError,
 } from "../runner-port";
 import type { UtilityService } from "../utility";
@@ -77,7 +78,7 @@ export interface SessionServiceDeps extends RunnerDeps {
   repo: SessionRepo;
   admission?: SessionAdmission;
   projects: ProjectService;
-  checklist?: Pick<ChecklistService, "get">;
+  checklist?: Pick<ChecklistService, "get" | "reserveLink" | "link">;
   inbox: InboxService;
   artifacts: ArtifactService;
   settings: SettingsStore;
@@ -292,47 +293,10 @@ export class SessionService {
     if (!project && req.role !== "orchestrator") {
       throw badRequest("projectId is required for this role", "project_required");
     }
-    if (project && req.role === "agent") {
-      const checklist = this.deps.checklist?.get(project.id);
-      if (checklist?.plan) {
-        checklistStartItem(
-          checklist,
-          req.purpose ?? firstPurposeLine(req.input?.text),
-          options.checklistItemId,
-          true,
-        );
-      }
-    }
     const previous = options.replacesRoleId
       ? this.roleToArchive(options.replacesRoleId)
       : undefined;
     if (previous) req = { ...req, provider: this.deps.settings.get().providers[req.role].provider };
-    // Refused before the conflict check: a worktree that can't be made is never queued either.
-    const workspace = startWorkspace(req.workspace, project);
-    if (
-      req.role === "agent" &&
-      req.startedBy.kind === "pm" &&
-      teamRoleOfTitle(req.title) === "browserOperator" &&
-      !options.chromeApproved &&
-      this.resolveProvider(req, project ? projectDefaultProvider(project) : null) === "claude"
-    ) {
-      const confirmation = await options.confirmChrome?.();
-      if (confirmation !== true) {
-        return {
-          status: "skipped",
-          reason:
-            typeof confirmation === "string" ? confirmation : "Chrome requires owner approval.",
-        };
-      }
-      // Recheck the project and conflicts after waiting for the user, with the provider fixed.
-      return this.start(
-        { ...req, provider: "claude" },
-        {
-          ...options,
-          chromeApproved: true,
-        },
-      );
-    }
     const purpose = derivePurpose(req.purpose, req.input?.text);
     const workKey = deriveWorkKey({
       workKey: req.workKey,
@@ -346,7 +310,10 @@ export class SessionService {
     let forced: StoredStartMeta["forced"] = null;
     if (conflicts.length > 0) {
       const decision = req.conflict;
-      if (!decision) return { status: "conflict", existing: conflicts };
+      if (!decision) {
+        startWorkspace(req.workspace, project);
+        return { status: "conflict", existing: conflicts };
+      }
       switch (decision.resolution) {
         case "skip":
           return { status: "skipped", reason: "The conflicting session start was skipped." };
@@ -370,6 +337,42 @@ export class SessionService {
       }
     }
 
+    const workspace = startWorkspace(req.workspace, project);
+    const fromPm = req.startedBy.kind === "pm";
+    const checklistService = this.deps.checklist;
+    const checklist =
+      project && req.role === "agent" ? checklistService?.get(project.id) : undefined;
+    const enforcing = checklistIsEnforced(checklist);
+    const item =
+      fromPm || checklist?.plan || checklist?.pending?.plan
+        ? checklistStartItem(
+            checklist,
+            req.purpose ?? firstPurposeLine(req.input?.text),
+            options.checklistItemId,
+            !fromPm,
+          )
+        : undefined;
+    if (fromPm && enforcing && !item) {
+      throw badRequest("This start requires checklist approval.", "checklist_approval_required");
+    }
+    if (
+      req.role === "agent" &&
+      fromPm &&
+      teamRoleOfTitle(req.title) === "browserOperator" &&
+      !options.chromeApproved &&
+      this.resolveProvider(req, project ? projectDefaultProvider(project) : null) === "claude"
+    ) {
+      const confirmation = await options.confirmChrome?.();
+      if (confirmation !== true) {
+        return {
+          status: "skipped",
+          reason:
+            typeof confirmation === "string" ? confirmation : "Chrome requires owner approval.",
+        };
+      }
+      // Recheck the project, checklist and conflicts after waiting for the owner.
+      return this.start({ ...req, provider: "claude" }, { ...options, chromeApproved: true });
+    }
     const session = this.buildSession(req, project, {
       purpose,
       workKey,
@@ -388,31 +391,48 @@ export class SessionService {
         "chrome_unavailable",
       );
     }
-    const queued = this.createAndLaunch(
-      session,
-      {
-        workspaceMode: workspace.mode,
-        workspaceFallback: null,
-        forced,
-        queuedBehind,
-        chromeOptIn: options.chromeApproved,
-        chromeRequested: req.chrome,
-        ...(options.teamArchitect ? { teamArchitect: true } : {}),
-        ...(options.autonomyFloor ? { autonomyFloor: options.autonomyFloor } : {}),
-        ...(options.ownTeamPins ? { ownTeamPins: true as const } : {}),
-        ...(options.runTeam ? { runTeam: options.runTeam } : {}),
-        ...(req.tokenSaver ? { tokenSaver: req.tokenSaver } : {}),
-        ...(req.role !== "agent" && {
-          roleProvider: this.deps.settings.get().providers[req.role].provider,
-          roleModel: this.deps.settings.get().providers[req.role].model,
-          roleEffort: this.deps.settings.get().providers[req.role].effort,
-        }),
-      },
-      workspace,
-      req.input,
-      undefined,
-      previous,
-    );
+    const releaseLink =
+      enforcing && item ? checklistService?.reserveLink(checklist.projectId, item) : undefined;
+    if (enforcing && item && !releaseLink) {
+      throw conflict(`Checklist item ${item.id} already has 200 active session links.`);
+    }
+    let queued: boolean;
+    let note =
+      options.checklistItemId && !item
+        ? `Unknown checklistItemId ${options.checklistItemId} was ignored.`
+        : undefined;
+    try {
+      queued = this.createAndLaunch(
+        session,
+        {
+          workspaceMode: workspace.mode,
+          workspaceFallback: null,
+          forced,
+          queuedBehind,
+          chromeOptIn: options.chromeApproved,
+          chromeRequested: req.chrome,
+          ...(options.teamArchitect ? { teamArchitect: true } : {}),
+          ...(options.autonomyFloor ? { autonomyFloor: options.autonomyFloor } : {}),
+          ...(options.ownTeamPins ? { ownTeamPins: true as const } : {}),
+          ...(options.runTeam ? { runTeam: options.runTeam } : {}),
+          ...(req.tokenSaver ? { tokenSaver: req.tokenSaver } : {}),
+          ...(req.role !== "agent" && {
+            roleProvider: this.deps.settings.get().providers[req.role].provider,
+            roleModel: this.deps.settings.get().providers[req.role].model,
+            roleEffort: this.deps.settings.get().providers[req.role].effort,
+          }),
+        },
+        workspace,
+        req.input,
+        undefined,
+        previous,
+      );
+      if (checklist && item) {
+        note = this.linkChecklistStart(checklist.projectId, item.id, session.id, queued);
+      }
+    } finally {
+      releaseLink?.();
+    }
     if (previous) {
       // Archived with the new one's creation: it doesn't run on, even while that one waits.
       void retireRoleSession(
@@ -424,8 +444,30 @@ export class SessionService {
       );
     }
     return queued
-      ? { status: "queued", sessionId: session.id, behind: queuedBehind }
-      : { status: "started", sessionId: session.id };
+      ? { status: "queued", sessionId: session.id, behind: queuedBehind, ...(note ? { note } : {}) }
+      : { status: "started", sessionId: session.id, ...(note ? { note } : {}) };
+  }
+
+  private linkChecklistStart(
+    projectId: string,
+    itemId: string,
+    sessionId: string,
+    queued: boolean,
+  ): string | undefined {
+    const checklist = this.deps.checklist;
+    const status = queued ? "queued" : "started";
+    try {
+      const session = this.deps.repo.find(sessionId)?.session;
+      if (session && checklist?.link(projectId, itemId, session)) return;
+      const stillListed = checklist?.get(projectId)?.items.some(({ id }) => id === itemId);
+      return stillListed
+        ? `${status}, but the session could not be linked to item ${itemId}`
+        : `${status}, but item ${itemId} is no longer in the approved plan: not linked`;
+    } catch (error) {
+      console.error(`[codeden] Checklist link failed for session ${sessionId}`, error);
+      const message = error instanceof Error ? error.message : String(error);
+      return `${queued ? "Queued" : "Started"}, but linking checklist item ${itemId} failed: ${message}`;
+    }
   }
 
   private roleToArchive(id: string): Session {
@@ -583,7 +625,15 @@ export class SessionService {
     assertProjectActive(this.deps.projects, session);
     assertRoleWritable(session);
     this.assertForcedProvider(session);
-    if (NOT_STARTED.has(session.status)) return this.enqueue(id, req.input, from);
+    const { admission, repo, outbox } = this.deps;
+    const messageId = req.submissionId && `submission:${id}:${req.submissionId}`;
+    if (messageId) {
+      if (outbox.get(id, messageId)) return { status: "queued" };
+      const settled = outbox.dequeuedReason(id, messageId);
+      if (settled === "sent" || settled === "deleted") return { status: "sent" };
+    }
+    const enqueue = (place?: string) => this.enqueue(id, req.input, from, place, messageId);
+    if (NOT_STARTED.has(session.status)) return enqueue();
     // A turn on its way to the runner counts as running, though there is nothing to steer yet.
     const delivering = this.delivering.has(id);
     if (BUSY.has(session.status) || delivering) {
@@ -597,7 +647,9 @@ export class SessionService {
             this.provider(session.provider, id)?.capabilities.steer))
       ) {
         try {
-          if ((await this.steer(id, req.input, from)) === "queued") return { status: "queued" };
+          if ((await this.steer(id, req.input, from, messageId)) === "queued") {
+            return { status: "queued" };
+          }
         } catch (error) {
           if (runnerErrorCode(error) === "priority_cancelled") throw error;
           if (
@@ -605,16 +657,15 @@ export class SessionService {
             !["compacting", "no_turn"].includes(runnerErrorCode(error) ?? "")
           )
             throw error;
-          const queued = this.enqueue(id, req.input, from);
+          const queued = enqueue();
           this.flushIfSettled(id);
           return queued;
         }
         if (PRIORITY_SENDERS.has(from) && !this.hasOutbox(id)) this.deps.admission?.dequeue(id);
         return { status: "steered" };
       }
-      return this.enqueue(id, req.input, from);
+      return enqueue();
     }
-    const { admission, repo } = this.deps;
     const priority = PRIORITY_SENDERS.has(from);
     if (priority) this.reserve(session);
     else if (
@@ -624,32 +675,46 @@ export class SessionService {
       if (req.whenBusy === "reject" || !this.canWaitForOutbox(session)) {
         throw conflict("All agent slots are in use", AT_CAPACITY_CODE);
       }
-      const queued = this.enqueue(id, req.input, from);
+      const queued = enqueue();
       this.holds.release(id);
       if (!session.archivedAt) admission?.enqueue(id);
       return queued;
     }
     // Its place in the queue, should it end up there: ahead of messages that arrive meanwhile.
-    const place = this.deps.outbox.reserve();
+    const place = outbox.reserve();
+    const submitted = messageId
+      ? outbox.push(id, this.externalize(session, req.input), from, place, messageId)
+      : undefined;
     try {
+      if (submitted) {
+        outbox.steering.add(submitted.id);
+        outbox.markDelivery(submitted, true);
+      }
       await this.sendNow(session, req.input, from);
+      if (submitted) outbox.remove(submitted, "sent");
       if (priority && !this.hasOutbox(id)) admission?.dequeue(id);
     } catch (error) {
       // The provider is still running a turn the server had not seen: the message waits for it.
       if (isTurnRunningError(error)) {
-        if (req.whenBusy === "reject") throw conflict("A turn is running", "turn_running");
-        const queued = this.enqueue(id, req.input, from, place);
+        if (req.whenBusy === "reject") {
+          if (submitted) outbox.remove(submitted, "dropped");
+          throw conflict("A turn is running", "turn_running");
+        }
+        if (submitted) outbox.markDelivery(submitted, false);
+        const queued = submitted ? { status: "queued" as const } : enqueue(place);
         this.flushIfSettled(id);
         return queued;
       }
+      if (submitted) return { status: "queued" };
       // CodeDen's own roles never lose a message to a runner restart: it waits in the queue.
       // The user sees the error instead; a wake (`reject`) is retried by its scheduler.
       if (from === "user" || req.whenBusy === "reject" || !isTransientRunnerError(error)) {
         throw error;
       }
       this.holds.hold(id, true);
-      return this.enqueue(id, req.input, from, place);
+      return enqueue(place);
     } finally {
+      if (submitted) outbox.releaseSteer(submitted);
       admission?.release(id);
     }
     this.holds.release(id);
@@ -660,6 +725,7 @@ export class SessionService {
     id: string,
     raw: UserInput,
     source: QueueSender | QueuedMessage = "user",
+    messageId?: string,
   ): Promise<"steered" | "queued"> {
     if (this.prioritySuspended)
       throw conflict("Priority delivery paused for shutdown", "priority_suspended");
@@ -673,13 +739,16 @@ export class SessionService {
     }
     if (compactionRunning(this.deps.repo, session)) throw compactingRefusal();
     const { outbox } = this.deps;
-    const place = typeof source === "string" ? outbox.reserve() : undefined;
     const stored = typeof source === "string" ? this.externalize(session, raw) : source.input;
     const input = this.forRunner(session, stored);
     const delay = capabilities.interruptToolCall
       ? this.deps.settings.get().priorityInterruptMinutes * 60_000
       : undefined;
-    let pending: QueuedMessage | undefined;
+    const pending =
+      typeof source === "string" ? outbox.push(id, stored, source, undefined, messageId) : source;
+    outbox.steering.add(pending.id);
+    let waited = false;
+    let awaitingAck = false;
     const wait = this.priorityWaits.get(id) ?? { controller: new AbortController(), pending: 0 };
     wait.pending++;
     this.priorityWaits.set(id, wait);
@@ -687,45 +756,54 @@ export class SessionService {
       await deliverPriority(
         async (attempt) => {
           const runner = this.runnerOf(id);
+          if (!runner.isConnected()) throw runnerUnavailable(runner);
           const revision = await applyPendingConfig(this.deps.repo, runner, session, true);
           wait.controller.signal.throwIfAborted();
           assertConfigRevision(this.deps.repo, id, revision);
-          const result = await runner.request({
-            name: "session.steer",
-            sessionId: id,
-            input,
-            revision,
-            waitForShell: true,
-            ...attempt,
-          });
-          if (
-            result?.waitingFor &&
-            !pending &&
-            typeof source === "string" &&
-            !wait.controller.signal.aborted
-          ) {
-            pending = outbox.push(id, stored, source, place);
-            outbox.steering.add(pending.id);
+          outbox.markDelivery(pending, true);
+          awaitingAck = true;
+          try {
+            const result = await runner.request({
+              name: "session.steer",
+              sessionId: id,
+              input,
+              revision,
+              waitForShell: true,
+              ...attempt,
+            });
+            awaitingAck = false;
+            if (result?.waitingFor) {
+              outbox.markDelivery(pending, false);
+              waited ||= !wait.controller.signal.aborted;
+            }
+            return result;
+          } catch (error) {
+            if (["compacting", "no_turn", "unsupported"].includes(runnerErrorCode(error) ?? "")) {
+              awaitingAck = false;
+              outbox.markDelivery(pending, false);
+            }
+            throw error;
           }
-          return result;
         },
         (wake) => this.deps.repo.onPriorityBoundary(id, wake),
         delay,
         wait.controller.signal,
       );
-      if (pending && outbox.get(id, pending.id)) outbox.remove(pending, "sent");
+      if (outbox.get(id, pending.id)) outbox.remove(pending, "sent");
       return "steered";
     } catch (error) {
       if (
-        (pending && isTransientRunnerError(error)) ||
-        (runnerErrorCode(error) === "priority_suspended" && (pending || typeof source !== "string"))
+        awaitingAck ||
+        isTransientRunnerError(error) ||
+        (runnerErrorCode(error) === "priority_suspended" && (waited || typeof source !== "string"))
       ) {
         return "queued";
       }
-      if (pending && outbox.get(id, pending.id)) outbox.remove(pending, "dropped");
+      if (typeof source === "string" && outbox.get(id, pending.id))
+        outbox.remove(pending, "dropped");
       throw toServiceError(error);
     } finally {
-      if (pending) outbox.steering.delete(pending.id);
+      outbox.releaseSteer(pending);
       // Keep Stop wired to all concurrent priority requests for this session.
       if (--wait.pending === 0 && this.priorityWaits.get(id) === wait) {
         this.priorityWaits.delete(id);
@@ -917,13 +995,26 @@ export class SessionService {
           return;
         }
       }
+      const tracked = next.id.startsWith("submission:");
       try {
         if (session.archivedAt) admission?.dequeue(id);
-        outbox.remove(next, "sent");
+        if (tracked) {
+          outbox.steering.add(next.id);
+          outbox.markDelivery(next, true);
+        } else {
+          outbox.remove(next, "sent");
+        }
         await this.sendNow(session, next.input, next.from);
+        if (tracked) outbox.remove(next, "sent");
       } catch (error) {
         if (isTurnRunningError(error)) {
-          outbox.restore(next);
+          if (tracked) outbox.markDelivery(next, false);
+          else outbox.restore(next);
+          this.flushIfSettled(id);
+          return;
+        }
+        if (tracked) {
+          // The runner may already have accepted this submission despite the error.
           this.flushIfSettled(id);
           return;
         }
@@ -935,6 +1026,8 @@ export class SessionService {
           this.deps.launcher.fail(id, `send-${Date.now()}`, error);
         }
         return;
+      } finally {
+        if (tracked) outbox.releaseSteer(next);
       }
       if (priority ? !this.hasOutbox(id) : admissionHead) admission?.dequeue(id);
     } finally {
@@ -993,7 +1086,10 @@ export class SessionService {
   dropQueued(id: string, from: QueueSender): number {
     const mine = this.deps.outbox
       .list(id)
-      .filter((m) => m.from === from && !this.deps.outbox.steering.has(m.id));
+      .filter(
+        (m) =>
+          m.from === from && m.delivery !== "uncertain" && !this.deps.outbox.steering.has(m.id),
+      );
     for (const m of mine) this.deps.outbox.remove(m, "dropped");
     if (!this.hasOutbox(id) && this.deps.repo.find(id)?.session.status !== "queued") {
       this.deps.admission?.dequeue(id);
@@ -1112,9 +1208,10 @@ export class SessionService {
     input: UserInput,
     from: QueueSender,
     at?: string,
+    messageId?: string,
   ): SendMessageResponse {
     const session = this.deps.repo.get(id);
-    this.deps.outbox.push(id, this.externalize(session, input), from, at);
+    this.deps.outbox.push(id, this.externalize(session, input), from, at, messageId);
     return { status: "queued" };
   }
 

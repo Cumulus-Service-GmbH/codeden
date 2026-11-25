@@ -1,3 +1,5 @@
+import { readFile } from "node:fs/promises";
+import { ReviewPolicy } from "@codeden/contracts";
 import { afterEach, expect, it, vi } from "vitest";
 import type { ExecResult } from "../src/services/exec";
 import { readyInboxId } from "../src/services/factory/merge";
@@ -18,8 +20,8 @@ afterEach(async () => {
 });
 const { enable, item, review, tick, verifying } = factorySteps(() => env);
 
-async function finishReview(autoMerge: boolean) {
-  await enable("software_factory", { autoMerge, tuning: { team: reviewTeam } });
+async function finishReview(autoMerge: boolean, reviewPolicy?: ReviewPolicy) {
+  await enable("software_factory", { autoMerge, tuning: { team: reviewTeam, reviewPolicy } });
   const { id, pr } = await verifying("success");
   await review(id, {
     ...APPROVE,
@@ -37,6 +39,54 @@ it("a configured completion check that passes lets the item proceed", async () =
   const { id, pr } = await finishReview(true);
   expect(item(id).jev).toMatchObject({ status: "pass", head: pr.headSha });
   expect(env.gh.merges.map((m) => m.number)).toEqual([pr.ref.number]);
+});
+
+it("retries a transient completion-check failure within the configured attempt cap", async () => {
+  env = activeEnv = createFactoryEnv({ jevScript: fixtureJevScript });
+  const invoke = vi
+    .fn((result: ExecResult) => result)
+    .mockImplementationOnce((result) => ({ ...result, timedOut: true }));
+  installDoneFixture(env, invoke);
+  const { id, pr } = await finishReview(true);
+  expect(invoke).toHaveBeenCalledOnce();
+  expect(item(id).jev).toMatchObject({ status: "unavailable" });
+  await tick();
+  expect(invoke).toHaveBeenCalledTimes(2);
+  expect(item(id).jev).toMatchObject({ status: "pass", head: pr.headSha });
+});
+
+it("keeps the merge blocked once the configured attempt cap is reached", async () => {
+  env = activeEnv = createFactoryEnv({ jevScript: fixtureJevScript });
+  const invoke = vi.fn((result: ExecResult) => ({ ...result, timedOut: true }));
+  installDoneFixture(env, invoke);
+  const { id } = await finishReview(true, ReviewPolicy.parse({ jevAttempts: 2 }));
+  await tick();
+  await tick();
+  expect(invoke).toHaveBeenCalledTimes(2);
+  expect(item(id).jev?.status).toBe("owner decision");
+  expect(env.gh.merges).toEqual([]);
+});
+
+it("gives Jev only host-verified CI evidence instead of reviewer-pasted test output", async () => {
+  env = activeEnv = createFactoryEnv({ jevScript: fixtureJevScript });
+  installDoneFixture(env);
+  const { pr } = await finishReview(true);
+  const done = env.execs.find(({ args }) => args[1] === "done");
+  expect(done).toBeDefined();
+  const raw = await readFile(done?.args[2] ?? "", "utf8");
+  expect(raw).toContain("GitHub commit checks");
+  expect(raw).toContain(pr.headSha);
+  expect(raw).not.toContain("test/counter.test.ts | grep");
+});
+
+it("fails closed when reviewer text claims passing tests without verified CI", async () => {
+  env = activeEnv = createFactoryEnv({ jevScript: fixtureJevScript });
+  installDoneFixture(env);
+  vi.spyOn(env.gh, "commitChecks").mockResolvedValue("failure");
+  const { id } = await finishReview(true);
+  expect(env.execs.some(({ args }) => args[1] === "done")).toBe(false);
+  expect(item(id).jev?.status).toBe("owner decision");
+  expect(env.gh.merges).toEqual([]);
 });
 
 async function expectBlocked(done: (result: ExecResult) => ExecResult) {

@@ -18,6 +18,8 @@ export type RoleSessionResponse = z.infer<typeof RoleSessionResponse>;
 /** `POST .../orchestrator/messages` and `.../projects/:id/pm/messages`. */
 export const RoleMessageRequest = z.object({
   input: UserInput,
+  /** A composer retry must target the same concrete role session. */
+  submission: z.object({ id: z.uuid(), sessionId: Id }).optional(),
   whenBusy: z.enum(["queue", "steer", "reject"]).default("queue"),
 });
 export type RoleMessageRequest = z.infer<typeof RoleMessageRequest>;

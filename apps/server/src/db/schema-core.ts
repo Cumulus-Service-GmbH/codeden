@@ -331,6 +331,7 @@ export const queuedMessages = sqliteTable(
     /** Who queued it; null for rows written before senders were recorded (the user). */
     sender: text("sender").$type<QueueSender>(),
     createdAt: text("created_at").notNull(),
+    deliveryUncertain: integer("delivery_uncertain", { mode: "boolean" }),
   },
   (t) => [index("queued_messages_session").on(t.sessionId, t.createdAt)],
 );

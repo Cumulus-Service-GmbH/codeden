@@ -32,6 +32,7 @@ it("lists the first reviewed plan once in the inbox when the checklist is empty"
   renderWithClient(<ChecklistInboxCard item={item} />, client);
 
   expect(await screen.findByText("Reviewed plan")).toBeTruthy();
+  expect(screen.getByText("Review reference supplied by the proposer: review-1")).toBeTruthy();
   expect(screen.getAllByText(task.text)).toHaveLength(1);
   expect(screen.queryByText("Changes to current checklist")).toBeNull();
 });

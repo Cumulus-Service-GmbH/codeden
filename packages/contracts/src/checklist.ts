@@ -50,9 +50,10 @@ export type ChecklistChange = z.infer<typeof ChecklistChange>;
 export const ChecklistState = z.enum(["draft", "approved"]);
 export type ChecklistState = z.infer<typeof ChecklistState>;
 
-/** A plan reviewed at the SHA-256 of the UTF-8 JSON task array, with keys ordered id then text. */
+/** Proposed tasks bound to the SHA-256 of the UTF-8 JSON.stringify task array with keys id then text. */
 export const ReviewedChecklistPlan = z.object({
   sha: z.string().regex(/^[a-f0-9]{64}$/),
+  /** Proposer-supplied reference. The owner approves the digest and tasks. */
   reviewRef: singleLine.min(1).max(500),
   tasks: z
     .array(

@@ -44,6 +44,8 @@ export const QueuedMessage = z.object({
   /** Who queued it. Events written before senders were recorded were all the user's. */
   from: QueueSender.default("user"),
   createdAt: Timestamp,
+  /** An active steer, or an attempt whose acceptance could not be established. */
+  delivery: z.enum(["steering", "uncertain"]).optional(),
 });
 export type QueuedMessage = z.infer<typeof QueuedMessage>;
 

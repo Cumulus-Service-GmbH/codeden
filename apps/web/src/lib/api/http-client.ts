@@ -168,8 +168,8 @@ export function createHttpClient(origin: string, opts: HttpClientOptions = {}): 
     },
     getToolOutput: (id, itemId) =>
       get(`/sessions/${enc(id)}/items/${enc(itemId)}/output`, (v) => ToolOutputResponse.parse(v)),
-    async sendMessage(id, input, mode) {
-      const body: SendMessageRequestInit = { input, whenBusy: whenBusy[mode] };
+    async sendMessage(id, input, mode, submissionId) {
+      const body: SendMessageRequestInit = { input, whenBusy: whenBusy[mode], submissionId };
       await post(`/sessions/${enc(id)}/messages`, body);
     },
     async interrupt(id) {

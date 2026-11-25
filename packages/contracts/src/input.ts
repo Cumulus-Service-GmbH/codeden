@@ -103,6 +103,9 @@ export const UserInput = z.object({
   teamCoordination: TeamCoordinationMessage.optional(),
 });
 export type UserInput = z.infer<typeof UserInput>;
+
+/** Data a browser user can provide. The server assigns all sender and coordination fields. */
+export const PublicUserInput = UserInput.pick({ text: true, attachments: true });
 /** Input shape accepted before defaults are applied (`attachments` optional). */
 export type UserInputInit = z.input<typeof UserInput>;
 

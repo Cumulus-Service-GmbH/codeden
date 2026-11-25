@@ -11,6 +11,7 @@ import {
   type TeamWorkerJev,
   teamMember,
 } from "@codeden/contracts";
+import { ServiceError } from "../errors";
 import type { TeamReviewEvidence } from "./team-run-jev";
 import { checkpoint, reviewAndMerge } from "./team-run-review";
 import { assignmentRoundLimit, eligibleAssignments, resolveRunTeam } from "./team-run-scheduler";
@@ -36,6 +37,7 @@ export interface TeamRunPorts {
     run: TeamRun,
     item?: TeamRun["items"][number],
     packet?: string,
+    onStarted?: (sessionId: string) => void,
   ): Promise<{ sessionId: string; branch: string; worktree: string; baseHead?: string }>;
   prepareAssembler(run: TeamRun, coordinatorId: string): Promise<string>;
   hasWorkerSession(sessionId: string): boolean;
@@ -120,7 +122,21 @@ export class TeamRuns {
         if (worker.jev?.status === "owner decision") this.ports.ownerDecision(run, worker);
       }
       const running = run.workers.filter((worker) => worker.status === "running");
-      if (!running.length && run.status !== "running") continue;
+      if (!running.length) {
+        if (run.status !== "running") {
+          const blocked =
+            run.status === "waiting" &&
+            run.notice &&
+            run.workers.find(
+              (worker) =>
+                worker.jev?.status !== "owner decision" &&
+                (worker.status === "waiting" || worker.status === "failed"),
+            );
+          if (blocked) this.ports.ownerDecision(run, blocked);
+          continue;
+        }
+        if (run.coordinatorId && eligibleAssignments(run.workers, run.limits, 1).length) continue;
+      }
       const reason = "Team run interrupted by server restart";
       for (const worker of running) {
         if (
@@ -139,6 +155,10 @@ export class TeamRuns {
         run.notice = reason;
       }
       this.save(run);
+      if (run.status === "waiting") {
+        const blocked = running.find((worker) => worker.status === "waiting");
+        if (blocked) this.ports.ownerDecision(run, blocked);
+      }
     }
   }
 
@@ -146,12 +166,15 @@ export class TeamRuns {
     await this.pending;
     const runId = this.runForWorker(sessionId);
     if (runId) await this.finish(runId, sessionId, failure);
-    else
-      await this.serialize(async () => {
-        for (const run of this.runs.values()) {
-          if (run.coordinatorId && run.status === "running") await this.dispatch(run);
-        }
-      });
+    else await this.dispatchAvailable();
+  }
+
+  dispatchAvailable(): Promise<void> {
+    return this.serialize(async () => {
+      for (const run of this.runs.values()) {
+        if (run.coordinatorId && run.status === "running") await this.dispatch(run);
+      }
+    });
   }
 
   private runForWorker(sessionId: string): string | undefined {
@@ -244,6 +267,8 @@ export class TeamRuns {
         run.status = "waiting";
         run.notice = String(error);
         this.save(run);
+        const worker = run.workers[0];
+        if (worker) this.ports.ownerDecision(run, worker);
       }
       return structuredClone(run);
     });
@@ -315,6 +340,18 @@ export class TeamRuns {
         }
       }
       this.save(run);
+      const blocker =
+        run.status === "waiting" &&
+        run.workers.find(
+          (entry) =>
+            entry.status === "waiting" ||
+            (entry.status === "failed" &&
+              entry.attempt >= assignmentRoundLimit(entry, run.limits.maxRounds)),
+        );
+      if (blocker && blocker.jev?.status !== "owner decision")
+        this.ports.ownerDecision(run, blocker);
+      else if (run.status === "waiting" && !blocker && run.notice)
+        this.ports.ownerDecision(run, worker);
       await this.ports.coordinate(coordinatorId, {
         type: "continue",
         itemId: worker.itemId,
@@ -325,14 +362,14 @@ export class TeamRuns {
   }
 
   private async dispatch(run: TeamRun) {
-    for (const itemId of eligibleAssignments(
-      run.workers,
-      run.limits,
-      this.ports.freeAgentSlots(),
-    )) {
+    while (true) {
+      const [itemId] = eligibleAssignments(run.workers, run.limits, this.ports.freeAgentSlots());
+      if (!itemId) return;
       const worker = run.workers.find((entry) => entry.itemId === itemId);
       const item = run.items.find((entry) => entry.id === itemId);
       if (!worker || !item) throw new Error("Assignment is outside the approved plan");
+      const previous = structuredClone(worker);
+      const index = run.workers.indexOf(worker);
       const resolving = worker.step === "merge" && worker.resolutionHead && !worker.resolutionBase;
       const base = resolving ? run.assembler : (worker.branch ?? run.assembler);
       worker.status = "running";
@@ -347,20 +384,36 @@ export class TeamRuns {
       try {
         const resources = await this.ports.launch(
           member(run.team, "writer"),
-          `work/${run.id}/${run.workers.indexOf(worker) + 1}-${worker.attempt}`,
+          `work/${run.id}/${index + 1}-${worker.attempt}`,
           base,
           run,
           item,
           worker.checkpoint
             ? `Completed work\n${worker.checkpoint.summary}\n\nRemaining work, in order\n${worker.checkpoint.nextSteps}`
             : undefined,
+          (sessionId) => {
+            worker.sessionId = sessionId;
+            this.save(run);
+          },
         );
         Object.assign(worker, { ...resources, baseHead: worker.baseHead ?? resources.baseHead });
         if (resolving) worker.resolutionBase = resources.baseHead;
       } catch (error) {
+        if (
+          error instanceof ServiceError &&
+          error.code === "team_launch_refused" &&
+          !worker.sessionId
+        ) {
+          run.workers[index] = { ...previous, progress: error.message };
+          this.save(run);
+          return;
+        }
         checkpoint(worker, "waiting", String(error));
         run.status = "waiting";
         run.notice = worker.checkpoint?.blocker ?? null;
+        this.save(run);
+        this.ports.ownerDecision(run, worker);
+        return;
       }
       this.save(run);
     }

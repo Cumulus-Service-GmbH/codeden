@@ -47,7 +47,7 @@ export class QueueService {
   }
 
   delete(sessionId: string, messageId: string): void {
-    this.deps.outbox.remove(this.require(sessionId, messageId), "deleted");
+    this.deps.outbox.remove(this.require(sessionId, messageId, true), "deleted");
     if (!this.deps.outbox.count(sessionId) && this.deps.repo.get(sessionId).status !== "queued") {
       this.deps.admission?.dequeue(sessionId);
     }
@@ -81,6 +81,7 @@ export class QueueService {
       if (!canSteer) throw conflict("This provider cannot steer a running turn", "unsupported");
       const { outbox } = this.deps;
       outbox.steering.add(messageId);
+      outbox.markDelivery(message, false);
       let retry = false;
       try {
         const status = await this.deps.sessions.steer(sessionId, message.input, message);
@@ -94,7 +95,7 @@ export class QueueService {
         if (runnerErrorCode(error) === "no_turn") return { status: "queued" };
         throw error;
       } finally {
-        outbox.steering.delete(messageId);
+        outbox.releaseSteer(message);
         if (retry) void this.deps.sessions.flushOutbox(sessionId).catch(() => undefined);
       }
     } finally {
@@ -103,12 +104,15 @@ export class QueueService {
   }
 
   /** The queued message, or 409 `already_sent` / 404 when it is no longer queued. */
-  private require(sessionId: string, messageId: string): QueuedMessage {
+  private require(sessionId: string, messageId: string, allowUncertain = false): QueuedMessage {
     this.deps.repo.get(sessionId);
     const message = this.deps.outbox.get(sessionId, messageId);
     if (message) {
       if (this.deps.outbox.steering.has(messageId)) {
         throw conflict("This message is being delivered", "already_sent");
+      }
+      if (message.delivery === "uncertain" && !allowUncertain) {
+        throw conflict("Delivery could not be confirmed", "delivery_uncertain");
       }
       return message;
     }
@@ -119,6 +123,11 @@ export class QueueService {
   }
 
   private present(message: QueuedMessage): QueuedMessage {
-    return { ...message, input: clientInput(message.input, this.deps.artifacts) };
+    const delivery = this.deps.outbox.steering.has(message.id) ? "steering" : message.delivery;
+    return {
+      ...message,
+      input: clientInput(message.input, this.deps.artifacts),
+      ...(delivery ? { delivery } : {}),
+    };
   }
 }

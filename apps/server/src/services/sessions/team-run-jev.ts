@@ -1,5 +1,7 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { lstatSync, readdirSync, readFileSync, realpathSync } from "node:fs";
 import { readFile, unlink, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { TeamWorkerJev } from "@codeden/contracts";
 import type { Exec } from "../exec";
 import { historyDigest, recordTeamHistory } from "./team-run-history";
@@ -10,6 +12,77 @@ export interface TeamReviewEvidence {
   evidence: string[];
   /** Writer response, base and head diff, findings and any Arbiter ruling for this round. */
   history: string;
+}
+
+function secureSource(path: string) {
+  const stat = lstatSync(path);
+  const owner = process.getuid?.();
+  if (owner !== undefined && ((stat.uid !== owner && stat.uid !== 0) || stat.mode & 0o022)) {
+    throw new Error("Team gate helper is not owner-controlled");
+  }
+  return stat;
+}
+
+/** Pin the host installation before dispatch. A running server never adopts changed helper source. */
+export function pinTeamJevHelper(configuredPath: string): () => string | null {
+  const fingerprint = () => {
+    const path = realpathSync(configuredPath);
+    const directory = dirname(path);
+    if (!secureSource(directory).isDirectory()) throw new Error("Missing helper directory");
+    const names = readdirSync(directory)
+      .filter((name) => /\.(?:[cm]?js|json)$/.test(name))
+      .sort();
+    if (names.length > 256) throw new Error("Helper installation is too large");
+    const hash = createHash("sha256");
+    let total = 0;
+    for (const name of names) {
+      const file = join(directory, name);
+      const stat = secureSource(file);
+      total += stat.size;
+      if (!stat.isFile() || total > 8 * 1024 * 1024) throw new Error("Unexpected helper source");
+      hash.update(name).update("\0").update(readFileSync(file)).update("\0");
+    }
+    return { path, digest: hash.digest("hex") };
+  };
+  try {
+    const pinned = fingerprint();
+    return () => {
+      try {
+        const current = fingerprint();
+        return current.path === pinned.path && current.digest === pinned.digest
+          ? current.path
+          : null;
+      } catch {
+        return null;
+      }
+    };
+  } catch {
+    return () => null;
+  }
+}
+
+function teamGateEnv(): NodeJS.ProcessEnv {
+  const keys = [
+    "PATH",
+    "HOME",
+    "USERPROFILE",
+    "SYSTEMROOT",
+    "TMPDIR",
+    "TEMP",
+    "TMP",
+    "HTTPS_PROXY",
+    "HTTP_PROXY",
+    "NO_PROXY",
+    "NODE_EXTRA_CA_CERTS",
+    "TYPESAFE_API_KEY",
+    "JEV_API_KEY",
+    "JEV_KEY_FILE",
+  ];
+  return {
+    ...Object.fromEntries(keys.map((key) => [key, process.env[key]])),
+    NODE_OPTIONS: "",
+    ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
+  };
 }
 
 export async function runJevDone(
@@ -47,10 +120,8 @@ export async function runJevDone(
       [script, "done", inputPath, "--log", `${historyPath}.jsonl`],
       {
         timeoutMs: 180_000,
-        env: {
-          NODE_OPTIONS: "",
-          ...(process.versions.electron ? { ELECTRON_RUN_AS_NODE: "1" } : {}),
-        },
+        inheritEnv: false,
+        env: teamGateEnv(),
       },
     );
     const out = JSON.parse(result.stdout);

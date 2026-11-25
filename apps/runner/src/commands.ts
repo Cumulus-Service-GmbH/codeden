@@ -245,6 +245,7 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
     case "git.branches":
       return gitOps.branches(command);
     case "git.mergeTeamWorker":
+    case "git.mergeLegacyTeamWorker":
       return gitOps.mergeTeamWorker(command);
     case "git.commit":
       return gitOps.commit(command);

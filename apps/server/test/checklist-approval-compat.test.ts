@@ -1,4 +1,4 @@
-import { CLIENT_CAPABILITIES, Snapshot, UiServerMessage } from "@codeden/contracts";
+import { CLIENT_CAPABILITIES, Snapshot, UiServerMessage, type UserInput } from "@codeden/contracts";
 import { Hono } from "hono";
 import type { WSContext } from "hono/ws";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
@@ -11,6 +11,7 @@ import { inboxRoutes } from "../src/routes/inbox";
 import { queryOf } from "../src/routes/validate";
 import { ChecklistService } from "../src/services/checklist/checklist-service";
 import type { AppServices } from "../src/services/container";
+import { SessionService, type SessionServiceDeps } from "../src/services/sessions/session-service";
 import { createFactoryEnv } from "./support/factory-env";
 
 const previousKind = z.enum([
@@ -59,7 +60,18 @@ it("binds the approved expansion item to its start purpose during enforcement", 
     factory: env.factory,
     settings: env.settings,
     projects: { get: () => env.project },
-    sessions: env.sessions,
+    sessions: new SessionService({
+      checklist,
+      projects: { get: () => env.project },
+      repo: env.repo,
+      runner: { providers: () => [], isConnected: () => false },
+      settings: env.settings,
+      launcher: { launch: async () => undefined },
+      artifacts: {
+        externalizeAttachments: (input: UserInput) => input,
+        resolveAttachments: (input: UserInput) => input,
+      },
+    } as unknown as SessionServiceDeps),
     sessionRepo: env.repo,
   } as unknown as AppServices;
   const start = (purpose: string, checklistItemId?: string) =>
@@ -84,7 +96,7 @@ it("binds the approved expansion item to its start purpose during enforcement", 
     startPurpose: "Add a counter",
   });
   await expect(start("Remove a counter", itemId)).rejects.toThrow(/approved for "Add a counter"/);
-  expect(env.starts).toHaveLength(0);
+  expect(env.repo.list({ projectId })).toHaveLength(0);
   expect(await start("  ADD A COUNTER  ", itemId)).toMatchObject({ status: "started" });
   const { pending: reword } = checklist.update(projectId, {
     patch: [{ id: itemId, text: "  Add two counters  " }],
@@ -107,6 +119,7 @@ it("gates checklist cards in the snapshot, inbox list and counts", async () => {
       checklist,
       db: env.db.db,
       inbox: env.inbox,
+      decisions: { pending: () => [] },
       store: env.store,
       settings: env.settings,
       projects: { list: () => [env.project] },
@@ -237,7 +250,10 @@ it("explicitly requests only open records for legacy inbox counts", async () => 
   vi.spyOn(env.inbox, "list").mockImplementation((query) =>
     query?.status === "open" ? list(query) : [open, resolved],
   );
-  const response = await inboxRoutes({ inbox: env.inbox } as AppServices).request("/counts");
+  const response = await inboxRoutes({
+    inbox: env.inbox,
+    decisions: { pending: () => [] },
+  } as unknown as AppServices).request("/counts");
   expect(await response.json()).toMatchObject({ open: 1 });
 });
 

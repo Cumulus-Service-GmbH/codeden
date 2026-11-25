@@ -243,12 +243,14 @@ export type StartSessionRequestInit = z.input<typeof StartSessionRequest>;
  * of a `ConflictDecision`: `queued` (wait), `skipped` (skip) and `joined` (join).
  */
 export const StartSessionResponse = z.discriminatedUnion("status", [
-  ...StartWorkResult.options,
+  StartWorkResult.options[0].extend({ note: z.string().optional() }),
+  StartWorkResult.options[1],
   z.object({
     status: z.literal("queued"),
     sessionId: Id,
     /** Work this session waits for. */
     behind: z.array(Id),
+    note: z.string().optional(),
   }),
   z.object({ status: z.literal("skipped"), reason: z.string().min(1) }),
   z.object({ status: z.literal("joined"), sessionId: Id }),
@@ -436,6 +438,8 @@ export type SessionDetail = z.infer<typeof SessionDetail>;
 /** `POST /api/sessions/:id/messages`. */
 export const SendMessageRequest = z.object({
   input: UserInput,
+  /** An agent composer submission key, retained when retrying after a lost HTTP response. */
+  submissionId: z.uuid().optional(),
   /** What to do while a turn is running: queue (default), steer into it, or reject. */
   whenBusy: z.enum(["queue", "steer", "reject"]).default("queue"),
 });

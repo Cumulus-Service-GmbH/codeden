@@ -14,6 +14,7 @@ import {
 } from "lucide-react";
 import { Hotkey, SectionLabel } from "@/components/common/bits";
 import { StatusDot } from "@/components/common/status-dot";
+import { useDecisionCards } from "@/components/inbox/decision-cards";
 import { TechDebtBadge } from "@/components/project/tech-debt-badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -83,7 +84,10 @@ export function Sidebar({ width, onClose }: { width: number | string; onClose?: 
   const openAddProject = useUiStore((s) => s.setAddProjectOpen);
 
   const inbox = data?.inbox.filter((i) => i.status === "open") ?? [];
-  const urgent = inbox.some((i) => i.kind === "approval" || i.kind === "question");
+  const { data: decisions } = useDecisionCards();
+  const pending = decisions?.length ?? 0;
+  const inboxCount = inbox.length + pending;
+  const urgent = pending > 0 || inbox.some((i) => i.kind === "approval" || i.kind === "question");
   const orchestrator = data && activeRoleSession(data, "orchestrator", null);
   const waiting = data?.sessions.filter((s) => s.status === "waiting" && s.role === "agent") ?? [];
   const projectName = (id: string | null) => data?.projects.find((p) => p.id === id)?.name ?? "";
@@ -148,7 +152,7 @@ export function Sidebar({ width, onClose }: { width: number | string; onClose?: 
         <NavRow href="/inbox" link={{ to: "/inbox" }}>
           <Inbox className="size-4 text-muted-foreground" />
           <span className="flex-1">Inbox</span>
-          {inbox.length > 0 && (
+          {inboxCount > 0 && (
             <span
               className={cn(
                 "flex h-[18px] min-w-[18px] items-center justify-center rounded-full px-1.5 text-3xs font-semibold tabular-nums",
@@ -157,7 +161,7 @@ export function Sidebar({ width, onClose }: { width: number | string; onClose?: 
                   : "bg-sidebar-accent text-sidebar-foreground",
               )}
             >
-              {inbox.length}
+              {inboxCount}
             </span>
           )}
         </NavRow>

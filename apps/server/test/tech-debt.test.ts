@@ -1,4 +1,4 @@
-import { type Project, TechDebtView } from "@codeden/contracts";
+import { EventEnvelope, type Project, TechDebtView } from "@codeden/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ServerToolContext } from "../src/mcp/define";
 import { type ToolCaller, ToolRegistry } from "../src/mcp/registry";
@@ -55,6 +55,31 @@ describe("project tech debt", () => {
       start,
     };
   }
+
+  it("stores only changed findings and replays them after a legacy full view", async () => {
+    const { env, service, project } = setup();
+    const replay = setup();
+    const before = await service.act(project, {
+      action: "record",
+      finding: { location: "src/a.ts:1", text: "First finding", date, receipt: null, pr: null },
+    });
+    const seq = env.store.headSeq();
+    const after = await service.act(project, {
+      action: "record",
+      finding: { location: "src/b.ts:1", text: "Second finding", date, receipt: null, pr: null },
+    });
+    const events = env.store.listAfter(seq);
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({
+      type: "tech_debt.changed",
+      payload: { changes: [expect.objectContaining({ text: "Second finding" })] },
+    });
+    replay.env.store.append([
+      { type: "tech_debt.updated", sessionId: null, payload: { view: before } },
+    ]);
+    replay.env.store.append(events.map((event) => EventEnvelope.parse(event)));
+    expect(await replay.service.list(project)).toEqual(after);
+  });
 
   it("imports LOW findings once on concurrent first loads and syncs only their ticks", async () => {
     const { service, project, read, write } = setup();

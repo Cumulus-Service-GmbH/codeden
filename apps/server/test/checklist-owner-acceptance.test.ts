@@ -4,7 +4,7 @@ import { sampleProject, sampleSession } from "../../../packages/contracts/test/f
 import { type Database, openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
 import { updateChecklistItem } from "../src/mcp/tools/checklist";
-import { updateChecklist } from "../src/mcp/tools/orchestrator/checklist";
+import { proposeChecklistPlan, updateChecklist } from "../src/mcp/tools/orchestrator/checklist";
 import { ChecklistListener } from "../src/services/checklist/checklist-listener";
 import { ChecklistService, WAITING_FOR_OWNER } from "../src/services/checklist/checklist-service";
 import { SessionRepo } from "../src/services/sessions/repo";
@@ -168,6 +168,37 @@ const reviewed = (tasks: { id: string; text: string }[]) => ({
   tasks,
   sha: createHash("sha256").update(JSON.stringify(tasks)).digest("hex"),
   reviewRef: "review-1",
+});
+
+it("preserves a pending proposal unless its replacement is explicit", () => {
+  const { pending } = checklist.update(
+    projectId,
+    { items: [{ id: "old", text: "Earlier work" }] },
+    { requestApproval: true },
+  );
+  if (!pending) throw new Error("Expected proposal");
+  const plan = reviewed([{ id: "a", text: "New work" }]);
+  expect(() => checklist.proposePlan(projectId, plan)).toThrow(/replacePending/);
+  expect(checklist.get(projectId)?.pending?.id).toBe(pending.id);
+  expect(checklist.proposePlan(projectId, plan, true).pending?.plan).toEqual(plan);
+});
+
+it("documents and pins the exact Unicode task digest with proposer-supplied provenance", () => {
+  expect(proposeChecklistPlan.description).toMatch(/JSON\.stringify.*non-ASCII/);
+  expect(proposeChecklistPlan.description).toMatch(/proposer-supplied.*not independently verified/);
+  const plan = reviewed([{ id: "a", text: 'Résumé 🚀 with "quotes"' }]);
+  const escaped = JSON.stringify(plan.tasks).replace(/é/g, "\\u00e9");
+  expect(() =>
+    checklist.proposePlan(projectId, {
+      ...plan,
+      sha: createHash("sha256").update(escaped).digest("hex"),
+    }),
+  ).toThrow(/does not match/);
+  const { pending } = checklist.proposePlan(projectId, plan);
+  if (!pending) throw new Error("Expected proposal");
+  expect(checklist.get(projectId)?.plan).toBeUndefined();
+  checklist.decide(pending.inboxItemId, "resolved");
+  expect(checklist.get(projectId)?.plan).toEqual(plan);
 });
 
 it("pins the reviewed plan only after owner approval and shows only revised scope in the diff", () => {

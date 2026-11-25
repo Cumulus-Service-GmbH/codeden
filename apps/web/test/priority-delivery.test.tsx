@@ -88,6 +88,7 @@ it("shows a pending composer steer only while a shell call is running", async ()
       session.id,
       { text: "Priority follow-up", attachments: [] },
       "steer",
+      expect.any(String),
     );
     expect(noShell.queryByRole("status")).toBeNull();
   } finally {

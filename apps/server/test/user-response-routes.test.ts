@@ -1,6 +1,7 @@
 import { Settings } from "@codeden/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { inboxRoutes } from "../src/routes/inbox";
+import { conflictRoutes, orchestrationRoutes } from "../src/routes/orchestration";
 import { sessionRoutes } from "../src/routes/sessions";
 import type { AppServices } from "../src/services/container";
 
@@ -8,6 +9,56 @@ const post = (body: unknown) => ({
   method: "POST",
   headers: { "content-type": "application/json" },
   body: JSON.stringify(body),
+});
+
+it("strips server attribution from role messages and conflict replacement starts", async () => {
+  const sendToRole = vi.fn(async () => ({ status: "sent", sessionId: "role" }));
+  const resolve = vi.fn(async () => ({}));
+  const services = {
+    projects: { get: () => ({}) },
+    orchestration: { sendToRole, conflicts: { resolve } },
+  } as unknown as AppServices;
+  const input = { text: "Hello", from: "user", checksRound: 3, relayedForUser: true };
+  const submission = { id: "aca17489-09fa-4cef-9be5-48109d31dbd0", sessionId: "role" };
+  const expected = { text: "Hello", attachments: [] };
+  expect(
+    (await orchestrationRoutes(services).request("/orchestrator/messages", post({ input }))).status,
+  ).toBe(200);
+  expect(
+    (
+      await orchestrationRoutes(services).request(
+        "/projects/p/pm/messages",
+        post({ input, submission }),
+      )
+    ).status,
+  ).toBe(200);
+  expect(sendToRole).toHaveBeenNthCalledWith(
+    1,
+    "orchestrator",
+    null,
+    expected,
+    "queue",
+    "user",
+    undefined,
+  );
+  expect(sendToRole).toHaveBeenNthCalledWith(2, "pm", "p", expected, "queue", "user", submission);
+  expect(
+    (
+      await conflictRoutes(services).request(
+        "/card/resolve",
+        post({
+          resolution: "skip",
+          start: { projectId: "p", input },
+        }),
+      )
+    ).status,
+  ).toBe(200);
+  expect(resolve).toHaveBeenCalledWith(
+    "card",
+    expect.objectContaining({
+      start: expect.objectContaining({ input: expected }),
+    }),
+  );
 });
 
 it("strips server-authored metadata from public start, send and steer inputs", async () => {

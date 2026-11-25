@@ -1,4 +1,4 @@
-import type { EventEnvelope, NewEvent } from "@codeden/contracts";
+import type { EventEnvelope, NewEvent, TechDebtView } from "@codeden/contracts";
 import { eq } from "drizzle-orm";
 import { automationToRow, inboxToRow, projectToRow, runToRow, sessionToRow } from "../db/rows";
 import {
@@ -39,8 +39,22 @@ export { applyDelta } from "./reducer/items";
  */
 export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
   switch (e.type) {
-    case "tech_debt.updated": {
-      const { view } = e.payload;
+    case "tech_debt.updated":
+    case "tech_debt.changed": {
+      let view: TechDebtView;
+      if (e.type === "tech_debt.updated") {
+        view = e.payload.view;
+      } else {
+        const { metadata, changes } = e.payload;
+        const before = tx
+          .select({ view: projectTechDebt.view })
+          .from(projectTechDebt)
+          .where(eq(projectTechDebt.projectId, metadata.projectId))
+          .get();
+        const findings = new Map(before?.view.findings.map((finding) => [finding.id, finding]));
+        for (const finding of changes) findings.set(finding.id, finding);
+        view = { ...metadata, findings: [...findings.values()] };
+      }
       tx.insert(projectTechDebt)
         .values({ projectId: view.projectId, view })
         .onConflictDoUpdate({ target: projectTechDebt.projectId, set: { view } })
@@ -132,6 +146,7 @@ export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
     case "message.queued":
     case "message.dequeued":
     case "message.edited":
+    case "message.delivery":
       applyWorkbenchProjection(tx, e);
       return [];
     case "notice.created":

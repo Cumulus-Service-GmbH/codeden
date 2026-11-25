@@ -25,8 +25,8 @@ export function jevPasses(receipt: Receipt | undefined, head: string | null) {
   );
 }
 
-export function jevNext(status: Receipt["status"], priorRefusals: number) {
-  return status === "revise" && priorRefusals === 0 ? "reviewer" : "owner";
+export function jevNext(status: Receipt["status"], priorRefusals: number, rounds = 1) {
+  return status === "revise" && priorRefusals < rounds ? "reviewer" : "owner";
 }
 
 /** The history path is part of the evidence, not an extra CLI flag. */
@@ -42,10 +42,11 @@ export async function runJevDone(
     historyEvidence: string;
   },
 ): Promise<Receipt> {
-  const unavailable = (reason: string): Receipt => ({
+  const unavailable = (reason: string, retryable?: true): Receipt => ({
     head: input.head,
     status: "unavailable",
     reasons: [reason],
+    retryable,
   });
   try {
     await mkdir(dir, { recursive: true, mode: 0o700 });
@@ -63,7 +64,7 @@ export async function runJevDone(
         historyPath,
         evidence: [
           ...input.evidence,
-          `shasum -a 256 ${historyPath}\n${historySha256}  ${historyPath}\n${input.historyEvidence}`,
+          `${JSON.stringify({ source: "CodeDen review history", historyPath, historySha256 })}\n${input.historyEvidence}`,
         ],
       }),
       { mode: 0o600 },
@@ -74,7 +75,7 @@ export async function runJevDone(
       env: ownNodeEnv({ NODE_OPTIONS: "" }),
     });
     if (result.timedOut || result.notFound || result.code === null) {
-      return unavailable("The done gate was unreachable or timed out.");
+      return unavailable("The done gate was unreachable or timed out.", true);
     }
     const output = JSON.parse(result.stdout);
     if (output.gate !== "done" || sha256(await readFile(historyPath, "utf8")) !== historySha256) {

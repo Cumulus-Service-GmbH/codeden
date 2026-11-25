@@ -171,6 +171,7 @@ describe("QueueService", () => {
     const reopened = openStore("codeden.db");
     try {
       expect(new Outbox(reopened.db.db, reopened.store).get("s1", message.id)).toEqual(message);
+      expect(queue.list("s1")).toMatchObject([{ id: message.id, delivery: "steering" }]);
       expectError(() => queue.delete("s1", message.id), 409, "already_sent");
       await expect(queue.sendNow("s1", message.id)).rejects.toMatchObject({ code: "already_sent" });
     } finally {
@@ -179,6 +180,21 @@ describe("QueueService", () => {
       await sending;
     }
     expect(text(outbox)).toEqual([]);
+  });
+
+  it("keeps ambiguous attempts out of automatic delivery and allows only explicit dismissal", async () => {
+    const { queue } = queueWith({ status: "running" });
+    const message = outbox.push("s1", { text: "priority", attachments: [] });
+    outbox.markDelivery(message, true);
+    expect(queue.list("s1")).toMatchObject([{ id: message.id, delivery: "uncertain" }]);
+    expect(outbox.peek("s1")).toBeUndefined();
+    expect(outbox.clear("s1")).toEqual([]);
+    expectError(() => queue.edit("s1", message.id, "edit"), 409, "delivery_uncertain");
+    await expect(queue.sendNow("s1", message.id)).rejects.toMatchObject({
+      code: "delivery_uncertain",
+    });
+    queue.delete("s1", message.id);
+    expect(queue.list("s1")).toEqual([]);
   });
 
   it("send-now keeps the message in its place when steering fails", async () => {

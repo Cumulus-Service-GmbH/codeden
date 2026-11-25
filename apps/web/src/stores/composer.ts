@@ -25,6 +25,8 @@ export type ComposerAttachment =
 export interface Draft {
   text: string;
   attachments: ComposerAttachment[];
+  /** Reuse after a failed response until the draft is edited. */
+  submissionId?: string;
 }
 
 export interface TurnOptions {
@@ -80,7 +82,10 @@ export const useComposerStore = create<ComposerState>()(
       focusToken: 0,
       setText: (sessionId, text) =>
         set((s) => ({
-          drafts: { ...s.drafts, [sessionId]: { ...getDraft(s, sessionId), text } },
+          drafts: {
+            ...s.drafts,
+            [sessionId]: { text, attachments: getDraft(s, sessionId).attachments },
+          },
         })),
       addAttachments: (sessionId, items) =>
         set((s) => {
@@ -88,7 +93,7 @@ export const useComposerStore = create<ComposerState>()(
           return {
             drafts: {
               ...s.drafts,
-              [sessionId]: { ...d, attachments: [...d.attachments, ...items] },
+              [sessionId]: { text: d.text, attachments: [...d.attachments, ...items] },
             },
           };
         }),
@@ -98,7 +103,7 @@ export const useComposerStore = create<ComposerState>()(
           return {
             drafts: {
               ...s.drafts,
-              [sessionId]: { ...d, attachments: d.attachments.filter((a) => a.id !== id) },
+              [sessionId]: { text: d.text, attachments: d.attachments.filter((a) => a.id !== id) },
             },
           };
         }),

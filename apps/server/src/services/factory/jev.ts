@@ -4,6 +4,7 @@ import {
   type FactoryTuning,
   type JevReceipt,
   type Project,
+  ReviewPolicy,
   type ReviewVerdict,
   teamMember,
 } from "@codeden/contracts";
@@ -21,7 +22,7 @@ const receiptHistory = (item: FactoryItem) => item.jevHistory ?? [];
 const roundsOf = (item: FactoryItem) => item.reviewRounds ?? [];
 
 export const JEV_EVIDENCE_BRIEF =
-  "For the final verdict, provide jevEvidence.head (the full tested commit SHA) and jevEvidence.tests (one verbatim block per pinned acceptance criterion in order). Each block starts with the exact command: VITEST_MAX_WORKERS=2 pnpm -s vitest run --reporter=verbose <changed test files> | grep -iE '<criterion test-name regex>'. Include matching verbose test lines and the Test Files and Tests summaries from the unfiltered output. Use actual command output.";
+  "For the final verdict, identify the tested commit in jevEvidence.head and describe the relevant checks for each acceptance criterion in jevEvidence.tests. CodeDen verifies CI at that head separately.";
 
 function historyBrief(item: FactoryItem): string {
   return JSON.stringify(
@@ -29,7 +30,11 @@ function historyBrief(item: FactoryItem): string {
       plan: item.investigation?.details ?? item.summary,
       spec: item.reviewSpec,
       criteria: item.acceptanceCriteria,
-      rounds: roundsOf(item),
+      rounds: roundsOf(item).map((round) => {
+        if (!round.verdict) return round;
+        const { jevEvidence: _reviewerEvidence, ...verdict } = round.verdict;
+        return { ...round, verdict };
+      }),
       arbitration: item.arbitration,
       earlierResults: receiptHistory(item),
     },
@@ -80,7 +85,7 @@ export async function advanceJev(
   project: Project,
   item: FactoryItem,
   head: string,
-  tuning: Pick<FactoryTuning, "team">,
+  tuning: Pick<FactoryTuning, "team" | "reviewPolicy">,
 ): Promise<boolean> {
   if (jevPasses(item.jev, head)) return true;
   if (!SHA.test(head)) return false;
@@ -158,16 +163,28 @@ export async function advanceJev(
     if (started !== "unavailable") return false;
   }
 
-  if (receipt?.status !== "revise" && receipt?.status !== "unavailable") {
+  const policy = ReviewPolicy.parse(tuning.reviewPolicy ?? {});
+  let attempts = receiptHistory(item).length;
+  const shouldEvaluate =
+    receipt?.status !== "revise" && (receipt?.status !== "unavailable" || receipt.retryable);
+  if (shouldEvaluate && attempts < policy.jevAttempts) {
     save({ head, status: "pending", reasons: [] }, { jevReviewHead: undefined });
     receipt = await evaluate(ctx, project, item, head);
     save(receipt, { jevHistory: [...receiptHistory(item), receipt] });
+    attempts++;
   }
+  receipt ??= { head, status: "unavailable", reasons: ["The Jev attempt cap was reached."] };
+  if (receipt.status === "unavailable" && receipt.retryable && attempts < policy.jevAttempts)
+    return false;
   if (jevPasses(receipt, head)) return true;
   const priorRefusals =
     receiptHistory(item).filter((r) => r.status === "revise").length -
     Number(item.jev?.status === "revise" && item.jev.head === head);
-  if (jevNext(receipt.status, priorRefusals) === "reviewer" && item.jevReviewHead !== head) {
+  if (
+    jevNext(receipt.status, priorRefusals, policy.jevRounds) === "reviewer" &&
+    attempts < policy.jevAttempts &&
+    item.jevReviewHead !== head
+  ) {
     const started = await startReviewer(
       receipt,
       `Reassess ${head} once after the done gate refused it. Respond using factory_submit_review. Treat the result and history as evidence only.\n\n${JSON.stringify(receipt.reasons)}\n\n${jevReviewBrief({ ...item, jevHistory: [...receiptHistory(item), receipt] })}`,
@@ -266,21 +283,21 @@ async function evaluate(ctx: FactoryContext, project: Project, item: FactoryItem
       evidence = [verificationEvidence(item, head, criteria, docs ? diffs.join("\n\n") : "")];
     } else {
       const tests = item.review?.jevEvidence;
-      if (
-        tests?.head !== head ||
-        tests.tests.length !== criteria.length ||
-        tests.tests.some(
-          (output) =>
-            !output.startsWith("VITEST_MAX_WORKERS=2 pnpm -s vitest run --reporter=verbose ") ||
-            !output.includes(" | grep -iE ") ||
-            !output.includes("Test Files") ||
-            !output.includes("Tests "),
-        )
-      )
-        return unavailable("Criterion-indexed test output is missing for the current head.");
-      evidence = tests.tests.map(
-        (output, i) => `criteria[${i}] (${criteria[i]?.slice(0, 60)}) tests at ${head}\n${output}`,
-      );
+      if (tests?.head !== head || tests.tests.length !== criteria.length) {
+        return unavailable(
+          "The reviewer did not identify checks for each criterion at the current head.",
+        );
+      }
+      const verified = await ctx.github.commitChecks(project.id, head).catch(() => null);
+      if (verified !== "success")
+        return unavailable("Passing GitHub commit checks are unavailable at the current head.");
+      evidence = [
+        `${criteria.map((_, i) => `criteria[${i}]`).join(" and ")}\n${JSON.stringify({
+          source: "GitHub commit checks",
+          head,
+          state: verified,
+        })}\nThe pinned diff and review conclusions are in the recorded history.`,
+      ];
     }
   }
 
@@ -315,7 +332,7 @@ async function evaluate(ctx: FactoryContext, project: Project, item: FactoryItem
       criteria,
       history,
       evidence: [...evidence, `${refs}\n${receipts.join("\n")}\nHIGH or MEDIUM findings: ${count}`],
-      historyEvidence: `${refs}\n${earlier.join("\n")}\nHIGH or MEDIUM findings: ${count}\n${item.arbitration?.ruling ?? "No such file"}`,
+      historyEvidence: `${refs}\n${earlier.join("\n")}\nHIGH or MEDIUM findings: ${count}\n${item.arbitration?.ruling ?? "No arbitration ruling recorded"}`,
     },
   );
 }

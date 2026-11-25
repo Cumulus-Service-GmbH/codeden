@@ -25,6 +25,24 @@ export const SETUP_TAIL_LIMIT = 2000;
 /** Index of a turn checkpoint: 0 is the baseline at session start, n the end of turn n. */
 export const CheckpointIndex = z.int().nonnegative();
 
+const TeamWorkerMerge = z.object({
+  cwd: z.string(),
+  assembler: z.string().min(1),
+  workerBranch: z.string().min(1),
+  head: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/),
+  /** Both candidate parents must be retained when merging a conflict resolution. */
+  resolutionParents: z
+    .array(z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/))
+    .length(2)
+    .optional(),
+});
+
+const TeamWorkerMergeResult = z.object({
+  needsResolution: z.boolean().optional(),
+  conflict: z.string().optional(),
+  headMoved: z.boolean().optional(),
+});
+
 /** Per-file change summary of a diff. */
 export const DiffFileStat = z.object({
   path: z.string(),
@@ -338,17 +356,13 @@ export const RunnerCommand = z.discriminatedUnion("name", [
     includeRemote: z.boolean().optional(),
   }),
   /** Merge only the approved worker commit into its run's checked-out assembler. */
-  z.object({
+  TeamWorkerMerge.extend({
     name: z.literal("git.mergeTeamWorker"),
-    cwd: z.string(),
-    assembler: z.string().min(1),
-    workerBranch: z.string().min(1),
-    head: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/),
-    /** Both candidate parents must be retained when merging a conflict resolution. */
-    resolutionParents: z
-      .array(z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/))
-      .length(2)
-      .optional(),
+  }),
+  /** Recover a legacy assembler only after proving its linked worktree belongs to this repository. */
+  TeamWorkerMerge.extend({
+    name: z.literal("git.mergeLegacyTeamWorker"),
+    repoPath: z.string().min(1),
   }),
   /** Stage (all changes, or `paths`) and commit. */
   z.object({
@@ -561,11 +575,8 @@ export const RunnerCommandResults = {
       }),
     ),
   }),
-  "git.mergeTeamWorker": z.object({
-    needsResolution: z.boolean().optional(),
-    conflict: z.string().optional(),
-    headMoved: z.boolean().optional(),
-  }),
+  "git.mergeTeamWorker": TeamWorkerMergeResult,
+  "git.mergeLegacyTeamWorker": TeamWorkerMergeResult,
   /** `commit` is null when there was nothing to commit. */
   "git.commit": z.object({ commit: z.string().nullable() }),
   "git.push": z.object({ remote: z.string(), branch: z.string() }),

@@ -2,6 +2,7 @@ import type { DecisionCard } from "@codeden/contracts";
 import { fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { ChecklistSidebar } from "@/components/checklist/checklist-sidebar";
+import { Sidebar } from "@/components/shell/sidebar/sidebar";
 import { createMockClient } from "@/lib/api/mock";
 import { InboxPage } from "@/routes/inbox";
 import { useLayoutStore } from "@/stores/layout";
@@ -26,6 +27,15 @@ function clientWithCard() {
   vi.spyOn(client.github, "decisionCards").mockResolvedValue([card]);
   return client;
 }
+
+it("counts a waiting decision on the sidebar Inbox badge", async () => {
+  const client = clientWithCard();
+  const snap = await client.getSnapshot();
+  vi.spyOn(client, "getSnapshot").mockResolvedValue({ ...snap, inbox: [] });
+  renderWithClient(<Sidebar width={240} />, client, { withRouter: true });
+  const nav = await screen.findByRole("link", { name: /^Inbox/ });
+  expect(await within(nav).findByText("1")).toBeTruthy();
+});
 
 it("shows a GitHub approval card in the inbox", async () => {
   const client = clientWithCard();

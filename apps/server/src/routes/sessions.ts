@@ -10,6 +10,7 @@ import {
   HandoffSessionRequest,
   type HandoffSessionResponse,
   ListSessionsQuery,
+  PublicUserInput,
   type QueuedMessageList,
   RespondRequest,
   ReviewSessionRequest,
@@ -21,7 +22,6 @@ import {
   ThreadItemsQuery,
   type ToolOutputResponse,
   UpdateSessionRequest,
-  UserInput,
 } from "@codeden/contracts";
 import { Hono } from "hono";
 import type { AppServices } from "../services/container";
@@ -32,8 +32,6 @@ import { withTeamRole } from "../services/sessions/team-start";
 import { exportSessionTranscript } from "../services/sessions/transcript-export";
 import { asUserResponse } from "./user-response";
 import { jsonBody, queryOf } from "./validate";
-
-const PublicInput = UserInput.pick({ text: true, attachments: true });
 
 /**
  * `/api/sessions`: start (with conflict handling), message, steer, interrupt, compact, respond, stop,
@@ -46,7 +44,7 @@ export function sessionRoutes(s: AppServices, installToken: string) {
       .get("/", queryOf(ListSessionsQuery), (c) => c.json(s.sessionRepo.list(c.req.valid("query"))))
       .post(
         "/",
-        jsonBody(StartSessionRequest.extend({ input: PublicInput.optional() })),
+        jsonBody(StartSessionRequest.extend({ input: PublicUserInput.optional() })),
         async (c) => {
           const asked = c.req.valid("json");
           // A Team role chosen in the composer: its tag, and the resolved Team's pins where the user set none.
@@ -84,10 +82,10 @@ export function sessionRoutes(s: AppServices, installToken: string) {
       })
       .post(
         "/:id/messages",
-        jsonBody(SendMessageRequest.extend({ input: PublicInput })),
+        jsonBody(SendMessageRequest.extend({ input: PublicUserInput })),
         async (c) => c.json(await s.sessions.send(c.req.param("id"), c.req.valid("json"))),
       )
-      .post("/:id/steer", jsonBody(SteerRequest.extend({ input: PublicInput })), async (c) => {
+      .post("/:id/steer", jsonBody(SteerRequest.extend({ input: PublicUserInput })), async (c) => {
         await s.sessions.steer(c.req.param("id"), c.req.valid("json").input);
         return c.json({ ok: true as const });
       })

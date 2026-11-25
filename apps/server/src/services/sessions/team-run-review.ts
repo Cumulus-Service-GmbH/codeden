@@ -83,6 +83,9 @@ export async function reviewAndMerge(
     if (candidate && review.head !== candidate.head) {
       throw new Error("Team review does not cover the captured candidate head");
     }
+    if (candidate && !review.record) {
+      throw new Error("Captured Team candidate has no reviewer receipt");
+    }
     if (review.record) {
       const record = TeamReviewRecord.parse(review.record);
       if (record.head !== review.head)

@@ -53,6 +53,7 @@ it("preserves a newer composer draft when Stop cancels a priority send", async (
       current.id,
       { text: "priority A", attachments: [] },
       "steer",
+      expect.any(String),
     ),
   );
   fireEvent.change(composer, { target: { value: "draft B" } });
@@ -62,6 +63,48 @@ it("preserves a newer composer draft when Stop cancels a priority send", async (
   expect(getDraft(useComposerStore.getState(), current.id).text).toBe("draft B");
   expect(errorToast).not.toHaveBeenCalled();
 });
+
+it.each(["agent", "pm"] as const)(
+  "reuses the %s submission id after a lost response",
+  async (role) => {
+    const client = createMockClient();
+    const sendAgent = vi
+      .spyOn(client, "sendMessage")
+      .mockRejectedValueOnce(new TypeError("Connection closed"))
+      .mockResolvedValueOnce(undefined);
+    const sendRole = vi
+      .spyOn(client.orchestration, "send")
+      .mockRejectedValueOnce(new TypeError("Connection closed"))
+      .mockResolvedValueOnce({ sessionId: "retry-priority-pm", status: "queued" });
+    const send = role === "agent" ? sendAgent : sendRole;
+    const current = session({
+      id: `retry-priority-${role}`,
+      role,
+      projectId: role === "pm" ? "p-storefront" : null,
+      autonomy: "auto",
+    });
+    renderWithClient(<SessionComposer session={current} running />, client, { withRouter: true });
+
+    const composer = await screen.findByRole("combobox");
+    fireEvent.change(composer, { target: { value: "priority A" } });
+    fireEvent.click(await screen.findByRole("button", { name: /^steer$/i }));
+    fireEvent.click(screen.getByRole("button", { name: "steer message" }));
+    await waitFor(() =>
+      expect(getDraft(useComposerStore.getState(), current.id).text).toBe("priority A"),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "steer message" }));
+    await waitFor(() => expect(send).toHaveBeenCalledTimes(2));
+    if (role === "agent") {
+      expect(sendAgent.mock.calls[0]?.[3]).toEqual(expect.any(String));
+    } else {
+      expect(sendRole.mock.calls[0]?.[4]).toEqual({
+        id: expect.any(String),
+        sessionId: current.id,
+      });
+    }
+    expect(send.mock.calls[1]).toEqual(send.mock.calls[0]);
+  },
+);
 
 describe("queue labels", () => {
   it("numbers positions and names senders", () => {
@@ -81,6 +124,23 @@ describe("queue labels", () => {
 });
 
 describe("QueuedMessages", () => {
+  it("prevents changing a steer owned by a running attempt", async () => {
+    const list = async (): Promise<QueuedMessage[]> => [
+      { ...queued("a", "live"), delivery: "steering" },
+      { ...queued("b", "held"), delivery: "uncertain" },
+    ];
+    renderWithClient(<QueuedMessages session={session()} running />, withQueue({ list }));
+
+    const [live, held] = await screen.findAllByTestId("queued-message");
+    if (!live || !held) throw new Error("Expected both queued messages");
+    expect(within(live).getByText("Delivering…")).toBeTruthy();
+    expect(within(live).getByRole("button", { name: "Edit" })).toHaveProperty("disabled", true);
+    expect(within(live).getByRole("button", { name: "Delete" })).toHaveProperty("disabled", true);
+    expect(within(held).getByRole("button", { name: "Edit" })).toHaveProperty("disabled", true);
+    expect(
+      within(held).getByRole("button", { name: "Dismiss unconfirmed message" }),
+    ).toHaveProperty("disabled", false);
+  });
   it("renders nothing while the queue is empty", async () => {
     const { container } = renderWithClient(
       <QueuedMessages session={session()} running />,

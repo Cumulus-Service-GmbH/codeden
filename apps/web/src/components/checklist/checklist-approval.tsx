@@ -237,7 +237,7 @@ export function ProposalChanges({
     return (
       <div className={className}>
         <p className="wrap-break-word text-2xs text-muted-foreground">
-          Reviewed by reference {plan.reviewRef}
+          Review reference supplied by the proposer: {plan.reviewRef}
         </p>
         <p className="wrap-break-word font-mono text-3xs" title={plan.sha}>
           {plan.sha}

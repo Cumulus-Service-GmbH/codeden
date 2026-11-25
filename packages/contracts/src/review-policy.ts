@@ -73,6 +73,8 @@ export const JevReceipt = z
       "owner decision",
       "not configured",
     ]),
+    /** A transport or tool failure that can be tried again within the configured cap. */
+    retryable: z.literal(true).optional(),
     historyPath: z.string().optional(),
     historySha256: z
       .string()

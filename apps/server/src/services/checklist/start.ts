@@ -2,6 +2,12 @@ import type { ProjectChecklist } from "@codeden/contracts";
 import { badRequest } from "../errors";
 import { sameChecklistPurpose } from "./checklist-service";
 
+export function checklistIsEnforced(
+  checklist: ProjectChecklist | undefined,
+): checklist is ProjectChecklist & { state: "approved"; enforce: true } {
+  return checklist?.state === "approved" && checklist.enforce === true;
+}
+
 export function checklistStartItem(
   checklist: ProjectChecklist | undefined,
   purpose: string,
@@ -21,7 +27,7 @@ export function checklistStartItem(
             sameChecklistPurpose(entry.startPurpose, purpose),
         )
       : undefined;
-  if (checklist?.state !== "approved" || !checklist.enforce) return item;
+  if (!checklistIsEnforced(checklist)) return item;
   if (!item) {
     if (itemId) {
       throw badRequest(`Unknown approved checklistItemId: ${itemId}.`, "checklist_item_unknown");

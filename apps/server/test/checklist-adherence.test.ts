@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { Automation, type UserInput } from "@codeden/contracts";
+import { Automation, StartSessionRequest, type UserInput } from "@codeden/contracts";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { sampleSession } from "../../../packages/contracts/test/fixtures";
 import { startSession } from "../src/mcp/tools/pm/sessions";
@@ -18,27 +18,37 @@ import { createFactoryEnv } from "./support/factory-env";
 let env: ReturnType<typeof createFactoryEnv>;
 let checklist: ChecklistService;
 let services: AppServices;
+let launched: string[];
+let requestSequence: number;
 const notify = vi.fn();
 
 beforeEach(() => {
   env = createFactoryEnv();
   notify.mockClear();
+  launched = [];
+  requestSequence = 0;
   checklist = new ChecklistService(env.db.db, env.store, env.inbox, notify);
   services = {
     checklist,
     factory: env.factory,
     settings: env.settings,
     projects: { get: () => env.project },
-    sessions: env.sessions,
+    sessions: undefined,
     sessionRepo: env.repo,
     inbox: env.inbox,
   } as unknown as AppServices;
+  services.sessions = sessionService();
 });
 afterEach(() => env.close());
 
 function start(checklistItemId?: string, purpose = "Add a counter") {
   return startSession.handler(
-    startSession.input.parse({ purpose, prompt: "Implement it", checklistItemId }),
+    startSession.input.parse({
+      purpose,
+      prompt: "Implement it",
+      checklistItemId,
+      workKey: `checklist-test:${++requestSequence}`,
+    }),
     {
       services,
       projectId: env.project.id,
@@ -76,7 +86,7 @@ it("waits for an owner decision, then starts and links when the PM retries", asy
   expect(await enforced.json()).toMatchObject({ enforce: true });
   await expect(start("missing")).rejects.toThrow(/unknown approved checklistItemId/i);
   expect(await start()).toMatchObject({ status: "approval_required" });
-  expect(env.starts).toHaveLength(0);
+  expect(launched).toHaveLength(0);
 
   const pending = checklist.get(id)?.pending;
   const itemId = pending?.diff[0]?.itemId;
@@ -84,7 +94,7 @@ it("waits for an owner decision, then starts and links when the PM retries", asy
   expect(await decide(pending.inboxItemId, "resolved")).toHaveProperty("status", 200);
   expect(await decide(pending.inboxItemId, "resolved")).toHaveProperty("status", 200);
   expect(notify).toHaveBeenCalledExactlyOnceWith(id, expect.stringContaining(itemId));
-  expect(env.starts).toHaveLength(0);
+  expect(launched).toHaveLength(0);
   const result = await start(itemId);
   expect(result).toMatchObject({ status: "started" });
   expect(checklist.get(id)?.items.find((item) => item.id === itemId)).toMatchObject({
@@ -102,7 +112,7 @@ it("keeps the start result unchanged without enforcement and reports an ignored 
     sessionId: expect.any(String),
     note: "Unknown checklistItemId unknown was ignored.",
   });
-  expect(env.starts).toHaveLength(3);
+  expect(launched).toHaveLength(3);
   expect(env.inbox.list()).toEqual([]);
 });
 
@@ -120,20 +130,19 @@ function approveItem() {
 
 it("reports a successful start whose checklist item was removed while starting", async () => {
   approveItem();
-  const originalStart = env.sessions.start.bind(env.sessions);
-  vi.spyOn(env.sessions, "start").mockImplementationOnce(async (...args) => {
-    const result = await originalStart(...args);
+  const originalCreate = env.repo.create.bind(env.repo);
+  vi.spyOn(env.repo, "create").mockImplementationOnce((...args) => {
+    originalCreate(...args);
     const { pending } = checklist.update(env.project.id, { remove: ["a"] });
     if (!pending) throw new Error("Expected a removal proposal");
     checklist.decide(pending.inboxItemId, "resolved");
-    return result;
   });
   expect(await start("a")).toMatchObject({
     status: "started",
     sessionId: expect.any(String),
     note: "started, but item a is no longer in the approved plan: not linked",
   });
-  expect(env.starts).toHaveLength(1);
+  expect(launched).toHaveLength(1);
 });
 
 function fillLinks(count: number) {
@@ -159,7 +168,7 @@ it("refuses a linked start at capacity until an inactive link can be dropped", a
   fillLinks(200);
   const projectId = env.project.id;
   await expect(start("a")).rejects.toThrow(/200 active/);
-  expect(env.starts).toHaveLength(0);
+  expect(launched).toHaveLength(0);
   env.repo.update("linked-1", (session) => ({ ...session, archivedAt: session.updatedAt }));
   env.repo.update("linked-2", (session) => ({ ...session, status: "completed" }));
   const result = await start("a");
@@ -172,7 +181,7 @@ it("refuses a linked start at capacity until an inactive link can be dropped", a
 
 it("accepts a trailing newline in a legacy PM start", async () => {
   expect(await start(undefined, "Fix bug\n")).toMatchObject({ status: "started" });
-  expect(env.starts).toHaveLength(1);
+  expect(launched).toHaveLength(1);
 });
 
 it("normalizes checklist expansion purposes before storage and comparison", async () => {
@@ -192,26 +201,23 @@ it("normalizes checklist expansion purposes before storage and comparison", asyn
 it("reserves the last link before concurrent enforced starts", async () => {
   approveItem();
   fillLinks(199);
-  const originalStart = env.sessions.start.bind(env.sessions);
-  const gate = Promise.withResolvers<void>();
-  const launch = vi.spyOn(env.sessions, "start").mockImplementationOnce(async (...args) => {
-    await gate.promise;
-    return originalStart(...args);
+  const create = vi.spyOn(env.repo, "create");
+  const results = await Promise.allSettled([start("a"), start("a")]);
+  expect(results).toContainEqual({
+    status: "fulfilled",
+    value: { status: "started", sessionId: expect.any(String) },
   });
-  const first = start("a");
-  const second = start("a");
-  gate.resolve();
-  const results = await Promise.allSettled([first, second]);
-  expect(results[0]).toMatchObject({ status: "fulfilled", value: { status: "started" } });
-  expect(results[1]).toMatchObject({ status: "rejected", reason: expect.any(Error) });
-  expect(launch).toHaveBeenCalledOnce();
+  expect(results).toContainEqual({ status: "rejected", reason: expect.any(Error) });
+  expect(create).toHaveBeenCalledOnce();
   expect(checklist.get(env.project.id)?.items[0]?.sessionIds).toHaveLength(200);
 });
 
 it("releases a reserved link when the session fails to start", async () => {
   approveItem();
   fillLinks(199);
-  vi.spyOn(env.sessions, "start").mockRejectedValueOnce(new Error("Start failed"));
+  vi.spyOn(env.repo, "create").mockImplementationOnce(() => {
+    throw new Error("Start failed");
+  });
   await expect(start("a")).rejects.toThrow("Start failed");
   expect(await start("a")).toMatchObject({ status: "started" });
   expect(checklist.get(env.project.id)?.items[0]?.sessionIds).toHaveLength(200);
@@ -223,7 +229,7 @@ it("refuses an enforced start for completed work", async () => {
   await expect(start("a")).rejects.toThrow(
     /item a is done; ask the orchestrator for an expansion card/,
   );
-  expect(env.starts).toHaveLength(0);
+  expect(launched).toHaveLength(0);
 });
 
 it.each(["started", "queued"] as const)(
@@ -231,14 +237,7 @@ it.each(["started", "queued"] as const)(
   async (status) => {
     approveItem();
     const log = vi.spyOn(console, "error").mockImplementation(() => {});
-    const originalStart = env.sessions.start.bind(env.sessions);
-    vi.spyOn(env.sessions, "start").mockImplementationOnce(async (...args) => {
-      const result = await originalStart(...args);
-      if (result.status !== "started") throw new Error("Expected a started session");
-      return status === "queued"
-        ? { status, sessionId: result.sessionId, behind: ["other"] }
-        : result;
-    });
+    services.sessions = sessionService(status === "queued");
     vi.spyOn(checklist, "link").mockImplementationOnce(() => {
       throw new Error("Write failed");
     });
@@ -246,7 +245,7 @@ it.each(["started", "queued"] as const)(
       expect(await start("a")).toEqual({
         status,
         sessionId: expect.any(String),
-        ...(status === "queued" ? { behind: ["other"] } : {}),
+        ...(status === "queued" ? { behind: [] } : {}),
         note:
           status === "queued"
             ? "Queued, but linking checklist item a failed: Write failed"
@@ -296,14 +295,27 @@ function proposePlan(text = "Add a counter") {
   return pending;
 }
 
-function sessionService() {
+function sessionService(queue = false) {
   return new SessionService({
     checklist,
     repo: env.repo,
     projects: services.projects,
     runner: { providers: () => [], isConnected: () => false },
     settings: env.settings,
-    launcher: { launch: async () => undefined },
+    launcher: {
+      launch: async (id: string) => {
+        launched.push(id);
+      },
+    },
+    ...(queue
+      ? {
+          admission: {
+            tryReserve: () => false,
+            enqueue: () => undefined,
+            release: () => undefined,
+          },
+        }
+      : {}),
     artifacts: {
       externalizeAttachments: (input: UserInput) => input,
       resolveAttachments: (input: UserInput) => input,
@@ -314,6 +326,60 @@ function sessionService() {
 function pinPlan(text?: string) {
   checklist.decide(proposePlan(text).inboxItemId, "resolved");
 }
+
+it("blocks a non-PM start while the first plan waits and links the approved task after", async () => {
+  const sessions = sessionService();
+  const req = StartSessionRequest.parse({ projectId: env.project.id, purpose: "Add a counter" });
+  const pending = proposePlan();
+  await expect(sessions.start(req)).rejects.toMatchObject({ code: "plan_approval_pending" });
+  expect(env.repo.list({ projectId: env.project.id })).toEqual([]);
+  checklist.decide(pending.inboxItemId, "resolved");
+  const result = await sessions.start(req);
+  expect(result.status).toBe("started");
+  expect(checklist.get(env.project.id)?.items[0]).toMatchObject({
+    status: "doing",
+    sessionIds: [result.status === "started" && result.sessionId],
+  });
+});
+
+it("enforces link capacity for a non-PM start matched by purpose", async () => {
+  pinPlan();
+  fillLinks(200);
+  const sessions = sessionService();
+  const req = StartSessionRequest.parse({ projectId: env.project.id, purpose: "Add a counter" });
+  await expect(sessions.start(req)).rejects.toThrow(/200 active/);
+  expect(launched).toHaveLength(0);
+  env.repo.update("linked-0", (session) => ({ ...session, status: "completed" }));
+  const result = await sessions.start(req);
+  if (result.status !== "started") throw new Error("Expected a session");
+  const links = checklist.get(env.project.id)?.items[0]?.sessionIds;
+  expect(links).toHaveLength(200);
+  expect(links?.at(-1)).toBe(result.sessionId);
+});
+
+it("resolves actual join and skip conflicts without admitting unplanned new work", async () => {
+  const sessions = sessionService();
+  const req = StartSessionRequest.parse({
+    projectId: env.project.id,
+    purpose: "Unplanned existing work",
+    workKey: "task:same-work",
+  });
+  const first = await sessions.start(req);
+  if (first.status !== "started") throw new Error("Expected a session");
+  pinPlan();
+  await expect(
+    sessions.start({ ...req, conflict: { resolution: "join", sessionId: first.sessionId } }),
+  ).resolves.toEqual({ status: "joined", sessionId: first.sessionId });
+  await expect(sessions.start({ ...req, conflict: { resolution: "skip" } })).resolves.toMatchObject(
+    {
+      status: "skipped",
+    },
+  );
+  await expect(
+    sessions.start({ ...req, workKey: "task:unmatched", conflict: { resolution: "skip" } }),
+  ).rejects.toMatchObject({ code: "outside_pinned_plan" });
+  expect(env.repo.list({ projectId: env.project.id })).toHaveLength(1);
+});
 
 it("refuses a factory start outside the pinned plan", async () => {
   const factory = new FactorySessions({
