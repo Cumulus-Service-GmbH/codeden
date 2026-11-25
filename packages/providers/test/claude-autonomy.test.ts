@@ -235,6 +235,32 @@ it("waits for the current Supervised mode after reopening a formerly Full query"
   }
 });
 
+it.each(["send", "compact"] as const)(
+  "disposes a refused Supervised replacement from %s and reopens on the next input",
+  async (action) => {
+    const dispose = vi.fn(async () => {});
+    const setMode = vi.fn<(mode: PermissionMode) => Promise<void>>().mockResolvedValue(undefined);
+    const sdk = stubSdk({ dispose, setMode });
+    const { session, events } = open(sdk, { autonomy: "supervised", resumeToken: "prior" });
+    await session.confirmStartup();
+    sdk.exit();
+    await new Promise<void>((done) => setImmediate(done));
+    setMode.mockRejectedValueOnce(new Error("Synthetic mode refusal"));
+
+    const input = { text: "Continue", attachments: [] };
+    await expect(action === "send" ? session.send(input) : session.compact()).rejects.toMatchObject(
+      { code: "config_unconfirmed" },
+    );
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(events.some((event) => event.type === "turn.started")).toBe(false);
+
+    await expect(session.send(input)).resolves.toBeUndefined();
+    expect(sdk.launches).toHaveLength(3);
+    expect(sdk.launches[2]).toMatchObject({ resume: "prior", permissionMode: "default" });
+    expect(sdk.modes).toEqual(["default", "default", "default"]);
+  },
+);
+
 it("rejects input that was waiting across a change from Supervised to Full", async () => {
   const { promise, resolve } = Promise.withResolvers<void>();
   const sdk = stubSdk({ setMode: (mode) => (mode === "default" ? promise : Promise.resolve()) });

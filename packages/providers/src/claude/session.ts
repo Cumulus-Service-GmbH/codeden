@@ -117,9 +117,12 @@ export class ClaudeSession implements ProviderSession {
   private readonly broker: ApprovalBroker;
   private readonly policy: ClaudePolicy;
   private q: Query | undefined;
+  private startupMode?: Promise<void>;
+  private queryDisposal?: Promise<void>;
   private modeUpdate = Promise.resolve();
   private pendingModeUpdates = 0;
   private modeRevision = 0;
+  private confirmedModeRevision?: number;
   private correctingMode = false;
   private appliedMode: PermissionMode | undefined;
   private settingMode: PermissionMode | undefined;
@@ -348,38 +351,85 @@ export class ClaudeSession implements ProviderSession {
     this.mcpStatus.stop();
     this.broker.cancelAll();
     this.mapper.closeAll();
-    this.prompts?.close();
-    try {
-      if (this.q?.[Symbol.asyncDispose]) await this.q[Symbol.asyncDispose]();
-      else this.q?.close();
-    } catch {
-      this.abort?.abort();
-    }
+    await this.disposeQuery();
     this.mcpConfig.remove();
     this.events.close();
   }
 
   // ---------------------------------------------------------------- internals
 
+  private clearQuery(): void {
+    this.markedHookAsks.clear();
+    this.prompts?.close();
+    this.q = undefined;
+    this.planExit = undefined;
+    this.prompts = undefined;
+  }
+
+  private disposeQuery(): Promise<void> {
+    if (this.queryDisposal) return this.queryDisposal;
+    const { q, abort } = this;
+    if (!q) return Promise.resolve();
+    this.prompts?.close();
+    this.queryDisposal = (async () => {
+      try {
+        if (q[Symbol.asyncDispose]) await q[Symbol.asyncDispose]();
+        else q.close();
+      } catch {
+        abort?.abort();
+      }
+    })().finally(() => {
+      if (this.q === q) this.clearQuery();
+      this.queryDisposal = undefined;
+    });
+    return this.queryDisposal;
+  }
+
+  private async confirmQueryStartup(q: Query): Promise<void> {
+    try {
+      await this.applyPermissionMode();
+    } catch (error) {
+      if (this.q === q && !this.closed) {
+        this.warnPermissionMode(
+          "claude_permission_mode_update_failed",
+          "Claude refused to apply the session's startup permission mode.",
+        );
+        await this.disposeQuery();
+      }
+      throw error;
+    } finally {
+      if (this.q === q) this.startupMode = undefined;
+    }
+  }
+
   /** Check the latest native write and perform the input operation in the same continuation. */
   private async withConfirmedPermissionMode(action?: () => void): Promise<void> {
-    if (this.autonomy === "supervised") {
-      const { q, modeRevision } = this;
-      const unconfirmed = () =>
-        new ProviderSessionError(
+    if (this.autonomy === "supervised" || this.startupMode) {
+      const { q, modeRevision, startupMode } = this;
+      const current = () => !this.closed && this.q === q && this.modeRevision === modeRevision;
+      let update: Promise<void> | undefined;
+      try {
+        if (startupMode) await startupMode;
+        while (current()) {
+          update = this.modeUpdate;
+          await update;
+          if (this.modeUpdate === update) break;
+        }
+      } catch {
+        update = undefined;
+      }
+      if (this.closed) throw new ProviderSessionError("closed", "Session is closed");
+      if (
+        !q ||
+        !current() ||
+        update !== this.modeUpdate ||
+        (this.autonomy === "supervised" &&
+          (this.planExit || this.confirmedModeRevision !== modeRevision))
+      ) {
+        throw new ProviderSessionError(
           "config_unconfirmed",
           "Claude has not confirmed its permission mode",
         );
-      for (;;) {
-        const update = this.modeUpdate;
-        try {
-          await update;
-        } catch {
-          throw unconfirmed();
-        }
-        if (!q || this.q !== q || this.closed || this.modeRevision !== modeRevision)
-          throw unconfirmed();
-        if (this.modeUpdate === update) break;
       }
     }
     action?.();
@@ -406,7 +456,10 @@ export class ClaudeSession implements ProviderSession {
       const setMode = async (target: PermissionMode) => {
         this.settingMode = target;
         await q.setPermissionMode(target);
-        if (active()) this.appliedMode = target;
+        if (active()) {
+          this.appliedMode = target;
+          this.confirmedModeRevision = revision;
+        }
       };
       try {
         await setMode(mode);
@@ -542,6 +595,8 @@ export class ClaudeSession implements ProviderSession {
   }
 
   private ensureQuery(): AsyncQueue<SDKUserMessage> {
+    if (this.queryDisposal)
+      throw new ProviderSessionError("config_unconfirmed", "Claude's previous query is closing");
     if (this.q && this.prompts) return this.prompts;
     const prompts = new AsyncQueue<SDKUserMessage>();
     const abort = new AbortController();
@@ -585,7 +640,9 @@ export class ClaudeSession implements ProviderSession {
       throw error;
     }
     this.q = q;
+    this.startupMode = undefined;
     this.modeUpdate = Promise.resolve();
+    this.confirmedModeRevision = undefined;
     this.pendingModeUpdates = 0;
     this.correctingMode = false;
     this.appliedMode = permissionModeFor(this.autonomy, this.planMode);
@@ -594,7 +651,10 @@ export class ClaudeSession implements ProviderSession {
     this.prompts = prompts;
     this.abort = abort;
     void this.pump(q);
-    if (this.autonomy === "supervised") void this.applyPermissionModeInBackground();
+    if (this.autonomy === "supervised") {
+      this.startupMode = this.confirmQueryStartup(q);
+      void this.startupMode.catch(() => {});
+    }
     // The composer's `/` menu lists what Claude Code would run (built-in commands included).
     q.supportedCommands().then(
       (commands) => this.mapper.reportCommands(commands),
@@ -623,6 +683,7 @@ export class ClaudeSession implements ProviderSession {
     let failure: unknown;
     try {
       for await (const message of q) {
+        if (this.q !== q) return;
         this.mapper.handle(message);
         this.afterMessage(message);
         const type = str(message, "type");
@@ -649,14 +710,9 @@ export class ClaudeSession implements ProviderSession {
       }
     } catch (error) {
       failure = error;
-    } finally {
-      if (this.q === q) {
-        this.markedHookAsks.clear();
-        this.q = undefined;
-        this.planExit = undefined;
-        this.prompts = undefined;
-      }
     }
+    if (this.q !== q) return;
+    this.clearQuery();
     if (this.closed) return;
     this.broker.cancelAll();
     if (this.mapper.turnId) {

@@ -609,6 +609,72 @@ describe("Claude plan mode", () => {
     await vi.waitFor(() => expect(sdk.modes).toEqual(["default", "default", "default"]));
   });
 
+  it.each(["steer", "send", "compact"] as const)(
+    "blocks Supervised %s until the plan exit's revision is confirmed",
+    async (action) => {
+      const sdk = stubSdk();
+      const { session, events, permission, items } = open(sdk, { autonomy: "supervised" });
+      const input = { text: "Continue", attachments: [] };
+      await session.send(input);
+      const approval = permission("ExitPlanMode", { plan: "A synthetic plan" }, "exit");
+      await vi.waitFor(() => expect(items("approval_request")).toHaveLength(1));
+      await session.respond("r-exit", { kind: "approval", decision: "allow_once" });
+      await expect(approval).resolves.toMatchObject({ behavior: "allow" });
+      if (action !== "steer") {
+        vi.useFakeTimers();
+        try {
+          await session.interrupt();
+          await vi.runOnlyPendingTimersAsync();
+        } finally {
+          vi.useRealTimers();
+        }
+        expect(events.some((event) => event.type === "turn.interrupted")).toBe(true);
+      }
+
+      expect(sdk.modes).toEqual(["plan"]);
+      const submit = () => (action === "compact" ? session.compact() : session[action](input));
+      await expect(submit()).rejects.toMatchObject({ code: "config_unconfirmed" });
+
+      const write = Promise.withResolvers<void>();
+      sdk.beforeMode.mockImplementationOnce(() => write.promise);
+      sdk.deliver(toolResult("exit"));
+      await vi.waitFor(() => expect(sdk.beforeMode).toHaveBeenCalledWith("default"));
+      const settled = vi.fn();
+      const pending = submit().then(settled, settled);
+      try {
+        await new Promise<void>((done) => setImmediate(done));
+        expect(settled).not.toHaveBeenCalled();
+      } finally {
+        write.resolve();
+        await pending;
+      }
+      expect(settled).toHaveBeenCalledExactlyOnceWith(undefined);
+      expect(sdk.modes).toEqual(["plan", "default"]);
+    },
+  );
+
+  it("drops waiting Supervised steer input when its turn ends", async () => {
+    const sdk = stubSdk();
+    const { session, events } = open(sdk, { autonomy: "supervised", planMode: false });
+    const input = { text: "Continue", attachments: [] };
+    await session.send(input);
+    const write = Promise.withResolvers<void>();
+    sdk.beforeMode.mockImplementationOnce(() => write.promise);
+    const configure = session.setAutonomy("supervised");
+    const steering = session.steer(input);
+    const proof = expect(steering).rejects.toMatchObject({ code: "no_turn" });
+    try {
+      sdk.deliver({ type: "result", subtype: "success" });
+      await vi.waitFor(() =>
+        expect(events.some((event) => event.type === "turn.completed")).toBe(true),
+      );
+    } finally {
+      write.resolve();
+      await configure;
+      await proof;
+    }
+  });
+
   it("declining keeps it planning, with the user's feedback", async () => {
     const sdk = stubSdk();
     const { session, preToolUse, permission, items, planUpdates } = open(sdk);
