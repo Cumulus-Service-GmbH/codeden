@@ -9,13 +9,25 @@ export function TeamSettings() {
   return (
     <>
       <EffectiveTeam />
-      {setup && <DefaultTeamEditor key={JSON.stringify(setup)} setup={setup} />}
+      {setup && <DefaultTeamEditor setup={setup} />}
     </>
   );
 }
 
 function DefaultTeamEditor({ setup }: { setup: Settings["teamSetup"] }) {
+  const [saved, setSaved] = useState(setup);
   const [draft, setDraft] = useState(setup);
+  if (saved !== setup) {
+    setSaved(setup);
+    setDraft({
+      ...setup,
+      team: saved.team === setup.team ? draft.team : setup.team,
+      resultSummaryBytes:
+        saved.resultSummaryBytes === setup.resultSummaryBytes
+          ? draft.resultSummaryBytes
+          : setup.resultSummaryBytes,
+    });
+  }
   return <TeamEditor tuning={draft} onChange={setDraft} />;
 }
 

@@ -1,5 +1,5 @@
 import { type ChildProcess, spawn } from "node:child_process";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { closeSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { RUNNER_PROTOCOL_VERSION, type RunnerLock, type SessionOptions } from "@codeden/contracts";
@@ -8,8 +8,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { isAlive, Journal, type RunningRunner, readLock, startRunner } from "../src";
 import { assertSingleInstance, isLockOwner, removeOwnLock } from "../src/lock";
 import type { ProcessRow } from "../src/process/inside";
+import { holdRunnerIdentity } from "../src/process/runner-identity";
 import type { TreeOps } from "../src/process/tree";
-import { removeDir, TestServer, tempDir, waitUntil } from "./helpers";
+import { removeDir, TestServer, tempDir, waitUntil, withBlockedPs } from "./helpers";
 
 let home: string;
 let runner: RunningRunner | undefined;
@@ -81,9 +82,9 @@ function writeLockFile(lock: RunnerLock): void {
 }
 
 /** A live process that never answers, with `args` on its command line. */
-function idleProcess(args: string[]): ChildProcess {
+function idleProcess(args: string[], fd?: number): ChildProcess {
   const child = spawn(process.execPath, ["-e", "setInterval(() => {}, 1000)", "--", ...args], {
-    stdio: "ignore",
+    stdio: fd === undefined ? "ignore" : ["ignore", "ignore", "ignore", fd],
   });
   children.push(child);
   return child;
@@ -273,17 +274,29 @@ describe("a journal another runner took over (#615)", () => {
 });
 
 describe("starting beside a runner that does not answer (#588)", () => {
-  it("stops the lock's runner when it is alive but silent", async () => {
-    const hung = idleProcess(["--home", home]);
-    const exited = new Promise((resolve) => hung.once("exit", resolve));
-    await waitUntil(() => hung.pid !== undefined && isAlive(hung.pid));
-    const lock = lockOf({ pid: hung.pid, port: await closedPort() });
-    writeLockFile(lock);
+  it.each(process.platform === "darwin" ? [false, true] : [false])(
+    "stops the lock's runner when it is alive but silent; ps denied: %s",
+    async (blockPs) => {
+      const lock = lockOf({ port: await closedPort() });
+      const dir = join(home, "runner");
+      mkdirSync(dir, { recursive: true });
+      const identity =
+        process.platform === "darwin"
+          ? holdRunnerIdentity(join(dir, "runner.json"), lock.token)
+          : undefined;
+      const hung = idleProcess(["--home", home], identity?.fd);
+      hung.once("exit", () => identity?.close());
+      const exited = new Promise((resolve) => hung.once("exit", resolve));
+      await waitUntil(() => hung.pid !== undefined && isAlive(hung.pid));
+      writeLockFile({ ...lock, pid: hung.pid ?? 0 });
 
-    runner = await startRunner({ home, enableFakeProvider: true });
-    await exited;
-    expect(readLock(runner.lockFile)?.token).toBe(runner.token);
-  });
+      runner = await withBlockedPs(blockPs, home, () =>
+        startRunner({ home, enableFakeProvider: true }),
+      );
+      await exited;
+      expect(readLock(runner.lockFile)?.token).toBe(runner.token);
+    },
+  );
 
   it("on Windows stops only what the silent runner started, by start time (#615)", async () => {
     const started = Date.parse("2026-11-21T10:00:00.000Z");
@@ -334,13 +347,28 @@ describe("starting beside a runner that does not answer (#588)", () => {
     expect(killed).toEqual([100, 101, 102]);
   });
 
-  it("leaves a process alone that only reused the lock's pid", async () => {
-    const other = idleProcess(["--home", join(home, "elsewhere")]);
-    await waitUntil(() => other.pid !== undefined && isAlive(other.pid));
-    const lock = lockOf({ pid: other.pid, port: await closedPort() });
-    writeLockFile(lock);
-
-    runner = await startRunner({ home, enableFakeProvider: true });
-    expect(isAlive(other.pid ?? 0)).toBe(true);
+  it.each(
+    process.platform === "darwin"
+      ? (["none", "read-only", "other-pid"] as const)
+      : (["none"] as const),
+  )("leaves a process alone that only reused the lock's pid; marker: %s", async (marker) => {
+    const lock = lockOf({ port: await closedPort() });
+    const dir = join(home, "runner");
+    mkdirSync(dir, { recursive: true });
+    const identity =
+      marker === "none" ? undefined : holdRunnerIdentity(join(dir, "runner.json"), lock.token);
+    const readOnly = marker === "read-only" && identity ? openSync(identity.path, "r") : undefined;
+    try {
+      const other = idleProcess(["--home", join(home, "elsewhere")], readOnly);
+      await waitUntil(() => other.pid !== undefined && isAlive(other.pid));
+      writeLockFile({ ...lock, pid: other.pid ?? 0 });
+      runner = await withBlockedPs(marker !== "none", home, () =>
+        startRunner({ home, enableFakeProvider: true }),
+      );
+      expect(isAlive(other.pid ?? 0)).toBe(true);
+    } finally {
+      if (readOnly !== undefined) closeSync(readOnly);
+      identity?.close();
+    }
   });
 });

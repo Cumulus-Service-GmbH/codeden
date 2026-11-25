@@ -121,6 +121,16 @@ const NUDGED_THEN_FAILED = {
   afterGrace: "The reviewer ended without a verdict",
 };
 
+it("does not nudge an ended reviewer after blocking the review on diff size", async () => {
+  env = createFactoryEnv();
+  const { id, pr, first } = await reviewing();
+  setStatus(first, "idle");
+  pr.additions = 3_001;
+  await tick();
+  expect(item(id)).toMatchObject({ stage: "failed", failureKind: "stuck" });
+  expect(nudges(first)).toBe(0);
+});
+
 describe("a replacement reviewer after its predecessor was nudged (#247)", () => {
   it("is nudged itself when the nudged reviewer died", async () => {
     env = createFactoryEnv();

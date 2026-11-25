@@ -215,7 +215,12 @@ it("shows the saved PM progress note and updates task text only when explicit", 
   expect(service.get(projectId)?.items[0]).toMatchObject({ text: "B", note: "Checked" });
 });
 
-it.each(["pending", "pinned"])("accepts PM progress on a %s reviewed plan", async (state) => {
+it.each([
+  ["pending", {}],
+  ["pending", { text: "A" }],
+  ["pinned", {}],
+  ["pinned", { text: "A" }],
+] as const)("accepts PM progress on a %s reviewed plan with %j", async (state, wording) => {
   const { tools, caller } = pmChecklistTools();
   const tasks = [{ id: "a", text: "A" }];
   service.update(projectId, { items: tasks });
@@ -229,7 +234,7 @@ it.each(["pending", "pinned"])("accepts PM progress on a %s reviewed plan", asyn
   expect(
     await tools.call(
       "update_checklist_item",
-      { itemId: "a", note: "Reviewed results", status: "done" },
+      { itemId: "a", ...wording, note: "Reviewed results", status: "done" },
       caller,
     ),
   ).toMatchObject({ isError: false });

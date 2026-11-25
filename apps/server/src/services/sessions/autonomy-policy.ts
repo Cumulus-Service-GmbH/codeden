@@ -25,7 +25,7 @@ function purposeTokens(purpose: string): string {
 }
 
 function outsideProject(projectPath: string, path: string): boolean {
-  const expanded = /^~[/\\]/.test(path) ? resolve(homedir(), path.slice(2)) : path;
+  const expanded = /^~(?:$|[/\\])/.test(path) ? resolve(homedir(), path.slice(2)) : path;
   const fromProject = relative(projectPath, resolve(projectPath, expanded));
   return fromProject === ".." || fromProject.startsWith(`..${sep}`) || isAbsolute(fromProject);
 }

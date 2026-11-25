@@ -34,6 +34,7 @@ import { Journal } from "./journal";
 import { assertSingleInstance, readLock, removeOwnLock } from "./lock";
 import { LinkMcpUpstream } from "./mcp/link-upstream";
 import { HttpMcpUpstream, handleMcpRequest, type McpUpstream } from "./mcp/proxy";
+import { holdRunnerIdentity } from "./process/runner-identity";
 import { ProcessSupervisor } from "./process/supervisor";
 import { isAlive } from "./process/tree";
 import { serverPid } from "./process/worktree-processes";
@@ -345,8 +346,28 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
     providers: registry.list().map((a) => a.id),
   };
   const tmp = `${lockFile}.${process.pid}.tmp`;
-  writeFileSync(tmp, `${JSON.stringify(lock, null, 2)}\n`, { mode: 0o600 });
-  renameSync(tmp, lockFile);
+  let identity: ReturnType<typeof holdRunnerIdentity> | undefined;
+  if (process.platform === "darwin") {
+    try {
+      identity = holdRunnerIdentity(lockFile, token);
+    } catch {
+      log("runner ownership file unavailable");
+    }
+  }
+  const closeIdentity = () => {
+    try {
+      identity?.close();
+    } catch {
+      log("could not remove the runner ownership file");
+    }
+  };
+  try {
+    writeFileSync(tmp, `${JSON.stringify(lock, null, 2)}\n`, { mode: 0o600 });
+    renameSync(tmp, lockFile);
+  } catch (error) {
+    closeIdentity();
+    throw error;
+  }
   log(`runner ${journal.runnerId} listening on 127.0.0.1:${port}`);
   const loopDelay = monitorEventLoopDelay({ resolution: 20 });
   loopDelay.enable();
@@ -375,7 +396,10 @@ export async function startRunner(opts: StartRunnerOptions): Promise<RunningRunn
   // Finish deleting worktrees a previous run moved to the trash; it never throws.
   void emptyTrash(opts.home, { log });
 
-  const removeLock = () => removeOwnLock(lockFile);
+  const removeLock = () => {
+    removeOwnLock(lockFile);
+    closeIdentity();
+  };
   process.once("exit", removeLock);
   // A lock naming another runner means this one was replaced (#588): servers find runners only
   // through the lock, so none can reach it again. It stops with its agents instead of running

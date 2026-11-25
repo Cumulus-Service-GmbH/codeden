@@ -18,6 +18,25 @@ export function tempDir(prefix: string): string {
   return mkdtempSync(join(tmpdir(), prefix));
 }
 
+export async function withBlockedPs<T>(
+  block: boolean,
+  dir: string,
+  run: () => Promise<T>,
+): Promise<T> {
+  if (!block) return run();
+  const bin = join(dir, "blocked-bin");
+  mkdirSync(bin, { recursive: true });
+  writeFileSync(join(bin, "ps"), "", { mode: 0o600 });
+  const path = process.env.PATH;
+  process.env.PATH = bin;
+  try {
+    return await run();
+  } finally {
+    if (path === undefined) delete process.env.PATH;
+    else process.env.PATH = path;
+  }
+}
+
 /**
  * Make `process.platform` read `platform`, to test a platform's rules on any host. Returns what
  * puts the real one back.

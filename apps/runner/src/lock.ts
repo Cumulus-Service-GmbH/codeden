@@ -1,8 +1,15 @@
 import { readFileSync, rmSync } from "node:fs";
 import { RunnerLock } from "@codeden/contracts";
 import type { ProcessRow } from "./process/inside";
+import { verifyRunnerIdentity } from "./process/runner-identity";
 import { processTable } from "./process/table";
-import { isAlive, killTreeAndOrphans, type TreeOps, waitForExit } from "./process/tree";
+import {
+  isAlive,
+  killProcess,
+  killTreeAndOrphans,
+  type TreeOps,
+  waitForExit,
+} from "./process/tree";
 
 /** Lock files owned by runners in this process (several embedded runners in tests). */
 const activeLocks = new Set<string>();
@@ -99,6 +106,19 @@ export async function assertSingleInstance(
         { graceMs: 5_000, ops: opts.ops },
       );
       await waitForExit(lock.pid, 5_000, alive);
+    } else if (
+      !opts.table &&
+      row?.limited &&
+      (await verifyRunnerIdentity(lockFile, lock.token, lock.pid))
+    ) {
+      opts.log?.(
+        `runner pid ${lock.pid} holds the ownership file but does not answer; stopping it`,
+      );
+      // The partial process table cannot prove which other PIDs share the runner's group.
+      killProcess(lock.pid);
+      if (!(await waitForExit(lock.pid, 5_000, alive))) {
+        throw new Error(`Runner pid ${lock.pid} did not exit`);
+      }
     }
   }
   activeLocks.add(lockFile);

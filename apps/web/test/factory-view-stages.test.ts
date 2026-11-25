@@ -340,6 +340,23 @@ describe("the item sheet's steps (#181)", () => {
 });
 
 describe("the factory's pull requests on the view (#181)", () => {
+  it("shows the failure reason for a failed draft and a wait message for an active draft", () => {
+    const failed = w("failed-draft", 30, {
+      stage: "failed",
+      step: "stopped",
+      pr: { ...prRef(30), state: "draft" },
+      reason: "The build failed",
+    });
+    const active = w("active-draft", 31, { pr: { ...prRef(31), state: "draft" } });
+    const p = viewPipeline(status({ inProgress: [active], recent: [failed] }), new Map(), NOW);
+    expect(p.needsYou.find((card) => card.item.id === failed.id)?.activity).toBe(
+      "The build failed",
+    );
+    expect(p.stages.building.find((card) => card.item.id === active.id)?.activity).toBe(
+      "Waiting for the pull request author to mark it ready for review",
+    );
+  });
+
   it("keeps an item's current PR and queue place when a superseded PR is listed after it", () => {
     // As the server lists them: the queue first, then the others, superseded ones among them.
     const prs = [

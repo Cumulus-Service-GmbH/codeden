@@ -122,11 +122,12 @@ async function settleOne(
     : undefined;
   // Read again: an earlier late reviewer of the same item may have been adopted just now.
   const current = reviewing ? ctx.store.item(reviewing.id) : undefined;
+  const head = current ? trackedHead(current) : null;
   if (
     current &&
     !s.archivedAt &&
     wantsReviewer(current) &&
-    (s.branch !== null || s.baseBranch === trackedHead(current))
+    (s.branch !== null || (head !== null && s.baseBranch === head))
   ) {
     const distinct = reviewVendorIsDistinct(ctx, current, s.provider);
     if (distinct === undefined) return;

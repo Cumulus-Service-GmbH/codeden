@@ -1,9 +1,9 @@
 /**
  * Characters a stored file's name never holds: path separators, what Windows forbids in a name,
  * control characters, and the direction marks that can make a name read differently from what
- * it is (`invoice‮fdp.exe` shows as `invoiceexe.pdf`).
+ * it is (`invoice\u202efdp.exe` shows as `invoiceexe.pdf`).
  */
-const UNSAFE = /[<>:"/\\|?*\p{Cc}؜‎‏‪-‮⁦-⁩]/gu;
+const UNSAFE = /[<>:"/\\|?*\p{Cc}\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]/gu;
 
 /**
  * Device names Windows reserves, with or without an extension (`CON`, `nul.txt`, `COM1.log`),

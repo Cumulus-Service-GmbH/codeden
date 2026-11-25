@@ -273,8 +273,11 @@ function activityOf(
   pr: FactoryPrEntry | null,
   session: SessionInfo | undefined,
 ): string {
-  const outcome = w.stage === "failed" || w.stage === "escalated" ? (w.reason ?? w.note) : null;
-  return (pr?.pr ?? w.pr ?? w.ownedPr)?.state === "draft"
+  const terminal = w.stage === "failed" || w.stage === "rejected";
+  const outcome = terminal || w.stage === "escalated" ? (w.reason ?? w.note) : null;
+  const draft = (pr?.pr ?? w.pr ?? w.ownedPr)?.state === "draft";
+  if (draft && terminal && outcome) return outcome;
+  return draft && !terminal
     ? "Waiting for the pull request author to mark it ready for review"
     : pr?.state === "waiting_ci" && pr.note
       ? pr.note

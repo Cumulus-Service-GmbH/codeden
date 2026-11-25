@@ -39,6 +39,36 @@ it("a configured completion check that passes lets the item proceed", async () =
   expect(env.gh.merges.map((m) => m.number)).toEqual([pr.ref.number]);
 });
 
+it("detaches a same-vendor reviewer before waiting on its stale completion-check marker", async () => {
+  env = activeEnv = createFactoryEnv({
+    jevScript: fixtureJevScript,
+    providers: ["claude", "codex"],
+  });
+  const invoke = vi.fn((result: ExecResult) => result);
+  installDoneFixture(env, invoke);
+  await enable("software_factory", { autoMerge: true });
+  const { id, pr, builder } = await verifying("pending");
+  const old = item(id).reviewerSessionId as string;
+  const provider = env.repo.get(builder).provider;
+  const head = pr.headSha as string;
+  expect(old).toBeTruthy();
+  env.repo.update(old, (session) => ({ ...session, provider, status: "running" }));
+  env.factory.data.updateItem(id, (i) => ({
+    ...i,
+    reviewerProvider: provider,
+    jev: { head, status: "revise", reasons: ["Refresh evidence"] },
+    jevReviewHead: head,
+  }));
+
+  await tick();
+
+  expect(env.stopped).toContain(old);
+  expect(item(id).reviewerSessionId).not.toBe(old);
+  expect(item(id).reviewerProvider).not.toBe(provider);
+  expect(item(id).jevReviewHead).toBeUndefined();
+  expect(invoke).not.toHaveBeenCalled();
+});
+
 async function expectBlocked(done: (result: ExecResult) => ExecResult) {
   for (const autoMerge of [true, false]) {
     env = activeEnv = createFactoryEnv({ jevScript: fixtureJevScript });

@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { readdir, readFile, readlink } from "node:fs/promises";
+import { basename } from "node:path";
 import type { ProcessRow } from "./inside";
 
 /** Run a command for its output. With `partial`, a non-zero exit still returns what it printed. */
@@ -129,9 +130,106 @@ export function parseLsofCwds(output: string): Map<number, string> {
   return cwds;
 }
 
+function lsofFields(output: string): string[] {
+  return output.split("\0").map((field) => field.replace(/^\n/, ""));
+}
+
+/** A partial macOS table using only kernel-reported parent IDs, CWDs and executable mappings. */
+export function parseLsofProcessTable(output: string): ProcessRow[] {
+  const rows: ProcessRow[] = [];
+  let row: ProcessRow | undefined;
+  let command = "";
+  let fd = "";
+  let executables = new Set<string>();
+  const complete = () => {
+    if (!row) return;
+    if (executables.size === 1) row.exe = [...executables][0] ?? null;
+    rows.push(row);
+  };
+  for (const field of lsofFields(output)) {
+    const value = field.slice(1);
+    switch (field[0]) {
+      case "p":
+        complete();
+        row = /^\d+$/.test(value)
+          ? {
+              pid: Number(value),
+              ppid: 0,
+              exe: null,
+              cwd: null,
+              commandLine: null,
+              startedAt: null,
+              limited: true,
+            }
+          : undefined;
+        command = fd = "";
+        executables = new Set();
+        break;
+      case "R":
+        if (row && /^\d+$/.test(value)) row.ppid = Number(value);
+        break;
+      case "c":
+        command = value;
+        break;
+      case "f":
+        fd = value;
+        break;
+      case "n":
+        if (!row || !value.startsWith("/")) break;
+        if (fd === "cwd") row.cwd = value;
+        if (fd === "txt" && basename(value) === command) executables.add(value);
+        break;
+    }
+  }
+  complete();
+  return rows;
+}
+
+/** Ask macOS whether this exact PID has a write descriptor for this exact file. */
+export async function holdsMacFile(pid: number, path: string): Promise<boolean> {
+  const output = await run(
+    "/usr/sbin/lsof",
+    ["-nP", "-a", "-p", String(pid), "-F0pfan", "--", path],
+    5_000,
+  );
+  let owner = false;
+  let descriptor = false;
+  let writable = false;
+  for (const field of lsofFields(output)) {
+    switch (field[0]) {
+      case "p":
+        owner = field === `p${pid}`;
+        descriptor = false;
+        writable = false;
+        break;
+      case "f":
+        descriptor = /^f\d+$/.test(field);
+        writable = false;
+        break;
+      case "a":
+        writable = field === "aw" || field === "au";
+        break;
+      case "n":
+        if (owner && descriptor && writable && field === `n${path}`) return true;
+        break;
+    }
+  }
+  return false;
+}
+
 /** macOS and other POSIX systems: `ps` for command lines, `lsof` (best effort) for cwds. */
 async function psTable(): Promise<ProcessRow[]> {
-  const rows = parsePsTable(await run("ps", ["-A", "-ww", "-o", "pid=,ppid=,lstart=,command="]));
+  let output: string;
+  try {
+    output = await run("ps", ["-A", "-ww", "-o", "pid=,ppid=,lstart=,command="]);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (process.platform !== "darwin" || (code !== "EPERM" && code !== "EACCES")) throw error;
+    return parseLsofProcessTable(
+      await run("/usr/sbin/lsof", ["-nP", "-d", "cwd,txt", "-F0pcRfn"], 20_000),
+    );
+  }
+  const rows = parsePsTable(output);
   // lsof exits non-zero when it can't read some processes; what it could read still counts.
   const cwds = await run("lsof", ["-nP", "-d", "cwd", "-Fpn"], 20_000, true)
     .then(parseLsofCwds)

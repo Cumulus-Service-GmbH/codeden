@@ -154,6 +154,28 @@ describe("a factory session whose start the runner didn't answer (#492)", () => 
     expect(item(id).review?.verdict).toBe("approve");
   });
 
+  it("does not adopt a detached reviewer when neither checkout nor tracked head is known", async () => {
+    const { id, reviewer } = await reviewerUnanswered();
+    later(START_ANSWER_GRACE_MS + 1_000);
+    await tick();
+    expect(item(id).reviewerSessionId).toBeNull();
+    env.repo.update(reviewer, (s) => ({ ...s, branch: null, baseBranch: null }));
+    env.factory.data.updateItem(id, (i) => ({
+      ...i,
+      nudges: Object.fromEntries(
+        Object.entries(i.nudges).filter(([key]) => !key.startsWith("head_")),
+      ),
+    }));
+
+    startsAnyway(reviewer);
+    await tick();
+    await env.factory.archiver.idle();
+
+    expect(env.stopped).toContain(reviewer);
+    expect(env.archived).toContain(reviewer);
+    expect(item(id).reviewerSessionId).not.toBe(reviewer);
+  });
+
   it("still skips the provider for the item when the runner refused the start", async () => {
     env = createFactoryEnv();
     await enable();

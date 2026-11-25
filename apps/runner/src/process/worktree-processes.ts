@@ -10,7 +10,7 @@ import {
   withDescendants,
 } from "./inside";
 import { processTable } from "./table";
-import { killTree } from "./tree";
+import { killProcess, killTree } from "./tree";
 
 export interface EndProcessesOptions {
   /** The CodeDen home: its `server.json` names the server process, which is never ended. */
@@ -117,6 +117,16 @@ export async function endProcessesInside(
   const windows = process.platform === "win32";
   const protect = [process.pid, ...(server !== undefined ? [server] : [])];
   const spare = new Set(opts.spare ? withDescendants(opts.spare, rows) : []);
+  const limited = rows.some((row) => row.limited);
+  if (limited) {
+    // Without an executable, a row and its descendants could belong to a user's app.
+    const descendants = withDescendants([process.pid], rows);
+    descendants.delete(process.pid);
+    const unknown = rows
+      .filter((row) => row.limited && !row.exe && descendants.has(row.pid))
+      .map((row) => row.pid);
+    for (const pid of withDescendants(unknown, rows)) spare.add(pid);
+  }
   // A folder moved away at `startedBefore`: what started since, or at an unknown time, is kept
   // like a spared terminal, so neither it nor a process it runs under (whose tree kill would
   // end it) is chosen.
@@ -132,13 +142,20 @@ export async function endProcessesInside(
     const allowed = removing
       ? endableForRemoval({ rows, runnerPid: process.pid, protect, dir: folder, windows })
       : startedByAgents(rows, process.pid, RUNNER_STARTED_AT, windows);
-    for (const pid of [...(opts.seen ?? []), ...inside]) allowed.add(pid);
+    if (!limited) {
+      for (const pid of [...(opts.seen ?? []), ...inside]) allowed.add(pid);
+    }
     const chosen = processesToEnd({ dir: folder, rows, windows, protect, allowed, spare, inside });
     for (const pid of chosen) victims.add(pid);
   }
   if (victims.size === 0) return [];
   const ended = [...victims];
-  const kill = opts.kill ?? ((pid: number) => killTree(pid, 500));
+  // The fallback cannot prove group membership. Signal only the individual selected PIDs.
+  const kill =
+    opts.kill ??
+    (limited
+      ? (pid: number) => Promise.resolve(killProcess(pid))
+      : (pid: number) => killTree(pid, 500));
   await Promise.all(ended.map((pid) => kill(pid).catch(() => undefined)));
   const names = ended.map((pid) => {
     const row = rows.find((r) => r.pid === pid);

@@ -162,7 +162,7 @@ describe("safeFileName", () => {
     expect(safeFileName("..\\..\\boot.ini")).toBe("boot.ini");
     expect(safeFileName('a:b*c?"d<e>|f.txt')).toBe("a_b_c__d_e__f.txt");
     expect(safeFileName("tab\there\u0000.txt")).toBe("tab_here_.txt");
-    expect(safeFileName("invoice‮fdp.exe")).toBe("invoice_fdp.exe");
+    expect(safeFileName("invoice\u202efdp.exe")).toBe("invoice_fdp.exe");
     expect(safeFileName("trailing. . ")).toBe("trailing");
     expect(safeFileName("..")).toBe("attachment");
     expect(safeFileName("")).toBe("attachment");

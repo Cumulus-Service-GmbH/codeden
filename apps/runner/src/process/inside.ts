@@ -13,6 +13,8 @@ export interface ProcessRow {
   cwd: string | null;
   /** When the process started (ms since the epoch), where the platform reports it. */
   startedAt: number | null;
+  /** macOS fallback row, without a full command line or start time. */
+  limited?: true;
 }
 
 /** Path form for comparing: forward slashes, no trailing slash, lowercase on Windows. */

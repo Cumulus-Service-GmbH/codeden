@@ -18,6 +18,7 @@ import {
 } from "./arbiter";
 import { codeFiles, evaluateChecks, hasTestResults, sameChecks } from "./checks";
 import { CI_KICK_NUDGE, kickCi } from "./ci-kick";
+import { letGoReviewer } from "./cleanup";
 import { type FactoryContext, visionOf } from "./context";
 import { handleFailure } from "./failures";
 import type { FactoryPr, PrEvidence } from "./github-port";
@@ -41,7 +42,7 @@ import {
   worktreeSettled,
 } from "./rebase";
 import { adoptAgentPr } from "./rebuild";
-import { recheckCause } from "./recheck";
+import { recheckCause, withoutRecheckRequest } from "./recheck";
 import { isAutoReReview, resumeReview, reviseRoundsAllowed } from "./rereview";
 import { checkRevert } from "./revert";
 import { ensureReviewer, reviewerStalled } from "./reviewer";
@@ -176,12 +177,25 @@ export async function advanceVerifying(
   const checked = await checkRevert(ctx, project, item, pr);
   if (!checked) return loop;
   item = checked;
+  const reviewer = item.reviewerSessionId
+    ? ctx.repo.find(item.reviewerSessionId)?.session
+    : undefined;
+  const reviewerProvider = item.reviewerProvider ?? reviewer?.provider;
   if (
-    item.review &&
-    item.reviewerProvider &&
-    reviewVendorIsDistinct(ctx, item, item.reviewerProvider) === false
+    (item.review || item.jevReviewHead || item.jev?.head) &&
+    reviewerProvider &&
+    reviewVendorIsDistinct(ctx, item, reviewerProvider) === false
   ) {
-    item = ctx.store.updateItem(item.id, (i) => ({ ...i, review: null, jev: undefined }));
+    item = ctx.store.updateItem(item.id, (i) => ({
+      ...i,
+      ...letGoReviewer(i),
+      reviewerProvider: null,
+      review: null,
+      jev: undefined,
+      jevReviewHead: undefined,
+      nudges: withoutRecheckRequest(i.nudges),
+    }));
+    if (reviewer && isBusy(reviewer)) await ctx.sessions.stop(reviewer.id);
   }
   // CI gets its time from when this head first appeared, not from when verification began. An
   // approval covers one head: a new head keeps it only with the same change (`approval.ts`).
@@ -328,7 +342,7 @@ export async function advanceVerifying(
       }
     }
     current = await ensureReviewer(ctx, project, loop, current, vision.text, pr);
-    return reviewerStalled(ctx, project, loop, current);
+    return current.stage === "verifying" ? reviewerStalled(ctx, project, loop, current) : loop;
   }
 
   if (!pr.headSha) return loop;

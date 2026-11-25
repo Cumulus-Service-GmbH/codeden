@@ -1,6 +1,7 @@
 import { type FactoryItem, factoryNeed } from "@codeden/contracts";
 import { type FactoryContext, factoryNotice, raiseInbox } from "./context";
 import { ownedPr } from "./pr-status";
+import { recoverable } from "./recover";
 import { endedByStop } from "./stops";
 import { DECISION_INBOX_PREFIX } from "./unattended";
 
@@ -22,11 +23,12 @@ export function settleFailureInbox(ctx: FactoryContext, projectId: string): void
     if (!open.id.startsWith(FAILURE_INBOX)) continue;
     const item = ctx.store.item(open.id.slice(FAILURE_INBOX.length));
     if (
-      item &&
+      item?.stage === "failed" &&
       factoryNeed(item, {
         now: ctx.now().getTime(),
         ownsOpenPr: Boolean(ownedPr(ctx, item)),
         stoppedOnPurpose: endedByStop(item),
+        recovering: recoverable(item),
       })
     )
       continue;

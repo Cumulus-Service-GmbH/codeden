@@ -12,12 +12,17 @@ import {
   withDescendants,
 } from "../src/process/inside";
 import { ProcessSupervisor } from "../src/process/supervisor";
-import { parseLsofCwds, parsePsTable, parseWindowsTable } from "../src/process/table";
+import {
+  parseLsofCwds,
+  parseLsofProcessTable,
+  parsePsTable,
+  parseWindowsTable,
+} from "../src/process/table";
 import { endProcessesInside } from "../src/process/worktree-processes";
 import { removeWorkspace } from "../src/workspace/removal";
 import { emptyTrash } from "../src/workspace/trash";
 import { prepareWorkspace } from "../src/workspace/worktree";
-import { makeRepo, removeDir, tempDir, waitUntil } from "./helpers";
+import { makeRepo, removeDir, tempDir, waitUntil, withBlockedPs } from "./helpers";
 
 const WT = "C:\\Users\\me\\.codeden\\wt\\demo\\abcd1234";
 
@@ -239,6 +244,42 @@ describe("choosing which processes to end before deleting a worktree", () => {
 });
 
 describe("reading the process table", () => {
+  it("protects editors and children with unknown executables in the limited table", async () => {
+    const dir = "/worktree";
+    const worker = process.pid + 10;
+    const editor = worker + 1;
+    const knownChild = editor + 1;
+    const unknown = knownChild + 1;
+    const unknownChild = unknown + 1;
+    const fields = (pid: number, ppid: number, name: string, executable?: string) => [
+      `p${pid}`,
+      `R${ppid}`,
+      `c${name}`,
+      "\nfcwd",
+      `n${dir}`,
+      ...(executable ? ["\nftxt", `n${executable}`] : []),
+    ];
+    const rows = parseLsofProcessTable(
+      `${[
+        ...fields(worker, process.pid, "node", "/usr/bin/node"),
+        ...fields(editor, process.pid, "Code", "/Applications/Code.app/Contents/MacOS/Code"),
+        ...fields(knownChild, editor, "node", "/usr/bin/node"),
+        ...fields(unknown, process.pid, "unknown"),
+        ...fields(unknownChild, unknown, "node", "/usr/bin/node"),
+      ].join("\0")}\0`,
+    );
+    const killed: number[] = [];
+    const ended = await endProcessesInside(dir, {
+      home: "/no-server",
+      table: async () => rows,
+      kill: async (pid) => {
+        killed.push(pid);
+      },
+    });
+    expect(ended).toEqual([worker]);
+    expect(killed).toEqual([worker]);
+  });
+
   it("parses the Windows, ps and lsof formats", () => {
     expect(
       parseWindowsTable(
@@ -288,61 +329,67 @@ describe("removing a worktree an agent's dev server still runs in", () => {
     for (const dir of dirs.splice(0).reverse()) removeDir(dir);
   });
 
-  it("ends the process (not one in a sibling folder) and then removes the worktree", async () => {
-    const repo = makeRepo();
-    const home = tempDir("codeden-home-");
-    dirs.push(repo, home);
-    homes.push(home);
-    const ctx = { home, supervisor: new ProcessSupervisor(), emit: () => undefined };
-    const wt = await prepareWorkspace(
-      {
-        name: "workspace.prepare",
-        sessionId: "sess-leftover",
-        repoPath: repo,
-        strategy: "worktree",
-        projectSlug: "demo",
-        setupCommands: [],
-      },
-      ctx,
-    );
-    const hold = "setInterval(() => {}, 1000)";
-    writeFileSync(join(wt.cwd, "server.js"), hold);
-    const sibling = `${wt.cwd}-2`;
-    mkdirSync(sibling);
-    dirs.push(sibling);
-    writeFileSync(join(sibling, "server.js"), hold);
-    // Started outside the runner's tracking, working in the worktree (Windows then refuses
-    // to move the folder).
-    const start = (cwd: string, args = [join(cwd, "server.js")]) => {
-      const child = spawn(process.execPath, args, { cwd, stdio: "ignore" });
-      const state = { exited: false };
-      child.once("exit", () => {
-        state.exited = true;
-      });
-      return { child, state };
-    };
-    const server = start(wt.cwd);
-    const other = start(sibling);
-    // Only its working directory ties these to the worktree (`node -e`, `node server.js`), so
-    // they're started where the platform reports it: Linux and macOS, never Windows (#608).
-    const inCwd = process.platform === "win32" ? [] : [start(wt.cwd, ["-e", hold])];
-    const inside = [server, ...inCwd];
-    try {
-      const ended = await endProcessesInside(wt.cwd, { home });
-      for (const p of inside) expect(ended).toContain(p.child.pid);
-      expect(ended).not.toContain(other.child.pid);
-      await waitUntil(() => inside.every((p) => p.state.exited), 15_000);
-      expect(other.state.exited).toBe(false);
-
-      const removed = await removeWorkspace(
-        { name: "workspace.remove", repoPath: repo, path: wt.cwd, force: true },
-        home,
+  it.each(process.platform === "darwin" ? [false, true] : [false])(
+    "ends the process (not one in a sibling folder) and then removes the worktree; ps denied: %s",
+    async (blockPs) => {
+      const repo = makeRepo();
+      const home = tempDir("codeden-home-");
+      dirs.push(repo, home);
+      homes.push(home);
+      const ctx = { home, supervisor: new ProcessSupervisor(), emit: () => undefined };
+      const wt = await prepareWorkspace(
+        {
+          name: "workspace.prepare",
+          sessionId: "sess-leftover",
+          repoPath: repo,
+          strategy: "worktree",
+          projectSlug: "demo",
+          setupCommands: [],
+        },
+        ctx,
       );
-      expect(removed).toMatchObject({ removed: true });
-      expect(existsSync(wt.cwd)).toBe(false);
-    } finally {
-      for (const p of [...inside, other]) p.child.kill();
-      await waitUntil(() => [...inside, other].every((p) => p.state.exited), 15_000);
-    }
-  }, 60_000);
+      const hold = "setInterval(() => {}, 1000)";
+      writeFileSync(join(wt.cwd, "server.js"), hold);
+      const sibling = `${wt.cwd}-2`;
+      mkdirSync(sibling);
+      dirs.push(sibling);
+      writeFileSync(join(sibling, "server.js"), hold);
+      // Started outside the runner's tracking, working in the worktree (Windows then refuses
+      // to move the folder).
+      const start = (cwd: string, args = [join(cwd, "server.js")]) => {
+        const child = spawn(process.execPath, args, { cwd, stdio: "ignore" });
+        const state = { exited: false };
+        child.once("exit", () => {
+          state.exited = true;
+        });
+        return { child, state };
+      };
+      const server = start(wt.cwd);
+      const other = start(sibling);
+      // Only its working directory ties these to the worktree (`node -e`, `node server.js`), so
+      // they're started where the platform reports it: Linux and macOS, never Windows (#608).
+      const inCwd = process.platform === "win32" ? [] : [start(wt.cwd, ["-e", hold])];
+      const inside = [server, ...inCwd];
+      try {
+        const ended = await withBlockedPs(blockPs, home, () =>
+          endProcessesInside(wt.cwd, { home }),
+        );
+        for (const p of inside) expect(ended).toContain(p.child.pid);
+        expect(ended).not.toContain(other.child.pid);
+        await waitUntil(() => inside.every((p) => p.state.exited), 15_000);
+        expect(other.state.exited).toBe(false);
+
+        const removed = await removeWorkspace(
+          { name: "workspace.remove", repoPath: repo, path: wt.cwd, force: true },
+          home,
+        );
+        expect(removed).toMatchObject({ removed: true });
+        expect(existsSync(wt.cwd)).toBe(false);
+      } finally {
+        for (const p of [...inside, other]) p.child.kill();
+        await waitUntil(() => [...inside, other].every((p) => p.state.exited), 15_000);
+      }
+    },
+    60_000,
+  );
 });

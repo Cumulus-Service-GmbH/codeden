@@ -25,9 +25,13 @@ function ciState(item: FactoryItem): FactoryPrState {
     : "checking";
 }
 
+function finishedWithFailure(item: FactoryItem): boolean {
+  return item.stage === "failed" || item.stage === "rejected";
+}
+
 /** The state of an item's PR, given its place in the merge queue (null: not queued). */
 export function prState(item: FactoryItem, project: Project, queued: boolean): FactoryPrState {
-  if (item.pr?.state === "draft") return "checking";
+  if (item.pr?.state === "draft" && !finishedWithFailure(item)) return "checking";
   if (item.stage === "escalated" && ciState(item) === "waiting_ci") return "waiting_ci";
   switch (item.stage) {
     case "verifying":
@@ -77,7 +81,9 @@ export function pullRequests(
     queuePosition: position.get(i.id) ?? null,
     note:
       pr.state === "draft"
-        ? "Waiting for the pull request author to mark it ready for review"
+        ? finishedWithFailure(i)
+          ? (i.reason ?? i.note)
+          : "Waiting for the pull request author to mark it ready for review"
         : prState(i, project, position.has(i.id)) === "waiting_ci"
           ? (i.checks.find((c) => c.name === "ci")?.detail ?? i.note ?? i.reason)
           : (i.note ?? i.reason),

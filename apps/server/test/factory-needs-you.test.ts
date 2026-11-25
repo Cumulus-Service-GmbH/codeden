@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { raiseInbox } from "../src/services/factory/context";
 import { needsYouItems } from "../src/services/factory/digest";
+import { failureInboxId, settleFailureInbox } from "../src/services/factory/stuck";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
 import { factorySteps } from "./support/factory-steps";
 
@@ -38,6 +40,45 @@ async function stoppedWithoutPr(title: string) {
 const viewRecent = async () =>
   (await env.factory.status(env.project.id)).viewRecent.map((w) => w.id);
 const waiting = () => needsYouItems(env.factory.ctx, env.project.id).map((n) => n.item.id);
+
+it("shows the failure reason and retry state for a draft pull request", async () => {
+  await enable();
+  const { id, pr } = await verifying("pending");
+  failed(id);
+  env.factory.data.updateItem(id, (i) => ({
+    ...i,
+    pr: { ...pr.ref, state: "draft" },
+    failureKind: "stuck",
+    reason: "The build failed",
+    note: "Waiting for a reviewer",
+  }));
+  const status = await env.factory.status(env.project.id);
+  expect(status.pullRequests.find((entry) => entry.itemId === id)).toMatchObject({
+    state: "stuck",
+    note: "The build failed",
+  });
+});
+
+it("closes a retry card when the factory can recover without the owner", async () => {
+  await enable();
+  const { id } = await verifying("pending");
+  failed(id);
+  const ctx = env.factory.ctx;
+  raiseInbox(ctx, {
+    id: failureInboxId(id),
+    kind: "owner_decision",
+    notify: "needs_you",
+    projectId: env.project.id,
+    title: "Retry the failed item",
+    body: null,
+  });
+  settleFailureInbox(ctx, env.project.id);
+  expect(env.inbox.find(failureInboxId(id))?.status).toBe("open");
+
+  env.factory.data.updateItem(id, (i) => ({ ...i, failureKind: "infrastructure" }));
+  settleFailureInbox(ctx, env.project.id);
+  expect(env.inbox.find(failureInboxId(id))?.status).toBe("resolved");
+});
 
 describe("closed issues settle their failed items (#265)", () => {
   it("moves a failed item out of needs you once its issue is closed", async () => {
