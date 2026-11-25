@@ -1,5 +1,8 @@
 import {
+  type AutonomyLevel,
   type AutonomyPolicy,
+  type RoleAutonomyFloors,
+  type Session,
   Settings,
   type StartSessionRequest,
   TEAM_ROLE_TAGS,
@@ -12,6 +15,7 @@ import { ToolRegistry } from "../src/mcp/registry";
 import { setSessionAutonomy, startSession } from "../src/mcp/tools/pm/sessions";
 import type { AppServices } from "../src/services/container";
 import { DecisionApprovals } from "../src/services/decision-approvals";
+import { Outbox } from "../src/services/sessions/outbox";
 import { SessionRepo } from "../src/services/sessions/repo";
 import { SessionService, type SessionServiceDeps } from "../src/services/sessions/session-service";
 import { sampleSession, sampleSessionEvent } from "./helpers";
@@ -27,7 +31,11 @@ async function start(
     callerTitle?: string;
     architect?: boolean;
     pmPolicy?: AutonomyPolicy;
+    roleFloors?: RoleAutonomyFloors;
+    guard?: boolean;
     teamPolicy?: AutonomyPolicy;
+    autonomy?: AutonomyLevel;
+    resumeWith?: AutonomyLevel;
   },
 ) {
   const database = openDatabase(":memory:");
@@ -54,10 +62,19 @@ async function start(
         model: "caller-model",
       }));
     }
-    const started: StartSessionRequest[] = [];
+    const started: Session[] = [];
+    let readOnlyScope: boolean | undefined;
+    const project = {
+      id: "p1",
+      kind: "local",
+      archivedAt: null,
+      path: process.cwd(),
+      autonomy: opts.autonomy ?? "full",
+      allowUnenforcedProviders: true,
+    };
     const services = {
       db: database.db,
-      projects: { get: () => ({ kind: "local", archivedAt: null, path: process.cwd() }) },
+      projects: { get: () => project },
       factory: {
         isUnattended: () => false,
         providerChoices: async () => [{ id: "claude", runnable: true }],
@@ -75,19 +92,51 @@ async function start(
       settings: {
         get: () =>
           Settings.parse({
-            autonomy: { pmPolicy: opts.pmPolicy },
+            autonomy: { pmPolicy: opts.pmPolicy, roleFloors: opts.roleFloors },
             teamSetup: { remembered: true, team: opts.defaults ?? [] },
           }),
       },
       sessionRepo,
       decisions: new DecisionApprovals(store, { check: vi.fn(), post: vi.fn() }),
-      sessions: {
-        start: async (req: StartSessionRequest) => {
-          started.push(req);
-          return { status: "started", sessionId: "child" };
+    } as unknown as AppServices;
+    const resume = vi.fn(async (_session: Session) => {});
+    const sessions = new SessionService({
+      repo: sessionRepo,
+      projects: services.projects,
+      settings: services.settings,
+      outbox: new Outbox(database.db, store),
+      runner: {
+        isConnected: () => true,
+        providers: () =>
+          ["claude", "codex", "cursor", "gemini", "opencode"].map((id) => ({
+            id,
+            capabilities: {
+              readOnly: true,
+              supervised: true,
+              reasoningEffort: true,
+              enforcesSecurityRules: opts.guard ?? true,
+            },
+          })),
+        request: async () => {
+          throw Object.assign(new Error("Stopped"), { code: "unknown_session" });
         },
       },
-    } as unknown as AppServices;
+      artifacts: {
+        externalizeAttachments: (input: unknown) => input,
+        resolveAttachments: (input: unknown) => input,
+      },
+      launcher: { launch: vi.fn(async () => {}), resume },
+    } as unknown as SessionServiceDeps);
+    services.sessions = {
+      start: async (req: StartSessionRequest, options: Parameters<SessionService["start"]>[1]) => {
+        const result = await sessions.start(req, { ...options, chromeApproved: true });
+        if (result.status === "started") {
+          started.push(sessionRepo.get(result.sessionId));
+          readOnlyScope = sessionRepo.find(result.sessionId)?.startMeta?.readOnlyScope;
+        }
+        return result;
+      },
+    } as SessionService;
     const ctx = {
       services,
       projectId: "p1",
@@ -104,7 +153,17 @@ async function start(
       return { started };
     }
     const result = await startSession.handler(startSession.input.parse(args), ctx);
-    return { result, started };
+    const child = started[0];
+    if (opts.resumeWith && child) {
+      project.autonomy = opts.resumeWith;
+      sessionRepo.update(child.id, (s) => ({ ...s, status: "stopped" }));
+      await sessions.send(child.id, {
+        input: { text: "Resume", attachments: [] },
+        whenBusy: "queue",
+      });
+      expect(resume).toHaveBeenCalledOnce();
+    }
+    return { result, started, readOnlyScope, resumed: resume.mock.calls[0]?.[0] };
   } finally {
     database.close();
   }
@@ -152,6 +211,45 @@ it.each([
 it("accepts an explicit request for supervision", async () => {
   const { started } = await start({ autonomy: "supervised" }, {});
   expect(started[0]?.autonomy).toBe("supervised");
+});
+
+it.each([
+  ["full", undefined, undefined, "full"],
+  ["auto", "full", undefined, "auto"],
+  ["full", "supervised", undefined, "supervised"],
+  ["read_only", "supervised", undefined, "read_only"],
+  ["auto", "full", "full", "full"],
+] as const)(
+  "resolves project %s, floor %s and choice %s",
+  async (autonomy, floor, choice, want) => {
+    const { started } = await start(
+      { autonomy: choice },
+      { autonomy, pmPolicy: floor ? { agent: { "*": floor } } : undefined },
+    );
+    expect(started[0]?.autonomy).toBe(want);
+  },
+);
+
+it.each([
+  ["supervised", "auto", undefined, "supervised"],
+  ["full", "read_only", undefined, "read_only"],
+  [undefined, "auto", undefined, "auto"],
+  [undefined, "auto", "supervised", "supervised"],
+] as const)(
+  "resumes choice %s with project default %s and floor %s",
+  async (autonomy, resumeWith, floor, want) => {
+    const { resumed } = await start(
+      { autonomy },
+      { autonomy: "full", resumeWith, pmPolicy: floor ? { agent: { "*": floor } } : undefined },
+    );
+    expect(resumed?.autonomy).toBe(want);
+  },
+);
+
+it("refuses an explicit request below a Read-only project default", async () => {
+  await expect(start({ autonomy: "full" }, { autonomy: "read_only" })).rejects.toThrow(
+    "Autonomy policy requires read_only",
+  );
 });
 
 it("refuses a request below the purpose policy", async () => {
@@ -225,6 +323,7 @@ it("applies current policy to a running agent with no stored floor", async () =>
     const update = vi.fn(async () => ({ autonomy: "full" }));
     const services = {
       sessionRepo: repo,
+      projects: { get: () => ({ path: process.cwd() }) },
       sessions: { update },
       settings: { get: () => Settings.parse({}) },
       factory: {
@@ -269,12 +368,14 @@ it("raises a running agent to supervised, audits the reason, and refuses a later
     const sessions = new SessionService({
       repo,
       runner: {
+        isConnected: () => true,
         request,
         providers: () => [{ id: session.provider, capabilities: { supervised: true } }],
       },
     } as unknown as SessionServiceDeps);
     const services = {
       sessionRepo: repo,
+      projects: { get: () => ({ path: process.cwd() }) },
       sessions,
       settings: { get: () => Settings.parse({}) },
       factory: { data: { loop: () => undefined } },
@@ -354,4 +455,70 @@ it("allows only the PM's delegated Architect to open child sessions", async () =
     architect: true,
   });
   expect(result.started[0]).toMatchObject({ autonomy: "supervised", parentSessionId: "s1" });
+});
+
+it.each(["planReviewer", "reviewer", "reviewerFallback", "investigator", "arbiter"] as const)(
+  "starts a review-only %s at Full with a read-only launch",
+  async (role) => {
+    const tag = Object.keys(TEAM_ROLE_TAGS).find((tag) => TEAM_ROLE_TAGS[tag] === role);
+    const { started, readOnlyScope } = await start(
+      { title: `${tag} Review`, purpose: "Review the diff", autonomy: "full" },
+      { project: [{ ...writer, role }], pmPolicy: { [role]: { "*": "supervised" } } },
+    );
+    expect(started[0]?.autonomy).toBe("full");
+    expect(readOnlyScope).toBe(true);
+  },
+);
+
+it("caps explicit outside-worktree scope at Auto with or without a legacy wildcard", async () => {
+  const input = { title: "[Writer] Work", scope: { paths: ["~/.config/tool"] } };
+  const opts = { project: [writer], pmPolicy: { writer: { "*": "supervised" as const } } };
+  expect((await start(input, opts)).started[0]?.autonomy).toBe("auto");
+  await expect(start({ ...input, autonomy: "full" }, opts)).rejects.toThrow(
+    "Autonomy policy requires auto",
+  );
+  expect(
+    (await start({ ...input, scope: { paths: ["docs/file"] } }, opts)).started[0]?.autonomy,
+  ).toBe("supervised");
+  expect((await start(input, { ...opts, autonomy: "read_only" })).started[0]?.autonomy).toBe(
+    "read_only",
+  );
+});
+
+it.each(["PRD installation", "Read secrets", "Run dbops", "Create Azure resources"])(
+  "keeps %s supervised even for outside-worktree scopes",
+  async (purpose) => {
+    const input = { purpose, scope: { paths: ["/tmp/installer"] }, autonomy: "auto" };
+    await expect(start(input, {})).rejects.toThrow("Autonomy policy requires supervised");
+  },
+);
+
+it("allows a guarded outside installer at Auto and keeps mixed install scopes supervised", async () => {
+  const pure = { purpose: "Install tooling", scope: { paths: ["/tmp/installer"] } };
+  expect((await start(pure, {})).started[0]?.autonomy).toBe("auto");
+  await expect(start(pure, { guard: false })).rejects.toThrow("isn't covered");
+  const mixed = { ...pure, scope: { paths: ["/tmp/installer", "scripts/setup"] } };
+  await expect(start({ ...mixed, autonomy: "auto" }, {})).rejects.toThrow(
+    "Autonomy policy requires supervised",
+  );
+});
+
+it("keeps a legacy purpose rule ahead of its wildcard for other roles", async () => {
+  const { started } = await start(
+    { title: "[Writer] Work", purpose: "Documentation" },
+    { project: [writer], pmPolicy: { writer: { "*": "supervised", documentation: "auto" } } },
+  );
+  expect(started[0]?.autonomy).toBe("auto");
+});
+
+it("applies a local override independently of the review lane default", async () => {
+  const input = { title: "[Investigator] Review", purpose: "Review the diff" };
+  const options = {
+    project: [{ ...writer, role: "investigator" as const }],
+    roleFloors: { investigator: "auto" as const },
+  };
+  expect((await start(input, options)).started[0]?.autonomy).toBe("auto");
+  await expect(start({ ...input, autonomy: "full" }, options)).rejects.toThrow(
+    "Autonomy policy requires auto",
+  );
 });

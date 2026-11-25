@@ -128,6 +128,17 @@ export function createApi(ctx: ApiContext) {
         if (!patch || typeof patch !== "object" || Array.isArray(patch)) {
           throw badRequest("Expected a JSON object");
         }
+        const autonomy = patch.autonomy;
+        if (
+          isRemoteRequest(c) &&
+          autonomy !== undefined &&
+          (autonomy === null ||
+            typeof autonomy !== "object" ||
+            Array.isArray(autonomy) ||
+            Object.keys(autonomy).some((key) => key !== "default"))
+        ) {
+          throw forbidden("Changing role autonomy floors requires the local install token");
+        }
         const { teamReviewLimits: reviewPatch, ...settingsPatch } = patch;
         const before = s.settings.get();
         if (reviewPatch !== undefined) {

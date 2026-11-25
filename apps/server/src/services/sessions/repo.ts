@@ -83,6 +83,12 @@ export type StoredStartMeta = SessionStartMeta & {
   /** The approved Team layer for a session created by a Team run. */
   runTeam?: import("@codeden/contracts").Team;
   autonomyFloor?: AutonomyLevel;
+  /** Read-only review scope is fixed for the life of the session. */
+  readOnlyScope?: boolean;
+  /** This outside-worktree installer must run with the machine's security rules. */
+  guardedInstall?: boolean;
+  /** PM session choice: null inherits defaults, absent preserves the legacy stored level. */
+  autonomyChoice?: AutonomyLevel | null;
   /** The PM delegated session starts to this Team Architect. */
   teamArchitect?: true;
   pending?: PendingStart | null;

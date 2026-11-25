@@ -121,10 +121,16 @@ export const startSession = defineTool({
     });
     const role = teamRoleOfTitle(input.title);
     const member = teamMember(team, role);
-    const autonomyFloor = resolveAutonomy(
+    const {
+      floor: autonomyFloor,
+      readOnlyScope,
+      guardedInstall,
+    } = resolveAutonomy(
       role,
       input.purpose,
-      settings.autonomy.pmPolicy,
+      input.scope,
+      project.path,
+      settings.autonomy,
       tuning?.autonomyPolicy,
     );
     assertAutonomy(input.autonomy, autonomyFloor);
@@ -153,7 +159,7 @@ export const startSession = defineTool({
       ...(provider !== undefined ? { provider } : {}),
       ...(model !== undefined ? { model } : {}),
       ...(effort !== undefined ? { effort } : {}),
-      autonomy: input.autonomy ?? autonomyFloor,
+      autonomy: input.autonomy,
       purpose: input.purpose,
       workKey: input.workKey ?? (input.issueNumber ? `issue:${input.issueNumber}` : undefined),
       scope: input.scope,
@@ -190,6 +196,8 @@ export const startSession = defineTool({
     try {
       const result = await services.sessions.start(req, {
         autonomyFloor,
+        readOnlyScope,
+        guardedInstall,
         // A PM grants the Architect delegation when choosing that role. A later title edit grants nothing.
         teamArchitect: callerRole === "pm" && role === "architect",
         ...(itemId ? { checklistItemId: itemId } : {}),
@@ -288,16 +296,17 @@ export const setSessionAutonomy = defineTool({
       throw new ToolError("The agent session has ended.");
     }
     const { settings, factory, sessionRepo } = ctx.services;
-    const currentFloor = resolveAutonomy(
+    const meta = sessionRepo.find(session.id)?.startMeta;
+    const { floor: currentFloor } = resolveAutonomy(
       teamRoleOfTitle(session.title ?? undefined),
       session.purpose,
-      settings.get().autonomy.pmPolicy,
+      session.scope,
+      session.scope.paths?.length ? projectFor(ctx.services, ctx.projectId).path : undefined,
+      settings.get().autonomy,
       factory.data.loop(ctx.projectId)?.tuning.autonomyPolicy,
+      meta ?? {},
     );
-    assertAutonomy(
-      autonomy,
-      stricter(currentFloor, sessionRepo.find(session.id)?.startMeta?.autonomyFloor),
-    );
+    assertAutonomy(autonomy, stricter(currentFloor, meta?.autonomyFloor));
     const updated = await ctx.services.sessions.update(
       session.id,
       { autonomy },

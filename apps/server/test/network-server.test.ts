@@ -135,6 +135,22 @@ describe("network access on a real server", () => {
       404,
     );
 
+    const before = server.services.settings.get().autonomy;
+    for (const autonomy of [
+      { roleFloors: { writer: "full" } },
+      { pmPolicy: {} },
+      { ["__proto__"]: { pmPolicy: { writer: { "*": "full" } } } },
+      null,
+    ]) {
+      const result = await fetch(`${remote}/api/settings`, {
+        method: "PATCH",
+        headers: { cookie, origin: remote, "content-type": "application/json" },
+        body: JSON.stringify({ autonomy }),
+      });
+      expect(result.status).toBe(403);
+      expect(server.services.settings.get().autonomy).toEqual(before);
+    }
+
     const ws = new WebSocket(`ws://${lanAddress}:${port}/ws`, {
       headers: { cookie, origin: remote },
     });

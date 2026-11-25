@@ -14,6 +14,17 @@ beforeEach(() => {
 afterEach(() => env.close());
 
 describe("create pull request", () => {
+  it("refuses to commit or push from a Full session with a read-only review scope", async () => {
+    const session = env.addSession({ autonomy: "full" });
+    env.repo.setStartMeta(session.id, (meta) => {
+      if (!meta) throw new Error("Expected saved start metadata");
+      return { ...meta, readOnlyScope: true };
+    });
+    await expect(
+      env.service.createPullRequest(session.id, { title: "Fix a bug", commitMessage: "Fix a bug" }),
+    ).rejects.toMatchObject({ code: "read_only" });
+  });
+
   it("pushes through the runner, opens the PR and links it to the session", async () => {
     env.gh.addIssue({ title: "Bug" });
     const session = env.addSession({

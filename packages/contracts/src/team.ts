@@ -24,6 +24,37 @@ export const AutonomyPolicy = z.partialRecord(
 );
 export type AutonomyPolicy = z.infer<typeof AutonomyPolicy>;
 
+/** Local owner overrides of a Team role's default minimum supervision. Null inherits the default. */
+export const RoleAutonomyFloors = z.partialRecord(
+  TeamRole.or(z.literal("agent")),
+  AutonomyLevel.nullable(),
+);
+export type RoleAutonomyFloors = z.infer<typeof RoleAutonomyFloors>;
+
+/** The role's baseline before scope and purpose rules apply. */
+export function roleAutonomyFloor(
+  role: TeamRole | "agent",
+  floors: RoleAutonomyFloors,
+  policy?: AutonomyPolicy,
+  scopeDefault?: AutonomyLevel,
+) {
+  const override = floors[role];
+  if (override) return { level: override, source: "local" } as const;
+  if (scopeDefault) return { level: scopeDefault, source: "default" } as const;
+  const legacy = policy?.[role]?.["*"];
+  if (legacy) return { level: legacy, source: "policy" } as const;
+  return { level: "full", source: "default" } as const;
+}
+
+/** Team roles eligible for read-only review scope. */
+export const REVIEW_TEAM_ROLES: ReadonlySet<TeamRole> = new Set([
+  "reviewer",
+  "reviewerFallback",
+  "planReviewer",
+  "investigator",
+  "arbiter",
+]);
+
 /** A role's provider and optional pins. Null means the model or effort is unpinned. */
 export const TeamMember = z.object({
   role: TeamRole,

@@ -134,11 +134,11 @@ export class SessionHost {
         `${adapter.displayName} isn't covered by this machine's security rules, and this session isn't allowed to use such providers`,
       );
     }
-    // PMs and the orchestrator are read-only at every level: only on a provider that enforces it.
-    if (role !== "agent" && caps.readOnly !== true) {
+    // Read-only scope is enforced independently of the session autonomy.
+    if ((role !== "agent" || cmd.options.readOnly) && caps.readOnly !== true) {
       throw new CommandError(
         "read_only_unsupported",
-        `${adapter.displayName} can't enforce read-only, so it can't run a ${role === "pm" ? "PM" : "orchestrator"}`,
+        `${adapter.displayName} can't enforce read-only, so it can't run a ${role === "pm" ? "PM" : role === "orchestrator" ? "orchestrator" : "review-only agent"}`,
       );
     }
     // A folder that isn't there (a host path sent to a sandbox, a removed worktree) is named as

@@ -47,7 +47,7 @@ import {
 import type { UtilityService } from "../utility";
 import type { SessionAdmission } from "./admission";
 import { assertProjectActive, inArchivedProject } from "./archived-project";
-import { assertAutonomy } from "./autonomy-policy";
+import { assertAutonomy, stricter } from "./autonomy-policy";
 import { freezeChecks, roundAfter, withRound } from "./checks";
 import { compactingRefusal, compactionRunning, compactRefusal, startCompaction } from "./compact";
 import { derivePurpose, deriveWorkKey, findConflicts, firstPurposeLine } from "./conflicts";
@@ -213,6 +213,7 @@ export class SessionService {
     session: Session,
     workspace: WorkspaceRequest,
     archived?: Session,
+    guardedInstall?: boolean,
   ): void {
     const project = session.projectId ? this.deps.projects.get(session.projectId) : null;
     // On the runner that hosts the role's conversations (the old one's), not only the home one.
@@ -228,7 +229,12 @@ export class SessionService {
     }
     // A worktree session runs in a CodeDen worktree (the runner checks the real folder too).
     const inWorktree = workspace.mode === "worktree";
-    const unenforced = securityRulesUnenforced(provider, project, session.role, inWorktree);
+    const unenforced = securityRulesUnenforced(
+      provider,
+      guardedInstall ? null : project,
+      session.role,
+      inWorktree,
+    );
     if (unenforced) throw badRequest(unenforced, "security_rules_unenforced");
     this.assertSupervisedSupported(session.provider, session.autonomy);
     this.assertReadOnlySupported(session.role, session.provider, session.autonomy);
@@ -273,6 +279,8 @@ export class SessionService {
       ownTeamPins?: boolean;
       runTeam?: import("@codeden/contracts").Team;
       autonomyFloor?: AutonomyLevel;
+      readOnlyScope?: boolean;
+      guardedInstall?: boolean;
       teamArchitect?: boolean;
     } = {},
   ): Promise<StartSessionResponse> {
@@ -280,13 +288,15 @@ export class SessionService {
     if (this.deps.forceFakeProvider && req.provider !== "fake") {
       req = { ...req, provider: "fake", model: undefined, effort: undefined, chrome: undefined };
     }
-    assertAutonomy(req.autonomy, options.autonomyFloor);
-    if (req.autonomy === undefined && options.autonomyFloor) {
-      req = { ...req, autonomy: options.autonomyFloor };
-    }
     // The workspace follows `isGitRepo`: read it once the folder has been checked since start.
     if (req.projectId) await this.deps.projectChecks?.current(req.projectId);
     const project = req.projectId ? projects.get(req.projectId) : null;
+    const pmStart = req.startedBy.kind === "pm";
+    const floor = stricter(
+      options.autonomyFloor,
+      pmStart && project?.autonomy === "read_only" ? "read_only" : undefined,
+    );
+    assertAutonomy(req.autonomy, floor);
     if (project?.archivedAt) throw badRequest("The project is archived", "project_archived");
     if (!project && req.role !== "orchestrator") {
       throw badRequest("projectId is required for this role", "project_required");
@@ -354,7 +364,7 @@ export class SessionService {
           if (target.projectId !== req.projectId) {
             throw badRequest("Can only join a session in the same project", "join_mismatch");
           }
-          assertAutonomy(target.autonomy, options.autonomyFloor);
+          assertAutonomy(target.autonomy, floor);
           if (req.input) {
             await this.send(target.id, { input: req.input, whenBusy: "queue" }, req.startedBy.kind);
           }
@@ -369,7 +379,7 @@ export class SessionService {
       }
     }
 
-    const session = this.buildSession(req, project, {
+    const session = this.buildSession(req, project, floor, {
       purpose,
       workKey,
       scope,
@@ -398,6 +408,9 @@ export class SessionService {
         chromeRequested: req.chrome,
         ...(options.teamArchitect ? { teamArchitect: true } : {}),
         ...(options.autonomyFloor ? { autonomyFloor: options.autonomyFloor } : {}),
+        ...(options.readOnlyScope ? { readOnlyScope: true } : {}),
+        ...(options.guardedInstall ? { guardedInstall: true } : {}),
+        ...(pmStart ? { autonomyChoice: req.autonomy ?? null } : {}),
         ...(options.ownTeamPins ? { ownTeamPins: true as const } : {}),
         ...(options.runTeam ? { runTeam: options.runTeam } : {}),
         ...(req.tokenSaver ? { tokenSaver: req.tokenSaver } : {}),
@@ -459,7 +472,10 @@ export class SessionService {
   ): boolean {
     const { admission, repo } = this.deps;
     // Every new session (a start, a fork, a handoff to another provider) passes here.
-    this.assertProviderAllowed(session, workspace, archived);
+    this.assertProviderAllowed(session, workspace, archived, meta.guardedInstall);
+    if (meta.readOnlyScope) {
+      this.assertReadOnlySupported(session.role, session.provider, "read_only");
+    }
     const waitingForConflict = session.status === "queued";
     const waitingForSlot = !waitingForConflict && !this.reserve(session);
     try {
@@ -501,8 +517,10 @@ export class SessionService {
     this.assertForcedProvider(repo.get(id));
     await this.sourceProjectChecked(id);
     const plan = await planFork({ repo, projects, runner: this.runnerOf(id) }, id, req);
-    const floor = repo.find(id)?.startMeta?.autonomyFloor;
-    if (floor) plan.meta.autonomyFloor = floor;
+    const sourceMeta = repo.find(id)?.startMeta;
+    if (sourceMeta?.autonomyFloor) plan.meta.autonomyFloor = sourceMeta.autonomyFloor;
+    if (sourceMeta?.readOnlyScope) plan.meta.readOnlyScope = true;
+    if (sourceMeta?.guardedInstall) plan.meta.guardedInstall = true;
     this.createAndLaunch(plan.session, plan.meta, plan.start.workspace, undefined, plan.start.fork);
     return { sessionId: plan.session.id };
   }
@@ -520,8 +538,10 @@ export class SessionService {
       req = { ...req, provider: "fake", model: undefined, effort: undefined };
     }
     const plan = await planHandoff({ repo, projects, runner: this.runnerOf(id), utility }, id, req);
-    const floor = repo.find(id)?.startMeta?.autonomyFloor;
-    if (floor) plan.meta.autonomyFloor = floor;
+    const sourceMeta = repo.find(id)?.startMeta;
+    if (sourceMeta?.autonomyFloor) plan.meta.autonomyFloor = sourceMeta.autonomyFloor;
+    if (sourceMeta?.readOnlyScope) plan.meta.readOnlyScope = true;
+    if (sourceMeta?.guardedInstall) plan.meta.guardedInstall = true;
     this.createAndLaunch(plan.session, plan.meta, plan.start.workspace, undefined, plan.start.fork);
     return { sessionId: plan.session.id };
   }
@@ -1073,19 +1093,26 @@ export class SessionService {
       archivedAt: null,
     }));
     try {
+      if (previous === "stopped") await this.refreshAutonomy(session.id, runner);
       // Cleanup removed the worktree (§9), or a container session's start failed and took its
       // container with it: make it again, then resume through the provider.
       if (session.worktreeRemovedAt || this.needsSandbox(session)) {
+        if (previous !== "stopped") await this.refreshAutonomy(session.id, runner);
         await this.deps.launcher.resume(this.deps.repo.get(session.id), input);
         return;
       }
       try {
-        const revision = await applyPendingConfig(this.deps.repo, runner, session);
+        const revision = await applyPendingConfig(
+          this.deps.repo,
+          runner,
+          this.deps.repo.get(session.id),
+        );
         assertConfigRevision(this.deps.repo, session.id, revision);
         await runner.request({ name: "session.send", sessionId: session.id, input, revision });
       } catch (error) {
         // The runner no longer hosts it (restart, stopped): resume through the provider.
         if (runnerErrorCode(error) !== "unknown_session") throw error;
+        if (previous !== "stopped") await this.refreshAutonomy(session.id, runner);
         await this.deps.launcher.resume(this.deps.repo.get(session.id), input);
       }
     } catch (error) {
@@ -1098,6 +1125,25 @@ export class SessionService {
       }
       throw toServiceError(error);
     }
+  }
+
+  private async refreshAutonomy(id: string, runner: RunnerPort): Promise<void> {
+    const { repo, projects, settings } = this.deps;
+    const found = repo.find(id);
+    const choice = found?.startMeta?.autonomyChoice;
+    const projectId = found?.session.projectId;
+    if (!found || choice === undefined || !projectId) return;
+    const { session, startMeta } = found;
+    const projectDefault = projects.get(projectId).autonomy;
+    const autonomy =
+      projectDefault === "read_only"
+        ? projectDefault
+        : (choice ??
+          stricter(projectDefault ?? settings.get().autonomy.default, startMeta?.autonomyFloor));
+    if (autonomy === undefined || autonomy === session.autonomy) return;
+    this.assertReadOnlySupported(session.role, session.provider, autonomy, id);
+    this.assertSupervisedSupported(session.provider, autonomy, id);
+    await updateSession(repo, runner, id, { autonomy }, undefined, true);
   }
 
   /** Queue a message; `at` is a place reserved for it earlier (`Outbox.reserve`). */
@@ -1221,6 +1267,7 @@ export class SessionService {
   private buildSession(
     req: StartSessionRequest,
     project: ReturnType<ProjectService["get"]> | null,
+    floor: AutonomyLevel | undefined,
     work: { purpose: string; workKey: string; scope: Session["scope"]; queued: boolean },
   ): Session {
     const settings = this.deps.settings.get();
@@ -1233,7 +1280,8 @@ export class SessionService {
       req.role,
       this.deps.forceFakeProvider,
     );
-    const autonomy = req.autonomy ?? project?.autonomy ?? settings.autonomy.default;
+    const defaultAutonomy = project?.autonomy ?? settings.autonomy.default;
+    const autonomy = req.autonomy ?? stricter(defaultAutonomy, floor) ?? defaultAutonomy;
     // A `docker` project's sessions run in containers, which no provider credentials reach yet.
     this.deps.sandboxes?.assertStartable(req.role, project, this.provider(provider));
     this.assertReadOnlySupported(req.role, provider, autonomy);
