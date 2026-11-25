@@ -43,7 +43,9 @@ case "$*" in
 esac
 """)
             (bin_dir / "ps").chmod(0o700)
-            (root / "reap.sh").write_text('printf "%s\\n" "$*" > "$FREEZE2_FIXTURE/reap.called"\n')
+            reaper = root / "reap.sh"
+            reaper.write_text('#!/bin/bash\nprintf "%s\\n" "$*" > "$FREEZE2_FIXTURE/reap.called"\n')
+            reaper.chmod(0o700)
             env = {
                 "HOME": str(home),
                 "PATH": f"{bin_dir}:/usr/bin:/bin",
