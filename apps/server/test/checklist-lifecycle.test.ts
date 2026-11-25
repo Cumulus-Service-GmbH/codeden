@@ -140,6 +140,17 @@ it("scopes item edits in MCP and exposes no owner decision tool", async () => {
     await tools.call("update_checklist_item", { itemId: "a", note: "Reviewing" }, pmCaller),
   ).toMatchObject({ isError: false });
   expect(store.listAfter(beforeProgress).map(({ type }) => type)).toEqual(["checklist.updated"]);
+  store.append([{ type: "session.created", sessionId: agent.id, payload: { session: agent } }]);
+  expect(
+    await tools.call("update_checklist_item", { itemId: "a", workKeys: [agent.workKey] }, pmCaller),
+  ).toMatchObject({ isError: false });
+  expect(
+    await tools.call(
+      "update_checklist_item",
+      { itemId: "a", note: "Work-key progress" },
+      agentCaller,
+    ),
+  ).toMatchObject({ isError: false });
   service.link(projectId, "a", agent);
   expect(
     await tools.call("update_checklist_item", { itemId: "a", sessionIds: [] }, agentCaller),

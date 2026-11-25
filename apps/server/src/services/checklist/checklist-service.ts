@@ -457,8 +457,16 @@ export class ChecklistService {
     const checklist = this.read(projectId);
     const item = checklist?.items.find((entry) => entry.id === itemId);
     if (!checklist || !item) throw notFound("Checklist item not found");
-    if (caller.role !== "pm" && (caller.role !== "agent" || !checklistLinked(item, caller))) {
-      throw forbidden("Your session is not linked to this checklist item");
+    if (caller.role !== "pm") {
+      const linked =
+        checklistLinked(item, caller) ||
+        (item.workKeys?.length &&
+          this.lanes(projectId, item).some(
+            (lane) => lane && (lane.id === caller.id || lane.id === caller.parentSessionId),
+          ));
+      if (caller.role !== "agent" || !linked) {
+        throw forbidden("Your session is not linked to this checklist item");
+      }
     }
     if (
       caller.role !== "pm" &&
@@ -637,6 +645,7 @@ export class ChecklistService {
     }
     const byId = new Map(candidates.map((session) => [session.id, session]));
     const linked = ids.map((id) => byId.get(id));
+    const keyLanes = keys.map((key) => candidates.find((session) => session.workKey === key));
     return [
       ...linked.filter((session, index) => {
         if (!session || item.explicitSessionIds?.includes(session.id)) return true;
@@ -646,11 +655,19 @@ export class ChecklistService {
           session.status === "stopped" ||
           session.result?.outcome === "failed" ||
           session.result?.outcome === "blocked";
+        if (!inactive) return true;
+        const newerKeyLane = keyLanes.some(
+          (lane) =>
+            lane?.workKey === session.workKey &&
+            lane !== session &&
+            candidates.indexOf(lane) < candidates.indexOf(session),
+        );
         return (
-          !inactive || !linked.slice(index + 1).some((later) => later?.workKey === session.workKey)
+          !newerKeyLane &&
+          !linked.slice(index + 1).some((later) => later?.workKey === session.workKey)
         );
       }),
-      ...keys.map((key) => candidates.find((session) => session.workKey === key)),
+      ...keyLanes,
     ];
   }
 
@@ -699,13 +716,20 @@ export class ChecklistService {
       },
     );
 
-    // A child may report progress for a linked parent. Only direct lanes count toward completion.
+    // A child can only signal progress for a current parent lane that still needs work.
+    const canSignal = (lane: Session | undefined) =>
+      !!lane && !lane.archivedAt && !liveSessionIds?.includes(lane.id);
     const delegated =
       eventSession?.parentSessionId &&
-      lanes.some((lane) => lane?.id === eventSession.parentSessionId);
+      lanes.some((lane) => lane?.id === eventSession.parentSessionId && canSignal(lane));
+    const eventCanSignal = Boolean(
+      eventSession &&
+        !eventSession.archivedAt &&
+        (delegated || lanes.some((lane) => lane?.id === eventSession.id && canSignal(lane))),
+    );
     const waitingOwnerId =
       this.waitingOwnerId(projectId, lanes, liveSessionIds) ??
-      (waiting ? eventSession?.id : undefined);
+      (waiting && eventCanSignal ? eventSession?.id : undefined);
     const blocked =
       state.find((lane) => lane.status === "blocked" && !lane.waiting) ??
       state.find((lane) => lane.status === "blocked");
@@ -736,7 +760,7 @@ export class ChecklistService {
       if (
         state.some((lane) => lane.status === "doing" || lane.status === "done") ||
         (delegated && signal === "doing") ||
-        (signal === "doing" && item.status !== "done")
+        (signal === "doing" && eventCanSignal && item.status !== "done")
       ) {
         if (item.status !== "doing") {
           next.status = "doing";
@@ -744,7 +768,10 @@ export class ChecklistService {
         }
       } else if (
         lanes.length &&
-        (!eventSession || waiting === false) &&
+        (!eventSession ||
+          eventSession.archivedAt ||
+          waiting === false ||
+          (item.status === "blocked" && item.autoUpdatedAt !== undefined)) &&
         (item.autoUpdatedAt || item.status !== "todo")
       ) {
         next.status = "todo";

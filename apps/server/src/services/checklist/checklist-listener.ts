@@ -70,6 +70,7 @@ function signalFor(session: Session, status: ChecklistStatus | undefined) {
     work: JSON.stringify([
       status,
       session.status,
+      Boolean(session.archivedAt),
       session.result,
       session.startError?.message,
       session.workKey,

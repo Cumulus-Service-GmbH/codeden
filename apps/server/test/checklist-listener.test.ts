@@ -155,7 +155,7 @@ it("marks an item when a linked child is created already waiting", async () => {
   const checklist = new ChecklistService(database.db, store);
   const repo = new SessionRepo(database.db, store);
   const projectId = sampleProject.id;
-  const session = { ...sampleSession, projectId };
+  const session = { ...sampleSession, projectId, status: "idle" as const };
   const second = { ...session, id: "second-parent", workKey: "issue:2" };
   store.append([
     { type: "project.created", sessionId: null, payload: { project: sampleProject } },
@@ -182,6 +182,14 @@ it("marks an item when a linked child is created already waiting", async () => {
       sessionId: child.id,
       source: "work",
     });
+    repo.update(session.id, (entry) => ({ ...entry, archivedAt: entry.updatedAt }));
+    await Promise.resolve();
+    expect.soft(checklist.get(projectId)?.items[0]?.needsOwner).toBeUndefined();
+    const late = { ...child, id: "late-waiting-child" };
+    store.append([{ type: "session.created", sessionId: late.id, payload: { session: late } }]);
+    await Promise.resolve();
+    expect(checklist.get(projectId)?.items[0]?.needsOwner).toBeUndefined();
+    expect(checklist.get(projectId)?.items[0]?.status).toBe("doing");
   } finally {
     listener.stop();
     database.close();
@@ -294,6 +302,41 @@ it("audits linked session and work-key progress within the project", async () =>
     } finally {
       restarted.stop();
     }
+  } finally {
+    listener.stop();
+    database.close();
+  }
+});
+
+it("clears an automatic failure when the work key moves to an idle retry", async () => {
+  const database = openDatabase(":memory:");
+  const store = new EventStore(database.db);
+  const checklist = new ChecklistService(database.db, store);
+  const repo = new SessionRepo(database.db, store);
+  const listener = new ChecklistListener(store, repo, checklist);
+  const projectId = sampleProject.id;
+  const failed = { ...sampleSession, projectId, status: "failed" as const };
+  const retry = {
+    ...failed,
+    id: "idle-retry",
+    status: "idle" as const,
+    createdAt: "2026-11-26T00:00:00Z",
+  };
+  try {
+    store.append([
+      { type: "project.created", sessionId: null, payload: { project: sampleProject } },
+    ]);
+    checklist.update(projectId, { items: [{ id: "linked", text: "Build" }] });
+    checklist.update(projectId, { patch: [{ id: "linked", workKeys: [failed.workKey] }] });
+    store.append([{ type: "session.created", sessionId: failed.id, payload: { session: failed } }]);
+    await Promise.resolve();
+    expect(checklist.get(projectId)?.items[0]?.status).toBe("blocked");
+    store.append([{ type: "session.created", sessionId: retry.id, payload: { session: retry } }]);
+    await Promise.resolve();
+    expect(checklist.get(projectId)?.items[0]).toMatchObject({
+      status: "todo",
+      note: "Waiting for linked work to start",
+    });
   } finally {
     listener.stop();
     database.close();
