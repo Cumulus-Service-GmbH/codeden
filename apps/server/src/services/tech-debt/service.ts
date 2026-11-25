@@ -1,10 +1,12 @@
 import {
+  type NewEvent,
   type Project,
   TechDebtAction,
   type TechDebtFinding,
   type TechDebtFindingInput,
   TechDebtIssue,
   type TechDebtList,
+  type TechDebtResolution,
   type TechDebtSummary,
   TechDebtView,
 } from "@codeden/contracts";
@@ -18,9 +20,14 @@ import { debtId, issueFindings, syncDebtTick, type TechDebtIssuePort } from "./i
 
 type StartFix = (project: Project, findings: TechDebtFinding[]) => Promise<string>;
 
-function mergeFindings(existing: TechDebtFinding[], incoming: TechDebtFinding[]) {
+function mergeFindings(
+  existing: TechDebtFinding[],
+  incoming: TechDebtFinding[],
+  ignoreCase = false,
+) {
   const ids = new Set(existing.map((finding) => finding.id));
-  const identity = (finding: TechDebtFinding) => JSON.stringify([finding.location, finding.text]);
+  const identity = ({ location, text }: TechDebtFinding) =>
+    JSON.stringify(ignoreCase ? [location.toLowerCase(), text.toLowerCase()] : [location, text]);
   const entries = new Set(existing.map(identity));
   const added = incoming.filter((finding) => {
     const key = identity(finding);
@@ -41,6 +48,21 @@ function recordFinding(input: TechDebtFindingInput): TechDebtFinding {
     sessionId: null,
     reason: null,
   };
+}
+
+function isClosed({ status }: TechDebtFinding) {
+  return status === "fixed" || status === "dismissed";
+}
+
+function resolutionEvent(
+  projectId: string,
+  sessionId: string | null,
+  resolution: Omit<TechDebtResolution, "receipt" | "reason"> & {
+    receipt: string | null;
+    reason: string | null;
+  },
+): NewEvent {
+  return { type: "tech_debt.resolved", sessionId, payload: { projectId, ...resolution } };
 }
 
 function failedIssue(view: TechDebtView) {
@@ -70,7 +92,7 @@ export class TechDebtService {
     return this.inProject(project, async () => {
       const view = this.get(project.id);
       const issue = view.importErrorIssue ?? (view.imported ? null : view.issue);
-      return issue ? this.mergeIssue(view, issue) : view;
+      return issue ? (await this.mergeIssue(view, issue)).view : view;
     });
   }
 
@@ -81,16 +103,75 @@ export class TechDebtService {
   ): Promise<TechDebtView> {
     return this.inProject(project, async () => {
       const view = this.get(project.id);
-      const target = TechDebtIssue.parse(issue);
-      if (restrictToProject) {
-        const repo =
-          project.kind === "github" ? `${project.github.owner}/${project.github.repo}` : null;
-        const [source] = target.toLowerCase().split("#");
-        if (source !== repo?.toLowerCase() && target.toLowerCase() !== view.issue?.toLowerCase()) {
-          throw badRequest("Use an issue from this project's repository or its tracking issue");
+      return (
+        await this.mergeIssue(view, this.importTarget(project, view, issue, restrictToProject))
+      ).view;
+    });
+  }
+
+  importCounts(project: Project, issue: string, restrictToProject: boolean) {
+    return this.inProject(project, async () => {
+      const view = this.get(project.id);
+      const target = this.importTarget(project, view, issue, restrictToProject);
+      const result = await this.mergeIssue(view, target);
+      if (result.error !== undefined) throw badRequest(result.error);
+      const imported = result.view.findings.length - view.findings.length;
+      return { imported, duplicates: result.entries - imported };
+    });
+  }
+
+  private importTarget(project: Project, view: TechDebtView, issue: string, restrict: boolean) {
+    const target = TechDebtIssue.parse(issue);
+    if (restrict) {
+      const repo =
+        project.kind === "github" ? `${project.github.owner}/${project.github.repo}` : null;
+      const [source] = target.toLowerCase().split("#");
+      if (source !== repo?.toLowerCase() && target.toLowerCase() !== view.issue?.toLowerCase()) {
+        throw badRequest("Use an issue from this project's repository or its tracking issue");
+      }
+    }
+    return target;
+  }
+
+  recordMany(project: Project, rows: TechDebtFindingInput[]) {
+    return this.inProject(project, async () => {
+      const view = this.get(project.id);
+      const findings = mergeFindings(view.findings, rows.map(recordFinding));
+      const recorded = findings.length - view.findings.length;
+      if (recorded) this.save({ ...view, findings });
+      return { recorded, duplicates: rows.length - recorded };
+    });
+  }
+
+  resolve(project: Project, resolutions: TechDebtResolution[], sessionId: string | null) {
+    return this.inProject(project, async () => {
+      const view = this.get(project.id);
+      const findings = new Map(view.findings.map((finding) => [finding.id, finding]));
+      const prefixes = new Map<string, string | null>();
+      for (const id of findings.keys()) {
+        const prefix = id.slice(0, 8);
+        prefixes.set(prefix, prefixes.has(prefix) ? null : id);
+      }
+      const audit: NewEvent[] = [];
+      let unknown = 0;
+      let alreadyResolved = 0;
+      for (const { id, status, reason, receipt } of resolutions) {
+        // The ledger also accepts unambiguous eight-character IDs used in disposition reports.
+        const target =
+          findings.get(id) ?? (id.length === 8 ? findings.get(prefixes.get(id) ?? "") : undefined);
+        if (!target) {
+          unknown++;
+        } else if (isClosed(target)) {
+          alreadyResolved++;
+        } else {
+          findings.set(target.id, { ...target, status, reason, resolutionReceipt: receipt });
+          audit.push(
+            resolutionEvent(project.id, sessionId, { id: target.id, status, reason, receipt }),
+          );
         }
       }
-      return this.mergeIssue(view, target);
+      if (audit.length) this.save({ ...view, findings: [...findings.values()] }, audit);
+      return { resolved: audit.length, unknown, alreadyResolved };
     });
   }
 
@@ -115,28 +196,35 @@ export class TechDebtService {
       });
   }
 
-  private async mergeIssue(view: TechDebtView, issue: string): Promise<TechDebtView> {
+  private async mergeIssue(view: TechDebtView, issue: string) {
     const target = issue.toLowerCase();
     let result: Awaited<ReturnType<TechDebtIssuePort["read"]>>;
     try {
       result = await this.issues.read(issue);
     } catch (error) {
       const importError = errorMessage(error);
-      return importError === view.importError && view.importErrorIssue === issue
-        ? view
-        : this.save({ ...view, importError, importErrorIssue: issue });
+      const unchanged =
+        importError === view.importError && failedIssue(view)?.toLowerCase() === target;
+      return {
+        view: unchanged ? view : this.save({ ...view, importError, importErrorIssue: issue }),
+        error: importError,
+      };
     }
-    const findings = mergeFindings(view.findings, issueFindings(issue, result.body, result.date));
+    const entries = issueFindings(issue, result.body, result.date);
+    const findings = mergeFindings(view.findings, entries, true);
     const imported = view.imported || view.issue?.toLowerCase() === target;
     const clearsError = failedIssue(view)?.toLowerCase() === target;
     if (!clearsError && imported === view.imported && findings === view.findings) {
-      return view;
+      return { view, entries: entries.length };
     }
-    return this.save({
-      ...(clearsError ? clearImportError(view) : view),
-      imported,
-      findings,
-    });
+    return {
+      view: this.save({
+        ...(clearsError ? clearImportError(view) : view),
+        imported,
+        findings,
+      }),
+      entries: entries.length,
+    };
   }
 
   act(project: Project, input: TechDebtAction): Promise<TechDebtView> {
@@ -181,7 +269,7 @@ export class TechDebtService {
           const status = action.action === "fixed" ? "fixed" : "dismissed";
           const reason = action.action === "dismiss" ? action.reason : null;
           if (finding.status === status && finding.reason === reason) return view;
-          if (finding.status === "fixed" || finding.status === "dismissed") {
+          if (isClosed(finding)) {
             throw badRequest("This finding is already closed");
           }
           const issue = view.issue;
@@ -190,12 +278,15 @@ export class TechDebtService {
               syncDebtTick(this.issues, issue, finding),
             );
           }
-          return this.save({
-            ...view,
-            findings: view.findings.map((row) =>
-              row.id === finding.id ? { ...row, status, reason } : row,
-            ),
-          });
+          return this.save(
+            {
+              ...view,
+              findings: view.findings.map((row) =>
+                row.id === finding.id ? { ...row, status, reason } : row,
+              ),
+            },
+            [resolutionEvent(project.id, null, { id: finding.id, status, reason, receipt: null })],
+          );
         }
       }
     });
@@ -229,8 +320,11 @@ export class TechDebtService {
     );
   }
 
-  private save(view: TechDebtView): TechDebtView {
-    this.store.append([{ type: "tech_debt.updated", sessionId: null, payload: { view } }]);
+  private save(view: TechDebtView, audit: NewEvent[] = []): TechDebtView {
+    this.store.append([
+      ...audit,
+      { type: "tech_debt.updated", sessionId: null, payload: { view } },
+    ]);
     return view;
   }
 

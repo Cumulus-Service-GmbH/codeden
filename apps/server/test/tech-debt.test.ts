@@ -2,7 +2,12 @@ import type { Project } from "@codeden/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ServerToolContext } from "../src/mcp/define";
 import { type ToolCaller, ToolRegistry } from "../src/mcp/registry";
-import { importTechDebt, listTechDebt, recordTechDebt } from "../src/mcp/tools/tech-debt";
+import {
+  importTechDebt,
+  listTechDebt,
+  recordTechDebt,
+  resolveTechDebt,
+} from "../src/mcp/tools/tech-debt";
 import { techDebtIssuePort } from "../src/services/tech-debt/issue";
 import { TechDebtService } from "../src/services/tech-debt/service";
 import { createGithubEnv } from "./support/github-env";
@@ -13,7 +18,10 @@ const low =
   "- [ ] LOW `src/build.ts:12` — Use the shared helper. | Receipt: review-1 | Date: 2026-11-23 | PR: #42";
 const medium = "- [ ] MEDIUM `src/build.ts:20` — Reproduce the failure.";
 
-function pmContext(project: Project, techDebt: TechDebtService): ServerToolContext<"global"> {
+function pmContext(
+  project: Project,
+  techDebt: TechDebtService,
+): ServerToolContext<"global"> & ToolCaller {
   return {
     role: "pm",
     projectId: project.id,
@@ -274,34 +282,26 @@ describe("project tech debt", () => {
     await service.act(project, { action: "configure", issue });
     read.mockRejectedValueOnce(new Error("Issue unavailable"));
 
-    await expect(importTechDebt.handler({ issue: target }, context)).resolves.toMatchObject({
-      issue,
-      imported: false,
-      findings: [],
-      importError: "Issue unavailable",
-      importErrorIssue: target,
-    });
+    await expect(importTechDebt.handler({ issue: target }, context)).rejects.toThrow(
+      "Issue unavailable",
+    );
 
-    const recovered = await importTechDebt.handler({ issue: target }, context);
-    expect(recovered).toMatchObject({
-      issue,
-      imported: false,
-      findings: [
-        {
-          source: target,
-          location: "src/build.ts:12",
-          text: "Use the shared helper.",
-          receipt: "review-1",
-          date,
-          pr: "#42",
-          status: "open",
-        },
-      ],
+    const mixedCase = target.toUpperCase();
+    expect(await importTechDebt.handler({ issue: mixedCase }, context)).toEqual({
+      imported: 1,
+      duplicates: 0,
     });
-    expect(recovered).not.toHaveProperty("importError");
-    expect(recovered).not.toHaveProperty("importErrorIssue");
-    expect(await importTechDebt.handler({ issue: target }, context)).toEqual(recovered);
-    expect(read.mock.calls).toEqual([[target], [target], [target]]);
+    read.mockResolvedValueOnce({ body: low.toUpperCase(), date });
+    expect(await importTechDebt.handler({ issue: target }, context)).toEqual({
+      imported: 0,
+      duplicates: 1,
+    });
+    expect(read.mock.calls).toEqual([[target], [mixedCase], [target]]);
+    expect(await service.list(project)).toMatchObject({
+      issue,
+      imported: true,
+      findings: [{ source: mixedCase, location: "src/build.ts:12", receipt: "review-1" }],
+    });
     expect(write).not.toHaveBeenCalled();
   });
 
@@ -311,8 +311,104 @@ describe("project tech debt", () => {
     const finding = { location: "src/file.ts:2", text: "Reuse the helper.", receipt: "r1" };
     const first = await recordTechDebt.handler(recordTechDebt.input.parse(finding), context);
     const retry = recordTechDebt.input.parse({ ...finding, receipt: "r2" });
-    expect(await recordTechDebt.handler(retry, context)).toEqual(first);
-    expect(first).toMatchObject({ findings: [finding] });
+    expect(first).toEqual({ recorded: 1, duplicates: 0 });
+    expect(await recordTechDebt.handler(retry, context)).toEqual({ recorded: 0, duplicates: 1 });
+    expect((await service.list(project)).findings).toMatchObject([finding]);
+  });
+
+  it("records and resolves 167 findings through MCP with bounded results and an audit event", async () => {
+    const { env, service, project, local } = setup();
+    const tools = new ToolRegistry([recordTechDebt, resolveTechDebt], {
+      techDebt: service,
+      projects: { get: (id: string) => (id === local.id ? local : project) },
+    } as never);
+    const caller = pmContext(project, service);
+    const findings = Array.from({ length: 167 }, (_, i) => ({
+      location: `src/file.ts:${i + 1}`,
+      text: "Reuse the helper.",
+      receipt: "review",
+    }));
+    const recorded = await tools.call("record_tech_debt", { findings }, caller);
+    expect(JSON.parse(recorded.text)).toEqual({ recorded: 167, duplicates: 0 });
+    const ids = (await service.list(project)).findings.map(({ id }) => id);
+    ids[0] = ids[0]?.slice(0, 8) ?? "";
+    const other = await service.act(local, {
+      action: "record",
+      finding: { location: "src/other.ts:1", text: "Foreign.", receipt: null, date, pr: null },
+    });
+    const args = {
+      ids: [...ids, "missing", other.findings[0]?.id],
+      status: "fixed",
+      reason: "Covered by tests.",
+      receipt: "test-proof",
+    };
+    expect(
+      await tools.call("resolve_tech_debt", { ...args, projectId: local.id }, caller),
+    ).toMatchObject({ isError: true });
+    const orchestrator = { ...caller, role: "orchestrator", projectId: null } as const;
+    expect(await tools.call("resolve_tech_debt", args, orchestrator)).toMatchObject({
+      isError: true,
+    });
+    const seq = env.store.headSeq();
+    const resolved = await tools.call(
+      "resolve_tech_debt",
+      { ...args, projectId: project.id },
+      orchestrator,
+    );
+    expect(JSON.parse(resolved.text)).toEqual({ resolved: 167, unknown: 2, alreadyResolved: 0 });
+    expect(resolved.text.length).toBeLessThan(100);
+    const events = env.store.listAfter(seq);
+    expect(events).toHaveLength(168);
+    expect(events.slice(0, -1).every((event) => event.type === "tech_debt.resolved")).toBe(true);
+    expect(events[0]).toMatchObject({
+      type: "tech_debt.resolved",
+      sessionId: "pm",
+      payload: {
+        projectId: project.id,
+        status: args.status,
+        reason: args.reason,
+        receipt: args.receipt,
+      },
+    });
+    expect(events.at(-1)?.type).toBe("tech_debt.updated");
+    expect((await service.list(project)).findings[0]).toMatchObject({
+      status: "fixed",
+      reason: args.reason,
+      receipt: "review",
+      resolutionReceipt: args.receipt,
+    });
+    const retry = await tools.call("resolve_tech_debt", args, caller);
+    expect(JSON.parse(retry.text)).toEqual({ resolved: 0, unknown: 2, alreadyResolved: 167 });
+    expect(env.store.headSeq()).toBe(events.at(-1)?.seq);
+    expect((await service.list(local)).findings[0]?.status).toBe("open");
+  });
+
+  it("applies distinct dispositions in one call and keeps the first resolution on retry", async () => {
+    const { service, project } = setup();
+    const context = pmContext(project, service);
+    const call = (input: unknown) =>
+      resolveTechDebt.handler(resolveTechDebt.input.parse(input), context);
+    const rows = [1, 2].map((line) => ({
+      location: `src/file.ts:${line}`,
+      text: "Reuse the helper.",
+      receipt: "review",
+    }));
+    await recordTechDebt.handler(recordTechDebt.input.parse({ findings: rows }), context);
+    const ids = (await service.list(project)).findings.map(({ id }) => id);
+    const resolutions = [
+      { id: ids[0], status: "fixed", reason: "Verified.", receipt: "tests" },
+      { id: ids[1], status: "dismissed", reason: "Superseded.", receipt: "issue" },
+    ];
+    expect(await call({ resolutions })).toEqual({ resolved: 2, unknown: 0, alreadyResolved: 0 });
+    expect(await call({ resolutions: [{ ...resolutions[0], status: "dismissed" }] })).toEqual({
+      resolved: 0,
+      unknown: 0,
+      alreadyResolved: 1,
+    });
+    expect((await service.list(project)).findings).toMatchObject([
+      { status: "fixed", reason: "Verified.", resolutionReceipt: "tests" },
+      { status: "dismissed", reason: "Superseded.", resolutionReceipt: "issue" },
+    ]);
   });
 
   it("persists import errors, merges explicit imports, and counts only open findings", async () => {

@@ -124,6 +124,9 @@ export function TechDebtPanel({ projectId }: { projectId: string }) {
                   <time dateTime={finding.date}>{finding.date.slice(0, 10)}</time>
                   <span>PR {finding.pr ?? "—"}</span>
                   <span>Receipt {finding.receipt ?? "—"}</span>
+                  {finding.resolutionReceipt && (
+                    <span>Resolution receipt {finding.resolutionReceipt}</span>
+                  )}
                   {finding.sessionId && (
                     <Link
                       className="underline"

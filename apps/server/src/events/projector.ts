@@ -39,6 +39,8 @@ export { applyDelta } from "./reducer/items";
  */
 export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
   switch (e.type) {
+    case "tech_debt.resolved":
+      return [];
     case "tech_debt.updated": {
       const { view } = e.payload;
       tx.insert(projectTechDebt)
