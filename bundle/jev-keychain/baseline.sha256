@@ -1,0 +1,5 @@
+6fd2fc2d4d4d7a772dc5f3d50de3b79197b6f9c58967e981ecbebc53004d5794  jev-keychain/claude/trioharness-codeden/scripts/jev.mjs
+6fd2fc2d4d4d7a772dc5f3d50de3b79197b6f9c58967e981ecbebc53004d5794  jev-keychain/claude/trioharness-lean/scripts/jev.mjs
+6fd2fc2d4d4d7a772dc5f3d50de3b79197b6f9c58967e981ecbebc53004d5794  jev-keychain/codex/trioharness-codeden/scripts/jev.mjs
+7e6cdfbb5b351c9b88bb9b2a8b9cc0ab11a5d28900f456861d23e9dbc95d4362  jev-keychain/hooks/codeden-guard-secrets.mjs
+2203b2090c3ec2df716e7d4e3a936cdaa2a86b8ea8b00e07976ebcc063462771  jev-keychain/hooks/codeden-guard.secrets.test.mjs
