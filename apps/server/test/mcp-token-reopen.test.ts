@@ -1,3 +1,4 @@
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { RunnerCommandName, RunnerCommandOf } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -15,6 +16,7 @@ let tokens: McpTokenStore;
 let launcher: SessionLauncher;
 /** The MCP token in each `session.start` the runner received. */
 let handed: string[];
+let inputs: unknown[];
 /** The error code `session.start` fails with; null: it starts the session. */
 let refuse: string | null;
 
@@ -22,6 +24,7 @@ beforeEach(() => {
   env = createGithubEnv();
   tokens = new McpTokenStore(env.db.db);
   handed = [];
+  inputs = [];
   refuse = null;
   const runner = {
     isConnected: () => true,
@@ -30,6 +33,7 @@ beforeEach(() => {
     mcpProxyUrl: () => "http://127.0.0.1:1/mcp",
     waitForConnection: async () => true,
     request: (async (command: Command) => {
+      if (command.name === "session.send") inputs.push(command.input);
       if (command.name !== "session.start") return {};
       const http = command.options.mcpServers.find((s) => s.transport === "http");
       if (http?.transport === "http") {
@@ -54,6 +58,34 @@ beforeEach(() => {
 afterEach(() => env.close());
 
 describe("MCP tokens when a session is reopened (#208)", () => {
+  it("warns once per instruction revision on start and resume without changing the input", async () => {
+    const session = env.addSession({ status: "idle" });
+    const root = env.githubProject.path;
+    mkdirSync(join(root, ".codeden"), { recursive: true });
+    writeFileSync(join(root, ".codeden", "VISION.md"), "z".repeat(4_097));
+    const guide = join(root, "AGENTS.md");
+    const write = (text: string) => writeFileSync(guide, text.repeat(7_000));
+    const warnings = () => env.inbox.list({ sessionId: session.id, kinds: ["message"] });
+    write("é");
+    const input = { text: "Keep this input verbatim.", attachments: [] };
+    await launcher.launch(session.id, { workspace: { mode: "repo_root" }, input });
+    expect(inputs).toEqual([input]);
+    expect(
+      warnings()
+        .map(({ body }) => body)
+        .sort(),
+    ).toEqual([
+      ".codeden/VISION.md is 4097 B (limit 4096 B).",
+      "AGENTS.md is 14000 B (limit 12288 B).",
+    ]);
+    await launcher.resume(env.repo.get(session.id));
+    expect(warnings()).toHaveLength(2);
+    write("à");
+    await launcher.resume(env.repo.get(session.id));
+    expect(warnings()).toHaveLength(3);
+    expect(warnings().every(({ body }) => !body?.includes("à") && !body?.includes("é"))).toBe(true);
+  });
+
   it("revokes the earlier tokens once the runner has started the session again", async () => {
     const session = env.addSession({ status: "idle" });
     // The token of the provider process that ended with the runner.

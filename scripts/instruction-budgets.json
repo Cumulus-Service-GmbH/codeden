@@ -1,0 +1,8 @@
+{
+  "root": { "AGENTS.md": 12288, "CLAUDE.md": 1024 },
+  "agentOverride": "AGENTS.override.md",
+  "scopedGuideBytes": 6144,
+  "visionBytes": 4096,
+  "chainWarningBytes": 24576,
+  "overrides": {}
+}

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import {
@@ -19,11 +20,14 @@ import type { McpTokenStore } from "../../mcp/tokens";
 import type { ArtifactService } from "../artifacts";
 import { errorMessage, ServiceError } from "../errors";
 import { type TeamFileDeps, writeTeamFile } from "../factory/team-file";
+import { visionBudgetWarning } from "../factory/vision";
 import type { GitBroker } from "../git-broker";
 import type { InboxService } from "../inbox-service";
+import { instructionWarnings } from "../instruction-budgets";
 import type { ProjectService } from "../projects/project-service";
 import {
   clonesWorkspaces,
+  isRemoteRunner,
   type RunnerDeps,
   type RunnerPort,
   runnerErrorCode,
@@ -387,6 +391,7 @@ export class SessionLauncher {
         );
       }
       setUnanswered(this.deps.repo, session.id, null);
+      if (!isRemoteRunner(runner)) this.reportInstructionBudgets(session);
       return result;
     } catch (error) {
       const code = runnerErrorCode(error);
@@ -398,6 +403,47 @@ export class SessionLauncher {
         return { resumeToken: null };
       }
       throw error;
+    }
+  }
+
+  private reportInstructionBudgets(session: Session): void {
+    const project = this.projectOf(session);
+    if (!project) return;
+    try {
+      const warnings = instructionWarnings(session.worktreePath ?? project.path, session.cwd);
+      const vision = visionBudgetWarning(project);
+      if (vision) warnings.push(vision);
+      for (const { path, bytes, limit, revision } of warnings) {
+        const key = createHash("sha256")
+          .update(JSON.stringify([path, revision]))
+          .digest("hex");
+        const id = `inbox:instruction-budget:${session.id}:${key}`;
+        if (this.deps.inbox.find(id)) continue;
+        const now = new Date().toISOString();
+        this.deps.inbox.put({
+          id,
+          kind: "message",
+          status: "open",
+          priority: "low",
+          notify: "factory",
+          title: "Instruction budget exceeded",
+          body: `${path} is ${bytes} B (limit ${limit} B).`,
+          projectId: project.id,
+          sessionId: session.id,
+          threadId: null,
+          itemId: null,
+          requestId: null,
+          issue: null,
+          pr: null,
+          automationRunId: null,
+          createdAt: now,
+          updatedAt: now,
+          resolvedAt: null,
+          resolution: null,
+        });
+      }
+    } catch {
+      // An advisory notice must not affect session start or resume.
     }
   }
 

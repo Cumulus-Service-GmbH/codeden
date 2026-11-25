@@ -32,7 +32,20 @@ jobs:
       # branch: `HEAD^1..HEAD` is exactly what the pull request changes.
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 2
+          fetch-depth: 0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Check instruction budgets
+        env:
+          PUSH_BASE: ${{ github.event.before }}
+        shell: bash
+        run: |
+          baseline=HEAD^1
+          if [[ "$GITHUB_EVENT_NAME" == push && -n "$PUSH_BASE" && ! "$PUSH_BASE" =~ ^0+$ ]]; then
+            baseline="$PUSH_BASE"
+          fi
+          node scripts/check-instruction-budgets.mjs "$baseline"
       - name: What does this change touch?
         id: detect
         shell: bash
@@ -50,7 +63,7 @@ jobs:
             echo "code=true" >> "$GITHUB_OUTPUT"
           else
             echo "code=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::Documentation-only change: skipping the checks."
+            echo "::notice::Documentation-only change: skipping build and tests."
           fi
 
   check:

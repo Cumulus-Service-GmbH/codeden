@@ -1,7 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
 import { type Project, parseVision, type VisionResponse } from "@codeden/contracts";
+import budgets from "../../../../../scripts/instruction-budgets.json" with { type: "json" };
 import { badRequest } from "../errors";
+import { overInstructionBudget, readInstructionFile } from "../instruction-budgets";
 
 export { parseProtectedAreas, parseVision } from "@codeden/contracts";
 
@@ -67,6 +69,12 @@ function visionFile(project: Project): string {
     throw badRequest("The vision path must stay inside the project", "invalid_vision_path");
   }
   return file;
+}
+
+/** Use the configured vision path and the same repository boundary as the vision reader. */
+export function visionBudgetWarning(project: Project) {
+  const file = readInstructionFile(project.path, visionFile(project));
+  return file && overInstructionBudget(file, budgets.visionBytes);
 }
 
 /** Read the vision; the template (and `exists: false`) when the file is missing. */
