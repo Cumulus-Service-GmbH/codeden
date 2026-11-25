@@ -1107,23 +1107,26 @@ test('G8 still checks effective commands and fail-closes unknown script writes',
 
 test('G9 R1 preserves a live denial before structural size checks', t => {
   const hook = fileURLToPath(new URL('./codeden-guard.mjs', import.meta.url));
-  const cwd = join(process.cwd(), '.guard-g9', 'wt', 'project');
+  const root = '/guard-g9-fixture';
+  const cwd = join(root, 'wt', 'project');
   const argument = '{'.repeat(300 * 1024);
   for (const mode of [[], ['codex']]) {
-    for (const [command, reason] of [
-      ['node running-ref.mjs check --run r --include-prod ' + argument, /probes production/],
-      ['echo ' + argument, /too large for structural analysis/],
+    for (const [directory, command, reason] of [
+      [cwd, 'node running-ref.mjs check --run r --include-prod ' + argument, /probes production/],
+      [cwd, 'echo ' + argument, /too large for structural analysis/],
+      [join(cwd, 'trioharness'), 'node running-ref.mjs check --run r --include-prod ' + argument, /touching the PRD approval card ledger/],
     ]) {
       const start = performance.now();
       const result = spawnSync(process.execPath, [hook, ...mode], {
-        input: JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd }),
-        env: { ...process.env, CODEDEN_HOME: join(cwd, '../..') },
+        input: JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: directory }),
+        env: { ...process.env, CODEDEN_HOME: root },
         encoding: 'utf8',
         timeout: 2000,
       });
       const elapsed = performance.now() - start;
       assert.ifError(result.error);
       assert.equal(result.status, 2, result.stderr);
+      assert.equal(result.stdout, '');
       assert.match(result.stderr, reason);
       assert.ok(elapsed < 2000, `${elapsed.toFixed(1)} ms`);
       t.diagnostic(`${mode[0] ?? 'Claude'} ${reason.source}: ${elapsed.toFixed(1)} ms`);
