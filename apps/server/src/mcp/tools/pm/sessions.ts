@@ -153,7 +153,7 @@ export const startSession = defineTool({
       ...(provider !== undefined ? { provider } : {}),
       ...(model !== undefined ? { model } : {}),
       ...(effort !== undefined ? { effort } : {}),
-      autonomy: input.autonomy ?? autonomyFloor,
+      autonomy: input.autonomy,
       purpose: input.purpose,
       workKey: input.workKey ?? (input.issueNumber ? `issue:${input.issueNumber}` : undefined),
       scope: input.scope,

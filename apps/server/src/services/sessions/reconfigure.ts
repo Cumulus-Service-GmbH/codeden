@@ -71,6 +71,7 @@ export async function updateSession(
   id: string,
   req: UpdateSessionRequest,
   audit?: AutonomyAudit,
+  refreshAutonomy = false,
 ): Promise<Session> {
   const change: PendingConfig = {
     ...(req.model !== undefined && { model: req.model }),
@@ -93,6 +94,9 @@ export async function updateSession(
     updatesConfig
       ? (m) => ({
           ...(m ?? emptyStartMeta()),
+          ...(!refreshAutonomy &&
+            m?.autonomyChoice !== undefined &&
+            req.autonomy !== undefined && { autonomyChoice: req.autonomy }),
           configRevision: (m?.configRevision ?? 0) + 1,
           pendingConfig: { ...m?.pendingConfig, ...change },
         })

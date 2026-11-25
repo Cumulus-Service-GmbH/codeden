@@ -83,6 +83,8 @@ export type StoredStartMeta = SessionStartMeta & {
   /** The approved Team layer for a session created by a Team run. */
   runTeam?: import("@codeden/contracts").Team;
   autonomyFloor?: AutonomyLevel;
+  /** PM session choice: null inherits defaults, absent preserves the legacy stored level. */
+  autonomyChoice?: AutonomyLevel | null;
   /** The PM delegated session starts to this Team Architect. */
   teamArchitect?: true;
   pending?: PendingStart | null;
