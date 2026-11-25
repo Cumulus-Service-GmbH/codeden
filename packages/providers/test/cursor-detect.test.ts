@@ -86,7 +86,8 @@ describe("Cursor versions and model lists", () => {
   });
 });
 
-describe("detectCursor", () => {
+// Each case can launch multiple fake CLI processes. Keep the test budget above the probe deadline.
+describe("detectCursor", { timeout: 40_000 }, () => {
   const probe = (exe: ResolvedCommand, signedIn: boolean) =>
     probeCursor(exe, { signedIn, timeoutMs: 10_000 });
 
@@ -158,7 +159,7 @@ describe("detectCursor", () => {
   });
 });
 
-describe("Cursor logins are never started in the background", () => {
+describe("Cursor logins are never started in the background", { timeout: 40_000 }, () => {
   const logged = (file: string) =>
     existsSync(file)
       ? readFileSync(file, "utf8")
