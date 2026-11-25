@@ -370,6 +370,12 @@ export const RunnerCommand = z.discriminatedUnion("name", [
     /** The credential for this push only (§9.2); a local runner uses the user's own git setup. */
     credential: GitCredential.optional(),
   }),
+  /** Dry-run pushing the checked-out session branch to the configured fork. */
+  z.object({
+    name: z.literal("git.forkPushPreflight"),
+    cwd: z.string(),
+    branch: z.string().min(1),
+  }),
   z.object({
     name: z.literal("checkpoint.list"),
     cwd: z.string(),
@@ -563,6 +569,9 @@ export const RunnerCommandResults = {
   /** `commit` is null when there was nothing to commit. */
   "git.commit": z.object({ commit: z.string().nullable() }),
   "git.push": z.object({ remote: z.string(), branch: z.string() }),
+  "git.forkPushPreflight": z.object({
+    status: z.enum(["passed", "rejected", "missing_fork", "inconclusive"]),
+  }),
   "checkpoint.list": z.object({
     checkpoints: z.array(
       z.object({

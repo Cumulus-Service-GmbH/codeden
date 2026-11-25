@@ -64,6 +64,7 @@ export class RoleSessions {
       settings: Pick<SettingsStore, "get">;
       /** The home runner: its providers are the ones a role can move to. */
       runner: Pick<RunnerPort, "isConnected" | "providers">;
+      forceFakeProvider?: boolean;
       /** A role's retired session was replaced by a new one (which took over its queue). */
       onMoved?: (from: Session, to: Session) => void;
       log?: (message: string) => void;
@@ -166,6 +167,10 @@ export class RoleSessions {
 
   /** Whether the session is to be retired now: its role moved, and no turn is under way. */
   private shouldRetire(session: Session): boolean {
+    if (this.deps.forceFakeProvider && session.provider !== "fake") {
+      const { runner } = this.deps;
+      return runner.isConnected() && runner.providers().some((provider) => provider.id === "fake");
+    }
     const underWay = isActiveSession(session) || this.deps.sessions.isDelivering(session.id);
     return !underWay && this.moveTarget(session);
   }

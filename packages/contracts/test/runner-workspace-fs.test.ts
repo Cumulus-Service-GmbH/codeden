@@ -57,6 +57,13 @@ describe("workspace.prepare clone (remote runners §9.1)", () => {
     ).toThrow();
   });
 
+  it("round-trips the fork push preflight and its fixed outcomes", () => {
+    roundTrip(RunnerCommand, { name: "git.forkPushPreflight", cwd: "/w", branch: "codeden/task" });
+    for (const status of ["passed", "rejected", "missing_fork", "inconclusive"]) {
+      roundTrip(RunnerCommandResults["git.forkPushPreflight"], { status });
+    }
+  });
+
   it("scopes a credential to one https origin", () => {
     const credential = (scope: string) => ({ scope, username: "x-access-token", password: "t" });
     expect(GitCredential.parse(credential("https://github.example:8443")).scope).toBe(

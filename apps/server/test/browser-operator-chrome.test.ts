@@ -25,8 +25,6 @@ import { startsWithLiteralTag, stripLeadingTags } from "../src/services/sessions
 import { ProviderUtilityService } from "../src/services/utility";
 import { sampleSession, sampleSessionEvent } from "./helpers";
 
-const localRunner = { mcpProxyUrl: () => "http://127.0.0.1:1/mcp" };
-const remoteRunner = { ...localRunner, remote: () => ({}) };
 const browserOperator: Session = {
   ...sampleSession,
   projectId: null,
@@ -35,7 +33,16 @@ const browserOperator: Session = {
   title: "[Browser Operator] Check the login page",
 };
 
-function launcher(remote = false, repo?: Pick<SessionRepo, "find">): SessionLauncher {
+function launcher(
+  remote = false,
+  repo?: Pick<SessionRepo, "find">,
+  chromeProviders = ["claude"],
+): SessionLauncher {
+  const localRunner = {
+    mcpProxyUrl: () => "http://127.0.0.1:1/mcp",
+    providers: () => chromeProviders.map((id) => ({ id, capabilities: { chrome: true } })),
+  };
+  const remoteRunner = { ...localRunner, remote: () => ({}) };
   return new SessionLauncher({
     repo: repo ?? { find: () => ({ startMeta: { chromeOptIn: true } }) },
     runner: localRunner,
@@ -79,6 +86,14 @@ describe("Claude in Chrome for Browser Operator sessions", () => {
   ])("does not opt in to Chrome for $label", ({ patch, remote }) => {
     const options = launcher(remote).sessionOptions({ ...browserOperator, ...patch }, "tok");
     expect("chrome" in options).toBe(false);
+  });
+
+  it("uses the local runner's Chrome capability for a recorded legacy opt-in", () => {
+    const withCapability = launcher(false, undefined, ["chrome-provider"]);
+    expect(
+      withCapability.sessionOptions({ ...browserOperator, provider: "chrome-provider" }).chrome,
+    ).toBe(true);
+    expect(withCapability.sessionOptions(browserOperator).chrome).toBeUndefined();
   });
 
   it("opens an explicitly opted-in session without a role tag", () => {

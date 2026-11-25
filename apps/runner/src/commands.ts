@@ -250,6 +250,8 @@ export async function executeCommand(core: RunnerCore, command: RunnerCommand): 
       return gitOps.commit(command);
     case "git.push":
       return gitOps.push(command);
+    case "git.forkPushPreflight":
+      return gitOps.forkPushPreflight(command);
 
     case "checkpoint.list":
       if (command.settled) await host.settled(command.sessionId);

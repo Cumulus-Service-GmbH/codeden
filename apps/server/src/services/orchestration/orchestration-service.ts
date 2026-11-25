@@ -80,6 +80,7 @@ export interface OrchestrationDeps {
   settings: Pick<SettingsStore, "get">;
   /** The home runner, whose providers the orchestrator and the PMs can run on. */
   runner: Pick<RunnerPort, "isConnected" | "providers">;
+  forceFakeProvider?: boolean;
   /** Saves the pasted images of a conflicting start before it is recorded. */
   artifacts: Pick<ArtifactService, "externalizeAttachments">;
   github?: GithubPort;

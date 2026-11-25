@@ -32,6 +32,19 @@ function hasCoverage(criteria: string[], head: string, evidence?: TeamReviewEvid
   );
 }
 
+function historyBrief(path: string, history: Buffer, run: TeamRun, worker: TeamWorker): string {
+  const assignment = run.items.find(({ id }) => id === worker.itemId);
+  let start = Math.max(0, history.length - 6_000);
+  // The archive is written as UTF-8. Skip any partial character at the cutoff.
+  while (((history[start] ?? 0) & 0xc0) === 0x80) start++;
+  return [
+    `Full history: ${path}`,
+    `Approved plan ${run.revision}`,
+    assignment ? JSON.stringify(assignment) : `Assignment ${worker.itemId}`,
+    history.toString("utf8", start),
+  ].join("\n");
+}
+
 export async function reviewAndMerge(
   ports: TeamRunPorts,
   run: TeamRun,
@@ -59,9 +72,9 @@ export async function reviewAndMerge(
       reviewRunId: worker.reviewRunId,
       candidateHead: candidate?.head,
       historyBrief:
-        earlierHistory === undefined
-          ? undefined
-          : `Full history: ${historyPath}\n${earlierHistory.subarray(-6_000).toString("utf8")}`,
+        historyPath && earlierHistory
+          ? historyBrief(historyPath, earlierHistory, run, worker)
+          : undefined,
       deltaBase: worker.deltaBase,
       historyPath,
       historySha256,

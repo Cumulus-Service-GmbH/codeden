@@ -4,6 +4,7 @@ import {
   CHILD_RUNS_FILE_ENV,
   type McpServerConfig,
   type Project,
+  type RunnerCommandResult,
   type Session,
   SessionOptions,
   TEAM_FILE_ENV,
@@ -85,14 +86,16 @@ export interface LauncherDeps extends RunnerDeps {
 }
 
 /** Whether this session starts Claude in Chrome on the home runner. */
-function startsWithChrome(session: Session, repo: SessionRepo): boolean {
+function startsWithChrome(session: Session, repo: SessionRepo, runner: RunnerPort): boolean {
   if (session.role !== "agent") return false;
   const meta = repo.find(session.id)?.startMeta;
   return (
     meta?.chromeRequested ??
-    (session.provider === "claude" &&
+    (meta?.chromeOptIn === true &&
       teamRoleOfTitle(session.title ?? undefined) === "browserOperator" &&
-      meta?.chromeOptIn === true)
+      runner
+        .providers()
+        .some((provider) => provider.id === session.provider && provider.capabilities.chrome))
   );
 }
 
@@ -198,6 +201,10 @@ export class SessionLauncher {
     }));
     const brief = this.pendingBrief(sessionId);
     const input = brief ? withHandoffBrief(brief, opts.input) : opts.input;
+    const pushPreflight =
+      project?.kind === "github" && ws.worktreePath && ws.branch
+        ? await this.forkPushPreflight(runner, sessionId, ws.worktreePath, ws.branch)
+        : undefined;
     const result = await this.open(
       runner,
       {
@@ -208,6 +215,7 @@ export class SessionLauncher {
         baseBranch: ws.baseBranch,
       },
       withSetupNote(input, ws.setupNote),
+      pushPreflight,
     );
     if (brief) this.briefDelivered(sessionId);
     repo.update(sessionId, (s) => ({
@@ -216,6 +224,26 @@ export class SessionLauncher {
       runnerId: runner.runnerId() ?? s.runnerId,
       status: s.status === "starting" ? (input ? "running" : "idle") : s.status,
     }));
+  }
+
+  private async forkPushPreflight(
+    runner: RunnerPort,
+    sessionId: string,
+    cwd: string,
+    branch: string,
+  ): Promise<string> {
+    const result = await runner
+      .request({ name: "git.forkPushPreflight", cwd, branch }, 8_000)
+      .catch(() => undefined);
+    const report: Record<RunnerCommandResult<"git.forkPushPreflight">["status"], string> = {
+      passed: "fork push dry run passed",
+      rejected: "fork push dry run was rejected",
+      missing_fork: "no fork remote is configured",
+      inconclusive: "fork push dry run inconclusive",
+    };
+    const note = `Runner Git identity: ${report[result?.status ?? "inconclusive"]}. A dry run does not verify provider sandbox access or server-side branch rules.`;
+    this.deps.log?.(`session ${sessionId}: ${note}`);
+    return note;
   }
 
   /**
@@ -329,7 +357,12 @@ export class SessionLauncher {
    * (its events came first), did open it: it counts as opened, with the resume token its events
    * carry, rather than failing a session that is working.
    */
-  private async open(runner: RunnerPort, session: Session, input: UserInput | undefined) {
+  private async open(
+    runner: RunnerPort,
+    session: Session,
+    input: UserInput | undefined,
+    startupNote?: string,
+  ) {
     if (this.deps.forceFakeProvider && session.provider !== "fake") {
       throw new ServiceError(
         409,
@@ -350,6 +383,7 @@ export class SessionLauncher {
     const revision = configRevision(this.deps.repo, session.id);
     try {
       options = this.sessionOptions(this.deps.repo.get(session.id), token);
+      if (startupNote) options.systemPrompt = `${options.systemPrompt}\n\n${startupNote}`;
     } catch (error) {
       // Nothing reached the runner (e.g. the Team file could not be written): retire the token.
       if (token) this.deps.tokens.revoke(token);
@@ -460,7 +494,7 @@ export class SessionLauncher {
       ...(project?.agentCiEnv === false ? { ciEnv: false } : {}),
       ...(project?.allowUnenforcedProviders ? { allowUnenforcedProviders: true } : {}),
       ...(home ? { env: { ...this.teamEnv(session), ...this.childRunsEnv(session) } } : {}),
-      ...(home && startsWithChrome(session, this.deps.repo) ? { chrome: true } : {}),
+      ...(home && startsWithChrome(session, this.deps.repo, runner) ? { chrome: true } : {}),
     });
   }
 

@@ -14,7 +14,14 @@ import { projectTechDebt, sessions } from "../../db/schema";
 import type { EventStore } from "../../events/store";
 import { badRequest, errorMessage, notFound } from "../errors";
 import { ACTIVE_SESSION_STATUSES } from "../sessions/conflicts";
-import { debtId, issueFindings, syncDebtTick, type TechDebtIssuePort } from "./issue";
+import {
+  debtId,
+  issueFindingReference,
+  issueFindings,
+  issueFindingsByReference,
+  syncDebtTick,
+  type TechDebtIssuePort,
+} from "./issue";
 
 type StartFix = (project: Project, findings: TechDebtFinding[]) => Promise<string>;
 
@@ -30,6 +37,27 @@ function mergeFindings(existing: TechDebtFinding[], incoming: TechDebtFinding[])
     return true;
   });
   return added.length ? [...existing, ...added] : existing;
+}
+
+function mergeImportedFindings(existing: TechDebtFinding[], incoming: TechDebtFinding[]) {
+  const exact = new Set(incoming.map(({ id }) => id));
+  const previous = issueFindingsByReference(existing);
+  const current = issueFindingsByReference(incoming);
+  const edits = new Set<string>();
+  const updated = existing.map((row) => {
+    if (exact.has(row.id)) return row;
+    const reference = issueFindingReference(row);
+    const edited = reference && previous.get(reference) ? current.get(reference) : undefined;
+    if (!edited || (edited.text === row.text && edited.date === row.date)) return row;
+    edits.add(edited.id);
+    return { ...row, text: edited.text, date: edited.date };
+  });
+  return edits.size
+    ? mergeFindings(
+        updated,
+        incoming.filter(({ id }) => !edits.has(id)),
+      )
+    : mergeFindings(existing, incoming);
 }
 
 function recordFinding(input: TechDebtFindingInput): TechDebtFinding {
@@ -126,7 +154,10 @@ export class TechDebtService {
         ? view
         : this.save({ ...view, importError, importErrorIssue: issue });
     }
-    const findings = mergeFindings(view.findings, issueFindings(issue, result.body, result.date));
+    const findings = mergeImportedFindings(
+      view.findings,
+      issueFindings(issue, result.body, result.date),
+    );
     const imported = view.imported || view.issue?.toLowerCase() === target;
     const clearsError = failedIssue(view)?.toLowerCase() === target;
     if (!clearsError && imported === view.imported && findings === view.findings) {
@@ -187,7 +218,7 @@ export class TechDebtService {
           const issue = view.issue;
           if (issue && (!finding.source || finding.source.toLowerCase() === issue.toLowerCase())) {
             await this.serial(`issue:${issue.toLowerCase()}`, () =>
-              syncDebtTick(this.issues, issue, finding),
+              syncDebtTick(this.issues, issue, finding, view.findings),
             );
           }
           return this.save({

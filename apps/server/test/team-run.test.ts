@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   EventEnvelope,
@@ -24,6 +25,7 @@ import { resolveApprovedTeamPlan } from "../src/services/sessions/team-run-sched
 import { type TeamRunPorts, TeamRuns } from "../src/services/sessions/team-runs";
 import { SettingsStore } from "../src/settings-store";
 import { createGithubEnv } from "./support/github-env";
+import { removeTree } from "./support/remove-tree";
 
 const teams: ProjectTeams = {
   defaultTeamId: "build",
@@ -45,6 +47,7 @@ function setup(
   initial: TeamRun[] = [],
   criteria?: string[],
   itemIds = ["a", "b"],
+  history?: TeamRunPorts["history"],
 ) {
   const merge = vi.fn(
     async (): Promise<{ conflict?: string; needsResolution?: boolean }> => ({
@@ -98,6 +101,7 @@ function setup(
       coordinate,
       head,
       review,
+      history,
       gate,
       ownerDecision,
       arbiter,
@@ -122,6 +126,26 @@ function setup(
     defer,
   };
 }
+
+it("keeps approved assignment criteria and valid UTF-8 in the bounded review history", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "codeden-team-review-"));
+  try {
+    const path = join(dir, "history.md");
+    const criterion = "Retain the approved criterion.";
+    writeFileSync(path, `Approved plan approved-v1\n${criterion}\n界${"x".repeat(5_998)}`);
+    const { runs, review } = setup(undefined, [], [criterion], ["a"], async () => path);
+    const run = await runs.start("project", { checklistId: "approved" });
+    await runs.finish(run.id, run.workers[0]?.sessionId ?? "", null);
+    const brief = review.mock.calls[0]?.[2].historyBrief;
+    expect(brief).toContain(path);
+    expect(brief).toContain("Approved plan approved-v1");
+    expect(brief).toContain(criterion);
+    expect(brief).not.toContain("\uFFFD");
+    expect(brief).toContain("x".repeat(5_998));
+  } finally {
+    await removeTree(dir);
+  }
+});
 
 it("uses the selected Team's models and dispatch cap", async () => {
   const { runs, launch } = setup();

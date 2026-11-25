@@ -9,7 +9,9 @@ export async function startTechDebtFix(
   findings: TechDebtFinding[],
 ): Promise<string> {
   const ids = findings.map((finding) => finding.id).sort();
-  const paths = [...new Set(findings.map(({ location }) => location.replace(/:\d+$/, "")))];
+  const paths = [
+    ...new Set(findings.map(({ location }) => location.replace(/:\d+(?:-\d+|:\d+)?$/, ""))),
+  ];
   const brief = findings.map(({ location, text, receipt, pr }) => ({
     location,
     text,
@@ -31,7 +33,7 @@ export async function startTechDebtFix(
       },
     }),
   );
-  if (result.status !== "started") {
+  if (result.status !== "started" && result.status !== "queued") {
     throw conflict(
       "Overlapping work is already running. Finish that work before starting this fix.",
     );

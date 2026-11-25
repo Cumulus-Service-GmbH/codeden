@@ -17,6 +17,12 @@ writeFileSync(
   ),
   { mode: 0o600 },
 );
+const expected = JSON.parse(process.env.FAKE_NPM_EXPECT_CONFIG ?? "{}");
+for (const [key, value] of Object.entries(expected)) {
+  if (process.env[key] !== value) {
+    throw new Error(`Unexpected value for ${key}`);
+  }
+}
 await new Promise((r) => setTimeout(r, Number(process.env.FAKE_NPM_DELAY_MS ?? 0)));
 if (process.env.FAKE_NPM_FAIL === "1") {
   console.error("npm error code E404\nnpm error 404 Not Found - GET http://registry.test/codeden");

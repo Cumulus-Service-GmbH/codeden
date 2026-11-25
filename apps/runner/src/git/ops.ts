@@ -167,6 +167,54 @@ export async function push(
   return { remote, branch };
 }
 
+export async function forkPushPreflight(
+  cmd: RunnerCommandOf<"git.forkPushPreflight">,
+): Promise<RunnerCommandResult<"git.forkPushPreflight">> {
+  try {
+    const { cwd } = cmd;
+    const remotes = await gitText(cwd, ["remote"], { timeoutMs: 1_000 });
+    if (!remotes.split(/\r?\n/).includes("fork")) return { status: "missing_fork" };
+    const ref = `refs/heads/${cmd.branch}`;
+    const current = await gitText(cwd, ["symbolic-ref", "--quiet", "HEAD"], { timeoutMs: 1_000 });
+    if (current !== ref) return { status: "inconclusive" };
+
+    const result = await git(
+      cwd,
+      [
+        "-c",
+        "remote.fork.mirror=false",
+        "push",
+        "--dry-run",
+        "--porcelain",
+        "--no-verify",
+        "--no-follow-tags",
+        "--recurse-submodules=no",
+        "--receive-pack=git-receive-pack",
+        "fork",
+        `${ref}:${ref}`,
+      ],
+      {
+        timeoutMs: 5_000,
+        okCodes: [0, 1, 128],
+        env: {
+          GIT_ALLOW_PROTOCOL: "file:https:ssh",
+          GIT_ASKPASS: "",
+          SSH_ASKPASS_REQUIRE: "never",
+        },
+      },
+    );
+    if (result.code === 0) return { status: "passed" };
+    const refusedRef = /^!\t[^\n]*\t\[(?:remote )?rejected\]/m.test(result.stdout.toString("utf8"));
+    const refusedIdentity =
+      /Authentication failed|Permission denied \(publickey\)|Write access to repository not granted|returned error: (?:401|403)\b/.test(
+        result.stderr,
+      );
+    return { status: refusedRef || refusedIdentity ? "rejected" : "inconclusive" };
+  } catch {
+    return { status: "inconclusive" };
+  }
+}
+
 /** `fromRef..toRef`, or `fromRef` against the working tree (incl. untracked files). */
 export async function diff(
   cmd: RunnerCommandOf<"git.diff">,

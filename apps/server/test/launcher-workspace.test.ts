@@ -12,11 +12,15 @@ let calls: Array<RunnerCommandOf<RunnerCommandName>>;
 let launcher: SessionLauncher;
 /** When set, `workspace.prepare` fails with it (a worktree git can't make). */
 let prepareError: Error | null;
+let pushPreflight: "passed" | Error | undefined;
+let logs: string[];
 
 beforeEach(() => {
   env = createGithubEnv();
   calls = [];
   prepareError = null;
+  pushPreflight = undefined;
+  logs = [];
   const runner = {
     isConnected: () => true,
     runnerId: () => "r1",
@@ -28,6 +32,10 @@ beforeEach(() => {
       if (command.name === "workspace.prepare") {
         if (prepareError) throw prepareError;
         return { cwd: command.path ?? env.dir, branch: command.branch ?? null, created: true };
+      }
+      if (command.name === "git.forkPushPreflight") {
+        if (pushPreflight instanceof Error) throw pushPreflight;
+        return { status: pushPreflight ?? "missing_fork" };
       }
       return { resumeToken: null };
     }) as RunnerPort["request"],
@@ -44,6 +52,7 @@ beforeEach(() => {
     worktreesDir: join(env.dir, "wt"),
     orchestratorDir: join(env.dir, "orchestrator"),
     tokens: { mint: () => "token" } as unknown as McpTokenStore,
+    log: (message) => logs.push(message),
   });
 });
 
@@ -56,6 +65,41 @@ const prepared = () => {
 };
 
 describe("new worktrees of a GitHub project", () => {
+  it("checks the session's fork before opening and reports the runner Git outcome", async () => {
+    pushPreflight = "passed";
+    const session = env.addSession({ status: "starting", worktreePath: null, branch: null });
+    const input = { text: "Implement the change.", attachments: [] };
+    await launcher.launch(session.id, { input, workspace: { mode: "worktree" } });
+
+    const worktree = env.repo.get(session.id);
+    const probe = calls.find((call) => call.name === "git.forkPushPreflight");
+    expect(probe).toEqual({
+      name: "git.forkPushPreflight",
+      cwd: worktree.worktreePath,
+      branch: worktree.branch,
+    });
+    const start = calls.find((call) => call.name === "session.start");
+    if (!probe || !start) throw new Error("expected the fork probe and session start");
+    expect(calls.indexOf(probe)).toBeLessThan(calls.indexOf(start));
+    expect(start).toMatchObject({
+      options: {
+        systemPrompt: expect.stringContaining("Runner Git identity: fork push dry run passed"),
+      },
+    });
+    expect(calls.find((call) => call.name === "session.send")).toMatchObject({ input });
+  });
+
+  it("reports an inconclusive push probe without opening a turn or surfacing runner errors", async () => {
+    pushPreflight = new Error("private probe detail");
+    const session = env.addSession({ status: "starting", worktreePath: null, branch: null });
+    await launcher.launch(session.id, { workspace: { mode: "worktree" } });
+
+    expect(env.repo.get(session.id).status).toBe("idle");
+    expect(calls.some((call) => call.name === "session.send")).toBe(false);
+    expect(logs.join("\n")).toContain("Runner Git identity: fork push dry run inconclusive");
+    expect(logs.join("\n")).not.toContain("private probe detail");
+  });
+
   it("fetch first, so they can start from the up-to-date default branch", async () => {
     const session = env.addSession({ status: "starting", worktreePath: null, branch: null });
     await launcher.launch(session.id, { workspace: { mode: "worktree" } });
@@ -120,5 +164,6 @@ describe("new worktrees of a GitHub project", () => {
     });
     await launcher.launch(session.id, { workspace: { mode: "worktree" } });
     expect(prepared().fetch).toBeUndefined();
+    expect(calls.some((call) => call.name === "git.forkPushPreflight")).toBe(false);
   });
 });

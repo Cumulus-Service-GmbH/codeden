@@ -1,10 +1,12 @@
-import type { Project } from "@codeden/contracts";
+import { type Project, TechDebtView } from "@codeden/contracts";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ServerToolContext } from "../src/mcp/define";
 import { type ToolCaller, ToolRegistry } from "../src/mcp/registry";
 import { importTechDebt, listTechDebt, recordTechDebt } from "../src/mcp/tools/tech-debt";
+import { projectRoutes } from "../src/routes/projects";
 import { techDebtIssuePort } from "../src/services/tech-debt/issue";
 import { TechDebtService } from "../src/services/tech-debt/service";
+import { startTechDebtFix } from "../src/services/tech-debt/start";
 import { createGithubEnv } from "./support/github-env";
 
 const issue = "owner/repo#246";
@@ -111,6 +113,123 @@ describe("project tech debt", () => {
     expect(read).not.toHaveBeenCalled();
     expect(write).not.toHaveBeenCalled();
   });
+
+  it.each([true, false])(
+    "closes a uniquely identified edited finding, reimport first: %s",
+    async (reimportFirst) => {
+      const { env, service, project, read, write } = setup();
+      await service.act(project, { action: "configure", issue });
+      const {
+        findings: [original],
+      } = await service.list(project);
+      if (!original) throw new Error("Expected an imported finding");
+      const edited = low.replace("shared helper", "shared build helper");
+      const another = low.replace("review-1", "review-2");
+      const body = [edited, another].join("\r\n");
+      if (reimportFirst) {
+        read.mockResolvedValueOnce({ body, date });
+        const view = await service.importIssue(project, issue);
+        expect(view.findings).toHaveLength(2);
+        expect(view.findings[0]).toMatchObject({
+          id: original.id,
+          text: "Use the shared build helper.",
+        });
+      }
+      read.mockResolvedValueOnce({ body, date });
+      const closed = await service.act(project, { action: "fixed", id: original.id });
+      expect(closed.findings[0]).toMatchObject({ id: original.id, status: "fixed" });
+      expect(write).toHaveBeenCalledExactlyOnceWith(
+        issue,
+        [edited.replace("[ ]", "[x]"), another].join("\r\n"),
+      );
+      const reimported = await service.importIssue(project, issue);
+      expect(reimported.findings).toHaveLength(2);
+      expect(reimported.findings[0]).toMatchObject({ id: original.id, status: "fixed" });
+      const seq = env.store.headSeq();
+      expect(await service.importIssue(project, issue)).toEqual(reimported);
+      expect(env.store.headSeq()).toBe(seq);
+    },
+  );
+
+  it("refuses to tick an edited finding if multiple lines share its source metadata", async () => {
+    const { service, project, read, write } = setup();
+    await service.act(project, { action: "configure", issue });
+    const {
+      findings: [original],
+    } = await service.list(project);
+    if (!original) throw new Error("Expected an imported finding");
+    read.mockResolvedValueOnce({
+      body: [
+        low.replace("shared helper", "other helper"),
+        low.replace("shared helper", "different helper"),
+      ].join("\n"),
+      date,
+    });
+    await expect(service.act(project, { action: "fixed", id: original.id })).rejects.toThrow(
+      "The tracking issue entry changed or was removed",
+    );
+    expect(write).not.toHaveBeenCalled();
+    expect((await service.list(project)).findings[0]?.status).toBe("open");
+  });
+
+  it.each(["started", "queued"] as const)(
+    "imports source locations into a scoped %s fix",
+    async (status) => {
+      const { env, project, read, write } = setup();
+      const start = vi
+        .fn<Parameters<typeof startTechDebtFix>[0]["start"]>()
+        .mockResolvedValue(
+          status === "queued"
+            ? { status, sessionId: "fix-session", behind: [] }
+            : { status, sessionId: "fix-session" },
+        );
+      const service = new TechDebtService(
+        env.db.db,
+        env.store,
+        { read, write },
+        (project, findings) => startTechDebtFix({ start }, project, findings),
+      );
+      const routes = projectRoutes({
+        projects: { get: () => project },
+        techDebt: service,
+      } as unknown as Parameters<typeof projectRoutes>[0]);
+      const path = `/${project.id}/tech-debt`;
+      async function act(action: object) {
+        return routes.request(path, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(action),
+        });
+      }
+      expect((await act({ action: "configure", issue })).status).toBe(200);
+      const locations = ["src/build.ts:12-15", "src/@build.ts:12:5", "src/with spaces.ts:9"];
+      read.mockResolvedValueOnce({
+        body: locations.map((location) => low.replace("src/build.ts:12", location)).join("\n"),
+        date,
+      });
+      const response = await routes.request(path);
+      expect(response.status).toBe(200);
+      const view = TechDebtView.parse(await response.json());
+      expect(view.findings).toMatchObject(locations.map((location) => ({ location })));
+      const fixed = await act({
+        action: "fix",
+        ids: view.findings.map(({ id }) => id),
+      });
+      expect(fixed.status).toBe(200);
+      expect(TechDebtView.parse(await fixed.json()).findings).toMatchObject(
+        locations.map(() => ({ status: "in_progress", sessionId: "fix-session" })),
+      );
+      expect(start).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          projectId: project.id,
+          scope: expect.objectContaining({
+            paths: ["src/build.ts", "src/@build.ts", "src/with spaces.ts"],
+          }),
+          input: expect.objectContaining({ from: "codeden" }),
+        }),
+      );
+    },
+  );
 
   it.each(["failed", "stopped", "idle"] as const)(
     "retries a finding after its fix session goes %s without ticking the issue",

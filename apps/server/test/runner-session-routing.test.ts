@@ -71,6 +71,8 @@ function port(tag: string, runnerId: string, providers: ProviderInfo[], proxy: s
           return { resumeToken: `${command.resumeToken}:fork` };
         case "workspace.prepare":
           return { cwd: command.path ?? env.dir, branch: command.branch ?? null, created: true };
+        case "git.forkPushPreflight":
+          return { status: "missing_fork" };
         case "session.start":
           starts.push(command);
           return { resumeToken: command.options.resumeToken ?? null };
@@ -129,6 +131,7 @@ describe("session work on its own runner", () => {
       "B:checkpoint.list",
       "B:provider.fork",
       "B:workspace.prepare",
+      "B:git.forkPushPreflight",
       "B:session.start",
     ]);
     const fork = env.repo.get(sessionId);
@@ -175,9 +178,20 @@ it("forces every session, including the orchestrator, onto the Fake provider whe
   settings.update({
     providers: { orchestrator: { provider: CLAUDE.id }, pm: { provider: CLAUDE.id } },
   });
+  const priorPm = env.addSession({
+    role: "pm",
+    projectId: env.localProject.id,
+    provider: CLAUDE.id,
+    status: "running",
+  });
   const { roles } = services.orchestration;
   const orchestrator = await roles.ensure("orchestrator", null);
   const pm = await roles.ensure("pm", env.localProject.id);
+  expect(pm.id).not.toBe(priorPm.id);
+  expect(env.repo.get(priorPm.id)).toMatchObject({
+    status: "stopped",
+    archivedAt: expect.any(String),
+  });
   const start = async (purpose: string, parentSessionId: string) => {
     const result = await services.sessions.start({
       projectId: env.localProject.id,

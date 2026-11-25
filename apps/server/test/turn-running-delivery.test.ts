@@ -5,7 +5,10 @@ import { Settings, type UserInput } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { type Database, openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
+import { ToolRegistry } from "../src/mcp/registry";
+import { messageSession } from "../src/mcp/tools/pm/sessions";
 import { RunnerCommandError } from "../src/runner/client";
+import type { AppServices } from "../src/services/container";
 import { LoopGuard } from "../src/services/orchestration/loop-guard";
 import { WakeScheduler } from "../src/services/orchestration/wake-scheduler";
 import type { RunnerPort } from "../src/services/runner-port";
@@ -107,6 +110,44 @@ function providerLike(
   return { sessions, launcher, sent, state, request, endTurn };
 }
 
+it("acknowledges default PM delivery without waiting on a busy provider", async () => {
+  const { sessions, request, endTurn, sent } = providerLike({ steer: true, turnRunning: true });
+  repo.update("s1", (s) => ({ ...s, status: "running", projectId: "project" }));
+  request.mockResolvedValueOnce({
+    waitingFor: { itemId: "sleep", turnId: "turn", threadId: "thread", rootTurnId: "turn" },
+  });
+  const tools = new ToolRegistry([messageSession], { sessions, sessionRepo: repo } as AppServices);
+  const sending = tools.call(
+    "message_session",
+    { sessionId: "s1", text: "PM follow-up" },
+    {
+      role: "pm",
+      caller: "mcp",
+      sessionId: "pm",
+      projectId: "project",
+      signal: new AbortController().signal,
+    },
+  );
+  try {
+    const result = await Promise.race([sending, settle().then(() => "still waiting")]);
+    expect(result).toMatchObject({ text: "Message queued.", isError: false });
+    expect(request).not.toHaveBeenCalled();
+    expect(outbox.list("s1")).toMatchObject([
+      { from: "pm", input: { text: "Message from your project manager:\nPM follow-up" } },
+    ]);
+    request.mockReset().mockImplementation(async ({ input }) => {
+      sent.push(input?.text ?? "");
+      return {};
+    });
+    await endTurn();
+    expect(sent).toEqual(["Message from your project manager:\nPM follow-up"]);
+    expect(outbox.list("s1")).toEqual([]);
+  } finally {
+    sessions.suspendPriorityDelivery();
+    await sending;
+  }
+});
+
 it.each([
   {
     name: "interrupts only the running shell call after the configured delay",
@@ -148,6 +189,7 @@ it.each([
     expect(request.mock.calls).toEqual([[steer]]);
     await vi.advanceTimersByTimeAsync(1);
     if (incapable) {
+      await vi.advanceTimersByTimeAsync(24 * 60 * 60_000);
       expect(request.mock.calls).toEqual([[steer]]);
       sessions.suspendPriorityDelivery();
       await expect(sending).resolves.toEqual({ status: "queued" });
@@ -202,8 +244,39 @@ it("keeps waiting priority messages when the server shuts down", async () => {
   expect(request).toHaveBeenCalledTimes(1);
 });
 
-it("keeps a waiting priority message queued when the runner disconnects", async () => {
+it("rejects a new steer once shutdown suspends priority delivery", async () => {
   const { sessions, request } = providerLike({ steer: true });
+  repo.update("s1", (s) => ({ ...s, status: "running" }));
+  sessions.suspendPriorityDelivery();
+  await expect(sessions.steer("s1", input("late"))).rejects.toMatchObject({
+    code: "priority_suspended",
+  });
+  expect(request).not.toHaveBeenCalled();
+  expect(texts()).toEqual([]);
+});
+
+it("keeps a waiting steer ahead of messages queued during its first request", async () => {
+  const { sessions, request } = providerLike({ steer: true });
+  repo.update("s1", (s) => ({ ...s, status: "running" }));
+  const reply = Promise.withResolvers<Record<string, unknown>>();
+  request.mockImplementationOnce(() => reply.promise);
+  const steering = sessions.steer("s1", input("first"));
+  try {
+    await settle();
+    await sessions.send("s1", { input: input("second"), whenBusy: "queue" });
+    reply.resolve({
+      waitingFor: { itemId: "sleep", turnId: "turn", threadId: "thread", rootTurnId: "turn" },
+    });
+    await settle();
+    expect(texts()).toEqual(["first", "second"]);
+  } finally {
+    sessions.suspendPriorityDelivery();
+    await steering;
+  }
+});
+
+it("keeps a waiting priority message queued when the runner disconnects", async () => {
+  const { sessions, request, sent, endTurn } = providerLike({ steer: true, turnRunning: true });
   repo.update("s1", (s) => ({ ...s, status: "running" }));
   request
     .mockResolvedValueOnce({
@@ -221,6 +294,50 @@ it("keeps a waiting priority message queued when the runner disconnects", async 
   ]);
   await expect(sending).resolves.toEqual({ status: "queued" });
   expect(texts()).toEqual(["priority"]);
+  await endTurn();
+  expect(sent).toEqual(["priority"]);
+  expect(texts()).toEqual([]);
+});
+
+it("retries a waiting steer when the shell completes in the event store", async () => {
+  const { sessions, request } = providerLike({ steer: true });
+  repo.update("s1", (s) => ({ ...s, status: "running" }));
+  const shell = { itemId: "sleep", turnId: "turn", threadId: "thread", rootTurnId: "turn" };
+  request.mockResolvedValueOnce({ waitingFor: shell });
+  const sending = sessions.send("s1", { input: input("priority"), whenBusy: "steer" });
+  try {
+    await settle();
+    store.append([
+      {
+        type: "agent.item.completed",
+        sessionId: "s1",
+        payload: {
+          type: "item.completed",
+          threadId: shell.threadId,
+          turnId: shell.turnId,
+          item: {
+            id: shell.itemId,
+            kind: "tool_call",
+            toolKind: "command",
+            toolName: "shell",
+            command: "sleep 600",
+            status: "completed",
+          },
+        },
+      },
+    ]);
+    await expect(Promise.race([sending, settle().then(() => "still waiting")])).resolves.toEqual({
+      status: "steered",
+    });
+    expect(request.mock.calls[1]?.[0]).toMatchObject({
+      name: "session.steer",
+      expectedTurnId: shell.rootTurnId,
+    });
+    expect(texts()).toEqual([]);
+  } finally {
+    sessions.suspendPriorityDelivery();
+    await sending;
+  }
 });
 
 describe("deliveries racing a running turn (#96)", () => {

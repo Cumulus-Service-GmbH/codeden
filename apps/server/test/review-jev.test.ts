@@ -105,6 +105,38 @@ it("passes the history by path and binds its digest and result to the item head"
   }
 });
 
+it("runs the done script using the bundled runtime in Electron", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "review-jev-electron-"));
+  const prior = Object.getOwnPropertyDescriptor(process.versions, "electron");
+  Object.defineProperty(process.versions, "electron", { value: "fixture", configurable: true });
+  try {
+    const exec = vi.fn<Exec>(async (path) => ({
+      code: null,
+      stdout: "",
+      stderr: "",
+      timedOut: false,
+      notFound: true,
+      path,
+    }));
+    await runJevDone(exec, jevScript, dir, {
+      head,
+      criteria: [],
+      evidence: [],
+      history: "",
+      historyEvidence: "",
+    });
+    expect(exec).toHaveBeenCalledExactlyOnceWith(
+      process.execPath,
+      expect.any(Array),
+      expect.objectContaining({ env: { NODE_OPTIONS: "", ELECTRON_RUN_AS_NODE: "1" } }),
+    );
+  } finally {
+    if (prior) Object.defineProperty(process.versions, "electron", prior);
+    else Reflect.deleteProperty(process.versions, "electron");
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 it("sends a product refusal to the reviewer once and then to the owner inbox", async () => {
   const dir = await mkdtemp(join(tmpdir(), "review-jev-"));
   try {

@@ -369,13 +369,16 @@ describe("priority session messages at capacity", () => {
     expect(admission.free()).toBe(0);
   });
 
-  it.each(["pm", "orchestrator"] as const)(
-    "steers a running turn with a message from %s",
-    async (from) => {
+  it.each([
+    { from: "pm", whenBusy: "steer" },
+    { from: "orchestrator", whenBusy: "queue" },
+  ] as const)(
+    "steers a running turn with a $whenBusy message from $from",
+    async ({ from, whenBusy }) => {
       const { sessions } = atCapacity();
       const { id } = env.addSession({ provider: "claude", status: "running" });
 
-      expect(await sessions.send(id, request, from)).toEqual({ status: "steered" });
+      expect(await sessions.send(id, { input, whenBusy }, from)).toEqual({ status: "steered" });
       expect(call("session.steer")).toMatchObject({ sessionId: id, input });
       expect(sessions.hasOutbox(id)).toBe(false);
     },
@@ -386,7 +389,7 @@ describe("priority session messages at capacity", () => {
     const { id } = env.addSession({ provider: "claude", status: "running" });
     vi.spyOn(sessions, "steer").mockRejectedValueOnce(new Error("Runner refused steer"));
 
-    const send = sessions.send(id, { input, whenBusy }, "pm");
+    const send = sessions.send(id, { input, whenBusy }, "orchestrator");
     if (whenBusy === "steer") {
       await expect(send).rejects.toThrow("Runner refused steer");
       expect(sessions.hasOutbox(id)).toBe(false);

@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { defaultTeam, messageFrom, type Session, type Team } from "@codeden/contracts";
-import { createImageEngineRegistry, type ImageEngineRegistry } from "@codeden/providers";
+import { createImageEngineRegistry, ImageEngineRegistry } from "@codeden/providers";
 import type { Db } from "../db/client";
 import type { EventStore } from "../events/store";
 import { noSandboxes, type SandboxService } from "../execution/sandboxes";
@@ -462,6 +462,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     inbox,
     settings: opts.settings,
     runner: opts.runner,
+    forceFakeProvider,
     artifacts,
     github: opts.orchestration?.github ?? new GithubServicePort(github),
     trustedAuthors,
@@ -582,7 +583,9 @@ export function createServices(opts: ServicesOptions): AppServices {
     }),
     updates: createUpdates(opts),
     images: new ImageService({
-      registry: opts.imageEngines ?? defaultImageEngines(opts.secrets),
+      registry:
+        opts.imageEngines ??
+        (forceFakeProvider ? new ImageEngineRegistry([]) : defaultImageEngines(opts.secrets)),
       settings: opts.settings,
       artifacts,
       repo: sessionRepo,

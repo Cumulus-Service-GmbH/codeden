@@ -134,6 +134,7 @@ export class SessionService {
    * second turn.
    */
   private readonly delivering = new Set<string>();
+  private prioritySuspended = false;
   private readonly priorityWaits = new Map<
     string,
     { controller: AbortController; pending: number }
@@ -592,7 +593,7 @@ export class SessionService {
         (req.whenBusy === "steer" ||
           (req.whenBusy === "queue" &&
             session.status === "running" &&
-            (from === "pm" || from === "orchestrator") &&
+            from === "orchestrator" &&
             this.provider(session.provider, id)?.capabilities.steer))
       ) {
         try {
@@ -660,6 +661,8 @@ export class SessionService {
     raw: UserInput,
     source: QueueSender | QueuedMessage = "user",
   ): Promise<"steered" | "queued"> {
+    if (this.prioritySuspended)
+      throw conflict("Priority delivery paused for shutdown", "priority_suspended");
     const session = this.deps.repo.get(id);
     assertProjectActive(this.deps.projects, session);
     this.assertForcedProvider(session);
@@ -670,6 +673,7 @@ export class SessionService {
     }
     if (compactionRunning(this.deps.repo, session)) throw compactingRefusal();
     const { outbox } = this.deps;
+    const place = typeof source === "string" ? outbox.reserve() : undefined;
     const stored = typeof source === "string" ? this.externalize(session, raw) : source.input;
     const input = this.forRunner(session, stored);
     const delay = capabilities.interruptToolCall
@@ -684,6 +688,7 @@ export class SessionService {
         async (attempt) => {
           const runner = this.runnerOf(id);
           const revision = await applyPendingConfig(this.deps.repo, runner, session, true);
+          wait.controller.signal.throwIfAborted();
           assertConfigRevision(this.deps.repo, id, revision);
           const result = await runner.request({
             name: "session.steer",
@@ -699,7 +704,7 @@ export class SessionService {
             typeof source === "string" &&
             !wait.controller.signal.aborted
           ) {
-            pending = outbox.push(id, stored, source);
+            pending = outbox.push(id, stored, source, place);
             outbox.steering.add(pending.id);
           }
           return result;
@@ -998,6 +1003,7 @@ export class SessionService {
 
   /** Shutdown releases the waiters while leaving their messages in the outbox. */
   suspendPriorityDelivery(): void {
+    this.prioritySuspended = true;
     const reason = conflict("Priority delivery paused for shutdown", "priority_suspended");
     for (const wait of this.priorityWaits.values()) wait.controller.abort(reason);
     this.priorityWaits.clear();

@@ -3,6 +3,7 @@ import { lstatSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { JevReceipt, type JevReceipt as Receipt } from "@codeden/contracts";
+import { ownNodeEnv } from "@codeden/providers";
 import type { Exec } from "./exec";
 
 export const sha256 = (text: string) => createHash("sha256").update(text).digest("hex");
@@ -67,11 +68,11 @@ export async function runJevDone(
       }),
       { mode: 0o600 },
     );
-    const result = await exec(
-      process.versions.electron ? "node" : process.execPath,
-      [script, "done", inputPath, "--log", logPath],
-      { cwd: attempt, timeoutMs: 120_000, env: { NODE_OPTIONS: "" } },
-    );
+    const result = await exec(process.execPath, [script, "done", inputPath, "--log", logPath], {
+      cwd: attempt,
+      timeoutMs: 120_000,
+      env: ownNodeEnv({ NODE_OPTIONS: "" }),
+    });
     if (result.timedOut || result.notFound || result.code === null) {
       return unavailable("The done gate was unreachable or timed out.");
     }

@@ -33,7 +33,12 @@ import { exportSessionTranscript } from "../services/sessions/transcript-export"
 import { asUserResponse } from "./user-response";
 import { jsonBody, queryOf } from "./validate";
 
-const PublicInput = UserInput.omit({ teamCoordination: true });
+const PublicInput = UserInput.omit({
+  from: true,
+  relayedForUser: true,
+  checksRound: true,
+  teamCoordination: true,
+});
 
 /**
  * `/api/sessions`: start (with conflict handling), message, steer, interrupt, compact, respond, stop,

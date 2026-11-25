@@ -320,6 +320,7 @@ describe("side-by-side installs", () => {
       NPM_CONFIG_USERCONFIG: join(home, ".npmrc"),
     };
     for (const [key, value] of Object.entries(settings)) vi.stubEnv(key, value);
+    vi.stubEnv("FAKE_NPM_EXPECT_CONFIG", JSON.stringify(settings));
     try {
       await installAppVersion({ home, version: "0.2.0", npm: fakeNpm });
       const keys = JSON.parse(readFileSync(join(home, "app", "npm-env.json"), "utf8")) as string[];

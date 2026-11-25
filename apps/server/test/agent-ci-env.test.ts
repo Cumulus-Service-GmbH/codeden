@@ -4,9 +4,12 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Database, openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
+import { McpTokenStore } from "../src/mcp/tokens";
 import { runTool } from "../src/services/exec";
+import { InboxService } from "../src/services/inbox-service";
 import { ProjectService } from "../src/services/projects/project-service";
-import { type LauncherDeps, SessionLauncher } from "../src/services/sessions/launcher";
+import { SessionLauncher } from "../src/services/sessions/launcher";
+import { SessionRepo } from "../src/services/sessions/repo";
 import { sampleSession } from "./helpers";
 import { removeTree } from "./support/remove-tree";
 
@@ -38,12 +41,27 @@ async function addProject(): Promise<string> {
 }
 
 function launcher(): SessionLauncher {
+  const store = new EventStore(database.db);
+  const unexpected = () => {
+    throw new Error("Session options do not use this dependency");
+  };
   return new SessionLauncher({
-    repo: { find: () => undefined },
-    runner: { mcpProxyUrl: () => null },
+    repo: new SessionRepo(database.db, store),
+    runner: {
+      isConnected: () => true,
+      runnerId: () => null,
+      providers: () => [],
+      mcpProxyUrl: () => null,
+      waitForConnection: unexpected,
+      request: unexpected,
+    },
+    inbox: new InboxService(database.db, store, unexpected),
+    tokens: new McpTokenStore(database.db),
     projects,
     home: join(dir, "home"),
-  } as unknown as LauncherDeps);
+    worktreesDir: join(dir, "wt"),
+    orchestratorDir: join(dir, "orchestrator"),
+  });
 }
 
 describe("CI=true in a project's agent sessions", () => {

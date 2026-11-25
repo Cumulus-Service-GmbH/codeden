@@ -35,7 +35,8 @@ export function debtId(value: string): string {
 
 const tick = /^(\s*[-*+]\s+\[)([ xX])(\]\s+)/;
 const localMarker = / <!-- codeden:tech-debt ([a-f0-9]{64}) -->$/;
-const low = /^(?:\*\*LOW\*\*|\[LOW\]|LOW)\s*[:–—-]?\s*`?([^\s`]+:\d+)`?\s*[:–—-]?\s+(.+)$/i;
+const low =
+  /^(?:\*\*LOW\*\*|\[LOW\]|LOW)\s*[:–—-]?\s*(?:`([^`]+)`|([^\s`]+:\d+(?:-\d+|:\d+)?))\s*[:–—-]?\s+(.+)$/i;
 
 function parseLine(line: string, issue: string, date: string): TechDebtFinding | undefined {
   const checkbox = tick.exec(line);
@@ -44,7 +45,7 @@ function parseLine(line: string, issue: string, date: string): TechDebtFinding |
   const marker = localMarker.exec(content);
   const match = low.exec(content.replace(localMarker, ""));
   if (!match) return;
-  const [text, ...fields] = (match[2] ?? "").split(/\s+\|\s+(?=(?:receipt|date|pr):)/i);
+  const [text, ...fields] = (match[3] ?? "").split(/\s+\|\s+(?=(?:receipt|date|pr):)/i);
   const metadata = new Map(
     fields.map((field) => {
       const colon = field.indexOf(":");
@@ -53,7 +54,7 @@ function parseLine(line: string, issue: string, date: string): TechDebtFinding |
   );
   const givenDate = metadata.get("date") ?? date;
   const parsed = TechDebtFindingInput.safeParse({
-    location: match[1],
+    location: match[1] ?? match[2],
     text,
     receipt: metadata.get("receipt") || null,
     date: /^\d{4}-\d{2}-\d{2}$/.test(givenDate) ? `${givenDate}T00:00:00.000Z` : givenDate,
@@ -74,19 +75,49 @@ export function issueFindings(issue: string, body: string, date: string): TechDe
   return body.split(/\r?\n/).flatMap((line) => parseLine(line, issue, date) ?? []);
 }
 
+export function issueFindingReference(finding: TechDebtFinding): string | undefined {
+  if (finding.source && finding.receipt) {
+    return JSON.stringify([
+      finding.source.toLowerCase(),
+      finding.location,
+      finding.receipt,
+      finding.pr,
+    ]);
+  }
+}
+
+/** Null means the receipt and source coordinates do not identify a single line. */
+export function issueFindingsByReference(findings: TechDebtFinding[]) {
+  const indexed = new Map<string, TechDebtFinding | null>();
+  for (const finding of findings) {
+    const reference = issueFindingReference(finding);
+    if (reference) indexed.set(reference, indexed.has(reference) ? null : finding);
+  }
+  return indexed;
+}
+
 /** Update the selected checkbox on the fresh issue body, retaining other lines and line endings. */
 export async function syncDebtTick(
   port: TechDebtIssuePort,
   issue: string,
   finding: TechDebtFinding,
+  previous: TechDebtFinding[],
 ) {
   const { body, date } = await port.read(issue);
+  const lines = body.split(/(\r?\n)/);
+  const parsed = finding.source ? lines.map((line) => parseLine(line, issue, date)) : [];
+  const reference = issueFindingReference(finding);
+  const edited =
+    reference &&
+    !parsed.some((row) => row?.id === finding.id) &&
+    issueFindingsByReference(previous).get(reference)
+      ? issueFindingsByReference(parsed.filter((row) => row !== undefined)).get(reference)
+      : undefined;
   let found = false;
-  const next = body
-    .split(/(\r?\n)/)
-    .map((line) => {
-      const id = finding.source ? parseLine(line, issue, date)?.id : localMarker.exec(line)?.[1];
-      if (id !== finding.id || !tick.test(line)) return line;
+  const next = lines
+    .map((line, index) => {
+      const id = finding.source ? parsed[index]?.id : localMarker.exec(line)?.[1];
+      if (id !== (edited?.id ?? finding.id) || !tick.test(line)) return line;
       found = true;
       return line.replace(tick, "$1x$3");
     })

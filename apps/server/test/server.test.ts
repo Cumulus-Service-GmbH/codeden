@@ -40,6 +40,28 @@ afterEach(async () => {
 
 const auth = { authorization: `Bearer ${TOKEN}` };
 
+it("disables built-in image engines when Fake is forced", async () => {
+  vi.stubEnv("CODEDEN_FAKE_PROVIDER", "1");
+  const fakeHome = mkdtempSync(join(tmpdir(), "codeden-server-fake-images-"));
+  let fakeServer: RunningServer | undefined;
+  try {
+    fakeServer = await startServer({
+      port: 0,
+      dataDir: fakeHome,
+      token: TOKEN,
+      runner: false,
+      secrets: "memory",
+      builtinProviders: true,
+      checkSetupOnStart: false,
+    });
+    expect((await fakeServer.services.images.engines()).engines).toEqual([]);
+  } finally {
+    await fakeServer?.close();
+    await removeTree(fakeHome);
+    vi.unstubAllEnvs();
+  }
+});
+
 describe("security", () => {
   it("serves health without a token", async () => {
     const res = await fetch(`${server.url}/api/health`);

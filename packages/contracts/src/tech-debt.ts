@@ -9,7 +9,13 @@ export const TechDebtIssue = z
 
 /** A LOW review finding, with nullable metadata for older issue entries. */
 export const TechDebtFindingInput = z.object({
-  location: z.string().trim().min(1).max(500).regex(/:\d+$/),
+  /** A source location can end in a line, a line range, or a line and column. */
+  location: z
+    .string()
+    .trim()
+    .min(1)
+    .max(500)
+    .regex(/:\d+(?:-\d+|:\d+)?$/),
   text: z.string().trim().min(1).max(4000),
   receipt: z.string().trim().min(1).max(1000).nullable(),
   date: Timestamp,

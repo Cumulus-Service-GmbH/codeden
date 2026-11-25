@@ -42,17 +42,24 @@ const kinds = [
   { kind: "PM hand-off", role: "agent", startedBy: { kind: "orchestrator" }, projectId: p },
 ] as const;
 
-it("includes a standing background-wait instruction in every session note", () => {
-  const plain = launcher(Schema.parse({ default: "off" }));
-  for (const { id: provider } of providers) {
-    for (const { kind, ...fields } of kinds) {
-      const prompt = plain.sessionOptions({ ...sampleSession, ...fields, provider }).systemPrompt;
-      expect(prompt, `${kind} on ${provider}`).toContain(
-        "Run long waits in the background and check their progress between short steps to keep the turn responsive to new messages.",
-      );
+it.each(["off", "lite", "full", "ultra"])(
+  "includes a standing background-wait instruction for every session with token saver %s",
+  (level) => {
+    const configured = launcher(Schema.parse({ default: level }));
+    for (const { id: provider } of providers) {
+      for (const { kind, ...fields } of kinds) {
+        const prompt = configured.sessionOptions({
+          ...sampleSession,
+          ...fields,
+          provider,
+        }).systemPrompt;
+        expect(prompt, `${kind} on ${provider}`).toContain(
+          "Run long waits in the background and check their progress between short steps to keep the turn responsive to new messages.",
+        );
+      }
     }
-  }
-});
+  },
+);
 
 describe("token saver note", () => {
   it("is absent when off or not configured", () => {
