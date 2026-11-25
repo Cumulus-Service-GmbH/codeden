@@ -31,7 +31,8 @@ test('CodeDen skill documents owner policy and the installed review gate', () =>
   const writer = readFileSync(join(root, 'templates/writer-prompt.md'), 'utf8');
   for (const rule of ['JEV_RECEIPT_REQUIRED', 'team-review.mjs" run', 'team-review.mjs" check',
     'c2.2 is pending', '8 model rounds', 'VITEST_MAX_WORKERS=2',
-    '/tmp/codeden-suite.lock', 'upstream-watch', 'git cherry', 'three consecutive stops']) {
+    '/tmp/codeden-suite.lock', 'upstream-watch', 'git cherry', 'access-control or configuration validation',
+    'findings by ID and `file:line`', 'Park the lane after three consecutive stops']) {
     assert.ok(skill.includes(rule), rule);
   }
   assert.doesNotMatch(skill, /team-review\.mjs["`]? record|TYPESAFE_API_KEY|JEV_API_KEY/);

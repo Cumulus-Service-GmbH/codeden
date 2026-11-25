@@ -4,24 +4,27 @@
 //
 // Deny by default:
 //   * the repository must opt in with .trioharness/merge-policy.json ON THE DEFAULT BRANCH (never read from the PR),
-//   * the PR must be an agent task branch (codeden/*, bambooed/* or trio/*) in the same repository, not a draft, against the
+//   * the PR must be an agent task branch (bambooed/*, trio/* or codeden/*) in the same repository, not a draft, against the
 //     default branch, with the head SHA the caller expects,
 //   * it must touch NO workflow, CI/deploy/infra/environment file, hook, guard or allowlist file, dependency or lock
 //     file, migration or schema, auth or secret path, nor any path the repo lists as high-risk in AGENTS.md,
 //   * no secret-shaped added line (files, patches, commit messages), no deleted/skipped/weakened tests, a bounded size,
-//   * every check on the head is green (a failure counts only if the same check also fails on the default branch head
-//     and the policy allows baseline failures), nothing pending, at least one real check,
+//   * every non-advisory check on the head is green (a failure counts only if the same check also fails on the default
+//     branch head and the policy allows baseline failures), nothing pending, at least one real check,
 //   * merging must trigger nothing live: a workflow that can run on a push to the default branch (or on a merged PR)
 //     and looks like a deploy, release, publish or upload makes the verdict DEPLOY_ON_MERGE. That is a deploy: ask.
 // The same script runs as a required GitHub status check (`ci`, from the default branch, through pull_request_target,
 // never checking out the PR), so `gh pr merge`, `gh api` and a fresh clone cannot skip it: the ruleset requires the
-// check, and a PR that edits this script, the workflow or the policy fails it (those paths are sensitive).
+// check, and a PR that edits this script, the workflow or the policy fails it (those paths are sensitive), unless the
+// policy sets sensitivePaths "review": then sensitive paths are notes and merge on review plus green checks; secret
+// material still fails.
 // Owner approval (ci mode only, never for the Architect's own check/merge): when every remaining reason is a person's
 // call (APPROVABLE: sensitive path, size, branch name, missing PR section) and an OWNER/MEMBER/COLLABORATOR who is not a
 // bot and not the PR author approved THIS head (and has not since requested changes), the check passes with a note. A
 // review does not re-run the check: after approving, run `recheck` (or press Re-run on the check in GitHub).
 // Honest limits: it proves the PR is boring, not that it is correct (tests, review and the Jev gates do that); a
-// dependency, migration, workflow or config change is never auto-merged; a repo whose default branch deploys on push is
+// dependency, migration, workflow or config change is never auto-merged unless the policy sets sensitivePaths "review"
+// (then the independent review is the gate for those paths); a repo whose default branch deploys on push is
 // never auto-merged; baseline-failure tolerance is a heuristic by check name; GitHub limits a PR diff to 3000 files.
 // Usage:
 //   node merge-verify.mjs check  --repo <owner/name|path> --pr N [--expect-sha S] [--checkout <path> --run <id>] [--wait-checks-sec N]
@@ -42,8 +45,9 @@ import { isMain } from './is-main.mjs';
 import { appendFailure } from './issues-failure-log.mjs';
 
 export const CHECK_NAME = 'merge-verify';
+const COPILOT_REVIEW_CHECK = 'copilot-pull-request-reviewer';
 export const POLICY_PATH = '.trioharness/merge-policy.json';
-export const AGENT_BRANCH = /^(codeden|bambooed|trio)\/[A-Za-z0-9._\/-]+$/;
+export const AGENT_BRANCH = /^(bambooed|trio|codeden)\/[A-Za-z0-9._\/-]+$/;
 export const DEFAULT_POLICY = Object.freeze({
   version: 1, enabled: false, mergeMethod: 'merge', maxFiles: 40, maxChangedLines: 1500,
   extraSensitive: [], allowBaselineFailures: false, requiredChecks: [], requireBodySection: true, minChecks: 1
@@ -62,8 +66,24 @@ export function validatePolicy(raw) {
   if (!Array.isArray(p.extraSensitive) || p.extraSensitive.some(x => typeof x !== 'string' || !x || x.length > 200)) errors.push('extraSensitive must be a list of path strings');
   if (typeof p.allowBaselineFailures !== 'boolean') errors.push('allowBaselineFailures must be true or false');
   if (!Array.isArray(p.requiredChecks) || p.requiredChecks.some(x => typeof x !== 'string' || !x)) errors.push('requiredChecks must be a list of check names');
+  if (p.advisoryChecks !== undefined) {
+    // Only GitHub's named Copilot review job is eligible. CI checks and future names are never inferred.
+    if (!Array.isArray(p.advisoryChecks) || p.advisoryChecks.some(name => name !== COPILOT_REVIEW_CHECK)) {
+      errors.push(`advisoryChecks must be a list containing only ${COPILOT_REVIEW_CHECK}`);
+    } else if (p.advisoryChecks.includes(COPILOT_REVIEW_CHECK) && Array.isArray(p.requiredChecks) && p.requiredChecks.includes(COPILOT_REVIEW_CHECK)) {
+      errors.push(`advisoryChecks cannot include ${COPILOT_REVIEW_CHECK} when it is listed in requiredChecks`);
+    }
+  }
   if (typeof p.requireBodySection !== 'boolean') errors.push('requireBodySection must be true or false');
   if (!Number.isInteger(p.minChecks) || p.minChecks < 1 || p.minChecks > 20) errors.push('minChecks must be an integer 1-20');
+  // ciWorkflows: named validation-only workflows whose bare words deploy/publish are not a deploy on merge (a deploy tool
+  // in them still is; see DEPLOY_TOOLS). A name that itself
+  // reads like a deploy (deploy-*.yml, release, publish, ...) can never be listed. Optional; absent means none.
+  // sensitivePaths: "refuse" (default) stops a PR on any sensitive or AGENTS.md high-risk path; "review" lists those
+  // paths as notes instead, so they merge on review plus green checks. Secret material (secret files, keys and
+  // certificates, local.settings.json) always refuses. Optional; absent means "refuse".
+  if (p.sensitivePaths !== undefined && !['refuse', 'review'].includes(p.sensitivePaths)) errors.push('sensitivePaths must be "refuse" or "review"');
+  if (p.ciWorkflows !== undefined && (!Array.isArray(p.ciWorkflows) || p.ciWorkflows.some(x => typeof x !== 'string' || !/^\.github\/workflows\/[A-Za-z0-9._-]+\.ya?ml$/.test(x) || DEPLOY_NAME.test(x.slice('.github/workflows/'.length))))) errors.push('ciWorkflows must be a list of .github/workflows/<name>.yml paths whose names do not read like a deploy');
   return { errors, policy: errors.length ? null : p };
 }
 
@@ -92,6 +112,39 @@ export function parseHighRisk(agentsMd) {
     out.push(p);
   }
   return out;
+}
+
+// Fail-closed allowlist for a workflow a PR changes under sensitivePaths "review". It is not a YAML parser; it relies on
+// one property: a key that decodes to `uses` comes from a line that literally holds the word, unless YAML escapes
+// (\x \u \U) or an escaped line break (backslash at the end of a double-quoted line) build it. So escapes refuse,
+// escaped line breaks are also checked joined, and every line holding the word must be one of two shapes:
+//   * the plain marketplace form `[- ]uses: owner/repo[/path]@ref`, optionally followed by a space and a comment with no
+//     quote or backslash (a line without quotes cannot close a multi-line string, so it hides no key), and not a
+//     reusable workflow (.github/workflows/), a local ./action, docker:// or a path with `..`;
+//   * a full-line comment with no quote character (inside a multi-line string such a line stays content).
+// Anything else (quoted, spaced or flow-style keys, aliases, block scalars, ...) is refused rather than parsed. YAML
+// separation is ASCII space or tab only, so the patterns never use \s.
+const PLAIN_USES = /^[ \t]*(-[ \t]+)?uses:[ \t]+[A-Za-z0-9][A-Za-z0-9_.-]*\/[A-Za-z0-9_.\/-]+@[A-Za-z0-9_.\/-]+[ \t]*([ \t]#[^'"\\]*)?$/;
+const SAFE_COMMENT = /^[ \t]*#[^'"]*$/;
+export function unfollowableUses(text) {
+  const crlf = String(text || '');
+  if (/\r(?!\n)|[\u0085\u2028\u2029]/.test(crlf)) return true; // line breaks other than LF and CRLF
+  const raw = crlf.replace(/\r\n/g, '\n'); // one line break form, so an escaped CRLF is joined like an escaped LF
+  if (/[\u00a0\u1680\u2000-\u200b\u202f\u205f\u3000\ufeff]/.test(raw)) return true; // non-ASCII spaces and BOM
+  if (/\\[xuU]/.test(raw)) return true; // YAML escapes that can spell any character
+  const plainOk = l => PLAIN_USES.test(l) && !/\.github\/workflows\/|\.\./i.test(l.split(/[ \t]#/)[0]);
+  const lines = raw.split('\n');
+  if (lines.some(l => /\buses\b/i.test(l) && !SAFE_COMMENT.test(l) && !plainOk(l))) return true;
+  // lines joined by escaped line breaks (YAML drops the break and the next line's leading spaces): no exemptions
+  const joined = raw.split(/(?<!\\)\n/).filter(l => l.includes('\\\n')).map(l => l.replace(/\\\n[ \t]*/g, ''));
+  return joined.some(l => /\buses\b/i.test(l) && !plainOk(l));
+}
+
+// Secret material refuses even under sensitivePaths "review" (and so do local actions under .github/actions/, which a
+// workflow can run without its own text showing a deploy).
+export function isSecretMaterial(path) {
+  const p = String(path).replace(/\\/g, '/').replace(/^\.\//, '');
+  return Boolean(isSecretFile(p)) || /\.(pfx|p12|pem|key|ppk|gpg|asc)$|(^|\/)local\.settings\.json$/i.test(p);
 }
 
 export function classifyPath(path, extra = []) {
@@ -128,6 +181,12 @@ export function testReduction(files) {
 // ---------- does a merge trigger something live? ----------
 const DEPLOYISH = /\b(az|azd)\s+(webapp|containerapp|functionapp|acr|deployment|group|staticwebapp|appservice)\b|azure\/(webapps-deploy|container-apps-deploy|functions-action|static-web-apps-deploy|cli)|docker\/build-push-action|docker\s+push|kubectl|helm\s+(upgrade|install)|terraform\s+apply|\baws\s+(s3|ecs|lambda|cloudformation)|gcloud\s|firebase\s+deploy|fastlane|testflight|upload-google-play|google-play|app-store-connect|gh\s+release|action-gh-release|create-release|release-please|semantic-release|changesets\/action|npm\s+publish|nuget\s+push|twine\s+upload|vercel|netlify|wrangler|\bdeploy(ment|ing|s)?\b|(?<!dotnet\s)\bpublish\b|^\s*environment\s*:/im;
 // ("Release" as a build configuration and "dotnet publish" are ordinary build steps, not deploys.)
+// A workflow named in the policy's ciWorkflows ignores only the bare words "deploy" and "publish"; every concrete deploy,
+// release, publish or upload tool (az, docker push, npm publish, environment:, ...) above still flags it.
+const DEPLOY_WORDS = '|\\bdeploy(ment|ing|s)?\\b|(?<!dotnet\\s)\\bpublish\\b';
+if (!DEPLOYISH.source.includes(DEPLOY_WORDS)) throw new Error('merge-verify: DEPLOYISH changed; update DEPLOY_WORDS');
+const DEPLOY_TOOLS = new RegExp(DEPLOYISH.source.replace(DEPLOY_WORDS, ''), DEPLOYISH.flags);
+export const deployToolsIn = text => DEPLOY_TOOLS.test(String(text || '').split('\n').filter(l => !/^\s*#/.test(l)).join('\n'));
 const branchMatches = (pats, branch) => pats.some(p => globToRe(p).test(branch));
 const listFrom = text => { const t = String(text).trim(); if (t.startsWith('[')) return t.replace(/^\[|\]$/g, '').split(',').map(s => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean); return [t.replace(/^['"]|['"]$/g, '')].filter(Boolean); };
 
@@ -222,7 +281,11 @@ function readChecks(gh, repo, sha) {
 }
 function judgeChecks(c, policy, baselineFailing) {
   const reasons = []; const notes = [];
-  const runs = c.runs.filter(r => r.name !== CHECK_NAME);
+  const advisory = new Set(policy.advisoryChecks);
+  const runs = c.runs.filter(r => r.name !== CHECK_NAME && !advisory.has(r.name));
+  for (const name of advisory) {
+    if (c.runs.some(r => r.name === name)) notes.push(`advisory check run ignored for merge verification: ${name}`);
+  }
   const pending = runs.filter(r => r.status !== 'completed').map(r => r.name);
   const pendingStatus = c.statuses.filter(s => s.state === 'pending').map(s => s.context);
   if (pending.length || pendingStatus.length) reasons.push({ code: 'CHECKS_PENDING', detail: [...pending, ...pendingStatus].slice(0, 10).join(', ') });
@@ -311,7 +374,7 @@ export async function evaluate({ repo, pr, expectSha, mode = 'architect', checko
   if (p.state !== 'open') fail('PR_NOT_OPEN', p.merged ? 'already merged' : p.state);
   if (p.draft) fail('PR_DRAFT', 'draft pull request');
   if (p.base?.ref !== def) fail('BASE_NOT_DEFAULT', `base is ${p.base?.ref}, default is ${def}`);
-  if (!AGENT_BRANCH.test(p.head?.ref || '')) fail('NOT_AGENT_BRANCH', `head ${p.head?.ref}: only codeden/*, bambooed/* and trio/* task branches are auto-merged`);
+  if (!AGENT_BRANCH.test(p.head?.ref || '')) fail('NOT_AGENT_BRANCH', `head ${p.head?.ref}: only bambooed/*, trio/* and codeden/* task branches are auto-merged`);
   if (p.head?.repo?.full_name !== repo) fail('HEAD_FROM_FORK', 'the head is in another repository');
   if (expectSha && head !== expectSha) fail('HEAD_CHANGED', `head is ${String(head).slice(0, 12)}, expected ${String(expectSha).slice(0, 12)}`);
   if (p.mergeable === false || p.mergeable_state === 'dirty') fail('CONFLICTS', 'the PR does not merge cleanly');
@@ -330,10 +393,11 @@ export async function evaluate({ repo, pr, expectSha, mode = 'architect', checko
 
   const agents = raw(gh, `repos/${repo}/contents/AGENTS.md?ref=${encodeURIComponent(def)}`);
   const extra = [...policy.extraSensitive, ...(agents.ok ? parseHighRisk(agents.text) : [])];
-  const sensitive = []; const secretHits = []; const noPatch = [];
+  const sensitive = []; const reviewed = []; const secretHits = []; const noPatch = [];
   for (const f of list) {
     for (const name of [f.filename, f.previous_filename].filter(Boolean)) {
-      const why = classifyPath(name, extra); if (why) sensitive.push(`${name} (${why})`);
+      const why = classifyPath(name, extra);
+      if (why) (policy.sensitivePaths === 'review' && !isSecretMaterial(name) && !/^\.github\/actions\//i.test(name) ? reviewed : sensitive).push(`${name} (${why})`);
     }
     if (f.status === 'removed') continue;
     const patch = f.patch;
@@ -347,6 +411,7 @@ export async function evaluate({ repo, pr, expectSha, mode = 'architect', checko
     const h = findSecrets(added); if (h.length) secretHits.push(`${f.filename} (${h[0].rule})`);
   }
   if (sensitive.length) fail('SENSITIVE_PATH', [...new Set(sensitive)].slice(0, 12).join('; '));
+  if (reviewed.length) notes.push(`sensitive paths merge on review (sensitivePaths "review" in ${POLICY_PATH}): ${[...new Set(reviewed)].slice(0, 12).join('; ')}`);
   if (secretHits.length) fail('SECRET_SHAPED_LINE', secretHits.slice(0, 8).join('; '));
   if (noPatch.length) fail('NO_PATCH_TO_SCAN', `${noPatch.slice(0, 8).join(', ')} (binary or too large for GitHub to show; not scanned)`);
   for (const t of testReduction(list)) fail(t.code, t.detail);
@@ -359,15 +424,35 @@ export async function evaluate({ repo, pr, expectSha, mode = 'architect', checko
   // does merging trigger anything live?
   const wf = api(gh, `repos/${repo}/contents/.github/workflows?ref=${encodeURIComponent(def)}`);
   let deployOnMerge = false;
+  const judgeWorkflow = (path, text, label) => {
+    const a = analyzeWorkflow(text, def);
+    if (a.triggers && a.deployish && (policy.ciWorkflows || []).includes(path) && !deployToolsIn(text)) notes.push(`${label} runs on ${a.why}; the words deploy/publish are ignored (listed in ciWorkflows of ${POLICY_PATH}; no deploy tool found)`);
+    else if (a.triggers && a.deployish) { deployOnMerge = true; fail('DEPLOY_ON_MERGE', `${label} runs on ${a.why} and looks like a deploy, release, publish or upload`); }
+    else if (a.triggers) notes.push(`${label} runs on ${a.why} (no deploy-like step found)`);
+  };
   if (wf.ok && Array.isArray(wf.json)) {
     for (const f of wf.json.filter(x => /\.ya?ml$/i.test(x.name))) {
       const t = raw(gh, `repos/${repo}/contents/${f.path}?ref=${encodeURIComponent(def)}`);
       if (!t.ok) { fail('WORKFLOW_UNREADABLE', f.path); continue; }
-      const a = analyzeWorkflow(t.text, def);
-      if (a.triggers && a.deployish) { deployOnMerge = true; fail('DEPLOY_ON_MERGE', `${f.path} runs on ${a.why} and looks like a deploy, release, publish or upload`); }
-      else if (a.triggers) notes.push(`${f.path} runs on ${a.why} (no deploy-like step found)`);
+      judgeWorkflow(f.path, t.text, f.path);
     }
   } else if (!wf.ok && !/Not Found|404/i.test(wf.err || '')) fail('WORKFLOW_UNREADABLE', `.github/workflows: ${wf.err}`);
+  // sensitivePaths "review" lets a PR change workflows, so every workflow it adds, changes or renames is read at the PR
+  // head as data only (never run) and judged fail-closed, by content rather than by trigger parsing: a deploy-like
+  // workflow (for a ciWorkflows entry: a deploy tool), or one that calls a reusable workflow or a local action that
+  // merge-verify cannot follow, is DEPLOY_ON_MERGE whatever its triggers say.
+  if (policy.sensitivePaths === 'review') {
+    for (const f of list.filter(x => x.status !== 'removed' && /^\.github\/workflows\/[^/]+\.ya?ml$/i.test(x.filename))) {
+      const label = `${f.filename} at the PR head`;
+      const t = raw(gh, `repos/${repo}/contents/${f.filename}?ref=${encodeURIComponent(head)}`);
+      if (!t.ok) { fail('WORKFLOW_UNREADABLE', label); continue; }
+      const a = analyzeWorkflow(t.text, def);
+      const deployish = (policy.ciWorkflows || []).includes(f.filename) ? deployToolsIn(t.text) : a.deployish;
+      if (unfollowableUses(t.text)) { deployOnMerge = true; fail('DEPLOY_ON_MERGE', `${label} calls a reusable workflow or a local action; merge-verify cannot follow it, so a person decides`); }
+      else if (deployish) { deployOnMerge = true; fail('DEPLOY_ON_MERGE', `${label} looks like a deploy, release, publish or upload; a PR may not change a deploy-like workflow without a person, whatever its triggers`); }
+      else if (a.triggers) notes.push(`${label} runs on ${a.why} (no deploy-like step found)`);
+    }
+  }
 
   // checks (wait for pending or not yet registered ones when asked)
   const deadline = now() + waitChecksSec * 1000;

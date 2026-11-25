@@ -1,11 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
+import { tmpdir, userInfo } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { analyzeWorkflow, classifyPath, evaluate, install, mergePr, parseHighRisk, postMerge, rulesetJson, testReduction, validatePolicy, DEFAULT_POLICY } from './merge-verify.mjs';
-import { JEV_RECEIPT_REQUIRED } from '../../../../.config/trioharness/jev-receipt-policy.mjs';
+const policyPath = new URL('../../../../.config/trioharness/jev-receipt-policy.mjs', import.meta.url);
+const { JEV_RECEIPT_REQUIRED } = await import(existsSync(policyPath) ? policyPath :
+  pathToFileURL(join(userInfo().homedir, '.config', 'trioharness', 'jev-receipt-policy.mjs')));
 import * as MV from './merge-verify.mjs'; // newer exports (recheck) through the namespace
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -366,7 +369,6 @@ test('hf5b1e-s6-p-mv-02 ghCli without env preserves the caller environment',asyn
   });
 });
 
-import { pathToFileURL } from 'node:url';
 function s6FailureLines(t) {const f=join(t.rd,'issues-failures.jsonl');assert.ok(existsSync(f),'durable hook failure log exists');return readFileSync(f,'utf8').trim().split('\n').map(s=>JSON.parse(s));}
 function s6Allowlisted(line,event,category) {
   assert.ok(Object.keys(line).every(k=>['v','kind','ts','run','event','category','key'].includes(k)));assert.equal(line.v,1);assert.equal(line.kind,'failure');assert.equal(line.event,event);assert.equal(line.category,category);assert.equal(new Date(line.ts).toISOString(),line.ts);
@@ -438,4 +440,17 @@ test('local audit with Jev suspended still blocks CI, secret hits and moved head
       [gate, { status: 'passed' }])),
   }));
   assert.equal((await run(world(), local)).verdict, 'PASS');
+});
+
+test('the bundled verifier matches the pinned Foundry default-branch blob plus the owner Jev policy', () => {
+  const source = readFileSync(new URL('./merge-verify.mjs', import.meta.url), 'utf8');
+  const canonical = source
+    .replace("import { fileURLToPath, pathToFileURL } from 'node:url';\nimport { userInfo } from 'node:os';",
+      "import { fileURLToPath } from 'node:url';")
+    .replace(/^    const policyFile = .*\n    const \{ JEV_RECEIPT_REQUIRED \} = await import\(existsSync\(policyFile\) \? policyFile :\n.*\n    if \(typeof JEV_RECEIPT_REQUIRED !== 'boolean'\) throw new Error\('JEV_RECEIPT_POLICY_INVALID'\);\n/m, '')
+    .replace("...(JEV_RECEIPT_REQUIRED ? ['done-jev'] : [])", "'done-jev'")
+    .replace("(JEV_RECEIPT_REQUIRED || n !== 'done-jev') && ", '');
+  // Cumulus-Service-GmbH/foundry-agent-webapp@0d4c65c4157ee20dfdea4322ccd5faf3b5c414df
+  assert.equal(createHash('sha256').update(canonical).digest('hex'),
+    '77f05032aa53a4644371e4315a970507f99bd19c241aebe4293f2a01bd937af8');
 });
