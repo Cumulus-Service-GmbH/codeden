@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { type ChecklistProposal, ProjectChecklist } from "@codeden/contracts";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { sampleProject, sampleSession } from "../../../packages/contracts/test/fixtures";
@@ -170,15 +171,15 @@ function pmChecklistTools() {
   return { tools, caller };
 }
 
-it("updates stored task text and preserves the note when the PM sends progress", async () => {
+it("shows the saved PM progress note and updates task text only when explicit", async () => {
   const { tools, caller } = pmChecklistTools();
   service.update(projectId, { items: [{ id: "a", text: "A" }] });
   const note = "Reviewing\nresults";
   expect(
     await tools.call("update_checklist_item", { itemId: "a", note, status: "doing" }, caller),
-  ).toMatchObject({ isError: false, text: expect.stringContaining("Reviewing results") });
+  ).toMatchObject({ isError: false, text: expect.stringContaining(JSON.stringify(note)) });
   expect(service.get(projectId)?.items[0]).toMatchObject({
-    text: "Reviewing results",
+    text: "A",
     note,
     status: "doing",
   });
@@ -186,6 +187,34 @@ it("updates stored task text and preserves the note when the PM sends progress",
     await tools.call("update_checklist_item", { itemId: "a", text: "B", note: "Checked" }, caller),
   ).toMatchObject({ isError: false });
   expect(service.get(projectId)?.items[0]).toMatchObject({ text: "B", note: "Checked" });
+});
+
+it.each(["pending", "pinned"])("accepts PM progress on a %s reviewed plan", async (state) => {
+  const { tools, caller } = pmChecklistTools();
+  const tasks = [{ id: "a", text: "A" }];
+  service.update(projectId, { items: tasks });
+  const reviewed = service.proposePlan(projectId, {
+    tasks,
+    sha: createHash("sha256").update(JSON.stringify(tasks)).digest("hex"),
+    reviewRef: "review-1",
+  });
+  if (state === "pinned") service.decide(proposal(reviewed).inboxItemId, "resolved");
+  const before = ProjectChecklist.parse(service.get(projectId));
+  expect(
+    await tools.call(
+      "update_checklist_item",
+      { itemId: "a", note: "Reviewed results", status: "done" },
+      caller,
+    ),
+  ).toMatchObject({ isError: false });
+  const after = ProjectChecklist.parse(service.get(projectId));
+  expect(after.items[0]).toMatchObject({ text: "A", note: "Reviewed results", status: "done" });
+  expect(after.plan).toEqual(before.plan);
+  expect(after.pending).toEqual(before.pending);
+  expect(
+    await tools.call("update_checklist_item", { itemId: "a", text: "New scope" }, caller),
+  ).toMatchObject({ isError: true, text: expect.stringContaining("reviewed plan revision") });
+  expect(service.get(projectId)).toEqual(after);
 });
 
 it("creates the first checklist item and uses owner approval for additions to approved lists", async () => {

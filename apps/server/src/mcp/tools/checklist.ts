@@ -32,7 +32,7 @@ export const readChecklist = defineTool({
 export const updateChecklistItem = defineTool({
   name: "update_checklist_item",
   description:
-    "Update a checklist item's status, note, ETA, or owner action. Use null to clear ETA or owner action. PMs can set text or create an item with a new itemId and text in their project. A nonblank PM note also updates existing text when text is omitted. Structural edits to approved checklists require owner approval. Agents can update progress on items linked to their session or their parent session.",
+    "Update a checklist item's status, progress note, ETA, or owner action. Use null to clear ETA or owner action. PMs can set task text or create an item with a new itemId and text in their project. Structural edits to approved checklists require owner approval. Agents can update progress on items linked to their session or their parent session.",
   roles: ["pm", "agent"],
   scope: "session",
   isAvailable: (services, caller, role) =>
@@ -43,23 +43,20 @@ export const updateChecklistItem = defineTool({
     if (!projectId || !session || session.projectId !== projectId || session.role !== role) {
       throw new ToolError("This tool needs a session in your project");
     }
-    if (role === "pm") {
+    if (text !== undefined) {
+      if (role !== "pm") throw new ToolError("Only PMs can edit checklist text or add items");
       const previous = services.checklist.get(projectId);
-      const noteText = change.note?.replace(/[\r\n]+/g, " ").trim();
-      const replacement =
-        text ?? (previous?.items.some(({ id }) => id === itemId) ? noteText : undefined);
-      if (replacement) {
-        const checklist = services.checklist.update(projectId, {
-          patch: [{ id: itemId, text: replacement, ...change }],
-        });
-        const result = formatChecklist(checklist);
-        return checklist.pending && checklist.pending.id !== previous?.pending?.id
-          ? `${result}\nAn owner card is waiting for a decision (${checklist.pending.inboxItemId}).`
-          : result;
-      }
-    } else if (text !== undefined) {
-      throw new ToolError("Only PMs can edit checklist text or add items");
+      const checklist = services.checklist.update(projectId, {
+        patch: [{ id: itemId, text, ...change }],
+      });
+      const result = formatChecklist(checklist, session);
+      return checklist.pending && checklist.pending.id !== previous?.pending?.id
+        ? `${result}\nAn owner card is waiting for a decision (${checklist.pending.inboxItemId}).`
+        : result;
     }
-    return formatChecklist(services.checklist.updateItem(projectId, itemId, change, session));
+    return formatChecklist(
+      services.checklist.updateItem(projectId, itemId, change, session),
+      session,
+    );
   },
 });

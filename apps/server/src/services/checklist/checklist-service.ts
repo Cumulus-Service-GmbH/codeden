@@ -758,10 +758,10 @@ function workStatus(item: ChecklistItem, status: ChecklistStatus | undefined): C
     : status;
 }
 
-/** Render the same progress and item IDs for the orchestrator and the PM. */
+/** Render checklist progress and item IDs, including progress notes for the PM. */
 export function formatChecklist(
   checklist: ProjectChecklist | undefined,
-  caller?: Pick<Session, "id" | "parentSessionId">,
+  caller?: Pick<Session, "id" | "parentSessionId" | "role">,
 ): string {
   const items = checklist?.items ?? [];
   const done = items.filter((item) => item.status === "done").length;
@@ -769,9 +769,10 @@ export function formatChecklist(
   return [
     `${done}/${items.length} done · ${percent}%`,
     ...items.map((item) => {
-      const { id, text, status } = item;
+      const { id, text, status, note } = item;
       const linked = caller && checklistLinked(item, caller) ? " · linked to your session" : "";
-      return `- [${status}] ${text} (${id})${linked}`;
+      const progress = caller?.role === "pm" && note ? ` · note: ${JSON.stringify(note)}` : "";
+      return `- [${status}] ${text} (${id})${linked}${progress}`;
     }),
   ].join("\n");
 }

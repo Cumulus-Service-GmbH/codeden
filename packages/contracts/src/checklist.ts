@@ -39,7 +39,7 @@ export const UpdateChecklistItemInput = z
     /** PM-only task text. Required when adding a new item. */
     text: ChecklistItem.shape.text.optional(),
     status: ChecklistStatus.optional(),
-    /** A progress note. For PMs, a nonblank note also supplies replacement text if text is omitted. */
+    /** A progress note stored separately from the task text. */
     note: ChecklistItem.shape.note,
     eta: ChecklistItem.shape.eta.unwrap().nullable().optional(),
     needsOwner: ChecklistItem.shape.needsOwner
