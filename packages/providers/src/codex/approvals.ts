@@ -28,6 +28,17 @@ function withRisk(item: ApprovalItem, risk: RiskAssessment): ApprovalItem {
   };
 }
 
+/**
+ * Local app-server requests render the execution argv as shell-quoted words.
+ * Recognize only a fixed non-login shell and a single literal script argument.
+ * The read verifier still checks the script itself.
+ */
+function readCommand(command: string | null | undefined): string | undefined {
+  if (!command) return;
+  const wrapped = /^(?:\/bin\/sh -c|\/bin\/zsh -fc) '([^'\r\n]*)'$/.exec(command);
+  return wrapped?.[1] ?? command;
+}
+
 /** Handle an app-server -> client request. Resolves with the JSON-RPC result. */
 export async function handleServerRequest(
   req: ServerRequest,
@@ -35,12 +46,16 @@ export async function handleServerRequest(
 ): Promise<unknown> {
   switch (req.method) {
     case "item/commandExecution/requestApproval": {
-      const p = req.params;
+      const p = req.params as typeof req.params & {
+        additionalPermissions?: unknown;
+        availableDecisions?: unknown;
+      };
+      const rawCommand = typeof p.command === "string" ? p.command : undefined;
       const command = p.commandActions?.length
         ? p.commandActions.map((a) => a.command).join(" && ")
-        : (p.command ?? "");
+        : (rawCommand ?? "");
       const risk = commandRisk(
-        [p.command ?? "", ...(p.commandActions ?? []).map((a) => a.command)],
+        [rawCommand ?? "", ...(p.commandActions ?? []).map((a) => a.command)],
         ac.risk,
         { cwd: p.cwd, stdin: p.kind === "writeStdin" },
       );
@@ -58,20 +73,25 @@ export async function handleServerRequest(
         toolCallItemId: p.itemId,
         options: ["allow_once", "allow_session", "deny"],
       };
-      if (approvedByPolicy(ac, p, item, risk)) return { decision: "accept" };
+      if ((p.command == null || rawCommand !== undefined) && approvedByPolicy(ac, p, item, risk)) {
+        return { decision: "accept" };
+      }
       // The parsed actions are for display. Delegate only the exact command supplied
       // by a normal local execution request, without extra permission context.
-      const exact = p.command;
+      const exact = readCommand(rawCommand);
       const candidate =
         !risk.risky &&
         exact &&
         p.cwd &&
-        p.environmentId === null &&
+        (p.environmentId === null || p.environmentId === "local") &&
         p.approvalId == null &&
         (p.kind === undefined || p.kind === "command") &&
         !p.reason &&
         !p.networkApprovalContext &&
         !p.proposedNetworkPolicyAmendments?.length &&
+        p.additionalPermissions == null &&
+        (p.availableDecisions == null ||
+          (Array.isArray(p.availableDecisions) && p.availableDecisions.includes("accept"))) &&
         (!p.commandActions?.length ||
           (p.commandActions.length === 1 && p.commandActions[0]?.command === exact))
           ? { ...item, command: exact, toolInput: { command: exact } }

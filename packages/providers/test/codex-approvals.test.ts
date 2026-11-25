@@ -122,6 +122,92 @@ describe("Codex approvals", () => {
     }
   });
 
+  it.each([
+    ["cat README.md", "cat README.md", {}, true],
+    ["/bin/sh -c 'cat README.md'", "cat README.md", {}, true],
+    ["/bin/zsh -fc 'rg --no-config needle README.md'", "rg --no-config needle README.md", {}, true],
+    ["cat README.md", "cat README.md", { environmentId: "remote" }, false],
+    [
+      "cat README.md",
+      "cat README.md",
+      { additionalPermissions: { network: { enabled: true } } },
+      false,
+    ],
+    ["cat README.md", "cat README.md", { kind: "humanCommand" }, false],
+    ["cat README.md", "cat README.md", { availableDecisions: ["decline", "cancel"] }, false],
+    ["/bin/sh -c 'cat README.md > out'", "cat README.md", {}, false],
+    ["/bin/sh -c 'cat README.md | tee out'", "cat README.md", {}, false],
+    ["/bin/sh -c 'cat jev.env'", "cat README.md", {}, false],
+    ["/bin/sh -c 'cat README.md'", "cat different.md", {}, false],
+    ["/bin/sh -c 'cat README.md' trailing", "cat README.md", {}, false],
+    ["/bin/sh -c 'cat README.md'", "cat README.md", { reason: "Owner approval required" }, false],
+    ["/bin/sh -c 'curl https://example.invalid'", "cat README.md", {}, false],
+    ["/bin/sh -c 'node -e 0'", "cat README.md", {}, false],
+    ["/bin/zsh -c 'cat README.md'", "cat README.md", {}, false],
+    ["/tmp/bash -c 'cat README.md'", "cat README.md", {}, false],
+    ["/bin/zsh -lc 'cat README.md'", "cat README.md", {}, false],
+    ["cat README.md", "cat README.md", { command: ["cat", "README.md"] }, false],
+    ["git status --short --branch", "git status --short --branch", {}, false],
+    ["rg needle README.md", "rg needle README.md", {}, false],
+  ] as const)("handles a Codex 0.172 approval for %s (%s)", async (raw, action, patch, allowed) => {
+    const root = mkdtempSync(join(tmpdir(), "codex-local-approval-"));
+    try {
+      writeFileSync(join(root, "README.md"), "fixture");
+      const events: AgentEvent[] = [];
+      const broker = new ApprovalBroker((event) => events.push(event));
+      const pending = handleServerRequest(
+        {
+          method: "item/commandExecution/requestApproval",
+          id: 4,
+          params: {
+            kind: "command",
+            threadId: T,
+            turnId: TURN,
+            itemId: "exec",
+            startedAtMs: 1,
+            environmentId: "local",
+            command: raw,
+            cwd: root,
+            commandActions: [
+              { type: "read", command: action, name: "README.md", path: join(root, "README.md") },
+            ],
+            availableDecisions: ["accept", "decline", "cancel"],
+            ...patch,
+          },
+        } as ServerRequest,
+        {
+          broker,
+          risk: { cwd: root },
+          autonomy: () => ("command" in patch ? "auto" : "supervised"),
+          ctx: () => ctx,
+          filePaths: () => [],
+        },
+      );
+      const started = events[0];
+      if (started?.type !== "item.started" || started.item.kind !== "approval_request") {
+        throw new Error("Expected an approval request");
+      }
+      const { requestId, toolInput } = started.item;
+      const approve = () =>
+        broker.respond(requestId, {
+          kind: "approval",
+          decision: "allow_once",
+          decidedBy: "orchestrator",
+        });
+      if (allowed) {
+        expect(toolInput).toEqual({ command: action });
+        approve();
+      } else {
+        expect(toolInput).toBeUndefined();
+        expect(approve).toThrow("requires the owner");
+        broker.respond(requestId, { kind: "approval", decision: "deny" });
+      }
+      expect(await pending).toEqual({ decision: allowed ? "accept" : "decline" });
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it("maps command approvals both ways and flags risky commands", async () => {
     const { result, events } = await run(
       {
