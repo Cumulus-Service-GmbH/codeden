@@ -217,6 +217,34 @@ it.each(["pending", "pinned"])("accepts PM progress on a %s reviewed plan", asyn
   expect(service.get(projectId)).toEqual(after);
 });
 
+it.each([
+  { itemId: "a", text: "Renamed" },
+  { itemId: "b", text: "Added" },
+])("rejects a PM structural edit of $itemId while draft approval is open", async (edit) => {
+  const { tools, caller } = pmChecklistTools();
+  const before = service.update(
+    projectId,
+    { items: [{ id: "a", text: "A" }] },
+    { requestApproval: true },
+  );
+  const { inboxItemId } = proposal(before);
+  const inbox = new InboxService(database.db, store, () => async () => {});
+
+  expect(await tools.call("update_checklist_item", edit, caller)).toEqual({
+    isError: true,
+    text: `Checklist card ${inboxItemId} is already open. Wait for the owner to decide.`,
+  });
+  expect(service.get(projectId)).toEqual(before);
+  expect(inbox.get(inboxItemId).status).toBe("open");
+
+  expect(
+    await tools.call("update_checklist_item", { itemId: "a", text: "A", status: "doing" }, caller),
+  ).toMatchObject({ isError: false });
+  expect(service.get(projectId)?.items[0]?.status).toBe("doing");
+  expect(service.get(projectId)?.pending).toEqual(before.pending);
+  expect(inbox.get(inboxItemId).status).toBe("open");
+});
+
 it("creates the first checklist item and uses owner approval for additions to approved lists", async () => {
   const { tools, caller } = pmChecklistTools();
   expect(

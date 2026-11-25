@@ -46,6 +46,16 @@ export const updateChecklistItem = defineTool({
     if (text !== undefined) {
       if (role !== "pm") throw new ToolError("Only PMs can edit checklist text or add items");
       const previous = services.checklist.get(projectId);
+      const pending = previous?.pending;
+      if (
+        pending &&
+        !pending.plan &&
+        previous.items.find(({ id }) => id === itemId)?.text !== text
+      ) {
+        throw new ToolError(
+          `Checklist card ${pending.inboxItemId} is already open. Wait for the owner to decide.`,
+        );
+      }
       const checklist = services.checklist.update(projectId, {
         patch: [{ id: itemId, text, ...change }],
       });
