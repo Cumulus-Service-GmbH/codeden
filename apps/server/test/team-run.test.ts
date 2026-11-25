@@ -437,7 +437,7 @@ it("commits worker changes before review and handles a runner completion conflic
       }),
     });
     expect(response.status).toBe(200);
-    const composerSessionId = (await response.json()).sessionId as string;
+    const { sessionId: composerSessionId } = (await response.json()) as { sessionId: string };
     await services.sessions.launching.get(composerSessionId);
     expect(services.sessionRepo.get(composerSessionId)).toMatchObject({ model: "build-writer" });
     prepared.length = 0;

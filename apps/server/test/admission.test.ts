@@ -156,7 +156,7 @@ it("PATCH /api/settings persists the session limit and remembered Team setup", a
       orchestration: { roles: { applyProviderSettings: vi.fn() } },
     },
     network: {},
-  } as ApiContext);
+  } as unknown as ApiContext);
   const patch = {
     limits: { maxActiveSessions: 3 },
     teamSetup: { remembered: true, resultSummaryBytes: 256 },

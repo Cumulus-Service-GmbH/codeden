@@ -145,7 +145,7 @@ describe("deciding a conflict after editing a draft with an implicit work key (#
       }),
     });
     expect(res.status).toBe(200);
-    const { result } = await res.json();
+    const { result } = (await res.json()) as { result: { sessionId: string } };
     const row = repo.find(result.sessionId);
     expect(row?.session).toMatchObject({ provider: "fake", model: "browser-model" });
     expect(row?.startMeta?.chromeRequested).toBe(true);
