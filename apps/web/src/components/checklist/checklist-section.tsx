@@ -1,4 +1,8 @@
-import type { Project, ProjectChecklist } from "@codeden/contracts";
+import {
+  type Project,
+  type ProjectChecklist,
+  runningChecklistItemsFirst,
+} from "@codeden/contracts";
 import { ChevronRight } from "lucide-react";
 import { useRef } from "react";
 import { useFactoryStatus } from "@/lib/factory";
@@ -127,7 +131,7 @@ export function ChecklistSection({
           <p className="mx-2 mt-1.5 text-2xs text-muted-foreground">No items yet</p>
         ) : (
           <ul className="mt-1.5 flex flex-col">
-            {checklist.items.map((item) => (
+            {runningChecklistItemsFirst(checklist.items).map((item) => (
               <ItemRow
                 key={changed.has(item.id) ? `${item.id}:${checklist.updatedAt}` : item.id}
                 item={item}

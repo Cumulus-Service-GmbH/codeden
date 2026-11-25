@@ -166,3 +166,102 @@ it("exposes the work signal handler without the unused child event export", asyn
   expect(listener.ChecklistListener.prototype.onWorkSignal).toBeTypeOf("function");
   expect(listener).not.toHaveProperty("CHILD_RUN_EVENT_TYPES");
 });
+
+it("audits linked session and work-key progress within the project", async () => {
+  const database = openDatabase(":memory:");
+  const store = new EventStore(database.db);
+  const checklist = new ChecklistService(database.db, store);
+  const repo = new SessionRepo(database.db, store);
+  const listener = new ChecklistListener(store, repo, checklist);
+  const projectId = sampleProject.id;
+  const one = { ...sampleSession, projectId, status: "idle" as const };
+  const two = { ...one, id: "lane-two", workKey: "issue:2" };
+  const foreign = { ...two, id: "foreign", projectId: "foreign-project" };
+  const item = () => checklist.get(projectId)?.items[0];
+  try {
+    store.append([
+      { type: "project.created", sessionId: null, payload: { project: sampleProject } },
+      {
+        type: "project.created",
+        sessionId: null,
+        payload: {
+          project: {
+            ...sampleProject,
+            id: foreign.projectId,
+            slug: "foreign",
+            path: "/tmp/foreign-project",
+          },
+        },
+      },
+      ...[one, two, foreign].map((session) => ({
+        type: "session.created" as const,
+        sessionId: session.id,
+        payload: { session },
+      })),
+    ]);
+    await Promise.resolve();
+    checklist.update(projectId, { items: [{ id: "linked", text: "Combined build" }] });
+    expect(() =>
+      checklist.update(projectId, {
+        patch: [{ id: "linked", sessionIds: [foreign.id] }],
+      }),
+    ).toThrow("project");
+    checklist.update(projectId, {
+      patch: [{ id: "linked", sessionIds: [one.id], workKeys: [two.workKey] }],
+    });
+    expect(item()).toMatchObject({ sessionIds: [one.id], workKeys: [two.workKey], status: "todo" });
+    const transition = async (
+      id: string,
+      status: typeof one.status | "running" | "waiting" | "completed" | "failed",
+    ) => {
+      const before = store.headSeq();
+      repo.update(id, (entry) => ({ ...entry, status }));
+      await Promise.resolve();
+      return store.listAfter(before).map((event) => event.type);
+    };
+    expect(await transition(foreign.id, "failed")).toEqual(["session.updated"]);
+    expect(await transition(one.id, "running")).toContain("checklist.updated");
+    expect(item()).toMatchObject({
+      status: "doing",
+      autoUpdatedAt: expect.any(String),
+      note: expect.any(String),
+    });
+    await transition(two.id, "waiting");
+    expect(item()).toMatchObject({ status: "blocked", note: expect.stringMatching(/waiting/i) });
+    repo.update(two.id, (entry) => ({
+      ...entry,
+      status: "failed",
+      result: { outcome: "failed", summary: "Build check failed", at: entry.updatedAt },
+    }));
+    await Promise.resolve();
+    expect(item()).toMatchObject({ status: "blocked", note: "Build check failed" });
+    await transition(one.id, "completed");
+    expect(item()?.status).toBe("blocked");
+    repo.update(two.id, (entry) => ({ ...entry, status: "completed", result: null }));
+    await Promise.resolve();
+    expect(item()).toMatchObject({ status: "done", note: "All linked work done" });
+
+    await transition(one.id, "running");
+    await transition(two.id, "running");
+    checklist.reportInstallHealthy(projectId, two.id);
+    expect(item()?.status).toBe("doing");
+    listener.stop();
+    const restarted = new ChecklistListener(store, repo, new ChecklistService(database.db, store));
+    try {
+      await transition(one.id, "completed");
+      expect(item()).toMatchObject({ status: "done", note: expect.stringContaining("LIVE") });
+      await transition(two.id, "failed");
+      expect(item()?.status).toBe("blocked");
+      checklist.reportInstallHealthy(projectId, two.id);
+      expect(item()?.status).toBe("done");
+      checklist.update(projectId, { patch: [{ id: "linked", sessionIds: [], workKeys: [] }] });
+      expect(await transition(one.id, "failed")).toEqual(["session.updated"]);
+      expect(item()?.status).toBe("done");
+    } finally {
+      restarted.stop();
+    }
+  } finally {
+    listener.stop();
+    database.close();
+  }
+});

@@ -35,7 +35,7 @@ export { applyDelta } from "./reducer/items";
  *
  * Agent events go through the pure reducer; the session and inbox changes it produces are
  * returned as derived domain events (`session.updated`, `inbox.*`), which the store appends
- * right after in the same transaction. Domain events never derive further events.
+ * right after in the same transaction. Closing an inbox card can also update its checklist.
  */
 export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
   switch (e.type) {
@@ -98,12 +98,42 @@ export function applyProjection(tx: Tx, e: EventEnvelope): NewEvent[] {
     }
     case "inbox.created":
     case "inbox.updated": {
-      const row = inboxToRow(e.payload.item);
+      const { item } = e.payload;
+      const previous =
+        item.status !== "open" && e.type === "inbox.updated"
+          ? tx
+              .select({ status: inboxItems.status })
+              .from(inboxItems)
+              .where(eq(inboxItems.id, item.id))
+              .get()
+          : undefined;
+      const row = inboxToRow(item);
       tx.insert(inboxItems)
         .values(row)
         .onConflictDoUpdate({ target: inboxItems.id, set: row })
         .run();
-      return [];
+      if (previous?.status !== "open") return [];
+      const checklists = tx
+        .select({ checklist: projectChecklists.checklist })
+        .from(projectChecklists)
+        .where(item.projectId ? eq(projectChecklists.projectId, item.projectId) : undefined)
+        .all();
+      return checklists.flatMap(({ checklist }) => {
+        const updatedAt = item.updatedAt;
+        const items = checklist.items.map((entry) =>
+          entry.needsOwner?.inboxItemId === item.id
+            ? { ...entry, needsOwner: undefined, updatedAt }
+            : entry,
+        );
+        if (items.every((entry, index) => entry === checklist.items[index])) return [];
+        return [
+          {
+            type: "checklist.updated",
+            sessionId: null,
+            payload: { checklist: { ...checklist, items, updatedAt, changes: [] } },
+          },
+        ];
+      });
     }
     case "automation.saved": {
       const row = automationToRow(e.payload.automation);

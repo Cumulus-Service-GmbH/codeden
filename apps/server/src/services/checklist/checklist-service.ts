@@ -8,22 +8,26 @@ import {
   type NewEvent,
   ProjectChecklist,
   ReviewedChecklistPlan,
+  runningChecklistItemsFirst,
   type Session,
 } from "@codeden/contracts";
-import { and, eq, inArray, isNull, ne, or } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, or } from "drizzle-orm";
 import type { Db } from "../../db/client";
-import { projectChecklists, projects, sessions } from "../../db/schema";
+import { rowToSession } from "../../db/rows";
+import { projectChecklists, projects, sessions, turns } from "../../db/schema";
 import type { EventStore } from "../../events/store";
 import { badRequest, conflict, forbidden, notFound } from "../errors";
 import { closedItem, InboxService } from "../inbox-service";
 
 type ItemMetadata = { eta?: string | null; needsOwner?: ChecklistItem["needsOwner"] | null };
+type LaneLinks = Pick<ChecklistItem, "sessionIds" | "workKeys">;
 type ReplaceItem = Pick<ChecklistItem, "text"> &
   Partial<Pick<ChecklistItem, "id" | "status">> &
   ItemMetadata;
 type PatchItem = Pick<ChecklistItem, "id"> &
   Partial<Pick<ChecklistItem, "text" | "status">> &
-  ItemMetadata;
+  ItemMetadata &
+  LaneLinks;
 type ChecklistUpdate = { items: ReplaceItem[] } | { patch?: PatchItem[]; remove?: string[] };
 
 export const CHECKLIST_CARD_ID_PREFIX = "checklist-approval:";
@@ -55,7 +59,7 @@ export class ChecklistService {
       .select({ checklist: projectChecklists.checklist })
       .from(projectChecklists)
       .all()
-      .map((row) => row.checklist);
+      .map(({ checklist }) => orderedChecklist(checklist));
   }
 
   projectIds(): string[] {
@@ -67,6 +71,11 @@ export class ChecklistService {
   }
 
   get(projectId: string): ProjectChecklist | undefined {
+    const checklist = this.read(projectId);
+    return checklist && orderedChecklist(checklist);
+  }
+
+  private read(projectId: string): ProjectChecklist | undefined {
     return this.db
       .select({ checklist: projectChecklists.checklist })
       .from(projectChecklists)
@@ -87,7 +96,7 @@ export class ChecklistService {
     if (!project) throw notFound("Project not found");
     if (project.archivedAt !== null) throw badRequest("Project is archived");
 
-    const previous = this.get(projectId);
+    const previous = this.read(projectId);
     const updatedAt = new Date().toISOString();
     const current = previous ?? { projectId, items: [], changes: [], updatedAt };
     const oldItems = current.items;
@@ -96,10 +105,11 @@ export class ChecklistService {
       id: string,
       text: string,
       status: ChecklistStatus,
-      metadata: ItemMetadata,
+      metadata: ItemMetadata & LaneLinks,
     ): ChecklistItem => {
       const old = oldById.get(id);
-      const next = { ...old, id, text, status, updatedAt, ...itemMetadata(old, metadata) };
+      const entry = { ...old, id, text, status, updatedAt, ...itemMetadata(old, metadata) };
+      const next = this.editLinks(projectId, entry, metadata);
       return old?.text === text && sameProgress(old, next) ? old : next;
     };
 
@@ -247,7 +257,7 @@ export class ChecklistService {
     const project = this.db.select().from(projects).where(eq(projects.id, projectId)).get();
     if (!project) throw notFound("Project not found");
     if (project.archivedAt !== null) throw badRequest("Project is archived");
-    const current = this.get(projectId) ?? {
+    const current = this.read(projectId) ?? {
       projectId,
       items: [],
       changes: [],
@@ -276,7 +286,7 @@ export class ChecklistService {
   }
 
   setEnforce(projectId: string, enforce: boolean): ProjectChecklist {
-    const checklist = this.get(projectId);
+    const checklist = this.read(projectId);
     if (checklist?.state !== "approved")
       throw conflict("Approve the checklist before changing enforcement");
     if (checklist.plan && !enforce) throw conflict("A pinned plan must be enforced");
@@ -286,7 +296,7 @@ export class ChecklistService {
 
   expansionForStart(projectId: string, projectName: string, startPurpose: string): string {
     const purpose = normalizeChecklistPurpose(startPurpose);
-    const checklist = this.get(projectId);
+    const checklist = this.read(projectId);
     if (!checklist) throw notFound("No checklist for this project");
     if (checklist.plan || checklist.pending?.plan)
       throw conflict("Work outside the pinned plan requires a reviewed revision");
@@ -315,7 +325,7 @@ export class ChecklistService {
   decide(inboxItemId: string, status: "resolved" | "dismissed"): InboxItem {
     const card = this.inbox.get(inboxItemId);
     if (card.kind !== "checklist_approval") throw badRequest("Expected a checklist approval card");
-    const checklist = card.projectId ? this.get(card.projectId) : undefined;
+    const checklist = card.projectId ? this.read(card.projectId) : undefined;
     const pending = checklist?.pending;
     const updatedAt = new Date().toISOString();
     if (card.status !== "open") {
@@ -420,21 +430,33 @@ export class ChecklistService {
   updateItem(
     projectId: string,
     itemId: string,
-    change: { status?: ChecklistStatus; note?: string } & ItemMetadata,
+    change: { status?: ChecklistStatus; note?: string } & ItemMetadata & LaneLinks,
     caller: Pick<Session, "id" | "parentSessionId" | "role">,
   ): ProjectChecklist {
-    const checklist = this.get(projectId);
+    const checklist = this.read(projectId);
     const item = checklist?.items.find((entry) => entry.id === itemId);
     if (!checklist || !item) throw notFound("Checklist item not found");
     if (caller.role !== "pm" && (caller.role !== "agent" || !checklistLinked(item, caller))) {
       throw forbidden("Your session is not linked to this checklist item");
     }
-    return this.changeItems(checklist, [item], (entry) => ({
-      ...entry,
-      status: change.status ?? entry.status,
-      note: change.note ?? entry.note,
-      ...itemMetadata(entry, change),
-    }));
+    if (
+      caller.role !== "pm" &&
+      (change.sessionIds !== undefined || change.workKeys !== undefined)
+    ) {
+      throw forbidden("Only the project manager can edit checklist links");
+    }
+    return this.changeItems(checklist, [item], (entry) =>
+      this.editLinks(
+        projectId,
+        {
+          ...entry,
+          status: change.status ?? entry.status,
+          note: change.note ?? entry.note,
+          ...itemMetadata(entry, change),
+        },
+        change,
+      ),
+    );
   }
 
   reserveLink(projectId: string, item: ChecklistItem): (() => void) | undefined {
@@ -469,7 +491,7 @@ export class ChecklistService {
   }
 
   link(projectId: string, itemId: string, session: Session): boolean {
-    const checklist = this.get(projectId);
+    const checklist = this.read(projectId);
     const item = checklist?.items.find((entry) => entry.id === itemId);
     if (!checklist || !item || session.projectId !== projectId) return false;
     let sessionIds = item.sessionIds ?? [];
@@ -482,16 +504,54 @@ export class ChecklistService {
       }
       sessionIds = [...sessionIds, session.id];
     }
-    const status = checklistWorkStatus(session);
-    this.changeItems(checklist, [item], (entry) => ({
-      ...entry,
-      status: workStatus(entry, status),
-      sessionIds,
-      ...(session.status === "waiting" && !session.archivedAt && !entry.needsOwner
-        ? { needsOwner: { reason: WAITING_FOR_OWNER, sessionId: session.id, source: "work" } }
-        : {}),
-    }));
+    this.changeItems(checklist, [item], (entry) => {
+      const linked = { ...entry, sessionIds };
+      const next = this.applyLaneProgress(projectId, linked, session);
+      return entry.status === "done" && next.status === "doing" ? linked : next;
+    });
     return true;
+  }
+
+  private editLinks(projectId: string, item: ChecklistItem, links: LaneLinks): ChecklistItem {
+    const sessionIds = replaceLinks(item.sessionIds, links.sessionIds);
+    const workKeys = replaceLinks(item.workKeys, links.workKeys);
+    if (sessionIds === item.sessionIds && workKeys === item.workKeys) return item;
+    if (sessionIds !== item.sessionIds && sessionIds?.length) {
+      const local = this.db
+        .select({ id: sessions.id })
+        .from(sessions)
+        .where(and(inArray(sessions.id, sessionIds), eq(sessions.projectId, projectId)))
+        .all();
+      if (local.length !== sessionIds.length)
+        throw badRequest("Linked sessions must belong to this project");
+    }
+    return this.applyLaneProgress(projectId, { ...item, sessionIds, workKeys });
+  }
+
+  reportInstallHealthy(projectId: string, sessionId: string, itemId?: string): ProjectChecklist {
+    const row = this.db
+      .select()
+      .from(sessions)
+      .where(and(eq(sessions.projectId, projectId), eq(sessions.id, sessionId)))
+      .get();
+    if (!row) throw notFound("Session not found in this project");
+    const checklist = this.read(projectId);
+    if (!checklist) throw notFound("Checklist not found");
+    const session = rowToSession(row);
+    const linked = checklist.items.filter((item) =>
+      this.lanes(projectId, item).some((lane) => lane?.id === session.id),
+    );
+    if (!linked.length || (itemId !== undefined && !linked.some((item) => item.id === itemId))) {
+      throw badRequest("Session is not linked to the requested checklist");
+    }
+    return this.changeItems(checklist, linked, (item) => {
+      if (item.liveSessionIds?.includes(sessionId)) return item;
+      return this.applyLaneProgress(projectId, {
+        ...item,
+        liveSessionIds: [...(item.liveSessionIds ?? []), sessionId],
+        autoUpdatedAt: new Date().toISOString(),
+      });
+    });
   }
 
   markWork(
@@ -500,43 +560,170 @@ export class ChecklistService {
     itemId?: string,
     waiting?: boolean,
   ): boolean {
-    const checklist = session.projectId ? this.get(session.projectId) : undefined;
-    const linked = checklist?.items.filter(
-      (item) => (itemId === undefined || item.id === itemId) && checklistLinked(item, session),
+    const projectId = session.projectId;
+    const checklist = projectId ? this.read(projectId) : undefined;
+    if (!projectId || !checklist) return false;
+    const linked = checklist.items.filter(
+      (item) =>
+        (itemId === undefined || item.id === itemId) &&
+        (checklistLinked(item, session) || item.workKeys?.includes(session.workKey)),
     );
-    if (!checklist || !linked?.length) return false;
-    this.changeItems(checklist, linked, (item) => {
-      const next = { ...item, status: workStatus(item, status) };
-      if (waiting === true && !item.needsOwner) {
-        next.needsOwner = { reason: WAITING_FOR_OWNER, sessionId: session.id, source: "work" };
-      }
-      if (
-        waiting === false &&
-        item.needsOwner?.sessionId === session.id &&
-        item.needsOwner.source === "work"
-      ) {
-        const ids = item.sessionIds ?? [];
-        const replacement = this.db
-          .select({ id: sessions.id })
-          .from(sessions)
-          .where(
-            and(
-              eq(sessions.projectId, checklist.projectId),
-              eq(sessions.status, "waiting"),
-              ne(sessions.id, session.id),
-              isNull(sessions.archivedAt),
-              or(inArray(sessions.id, ids), inArray(sessions.parentSessionId, ids)),
-            ),
-          )
-          .orderBy(sessions.id)
-          .get();
-        next.needsOwner = replacement
-          ? { reason: WAITING_FOR_OWNER, sessionId: replacement.id, source: "work" }
-          : undefined;
-      }
-      return next;
-    });
+    if (!linked.length) return false;
+    this.changeItems(checklist, linked, (item) =>
+      this.applyLaneProgress(projectId, item, session, status, waiting),
+    );
     return true;
+  }
+
+  private lanes(projectId: string, item: ChecklistItem, eventSession?: Session) {
+    const ids = item.sessionIds ?? [];
+    const keys = item.workKeys ?? [];
+    if (!ids.length && !keys.length) return [];
+    const rows = this.db
+      .select()
+      .from(sessions)
+      .where(
+        and(
+          eq(sessions.projectId, projectId),
+          or(inArray(sessions.id, ids), inArray(sessions.workKey, keys)),
+        ),
+      )
+      .orderBy(desc(sessions.createdAt), desc(sessions.id))
+      .all();
+    const candidates = rows.map(rowToSession);
+    if (eventSession && !candidates.some(({ id }) => id === eventSession.id)) {
+      candidates.push(eventSession);
+    }
+    return [
+      ...ids.map((id) => candidates.find((session) => session.id === id)),
+      ...keys.map((key) => candidates.find((session) => session.workKey === key)),
+    ];
+  }
+
+  private applyLaneProgress(
+    projectId: string,
+    item: ChecklistItem,
+    eventSession?: Session,
+    signal?: ChecklistStatus,
+    waiting?: boolean,
+  ): ChecklistItem {
+    const lanes = this.lanes(projectId, item, eventSession);
+    if (
+      eventSession &&
+      !checklistLinked(item, eventSession) &&
+      !lanes.some((lane) => lane?.id === eventSession.id)
+    ) {
+      return item;
+    }
+    const eventStatus = eventSession && this.laneStatus(eventSession);
+    const liveSessionIds = replaceLinks(
+      item.liveSessionIds,
+      (item.liveSessionIds ?? []).filter(
+        (id) =>
+          lanes.some((lane) => lane?.id === id) &&
+          !(eventSession?.id === id && (eventStatus === "blocked" || eventStatus === "doing")),
+      ),
+    );
+    const next = { ...item, liveSessionIds };
+    const state = lanes.map((lane) => {
+      if (!lane) return { status: "todo" as const };
+      if (liveSessionIds?.includes(lane.id)) return { status: "done" as const };
+      return {
+        status: this.laneStatus(lane) ?? "todo",
+        reason: this.laneReason(lane),
+      };
+    });
+
+    // A child working on the only linked session may signal progress on its parent's behalf.
+    const delegated =
+      eventSession?.parentSessionId &&
+      item.sessionIds?.length === 1 &&
+      !item.workKeys?.length &&
+      checklistLinked(item, eventSession);
+    const blocked = state.find((lane) => lane.status === "blocked");
+    const allDone = state.length > 0 && state.every((lane) => lane.status === "done");
+    if (blocked || (delegated && signal === "blocked" && !allDone)) {
+      next.status = "blocked";
+      next.note =
+        blocked?.reason ?? (eventSession && this.laneReason(eventSession)) ?? "Linked work blocked";
+    } else if (allDone) {
+      next.status = "done";
+      next.note = liveSessionIds?.length ? "All linked work done or LIVE" : "All linked work done";
+    } else if (
+      state.some((lane) => lane.status === "doing" || lane.status === "done") ||
+      (delegated && signal === "doing") ||
+      (signal === "doing" && item.status !== "done")
+    ) {
+      next.status = "doing";
+      next.note = "Linked work in progress";
+    } else if (lanes.length && (item.autoUpdatedAt || item.status !== "todo")) {
+      next.status = "todo";
+      next.note = "Waiting for linked work to start";
+    }
+
+    if (!next.needsOwner || next.needsOwner.source === "work") {
+      const owner =
+        lanes.find(
+          (lane) =>
+            lane?.status === "waiting" && !lane.archivedAt && !liveSessionIds?.includes(lane.id),
+        ) ?? (delegated && waiting ? eventSession : undefined);
+      if (owner) {
+        next.needsOwner = { reason: WAITING_FOR_OWNER, sessionId: owner.id, source: "work" };
+      } else if (
+        !eventSession ||
+        (waiting === false && next.needsOwner?.sessionId === eventSession.id)
+      ) {
+        next.needsOwner = undefined;
+      }
+    }
+    if (
+      next.status !== item.status ||
+      next.note !== item.note ||
+      next.liveSessionIds !== item.liveSessionIds ||
+      (next.needsOwner?.source === "work" &&
+        next.needsOwner.sessionId !== item.needsOwner?.sessionId)
+    ) {
+      next.autoUpdatedAt = new Date().toISOString();
+    }
+    return next;
+  }
+
+  private laneStatus(session: Session): ChecklistStatus | undefined {
+    const { result, rootThreadId } = session;
+    if (result && rootThreadId && session.status !== "failed" && session.status !== "completed") {
+      const newerTurn = this.db
+        .select({ id: turns.id })
+        .from(turns)
+        .where(
+          and(
+            eq(turns.sessionId, session.id),
+            eq(turns.threadId, rootThreadId),
+            gt(turns.startedAt, result.at),
+          ),
+        )
+        .get();
+      if (newerTurn) return checklistWorkStatus({ ...session, result: null }, true);
+    }
+    return checklistWorkStatus(session, true);
+  }
+
+  private laneReason(session: Session): string | undefined {
+    if (session.status === "waiting") return WAITING_FOR_OWNER;
+    if (session.result?.outcome === "blocked" || session.result?.outcome === "failed") {
+      return session.result.summary.slice(0, 280);
+    }
+    if (session.status === "failed") {
+      const turn = this.db
+        .select({ error: turns.error })
+        .from(turns)
+        .where(and(eq(turns.sessionId, session.id), eq(turns.status, "failed")))
+        .orderBy(desc(turns.completedAt))
+        .get();
+      return (session.startError?.message ?? turn?.error?.message ?? "Linked session failed").slice(
+        0,
+        280,
+      );
+    }
   }
 
   private changeItems(
@@ -694,9 +881,13 @@ function sameProgress(old: ChecklistItem, next: ChecklistItem): boolean {
     old.status === next.status &&
     old.note === next.note &&
     old.sessionIds === next.sessionIds &&
+    old.workKeys === next.workKeys &&
+    old.liveSessionIds === next.liveSessionIds &&
+    old.autoUpdatedAt === next.autoUpdatedAt &&
     old.eta === next.eta &&
     old.needsOwner?.reason === next.needsOwner?.reason &&
     old.needsOwner?.sessionId === next.needsOwner?.sessionId &&
+    old.needsOwner?.inboxItemId === next.needsOwner?.inboxItemId &&
     old.needsOwner?.source === next.needsOwner?.source
   );
 }
@@ -731,8 +922,12 @@ export function checklistLinked(
   );
 }
 
-export function checklistWorkStatus(session: Session): ChecklistStatus | undefined {
-  if (session.archivedAt) return;
+export function checklistWorkStatus(
+  session: Session,
+  includeArchived = false,
+): ChecklistStatus | undefined {
+  if (session.archivedAt && !includeArchived) return;
+  if (session.status === "waiting") return "blocked";
   if (session.status === "failed") return "blocked";
   switch (session.result?.outcome) {
     case "success":
@@ -747,10 +942,18 @@ export function checklistWorkStatus(session: Session): ChecklistStatus | undefin
   if (session.status === "completed") return "done";
 }
 
-function workStatus(item: ChecklistItem, status: ChecklistStatus | undefined): ChecklistStatus {
-  return status === undefined || (item.status === "done" && status === "doing")
-    ? item.status
-    : status;
+function replaceLinks(
+  old: string[] | undefined,
+  links: string[] | undefined,
+): string[] | undefined {
+  if (links === undefined) return old;
+  const unique = [...new Set(links)];
+  if (old?.length === unique.length && unique.every((id, index) => id === old[index])) return old;
+  return unique.length ? unique : undefined;
+}
+
+function orderedChecklist(checklist: ProjectChecklist): ProjectChecklist {
+  return { ...checklist, items: runningChecklistItemsFirst(checklist.items) };
 }
 
 /** Render the same progress and item IDs for the orchestrator and the PM. */
@@ -763,7 +966,7 @@ export function formatChecklist(
   const percent = items.length ? Math.round((done / items.length) * 100) : 0;
   return [
     `${done}/${items.length} done · ${percent}%`,
-    ...items.map((item) => {
+    ...runningChecklistItemsFirst(items).map((item) => {
       const { id, text, status } = item;
       const linked = caller && checklistLinked(item, caller) ? " · linked to your session" : "";
       return `- [${status}] ${text} (${id})${linked}`;

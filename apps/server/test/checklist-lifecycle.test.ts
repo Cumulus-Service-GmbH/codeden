@@ -2,6 +2,7 @@ import { type ChecklistProposal, ProjectChecklist } from "@codeden/contracts";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { sampleProject, sampleSession } from "../../../packages/contracts/test/fixtures";
 import { type Database, openDatabase } from "../src/db/client";
+import { projectChecklists } from "../src/db/schema";
 import { EventStore } from "../src/events/store";
 import { ToolRegistry } from "../src/mcp/registry";
 import { allTools } from "../src/mcp/tools";
@@ -134,6 +135,14 @@ it("scopes item edits in MCP and exposes no owner decision tool", async () => {
     await tools.call("update_checklist_item", { itemId: "a", note: "Reviewing" }, pmCaller),
   ).toMatchObject({ isError: false });
   service.link(projectId, "a", agent);
+  expect(
+    await tools.call("update_checklist_item", { itemId: "a", sessionIds: [] }, agentCaller),
+  ).toMatchObject({ isError: true, text: expect.stringContaining("Only the project manager") });
+  expect(
+    await tools.call("update_checklist_item", { itemId: "a", workKeys: ["issue:42"] }, pmCaller),
+  ).toMatchObject({ isError: false });
+  expect(service.get(projectId)?.items[0]?.workKeys).toEqual(["issue:42"]);
+
   expect(
     await tools.call("update_checklist_item", { itemId: "a", status: "doing" }, agentCaller),
   ).toMatchObject({ isError: false });
@@ -272,4 +281,93 @@ it.each(["\r", "\n"])("rejects multiline checklist edit inputs (%j)", (line) => 
     updateChecklist.input.safeParse({ projectId, requestApproval: true, reason: `Reason${line}` })
       .success,
   ).toBe(false);
+});
+it("lists running checklist items first and preserves the order within each group", () => {
+  const first = { ...sampleSession, projectId, status: "running" as const };
+  const second = { ...first, id: "second-running", workKey: "issue:2" };
+  for (const session of [first, second]) {
+    store.append([{ type: "session.created", sessionId: session.id, payload: { session } }]);
+  }
+  service.update(projectId, {
+    items: ["todo-a", "running-a", "todo-b", "running-b"].map((id) => ({ id, text: id })),
+  });
+  expect(service.link(projectId, "running-a", first)).toBe(true);
+  expect(service.link(projectId, "running-b", second)).toBe(true);
+
+  const expected = ["running-a", "running-b", "todo-a", "todo-b"];
+  expect(service.list()[0]?.items.map(({ id }) => id)).toEqual(expected);
+  expect(service.get(projectId)?.items.map(({ id }) => id)).toEqual(expected);
+  expect(
+    database.db
+      .select()
+      .from(projectChecklists)
+      .get()
+      ?.checklist.items.map(({ id }) => id),
+  ).toEqual(["todo-a", "running-a", "todo-b", "running-b"]);
+});
+
+it.each(["resolved", "dismissed"] as const)(
+  "clears needsOwner when the linked card is %s",
+  async (status) => {
+    const inbox = new InboxService(database.db, store, () => async () => {});
+    const pending = proposal(
+      service.update(
+        projectId,
+        {
+          items: [
+            { id: "a", text: "A" },
+            { id: "b", text: "B" },
+          ],
+        },
+        { requestApproval: true },
+      ),
+    );
+    const card = inbox.put({ ...inbox.get(pending.inboxItemId), id: "decision" });
+    const needsOwner = { reason: "Choose a direction", inboxItemId: card.id };
+    const otherNeed = { ...needsOwner, inboxItemId: pending.inboxItemId };
+    service.update(projectId, {
+      items: [
+        { id: "a", text: "A", needsOwner },
+        { id: "b", text: "B", needsOwner: otherNeed },
+      ],
+    });
+    expect
+      .soft(service.get(projectId)?.items.map((item) => item.needsOwner))
+      .toEqual([needsOwner, otherNeed]);
+
+    const before = store.headSeq();
+    await inbox.resolve(card.id, { status });
+    expect(service.get(projectId)?.items.map((item) => item.needsOwner)).toEqual([
+      undefined,
+      otherNeed,
+    ]);
+    expect(store.listAfter(before).map((event) => event.type)).toEqual([
+      "inbox.updated",
+      "checklist.updated",
+    ]);
+  },
+);
+
+it("lets the orchestrator link, report install health, and unlink through the checklist tool", async () => {
+  const session = { ...sampleSession, projectId, status: "running" as const };
+  store.append([{ type: "session.created", sessionId: session.id, payload: { session } }]);
+  service.update(projectId, { items: [{ id: "lane", text: "Build" }] });
+  const tools = new ToolRegistry([updateChecklist], { checklist: service } as never);
+  const caller = {
+    role: "orchestrator" as const,
+    caller: "mcp" as const,
+    projectId: null,
+    sessionId: "orchestrator",
+    signal: new AbortController().signal,
+  };
+  const edit = (payload: Record<string, unknown>) =>
+    tools.call("update_checklist", { projectId, ...payload }, caller);
+  expect(await edit({ patch: [{ id: "lane", sessionIds: [session.id] }] })).toMatchObject({
+    isError: false,
+  });
+  expect(service.get(projectId)?.items[0]?.status).toBe("doing");
+  expect(await edit({ installHealthySessionId: session.id })).toMatchObject({ isError: false });
+  expect(service.get(projectId)?.items[0]?.status).toBe("done");
+  expect(await edit({ patch: [{ id: "lane", sessionIds: [] }] })).toMatchObject({ isError: false });
+  expect(service.get(projectId)?.items[0]?.sessionIds).toBeUndefined();
 });

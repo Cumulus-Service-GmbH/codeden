@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { Id, Timestamp } from "./common";
+import { WorkKey } from "./work";
 
 /** The current state of a project checklist item. */
 export const ChecklistStatus = z.enum(["todo", "doing", "done", "blocked"]);
@@ -13,7 +14,14 @@ export const ChecklistItem = z.object({
   text: singleLine.min(1).max(500),
   status: ChecklistStatus,
   note: z.string().max(280).optional(),
+  /** Sessions whose lane status contributes to this item. */
   sessionIds: z.array(Id).max(200).optional(),
+  /** Work keys tracked within this item's project. */
+  workKeys: z.array(WorkKey).max(200).optional(),
+  /** Linked session IDs with an accepted install-health report. */
+  liveSessionIds: z.array(Id).max(400).optional(),
+  /** When linked work last changed this item's progress. */
+  autoUpdatedAt: Timestamp.optional(),
   startPurpose: singleLine.max(300).optional(),
   /** Estimated completion time. */
   eta: Timestamp.optional(),
@@ -22,6 +30,8 @@ export const ChecklistItem = z.object({
     .object({
       reason: singleLine.min(1).max(200),
       sessionId: Id.regex(/^[^\r\n]*$/).optional(),
+      /** The inbox card whose decision clears this marker. */
+      inboxItemId: Id.optional(),
       /** Distinguishes automatic work tracking from a manual request with the same reason. */
       source: z.literal("work").optional(),
     })
@@ -31,6 +41,13 @@ export const ChecklistItem = z.object({
   updatedAt: Timestamp,
 });
 export type ChecklistItem = z.infer<typeof ChecklistItem>;
+
+/** Show in-progress work first, preserving checklist order within each group. */
+export function runningChecklistItemsFirst(items: readonly ChecklistItem[]): ChecklistItem[] {
+  return [...items].sort(
+    (left, right) => Number(right.status === "doing") - Number(left.status === "doing"),
+  );
+}
 
 /** A status change, addition (null from), or removal (null to). */
 export const ChecklistChange = z.object({

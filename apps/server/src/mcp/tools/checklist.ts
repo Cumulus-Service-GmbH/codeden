@@ -1,4 +1,4 @@
-import { ChecklistItem } from "@codeden/contracts";
+import { ChecklistItem, Id } from "@codeden/contracts";
 import { z } from "zod";
 import { formatChecklist } from "../../services/checklist/checklist-service";
 import type { AppServices } from "../../services/container";
@@ -32,7 +32,7 @@ export const readChecklist = defineTool({
 export const updateChecklistItem = defineTool({
   name: "update_checklist_item",
   description:
-    "Update a checklist item's status, note, ETA, or owner action. Use null to clear ETA or owner action. PMs can update their project's items. Agents can update items linked to their session or their parent session.",
+    "Update a checklist item's status, note, ETA, or owner action. Use null to clear ETA or owner action. PMs can update their project's items, replace sessionIds or workKeys (empty arrays unlink), or report a linked session LIVE after a healthy install. Agents can update items linked to their session or their parent session.",
   roles: ["pm", "agent"],
   scope: "session",
   isAvailable: hasChecklist,
@@ -41,6 +41,9 @@ export const updateChecklistItem = defineTool({
       itemId: ChecklistItem.shape.id,
       status: ChecklistItem.shape.status.optional(),
       note: ChecklistItem.shape.note,
+      sessionIds: ChecklistItem.shape.sessionIds,
+      workKeys: ChecklistItem.shape.workKeys,
+      installHealthySessionId: Id.optional(),
       eta: ChecklistItem.shape.eta.unwrap().nullable().optional(),
       needsOwner: ChecklistItem.shape.needsOwner
         .unwrap()
@@ -49,14 +52,26 @@ export const updateChecklistItem = defineTool({
         .optional(),
     })
     .refine(
-      ({ status, note, eta, needsOwner }) =>
-        status !== undefined || note !== undefined || eta !== undefined || needsOwner !== undefined,
-      "Provide a status, note, ETA, or owner action",
+      ({ itemId: _itemId, ...changes }) =>
+        Object.values(changes).some((value) => value !== undefined),
+      "Provide progress, links, or an install-health report",
     ),
-  handler: async ({ itemId, ...change }, { services, sessionId, projectId, role }) => {
+  handler: async (
+    { itemId, installHealthySessionId, ...change },
+    { services, sessionId, projectId, role },
+  ) => {
     const session = services.sessionRepo.find(sessionId)?.session;
     if (!projectId || !session || session.projectId !== projectId || session.role !== role) {
       throw new ToolError("This tool needs a session in your project");
+    }
+    if (installHealthySessionId !== undefined) {
+      if (role !== "pm") throw new ToolError("Only the project manager can report install health");
+      if (Object.values(change).some((value) => value !== undefined)) {
+        throw new ToolError("Report install health as a separate update");
+      }
+      return formatChecklist(
+        services.checklist.reportInstallHealthy(projectId, installHealthySessionId, itemId),
+      );
     }
     return formatChecklist(services.checklist.updateItem(projectId, itemId, change, session));
   },

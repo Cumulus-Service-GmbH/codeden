@@ -70,3 +70,16 @@ it("strips automatic ownership from proposal addition metadata", () => {
     ]),
   ).toEqual([{ id: "new", needsOwner }]);
 });
+
+it("round-trips lane links and their last automatic update", () => {
+  const item = {
+    id: "build",
+    text: "Build",
+    status: "doing",
+    sessionIds: ["lane-one"],
+    workKeys: ["issue:2"],
+    autoUpdatedAt: "2026-11-25T12:00:00Z",
+    updatedAt: "2026-11-25T12:00:00Z",
+  };
+  expect(ChecklistItem.parse(JSON.parse(JSON.stringify(item)))).toEqual(item);
+});
