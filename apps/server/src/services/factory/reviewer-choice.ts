@@ -44,10 +44,6 @@ export function reviewVendorIsDistinct(ctx: FactoryContext, item: FactoryItem, r
   return vendor && reviewerVendor ? reviewerVendor !== vendor : undefined;
 }
 
-export function canReviewItem(ctx: FactoryContext, item: FactoryItem, reviewer: string): boolean {
-  return reviewVendorIsDistinct(ctx, item, reviewer) === true;
-}
-
 /** A review requires two known, distinct model vendors. */
 export function pickReviewer(input: ReviewerInput): ReviewerChoice | ReviewerWait {
   const { author, tuning, available, unavailable, vendor } = input;

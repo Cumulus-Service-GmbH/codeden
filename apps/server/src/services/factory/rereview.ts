@@ -128,7 +128,7 @@ export function resumeReview(
   ctx: FactoryContext,
   item: FactoryItem,
   pr: GitHubPrRef,
-  opts: { note: string; retry?: boolean; autoHead?: string },
+  opts: { note: string; retry?: boolean; autoHead?: string; clearArbitration?: boolean },
 ): FactoryItem {
   const at = ctx.now().toISOString();
   const resumed = ctx.store.updateItem(item.id, (i) => ({
@@ -138,7 +138,10 @@ export function resumeReview(
     review: null,
     jev: undefined,
     jevReviewHead: undefined,
-    ...(opts.retry ? { reviewRounds: undefined, arbitration: undefined } : {}),
+    ...(opts.retry ? { reviewRounds: undefined } : {}),
+    ...(opts.retry || opts.clearArbitration
+      ? { arbitration: undefined, arbiterRoundsUsed: i.arbiterRoundsUsed ?? i.arbitration?.round }
+      : {}),
     attempts: opts.retry ? 0 : i.attempts,
     // A retry is a person's (or the PM's) call to spend more: the per-item cap counts afresh.
     itemBudgetSince: opts.retry ? at : i.itemBudgetSince,

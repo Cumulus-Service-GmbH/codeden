@@ -48,6 +48,9 @@ export interface FactoryNeedContext {
   ownsOpenPr: boolean;
   /** A failure outside its code that the loop still puts back by itself. */
   recovering?: boolean;
+  stoppedOnPurpose?: boolean;
+  /** Its PR awaits readiness, CI or replacement. */
+  prWaiting?: boolean;
   /** Its pull request waits for a person to merge it. */
   prWaitsForYou?: boolean;
   /** Its agent waits on a person (a question or an approval). */
@@ -69,7 +72,8 @@ export function factoryNeed(
   item: FactoryNeedItem,
   ctx: FactoryNeedContext,
 ): FactoryNeedKind | null {
-  if (item.stage === "escalated") return "merge";
+  if (ctx.stoppedOnPurpose) return null;
+  if (item.stage === "escalated") return ctx.prWaiting ? null : "merge";
   if (item.stage === "failed") {
     if (ctx.recovering) return null;
     if (ctx.ownsOpenPr) return "retry";

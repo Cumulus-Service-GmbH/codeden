@@ -1,4 +1,4 @@
-import { ReviewPolicy } from "@codeden/contracts";
+import { ReviewPolicy, ReviewVerdict } from "@codeden/contracts";
 import { describe, expect, it, vi } from "vitest";
 import { arbiterLane, reviewEscalation } from "../src/services/factory/arbiter";
 
@@ -122,6 +122,38 @@ it("the Arbiter rounds setting round-trips", async () => {
       tuning: { reviewPolicy: ReviewPolicy.parse({ arbiterRounds: 3 }) },
     });
     expect((await env.factory.status(env.project.id)).tuning.reviewPolicy?.arbiterRounds).toBe(3);
+  } finally {
+    await env.close();
+  }
+});
+
+it("blocks a stored non-approving Arbiter confirmation before continuing verification", async () => {
+  const env = createFactoryEnv();
+  const { enable, item, tick, verifying } = factorySteps(() => env);
+  try {
+    await enable();
+    const { id, pr, builder } = await verifying();
+    const head = pr.headSha;
+    if (!head) throw new Error("Expected a verified pull request head");
+    env.factory.data.updateItem(id, (current) => ({
+      ...current,
+      arbitration: { head, state: "jev_pending", ruling: "Fix the regression." },
+      review: ReviewVerdict.parse({ ...APPROVE, verdict: "request_changes" }),
+    }));
+
+    await tick();
+    await tick();
+
+    expect(item(id)).toMatchObject({
+      stage: "verifying",
+      attempts: 0,
+      arbitration: { state: "blocked" },
+    });
+    expect(env.gh.merges).toEqual([]);
+    expect(env.messages.filter((message) => message.sessionId === builder)).toEqual([]);
+    expect(env.inbox.list({ kinds: ["owner_decision"] })).toMatchObject([
+      { id: `inbox:factory-owner-decision:${id}`, status: "open" },
+    ]);
   } finally {
     await env.close();
   }

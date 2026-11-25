@@ -2,6 +2,7 @@ import { z } from "zod";
 import { type GitHubPrRef, Id } from "./common";
 import type { FactoryItemStage } from "./factory-api";
 import type { FactoryFailureKind } from "./factory-prs";
+import type { JevReceipt, ReviewArbitration } from "./review-policy";
 
 /**
  * Running stopped factory work again (§10.1, Stopped work with an open PR): the Retry request,
@@ -43,6 +44,8 @@ export interface StoppedItem {
   /** Revise rounds used. */
   attempts: number;
   reason: string | null;
+  jev?: Pick<JevReceipt, "status">;
+  arbitration?: Pick<ReviewArbitration, "state">;
 }
 
 /** What Retry offers a stopped item. */
@@ -68,6 +71,16 @@ const SIZE_FAILURE = /(^|; )size: /;
  * else (null) can't.
  */
 export function stoppedRetry(item: StoppedItem): StoppedRetry | null {
+  if (item.stage === "verifying") {
+    const blocked = item.jev?.status === "owner decision" || item.arbitration?.state === "blocked";
+    return blocked && item.pr?.state === "open"
+      ? {
+          mode: "rereview",
+          pr: item.pr,
+          label: "Review blocked; retry when the blocker is resolved",
+        }
+      : null;
+  }
   if (item.stage !== "failed" && item.stage !== "rejected") return null;
   const open = item.pr?.state === "open" || item.pr?.state === "draft";
   const pr = open ? item.pr : null;

@@ -853,6 +853,8 @@ export const FactoryWorkItem = z.object({
    * doesn't need a person (`factoryNeed`).
    */
   recovering: z.boolean().default(false),
+  /** The operator ended this attempt deliberately. */
+  stoppedOnPurpose: z.boolean().optional(),
   /**
    * Its merge checks so far: passed (passed or skipped), failed and all recorded; null before
    * any ran.

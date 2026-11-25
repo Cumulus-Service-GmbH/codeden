@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
+import { sha } from "./support/factory-jev-fixture";
 import { APPROVE, factorySteps } from "./support/factory-steps";
 
 /**
@@ -41,7 +42,7 @@ describe("a re-check owed across an infrastructure failure", () => {
       pr.mergeable = "conflicting";
       await tick();
       // The builder resolves the conflicts; the approval waits for the re-check.
-      env.gh.rebase(pr, "resolved1", cause === "ci" ? "none" : "success");
+      env.gh.rebase(pr, sha("resolved1"), cause === "ci" ? "none" : "success");
       await env.setStatus(builder, "idle");
       await tick();
       expect(item(id).nudges[`recheck_${oldHead}`]).toBeDefined();
@@ -55,7 +56,7 @@ describe("a re-check owed across an infrastructure failure", () => {
           if (n < 4) {
             await tick();
             expect(env.starts.at(-1)?.input?.text).toContain(
-              `git range-diff ${oldHead}...resolved1`,
+              `git range-diff ${oldHead}...${sha("resolved1")}`,
             );
           }
         }
@@ -77,7 +78,7 @@ describe("a re-check owed across an infrastructure failure", () => {
       expect(rechecker).toBeTruthy();
       const asked =
         cause === "reviewer" ? (env.starts.at(-1)?.input?.text ?? "") : lastMessageTo(rechecker);
-      expect(asked).toContain(`git range-diff ${oldHead}...resolved1`);
+      expect(asked).toContain(`git range-diff ${oldHead}...${sha("resolved1")}`);
       if (cause === "ci") pr.checks = "success";
       await tick();
       await tick();

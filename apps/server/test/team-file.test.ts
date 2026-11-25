@@ -366,3 +366,30 @@ it("a session whose pins came from the Team has no layer of its own: a Team chan
   expect(file.sources).toEqual({ writer: "project" });
   inherited.delete(session.id);
 });
+
+it("keeps the approved run Team in the session's Team file when the project default changes", async () => {
+  const id = await addProject();
+  const session: Session = { ...sampleSession, projectId: id, status: "running" };
+  sessions.set(session.id, session);
+  inherited.add(session.id);
+  projectTeams.set(id, [{ ...opus, model: "project-default-reviewer" }]);
+  const teamDeps = {
+    ...deps(),
+    runTeam: (sessionId: string) => (sessionId === session.id ? [opus] : undefined),
+  };
+  const refresh = createTeamFileRefresher(teamDeps);
+  refresh([]);
+  const path = teamFilePath(join(dir, "home"), session.id);
+  expect(read(path).team).toContainEqual(opus);
+  projectTeams.set(id, [{ ...opus, model: "new-default-reviewer" }]);
+  refresh([
+    {
+      seq: 1,
+      sessionId: null,
+      ts: new Date().toISOString(),
+      type: "project.updated",
+      payload: { project: projects.get(id) },
+    },
+  ]);
+  expect(read(path).team).toContainEqual(opus);
+});

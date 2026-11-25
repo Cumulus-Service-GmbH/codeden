@@ -169,7 +169,7 @@ export async function advanceDrain(
   ctx: FactoryContext,
   project: Project,
   loop: FactoryLoop,
-  writeKillSwitch = ctx.setKillSwitch,
+  writeKillSwitch: (projectId: string, on: boolean, timedOut?: boolean) => void = ctx.setKillSwitch,
 ): Promise<FactoryLoop> {
   const drain = loop.drain;
   if (!drain) return loop;
@@ -211,9 +211,9 @@ async function drainTimedOut(
   loop: FactoryLoop,
   drain: FactoryDrain,
   inFlight: FactoryItem[],
-  writeKillSwitch: FactoryContext["setKillSwitch"],
+  writeKillSwitch: (projectId: string, on: boolean, timedOut?: boolean) => void,
 ): Promise<FactoryLoop> {
-  writeKillSwitch(project.id, true);
+  writeKillSwitch(project.id, true, true);
   await stopWork(ctx, project.id);
   const n = inFlight.length;
   const title = `Drain time limit reached; stopped with ${n} item${n === 1 ? "" : "s"} still in flight`;

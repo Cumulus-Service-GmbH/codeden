@@ -294,6 +294,7 @@ export function createServices(opts: ServicesOptions): AppServices {
     projectTeam,
     project: (projectId) => projects.get(projectId),
     session: (sessionId) => sessionRepo.find(sessionId)?.session,
+    runTeam: (sessionId) => sessionRepo.find(sessionId)?.startMeta?.runTeam,
     ownTeamPins: (sessionId) => sessionRepo.find(sessionId)?.startMeta?.ownTeamPins === true,
     liveSessions: (projectId) => sessionRepo.listInStatus(TEAM_FILE_STATUSES, projectId),
     log: opts.log,

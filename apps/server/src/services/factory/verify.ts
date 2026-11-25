@@ -42,9 +42,10 @@ import {
 } from "./rebase";
 import { adoptAgentPr } from "./rebuild";
 import { recheckCause } from "./recheck";
-import { isAutoReReview, reviseRoundsAllowed } from "./rereview";
+import { isAutoReReview, resumeReview, reviseRoundsAllowed } from "./rereview";
 import { checkRevert } from "./revert";
 import { ensureReviewer, reviewerStalled } from "./reviewer";
+import { reviewVendorIsDistinct } from "./reviewer-choice";
 import { isBusy } from "./sessions";
 import { endStopped, stoppedOnPurpose } from "./stops";
 import { mayAutoMerge } from "./trust";
@@ -109,8 +110,37 @@ export async function advanceVerifying(
     prDecidedOutside(ctx, item, pr.ref);
     return loop;
   }
+  if (pr.ref.state === "draft") {
+    const ready = ctx.inbox.find(readyInboxId(item.id));
+    if (ready?.status === "open")
+      ctx.inbox.close(ready, "resolved", {
+        note: "Waiting for the author to mark the pull request ready",
+      });
+    ctx.store.updateItem(item.id, (i) => {
+      const { ready: _ready, ready_checked: _checked, ...nudges } = i.nudges;
+      return {
+        ...i,
+        nudges,
+        pr: pr.ref,
+        note: "Waiting for the author to mark the pull request ready",
+      };
+    });
+    leaveQueue(ctx, item);
+    return loop;
+  }
+  if (pr.headSha && item.arbitration?.state === "blocked" && item.arbitration.head !== pr.headSha) {
+    item = resumeReview(ctx, item, pr.ref, {
+      note: "A new commit arrived after the review was blocked; waiting for a fresh review",
+      clearArbitration: true,
+    });
+  }
   // What it changes, for overlap-aware scheduling of the queue (`overlap.ts`).
-  ctx.prFiles.set(project.id, pr.ref.number, changedPaths(pr));
+  ctx.prFiles.set(
+    project.id,
+    pr.ref.number,
+    changedPaths(pr),
+    (pr.changedFiles ?? pr.files.length) <= pr.files.length ? pr.headSha : null,
+  );
   // Work over its spend cap moves on through the steps that start no agent turn (CI, the merge
   // queue, update-branch, the merge) and stops before one that would (`item-budget.ts`).
   const beforeAgentTurn = (current: FactoryItem) =>
@@ -146,6 +176,13 @@ export async function advanceVerifying(
   const checked = await checkRevert(ctx, project, item, pr);
   if (!checked) return loop;
   item = checked;
+  if (
+    item.review &&
+    item.reviewerProvider &&
+    reviewVendorIsDistinct(ctx, item, item.reviewerProvider) === false
+  ) {
+    item = ctx.store.updateItem(item.id, (i) => ({ ...i, review: null, jev: undefined }));
+  }
   // CI gets its time from when this head first appeared, not from when verification began. An
   // approval covers one head: a new head keeps it only with the same change (`approval.ts`).
   const at = now.toISOString();
@@ -202,6 +239,17 @@ export async function advanceVerifying(
     nudges: nudgesFor(i.nudges, i.review),
   }));
 
+  if (outcome !== "pass" && current.nudges.ready) {
+    const ready = ctx.inbox.find(readyInboxId(item.id));
+    if (ready?.status === "open")
+      ctx.inbox.close(ready, "resolved", {
+        note: "The pull request is waiting for its merge checks",
+      });
+    current = ctx.store.updateItem(item.id, (i) => {
+      const { ready: _ready, ready_checked: _checked, ...nudges } = i.nudges;
+      return { ...i, nudges };
+    });
+  }
   if (stopUnapprovedArbitration(ctx, current)) return loop;
   if (outcome === "escalate") return escalate(ctx, loop, current, checks);
   if (

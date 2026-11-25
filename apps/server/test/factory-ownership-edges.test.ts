@@ -1,6 +1,7 @@
 import type { ReviewVerdictInit } from "@codeden/contracts";
 import { afterEach, describe, expect, it } from "vitest";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
+import { sha } from "./support/factory-jev-fixture";
 import { APPROVE, factorySteps } from "./support/factory-steps";
 
 /**
@@ -183,7 +184,7 @@ describe("work whose author's session is gone", () => {
     await tick();
     expect(env.starts.at(-1)).toMatchObject({
       workKey: `factory:review:${pr.ref.number}`,
-      workspace: { mode: "worktree", baseRef: `origin/${pr.headBranch}`, fetch: true },
+      workspace: { mode: "worktree", detachedSha: pr.headSha, fetch: true },
     });
   });
 });
@@ -208,7 +209,7 @@ describe("a re-check whose reviewer is replaced", () => {
     pr.mergeable = "conflicting";
     await tick();
     expect(lastMessageTo(builder)).toMatch(/\*\*Rebase\*\*/);
-    env.gh.rebase(pr, "rebased1", "success");
+    env.gh.rebase(pr, sha("rebased1"), "success");
     await env.setStatus(builder, "idle");
     await tick();
 
@@ -216,7 +217,7 @@ describe("a re-check whose reviewer is replaced", () => {
     const fresh = item(id).reviewerSessionId as string;
     expect(fresh).not.toBe(first);
     const brief = env.starts.at(-1)?.input?.text ?? "";
-    expect(brief).toContain(`git range-diff ${oldHead}...rebased1`);
+    expect(brief).toContain(`git range-diff ${oldHead}...${sha("rebased1")}`);
     expect(brief).toContain(APPROVE.summary);
     expect(item(id).review?.summary).toBe(APPROVE.summary);
     expect(item(id).checks.find((c) => c.name === "review")?.state).toBe("pending");

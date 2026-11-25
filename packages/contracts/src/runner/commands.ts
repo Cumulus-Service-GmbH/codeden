@@ -136,6 +136,11 @@ export const RunnerCommand = z.discriminatedUnion("name", [
       path: z.string().optional(),
       branch: z.string().optional(),
       baseRef: z.string().optional(),
+      /** Detach the worktree or clone at this exact commit. */
+      detachedSha: z
+        .string()
+        .regex(/^[a-f0-9]{40}$/)
+        .optional(),
       setupCommands: z.array(z.string()).default([]),
       /** Used for the default worktree path `<home>/wt/<projectSlug>/<sessionShort>`. */
       projectSlug: z

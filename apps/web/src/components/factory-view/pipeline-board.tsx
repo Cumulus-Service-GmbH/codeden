@@ -1,4 +1,5 @@
 import type { FactoryStatus } from "@codeden/contracts";
+import { Link } from "@tanstack/react-router";
 import { ChevronDown, ChevronRight, UserRound } from "lucide-react";
 import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import { InfoHint } from "@/components/common/info-hint";
@@ -231,6 +232,42 @@ function NeedsYou({
 }
 
 /** The Factory view's pipeline: Intake → Identify type → Building → Reviewing → Merge queue → Merged. */
+function StoppedHistory({ f }: { f: FactoryStatus }) {
+  const stops = f.recent.filter((item) => item.stoppedOnPurpose);
+  if (!stops.length) return null;
+  return (
+    <details className="px-1 py-2 text-xs text-muted-foreground">
+      <summary className="cursor-pointer">Intentional stops</summary>
+      <ul className="space-y-2 py-2">
+        {stops.map((item) => {
+          const active = f.inProgress.find((other) => other.workKey === item.workKey);
+          return (
+            <li key={item.id}>
+              <Link
+                to="/projects/$projectId/factory/$itemId"
+                params={{ projectId: f.projectId, itemId: item.id }}
+                className="text-primary hover:underline"
+              >
+                {item.title}
+              </Link>
+              <p>{item.reason}</p>
+              {active && (
+                <Link
+                  to="/projects/$projectId/factory/$itemId"
+                  params={{ projectId: f.projectId, itemId: active.id }}
+                  className="text-primary hover:underline"
+                >
+                  View active work
+                </Link>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </details>
+  );
+}
+
 export function PipelineBoard({
   f,
   pipeline,
@@ -301,6 +338,7 @@ export function PipelineBoard({
                   }
                 />
                 {stage.id === "intake" && <HeldIssues held={f.held} />}
+                {stage.id === "intake" && <StoppedHistory f={f} />}
                 {stage.id === "intake" && ignored > 0 && (
                   <p
                     className="px-1 text-[10px] text-status-waiting"

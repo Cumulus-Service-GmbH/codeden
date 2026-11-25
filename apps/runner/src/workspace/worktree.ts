@@ -9,7 +9,7 @@ import { git, gitOk, isWorkTree } from "../git/exec";
 import { currentBranch, defaultBranch } from "../git/ops";
 import type { ProcessSupervisor } from "../process/supervisor";
 import { endProcessesInside } from "../process/worktree-processes";
-import { prepareClone } from "./clone";
+import { assertDetachedWorkspace, prepareClone } from "./clone";
 import { PROJECT_CONFIG_PATH, readProjectConfig } from "./project-config";
 import { pruneWorktrees, removeWorkspace, worktreeState } from "./removal";
 import { runSetup, type SetupStep } from "./setup";
@@ -138,9 +138,19 @@ async function createWorktree(
   const slug = cmd.projectSlug ?? slugFromPath(repo);
   const path = resolve(cmd.path ?? join(ctx.home, "wt", slug, short));
   const reuse = await clearTarget(repo, path, ctx);
-  if (reuse) return reuse;
+  if (reuse) {
+    if (cmd.detachedSha) await assertDetachedWorkspace(reuse.cwd, cmd.detachedSha);
+    return reuse;
+  }
   await mkdir(dirname(path), { recursive: true });
   const base = await resolveBase(repo, cmd);
+  if (cmd.detachedSha) {
+    await git(repo, ["worktree", "add", "--detach", path, cmd.detachedSha], {
+      timeoutMs: 10 * 60_000,
+    });
+    await assertDetachedWorkspace(path, cmd.detachedSha);
+    return { cwd: path, branch: null, created: true };
+  }
   if (cmd.branch && (await branchExists(repo, cmd.branch))) {
     await git(repo, ["worktree", "add", path, cmd.branch], { timeoutMs: 10 * 60_000 });
     return { cwd: path, branch: cmd.branch, created: true };

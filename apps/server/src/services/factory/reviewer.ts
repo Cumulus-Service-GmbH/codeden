@@ -4,14 +4,14 @@ import { withAskedHead } from "./approval";
 import { factoryReviewPolicy, reviewBudgetReached } from "./arbiter";
 import { type ProviderCause, unavailableText } from "./availability";
 import { letGoReviewer } from "./cleanup";
-import type { FactoryContext } from "./context";
+import { type FactoryContext, factoryNotice } from "./context";
 import { failReview } from "./failures";
 import type { FactoryPr } from "./github-port";
 import { stoppedSinceNudge } from "./idle";
 import { jevReviewBrief } from "./jev";
 import { awaitingStart, awaitingStartNote } from "./late-start";
 import { briefLessons } from "./lessons";
-import { failItem } from "./outcomes";
+import { failItem, markStuck } from "./outcomes";
 import { REVIEWER_NUDGE, reReviewPrompt } from "./prompts";
 import { recheckPrompt } from "./prompts-integration";
 import {
@@ -67,11 +67,12 @@ function reviewHead(
   project: Project,
   item: FactoryItem,
   pr: FactoryPr,
-): { headBranch: string; baseBranch: string } | null {
+): { headSha: string | null; baseBranch: string } | null {
   const builder = item.builderSessionId ? ctx.repo.find(item.builderSessionId)?.session : undefined;
   const shared = builder?.worktreePath && !builder.worktreeRemovedAt;
-  if (shared && !item.nudges[CLEAN_REVIEW]) return null;
-  return { headBranch: pr.headBranch, baseBranch: baseBranchOf(project) };
+  const replacing = Boolean(item.reviewerSessionId || item.earlierSessionIds.length);
+  if (shared && !item.nudges[CLEAN_REVIEW] && !replacing) return null;
+  return { headSha: pr.headSha, baseBranch: baseBranchOf(project) };
 }
 
 /**
@@ -110,12 +111,16 @@ async function startReviewer(
 > {
   const choice = chooseReviewer(ctx, loop, item);
   if (choice.wait) return { waiting: choice.note };
+  const head = reviewHead(ctx, project, item, pr);
+  if (head && (!head.headSha || !/^[a-f0-9]{40}$/.test(head.headSha))) {
+    return { waiting: "Waiting for a verified pull request commit to review" };
+  }
   const res = await ctx.sessions.startReviewer(
     item,
     vision,
     choice,
     choice.note,
-    reviewHead(ctx, project, item, pr),
+    head?.headSha ? { headSha: head.headSha, baseBranch: head.baseBranch } : null,
     mayAutoMerge(item, project.factoryLimits),
     text,
     text ? undefined : await briefLessons(ctx, item),
@@ -175,19 +180,23 @@ export async function ensureReviewer(
 ): Promise<FactoryItem> {
   const old = recheckOf(item);
   if (pr.additions + pr.deletions > MAX_REVIEW_LINES && (!item.review || old)) {
-    return ctx.store.updateItem(
-      item.id,
-      (i) => ({ ...i, note: `Review blocked: the diff exceeds ${MAX_REVIEW_LINES} changed lines` }),
-      { touch: false },
+    markStuck(
+      ctx,
+      loop,
+      item,
+      `Review blocked: the diff exceeds ${MAX_REVIEW_LINES} changed lines`,
+      "Split the change into smaller pull requests, then retry this item.",
     );
+    return ctx.store.item(item.id) ?? item;
   }
   if ((!item.review || old) && pr.headSha) {
-    const round = reviewRound(factoryReviewPolicy(ctx, loop), item.reviewRounds ?? [], {
+    const policy = factoryReviewPolicy(ctx, loop);
+    const round = reviewRound(policy, item.reviewRounds ?? [], {
       head: pr.headSha,
       lines: pr.additions + pr.deletions,
     });
     const reason =
-      round.blocked === "round_limit" && !old
+      round.blocked === "round_limit" && (!old || round.number > policy.totalRounds)
         ? `Review round ${round.number}/${round.limit} blocked by the round limit`
         : round.blocked === "unchanged_head" && item.nudges.rereview_pending
           ? "Waiting for a new commit to review"
@@ -198,6 +207,16 @@ export async function ensureReviewer(
       return ctx.store.updateItem(item.id, (i) => ({ ...i, note: reason }), { touch: false });
   }
   if (item.area === "security" && !item.reviewSpec?.threatModel && !item.review) {
+    factoryNotice(ctx, {
+      id: `factory.threat-model:${item.id}`,
+      projectId: item.projectId,
+      target: "pm",
+      event: "failed",
+      title: "Security review waits for a threat model",
+      text: "Pin a security review spec and threat model to unblock the review.",
+      itemIds: [item.id],
+      wake: true,
+    });
     return ctx.store.updateItem(
       item.id,
       (i) => ({ ...i, note: "Waiting for the PM to pin a security review spec and threat model" }),
@@ -227,6 +246,10 @@ export async function ensureReviewer(
         (i) => ({ ...i, note: "Waiting for a free agent for the re-review" }),
         { touch: false },
       );
+    }
+    if (reviewer?.branch === null) {
+      if (isBusy(reviewer)) await ctx.sessions.stop(reviewer.id);
+      return ctx.store.updateItem(item.id, (i) => ({ ...i, ...letGoReviewer(i) }));
     }
     await ctx.sessions.message(
       item.reviewerSessionId,
@@ -299,7 +322,12 @@ async function requestRecheck(
   const reviewer = item.reviewerSessionId
     ? ctx.repo.find(item.reviewerSessionId)?.session
     : undefined;
-  if (reviewer && reviewer.status !== "failed" && !reviewer.archivedAt) {
+  if (
+    reviewer &&
+    reviewer.branch !== null &&
+    reviewer.status !== "failed" &&
+    !reviewer.archivedAt
+  ) {
     if (!reviewSlot(ctx, project, item, reviewer)) {
       const note = `${why}: waiting for a free agent to ${job}`;
       return ctx.store.updateItem(item.id, (i) => ({ ...i, note }), { touch: false });
@@ -319,6 +347,10 @@ async function requestRecheck(
       ...i,
       note: `${why}: waiting for a free agent to ${job}`,
     }));
+  }
+  if (item.reviewerSessionId) {
+    item = ctx.store.updateItem(item.id, (i) => ({ ...i, ...letGoReviewer(i) }));
+    if (reviewer && isBusy(reviewer)) await ctx.sessions.stop(reviewer.id);
   }
   const res = await startReviewer(ctx, project, loop, item, vision, pr, prompt(true));
   if ("waiting" in res) {

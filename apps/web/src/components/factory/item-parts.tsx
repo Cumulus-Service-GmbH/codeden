@@ -198,7 +198,7 @@ export function ItemActions({ item, projectId }: { item: FactoryItem; projectId:
             className="flex-1"
           />
           {/* With its PR open, Retry re-reviews it; starting over is the other choice. */}
-          {pr && (
+          {pr && item.stage !== "verifying" && (
             <RetryButton
               projectId={projectId}
               item={item}
@@ -210,7 +210,8 @@ export function ItemActions({ item, projectId }: { item: FactoryItem; projectId:
         </div>
         {pr && (
           <p className="text-3xs text-muted-foreground">
-            Retry sends #{pr.number} back to a fresh review; Rebuild starts over and replaces it.
+            Retry sends #{pr.number} back to a fresh review.
+            {item.stage !== "verifying" && " Rebuild starts over and replaces it."}
           </p>
         )}
       </div>

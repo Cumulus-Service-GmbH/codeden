@@ -8,6 +8,7 @@ import { errorMessage } from "../errors";
 import { withVerdictHead } from "./approval";
 import { baseBranchOf, type FactoryContext, factoryNotice } from "./context";
 import type { FactoryPr } from "./github-port";
+import { closeInboxFor } from "./merge";
 import { failItem } from "./outcomes";
 import { revertedPrompt } from "./prompts-revert";
 import { isReReviewRecord } from "./rereview";
@@ -17,6 +18,7 @@ import { isBusy } from "./sessions";
 import { claimSlot } from "./slots";
 import { REVERTED_AT } from "./stats";
 import { AFTER_REVERT, FOLLOW_UPS_DUE, FOLLOW_UPS_HELD } from "./store";
+import { raiseStuck } from "./stuck";
 
 /**
  * Automatic reverts (§10.1, Merge). When CI on the default branch fails after a factory merge,
@@ -102,11 +104,22 @@ export async function checkRevert(
   }
   const at = ctx.now().toISOString();
   if (!exact || !mergeSha) {
+    if (!item.builderSessionId && !item.builderProvider) {
+      raiseStuck(
+        ctx,
+        item,
+        "The automatic revert no longer matches the original tree",
+        "Restore the exact revert or replace it with a revert whose author is known.",
+      );
+    }
     return ctx.store.updateItem(item.id, (i) => ({
       ...i,
       note: "Not an exact revert of the merge (conflicts were resolved, or it changes more): the normal review applies",
       nudges: { ...i.nudges, [`${INEXACT}${head}`]: at },
     }));
+  }
+  if (!item.builderSessionId && !item.builderProvider) {
+    closeInboxFor(ctx, item.id, "The revert now matches the original tree");
   }
   const verdict = revertVerdict(baseBranchOf(project), original?.pr?.number ?? null, mergeSha);
   return ctx.store.updateItem(item.id, (i) => ({

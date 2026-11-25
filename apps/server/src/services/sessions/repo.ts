@@ -80,6 +80,8 @@ export type StoredStartMeta = SessionStartMeta & {
   chromeRequested?: boolean;
   /** Its provider or model was the caller's own choice, not filled from the Team (`ownTeamPins`). */
   ownTeamPins?: true;
+  /** The approved Team layer for a session created by a Team run. */
+  runTeam?: import("@codeden/contracts").Team;
   autonomyFloor?: AutonomyLevel;
   /** The PM delegated session starts to this Team Architect. */
   teamArchitect?: true;

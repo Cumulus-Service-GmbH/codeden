@@ -177,6 +177,14 @@ function openPrNumber(w: FactoryWorkItem, pr: FactoryPrEntry | null): number | n
  * What a work item needs from a person, by the factory's one definition (`factoryNeed`): the
  * lane shows these cards and the header counts them. Null when nothing waits on a person.
  */
+function waitingOnPr(w: FactoryWorkItem, pr: FactoryPrEntry | null): boolean {
+  return (
+    pr?.state === "waiting_ci" ||
+    pr?.state === "superseded" ||
+    (pr?.pr ?? w.pr ?? w.ownedPr)?.state === "draft"
+  );
+}
+
 export function needOf(
   w: FactoryWorkItem,
   pr: FactoryPrEntry | null,
@@ -187,6 +195,8 @@ export function needOf(
     now,
     ownsOpenPr: ownsOpenPr(w, pr),
     recovering: w.recovering,
+    stoppedOnPurpose: w.stoppedOnPurpose,
+    prWaiting: waitingOnPr(w, pr),
     prWaitsForYou: pr?.state === "waiting_for_you",
     agentWaiting: session?.status === "waiting",
     specPending: w.specApproval === "pending",
@@ -212,6 +222,8 @@ export function placeOf(
       return "intake";
     case "backlog":
       return "type";
+    case "escalated":
+      return "merge";
     case "building":
       return "building";
     case "verifying":
@@ -239,7 +251,10 @@ export function stateOf(
   pr: FactoryPrEntry | null,
   session: SessionInfo | undefined,
 ): CardState {
-  if (w.stage === "escalated" || isStuck(w, pr)) return "person";
+  if (w.stage === "escalated") {
+    return waitingOnPr(w, pr) ? "waiting" : "person";
+  }
+  if (isStuck(w, pr)) return "person";
   if (w.stage === "failed") return "failed";
   // Its spec waits for a person's approval before it is built.
   if (w.stage === "building" && w.specApproval === "pending") return "person";
@@ -259,14 +274,16 @@ function activityOf(
   session: SessionInfo | undefined,
 ): string {
   const outcome = w.stage === "failed" || w.stage === "escalated" ? (w.reason ?? w.note) : null;
-  return (
-    outcome ??
-    session?.progress ??
-    pr?.note ??
-    w.note ??
-    (w.stage === "watching" ? "Watching CI on the default branch" : null) ??
-    (w.stage === "merged" ? "Merged" : stepLabel(w.step, w.type))
-  );
+  return (pr?.pr ?? w.pr ?? w.ownedPr)?.state === "draft"
+    ? "Waiting for the pull request author to mark it ready for review"
+    : pr?.state === "waiting_ci" && pr.note
+      ? pr.note
+      : (outcome ??
+        session?.progress ??
+        pr?.note ??
+        w.note ??
+        (w.stage === "watching" ? "Watching CI on the default branch" : null) ??
+        (w.stage === "merged" ? "Merged" : stepLabel(w.step, w.type)));
 }
 
 /** Place every work item of the status on the view, with its state and activity line. */

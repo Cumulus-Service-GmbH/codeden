@@ -627,6 +627,7 @@ export class SessionLauncher {
           path,
           branch,
           baseRef,
+          detachedSha: req.detachedSha,
           setupCommands: req.setupCommands ?? [],
           seenSetups: seenSetups(project),
           ...(fetch ? { fetch: true } : {}),
@@ -644,7 +645,7 @@ export class SessionLauncher {
       };
     } catch (error) {
       // A fork needs its own worktree (the source's code); it never falls back to the root.
-      if (fork || runnerErrorCode(error) !== "not_implemented") throw error;
+      if (req.detachedSha || fork || runnerErrorCode(error) !== "not_implemented") throw error;
       if (req.mode === "existing") return plain(path);
       return {
         ...plain(project.path),

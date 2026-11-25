@@ -3,7 +3,8 @@ import { errorMessage } from "../errors";
 import { type FactoryContext, factoryNotice, pauseLoop, raiseInbox } from "./context";
 import { escalatedInboxId } from "./merge";
 import { shouldPause } from "./policy";
-import { isDarkFactory, raiseStuck, recordStuckDecision } from "./stuck";
+import { ownedPr } from "./pr-status";
+import { failureInboxId, isDarkFactory, raiseStuck, recordStuckDecision } from "./stuck";
 
 export const failureStreakPauseSuffix = " failed merge checks or reverts in a row";
 
@@ -34,6 +35,21 @@ export function failItem(
     finishedAt: at,
   }));
   if (opts.notify !== false) {
+    if (kind === "checks") {
+      const pr = ownedPr(ctx, { ...item, stage: "failed" });
+      raiseInbox(ctx, {
+        id: failureInboxId(item.id),
+        kind: "owner_decision",
+        notify: "needs_you",
+        priority: "normal",
+        projectId: item.projectId,
+        sessionId: item.builderSessionId,
+        title: `${pr ? "Retry" : "Retry or dismiss"}: ${item.title}`,
+        body: reason,
+        issue: item.issue,
+        pr,
+      });
+    }
     factoryNotice(ctx, {
       id: `factory.failed:${item.id}`,
       projectId: item.projectId,

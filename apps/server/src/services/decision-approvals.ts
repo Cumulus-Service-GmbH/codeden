@@ -11,6 +11,7 @@ import {
   type NewEvent,
   OwnerApprovalWords,
   type PlanApprovalStep,
+  redactAndCount,
   redactSecrets,
 } from "@codeden/contracts";
 import { z } from "zod";
@@ -154,6 +155,12 @@ export class DecisionApprovals {
       request.steps.some(({ action }) => tierFor(action) !== (actor.role === "pm" ? 0 : 1))
     ) {
       refuse("The requester lacks decision rights for a plan step");
+    }
+    if (
+      request.kind === "plan" &&
+      request.steps.some(({ args }) => redactAndCount(JSON.stringify(args)).count > 0)
+    ) {
+      refuse("Plan step arguments must not contain credentials");
     }
     const card = DecisionCard.parse({
       id: randomUUID(),
@@ -351,6 +358,9 @@ export class DecisionApprovals {
       (tier === 1 && actor.role !== "orchestrator")
     ) {
       refuse("This session lacks decision rights for the step");
+    }
+    if (redactAndCount(JSON.stringify(step.args)).count > 0) {
+      refuse("Plan step arguments must not contain credentials");
     }
     this.store.appendFrom(() => {
       const state = cardId ? this.cards().get(cardId) : undefined;

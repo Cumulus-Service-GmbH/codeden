@@ -45,7 +45,7 @@ export function jevReviewBrief(item: FactoryItem): string {
 export function jevWriterResponse(ctx: FactoryContext, item: FactoryItem): string | undefined {
   const builder = item.builderSessionId ? ctx.repo.find(item.builderSessionId)?.session : undefined;
   const response = builder && ctx.repo.rootItems(builder, ["assistant_message"], 1)[0];
-  return response?.kind === "assistant_message" ? response.text : undefined;
+  return response?.kind === "assistant_message" ? response.text.slice(0, 8_000) : undefined;
 }
 
 /** Record a response only against the head that was sent back by the done gate. */

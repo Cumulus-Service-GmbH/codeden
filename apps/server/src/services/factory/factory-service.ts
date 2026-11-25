@@ -526,8 +526,11 @@ export class FactoryService {
       const stopped = await Promise.all(projects.map(({ id }) => this.halt(id)));
       return { on, stoppedSessions: stopped.flat(), draining: false, inFlight: 0 };
     }
+    const idleResumes: Promise<void>[] = [];
     for (const { id } of projects) {
-      await this.serialize(id, "global resume", () => {
+      const waiting = this.chains.has(id);
+      const resumed = this.serialize(id, "global resume", () => {
+        if (this.deps.settings.get().factory.killSwitch) return;
         const project = this.deps.projects.get(id);
         const existing = this.data.loop(id);
         if (!project.killSwitch && existing) {
@@ -538,7 +541,10 @@ export class FactoryService {
           this.resumeAfterKill(id, control);
         }
       });
+      if (waiting) void resumed.catch(() => undefined);
+      else idleResumes.push(resumed);
     }
+    await Promise.all(idleResumes);
     return { on, stoppedSessions: [], draining: false, inFlight: 0 };
   }
 
@@ -693,6 +699,11 @@ export class FactoryService {
     const item = decisions.retry(this.ctx, projectId, itemId, mode, by);
     this.soon(projectId);
     return item;
+  }
+
+  /** The owner can retry an item still in verification, after any in-flight tick finishes. */
+  retryFromUser(projectId: string, itemId: string, mode?: FactoryRetryMode): Promise<FactoryItem> {
+    return this.serialize(projectId, "owner retry", () => this.retry(projectId, itemId, mode));
   }
 
   /**
@@ -1007,11 +1018,12 @@ export class FactoryService {
         this.ctx,
         project,
         { ...started.loop, lastControl: control ?? started.loop.lastControl },
-        () => {
+        (_id, _on, timedOut) => {
           finished = true;
+          if (timedOut) this.writeKillSwitch(projectId, true);
         },
       );
-      if (stopped())
+      if ((!finished && stopped()) || this.deps.settings.get().factory.killSwitch)
         return { loop: null, stoppedSessions: started.stoppedSessions, changed: false };
       if (finished) this.writeKillSwitch(projectId, true, next);
       const loop = finished ? next : this.data.saveLoop(next);

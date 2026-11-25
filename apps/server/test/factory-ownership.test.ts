@@ -279,6 +279,7 @@ describe("failures outside the work's code", () => {
     env = createFactoryEnv();
     await enable();
     const { id, pr } = await verifying("none");
+    const originalHead = pr.headSha;
     env.gh.main.sha = "main-moved";
     later(2 * 60_000);
     await tick();
@@ -287,7 +288,7 @@ describe("failures outside the work's code", () => {
     expect(env.gh.updates).toEqual([
       {
         number: pr.ref.number,
-        expectedHeadSha: expect.stringMatching(/^head/) as unknown as string,
+        expectedHeadSha: originalHead,
       },
     ]);
     expect((pr as FakePr).checks).toBe("pending");

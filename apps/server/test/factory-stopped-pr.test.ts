@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { assertMayRetry } from "../src/mcp/tools/pm/issue-trust";
 import { createFactoryEnv, type FactoryEnv } from "./support/factory-env";
+import { sha } from "./support/factory-jev-fixture";
 import { APPROVE, factorySteps } from "./support/factory-steps";
 
 /**
@@ -34,7 +35,7 @@ describe("failed items with an open PR", () => {
     expect(item(id).stage).toBe("failed");
 
     // The builder's fix lands after the last review: a new head, mergeable, CI green.
-    env.gh.rebase(pr, "fixed-after-review");
+    env.gh.rebase(pr, sha("fixed-after-review"));
     readAgainSoon(id);
     await tick();
     // One re-review of the existing PR, no new build.
@@ -54,7 +55,7 @@ describe("failed items with an open PR", () => {
     review(id, CHANGES);
     failed(id);
     await env.setStatus(item(id).reviewerSessionId as string, "idle");
-    env.gh.rebase(pr, "fixed-after-review");
+    env.gh.rebase(pr, sha("fixed-after-review"));
     readAgainSoon(id);
     await tick();
     expect(item(id).stage).toBe("verifying");
@@ -80,7 +81,7 @@ describe("failed items with an open PR", () => {
     env.factory.data.updateItem(id, (i) => ({ ...i, attempts: 2 }));
     failed(id);
     await env.setStatus(item(id).reviewerSessionId as string, "idle");
-    env.gh.rebase(pr, "fixed-after-review");
+    env.gh.rebase(pr, sha("fixed-after-review"));
     readAgainSoon(id);
     await tick();
     await tick();
@@ -97,7 +98,7 @@ describe("failed items with an open PR", () => {
     review(id, CHANGES);
     failed(id);
     await env.setStatus(item(id).reviewerSessionId as string, "idle");
-    env.gh.rebase(pr, "fixed-after-review", "pending");
+    env.gh.rebase(pr, sha("fixed-after-review"), "pending");
     readAgainSoon(id);
     await tick();
     expect(item(id).stage).toBe("failed");

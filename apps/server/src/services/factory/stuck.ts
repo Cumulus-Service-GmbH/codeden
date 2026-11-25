@@ -1,5 +1,7 @@
-import type { FactoryItem } from "@codeden/contracts";
+import { type FactoryItem, factoryNeed } from "@codeden/contracts";
 import { type FactoryContext, factoryNotice, raiseInbox } from "./context";
+import { ownedPr } from "./pr-status";
+import { endedByStop } from "./stops";
 import { DECISION_INBOX_PREFIX } from "./unattended";
 
 /**
@@ -12,6 +14,28 @@ import { DECISION_INBOX_PREFIX } from "./unattended";
  */
 
 /** Inbox id of a stuck item (software factory; one per item). */
+const FAILURE_INBOX = "inbox:factory-retry:";
+export const failureInboxId = (itemId: string) => `${FAILURE_INBOX}${itemId}`;
+
+export function settleFailureInbox(ctx: FactoryContext, projectId: string): void {
+  for (const open of ctx.inbox.list({ projectId })) {
+    if (!open.id.startsWith(FAILURE_INBOX)) continue;
+    const item = ctx.store.item(open.id.slice(FAILURE_INBOX.length));
+    if (
+      item &&
+      factoryNeed(item, {
+        now: ctx.now().getTime(),
+        ownsOpenPr: Boolean(ownedPr(ctx, item)),
+        stoppedOnPurpose: endedByStop(item),
+      })
+    )
+      continue;
+    ctx.inbox.close(open, "resolved", {
+      note: "The factory item no longer needs a retry decision",
+    });
+  }
+}
+
 export const stuckInboxId = (itemId: string) => `inbox:factory-stuck:${itemId}`;
 
 /** Inbox id of a stuck item's recorded decision (dark factory; one per item). */

@@ -27,6 +27,8 @@ function ciState(item: FactoryItem): FactoryPrState {
 
 /** The state of an item's PR, given its place in the merge queue (null: not queued). */
 export function prState(item: FactoryItem, project: Project, queued: boolean): FactoryPrState {
+  if (item.pr?.state === "draft") return "checking";
+  if (item.stage === "escalated" && ciState(item) === "waiting_ci") return "waiting_ci";
   switch (item.stage) {
     case "verifying":
       if (isRebasing(item)) return "rebasing";
@@ -73,7 +75,12 @@ export function pullRequests(
     pr,
     state: prState(i, project, position.has(i.id)),
     queuePosition: position.get(i.id) ?? null,
-    note: i.note ?? i.reason,
+    note:
+      pr.state === "draft"
+        ? "Waiting for the pull request author to mark it ready for review"
+        : prState(i, project, position.has(i.id)) === "waiting_ci"
+          ? (i.checks.find((c) => c.name === "ci")?.detail ?? i.note ?? i.reason)
+          : (i.note ?? i.reason),
   });
   const queued = queue.flatMap((i) => (i.pr ? [entry(i, i.pr)] : []));
   const others: FactoryPrEntry[] = [];

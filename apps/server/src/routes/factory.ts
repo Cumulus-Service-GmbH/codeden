@@ -94,7 +94,7 @@ export function projectFactoryRoutes(s: AppServices) {
     })
     .post("/:id/factory/items/:itemId/retry", jsonBody(FactoryRetryOptions), async (c) => {
       const id = c.req.param("id");
-      const item = f.retry(id, c.req.param("itemId"), c.req.valid("json").mode);
+      const item = await f.retryFromUser(id, c.req.param("itemId"), c.req.valid("json").mode);
       return c.json<FactoryItemResponse>(await f.itemResponse(id, item));
     })
     .post("/:id/factory/items/:itemId/dismiss", jsonBody(FactoryDismissRequest), async (c) => {

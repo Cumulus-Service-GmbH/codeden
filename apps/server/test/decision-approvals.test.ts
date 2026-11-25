@@ -493,3 +493,19 @@ it.each([true, false])("records the consumed step's result when ok is %s", async
     },
   ]);
 });
+
+it("refuses plan arguments containing credentials before emitting a card", () => {
+  const { service, store } = setup();
+  expect(() =>
+    service().raise(orchestrator, "project", {
+      kind: "plan",
+      steps: [
+        {
+          action: "stop_session",
+          args: { command: ["DB_PASSWORD", "synthetic-test-value"].join("=") },
+        },
+      ],
+    }),
+  ).toThrow("Plan step arguments must not contain credentials");
+  expect(store.listTypes(["decision.raised"])).toEqual([]);
+});

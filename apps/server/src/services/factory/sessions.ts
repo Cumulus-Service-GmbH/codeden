@@ -354,7 +354,7 @@ export class FactorySessions {
     reviewer: AgentChoice,
     note: string | null,
     /** The PR's head to review in a fresh worktree; null to use the builder's worktree. */
-    pr: { headBranch: string; baseBranch: string } | null,
+    pr: { headSha: string; baseBranch: string } | null,
     autoMerge: boolean,
     /** A brief of its own instead of the whole review (a conflict resolution's re-check). */
     text?: string,
@@ -371,8 +371,8 @@ export class FactorySessions {
     if (pr) {
       workspace = {
         mode: "worktree",
-        branch: `codeden/review-${item.pr?.number ?? item.id.slice(0, 8)}-${item.id.slice(0, 4)}`,
-        baseRef: `origin/${pr.headBranch}`,
+        detachedSha: pr.headSha,
+        baseRef: pr.headSha,
         fetch: true,
       };
       localBase = `origin/${pr.baseBranch}`;

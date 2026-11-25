@@ -89,6 +89,7 @@ export interface TeamFileDeps {
   session: (sessionId: string) => Session | undefined;
   /** Whether the session's provider or model was its starter's own choice (its own Team layer). */
   ownTeamPins?: (sessionId: string) => boolean;
+  runTeam?: (sessionId: string) => Team | undefined;
   /** Sessions that are live (not ended), all or one project's. */
   liveSessions: (projectId?: string) => Session[];
   log?: (message: string) => void;
@@ -103,7 +104,7 @@ export function writeTeamFile(deps: TeamFileDeps, session: Session, now = new Da
   const path = teamFilePath(deps.home, session.id);
   const { team, sources } = resolveTeam({
     defaults: deps.defaults(),
-    project: deps.projectTeam(session.projectId),
+    project: deps.runTeam?.(session.id) ?? deps.projectTeam(session.projectId),
     // Only pins the starter chose are the session's own; ones filled from the Team follow the Team.
     session: deps.ownTeamPins?.(session.id) ? sessionTeamMember(session) : null,
   });

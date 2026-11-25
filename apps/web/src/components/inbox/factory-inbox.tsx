@@ -11,12 +11,16 @@ import { InboxActions, PrReviewStatus } from "./inbox-actions";
 
 const DIGEST = "inbox:factory-digest:";
 const ESCALATED = "inbox:factory-escalated:";
+const RETRY = "inbox:factory-retry:";
 const SPEC = "inbox:factory-spec:";
 
 /** Which factory inbox item this is (§10.1), from the ids the factory gives them. */
-export function factoryInboxKind(item: InboxItem): "digest" | "escalated" | "spec" | null {
+export function factoryInboxKind(
+  item: InboxItem,
+): "digest" | "escalated" | "spec" | "retry" | null {
   if (item.id.startsWith(DIGEST)) return "digest";
   if (item.id.startsWith(ESCALATED)) return "escalated";
+  if (item.id.startsWith(RETRY)) return "retry";
   if (item.id.startsWith(SPEC)) return "spec";
   return null;
 }
@@ -169,5 +173,20 @@ export function FactoryInboxCard({ item }: { item: InboxItem }) {
   const kind = factoryInboxKind(item);
   if (kind === "digest") return <DigestCard item={item} />;
   if (kind === "spec") return <SpecCard item={item} />;
+  if (kind === "retry" && item.projectId)
+    return (
+      <div className="space-y-3 rounded-xl border border-border bg-card p-4">
+        <h3 className="text-sm font-medium">{item.title}</h3>
+        <p className="text-sm text-muted-foreground">{item.body}</p>
+        <Button asChild size="sm" variant="outline">
+          <Link
+            to="/projects/$projectId/factory/$itemId"
+            params={{ projectId: item.projectId, itemId: item.id.slice(RETRY.length) }}
+          >
+            {item.status === "open" ? (item.pr ? "Retry" : "Retry or dismiss") : "View work item"}
+          </Link>
+        </Button>
+      </div>
+    );
   return <EscalationCard item={item} />;
 }

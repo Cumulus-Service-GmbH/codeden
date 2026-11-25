@@ -32,6 +32,8 @@ it("shows a GitHub approval card in the inbox", async () => {
   const approve = vi.spyOn(client.github, "approveDecisionCard").mockResolvedValue();
   renderWithClient(<InboxPage />, client, { withRouter: true });
 
+  const defaultCards = within(await screen.findByRole("region", { name: "Approval cards" }));
+  expect(defaultCards.getByRole("heading", { name: "Approve pull request" })).toBeTruthy();
   fireEvent.click(await screen.findByRole("button", { name: /^Needs an answer/ }));
   const cards = within(await screen.findByRole("region", { name: "Approval cards" }));
   expect(cards.getByRole("heading", { name: "Approve pull request" })).toBeTruthy();

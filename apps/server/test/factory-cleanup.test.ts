@@ -160,13 +160,15 @@ describe("archiving finished factory work (§10.1)", () => {
     const verifying = await toVerifying(backlogItem());
     const builder = verifying.builderSessionId as string;
     const first = verifying.reviewerSessionId as string;
+    expect(session(first).cwd).toBe(session(builder).worktreePath);
     await env.setStatus(first, "failed");
     await tick(); // The failed reviewer is let go...
     await tick(); // ...and a new one starts.
     const second = item(verifying.id).reviewerSessionId as string;
     expect(second).toBeTruthy();
     expect(second).not.toBe(first);
-    expect(session(second).cwd).toBe(session(builder).worktreePath);
+    expect(session(second).cwd).not.toBe(session(builder).worktreePath);
+    expect(env.starts.at(-1)?.workspace?.detachedSha).toMatch(/^[a-f0-9]{40}$/);
     // An area reviewer (a "lens") is long-lived, even in the same folder.
     const lens = await env.factory.ctx.sessions.startLens(env.project.id, "security", "Look", {
       provider: "auto",

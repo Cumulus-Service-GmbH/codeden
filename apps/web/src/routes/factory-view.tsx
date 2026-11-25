@@ -3,6 +3,7 @@ import { Link } from "@tanstack/react-router";
 import { Bot, Factory, MessageSquare } from "lucide-react";
 import { type ReactNode, useMemo, useState } from "react";
 import { EmptyState } from "@/components/common/bits";
+import { FactoryActivity } from "@/components/factory-view/factory-activity";
 import type { SceneChat } from "@/components/factory-view/floor/floor-scene";
 import { useChatColumn, useNow, useRoomy, useWide } from "@/components/factory-view/hooks";
 import { ItemSheet } from "@/components/factory-view/item-sheet";
@@ -21,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetDescription, SheetTitle } from "@/components/ui/sheet";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useFactoryStatus } from "@/lib/factory";
+import { useProjectStatus } from "@/lib/orchestration";
 import { useProject, useSessionLookups, useSnapshot, useSnapshotData } from "@/lib/queries";
 
 const CHAT_KEY = "codeden.factoryView.chat";
@@ -68,6 +70,7 @@ function Frame({ children }: { children: ReactNode }) {
 export function FactoryViewPage({ projectId }: { projectId: string }) {
   const { data: snapshot } = useSnapshot();
   const project = useProject(projectId);
+  const activity = useProjectStatus(projectId);
   const factory = project ? isFactoryMode(project.autonomyMode) : false;
   const { data: f } = useFactoryStatus(projectId, factory);
   const sessionList = useSnapshotData((s) => s.sessions, noSessions);
@@ -195,6 +198,13 @@ export function FactoryViewPage({ projectId }: { projectId: string }) {
             ) : undefined
           }
         />
+        {f.inProgress.length === 0 && f.backlog.length === 0 && (
+          <FactoryActivity
+            projectId={projectId}
+            projectActive={activity.work.length > 0}
+            activityLoaded={Boolean(activity.status)}
+          />
+        )}
         <div className="flex min-h-0 flex-1">
           {scene ? (
             // Floor fills the space; its dial and status board stand in for the figures, and

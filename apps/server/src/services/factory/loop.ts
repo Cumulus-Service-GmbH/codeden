@@ -33,6 +33,7 @@ import { settleSpecInbox } from "./spec-approval";
 import { closeEarlyPrs } from "./spec-early-pr";
 import { settleSpotCheckInbox } from "./spot-checks";
 import { OWNED_STAGES } from "./store";
+import { settleFailureInbox } from "./stuck";
 import { teamTuning } from "./team-role";
 import { mayAutoMerge } from "./trust";
 import { recoverTurnRaceFailures } from "./turn-race";
@@ -152,6 +153,7 @@ export async function runTick(
   loop = sweepFailedSessions(ctx, projectId, loop);
   // Requests to approve a spec that waits for nothing any more are resolved.
   settleSpecInbox(ctx, projectId);
+  settleFailureInbox(ctx, projectId);
   // The one "N merges to spot-check" item follows the merges set aside and the checks recorded.
   settleSpotCheckInbox(ctx, project);
   // A drain whose work is all done stops the loop here (also while paused).

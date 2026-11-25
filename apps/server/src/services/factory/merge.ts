@@ -6,7 +6,7 @@ import { followUpsAtMerge } from "./follow-ups";
 import type { FactoryPr } from "./github-port";
 import { trackedHead } from "./rebase";
 import { spotCheckAtMerge } from "./spot-checks";
-import { stuckDecisionId, stuckInboxId } from "./stuck";
+import { failureInboxId, stuckDecisionId, stuckInboxId } from "./stuck";
 
 /**
  * The Merge step (§10.1): every check passed. With auto-merge on and trusted work, the factory
@@ -26,6 +26,7 @@ export function prInboxIds(itemId: string): string[] {
     readyInboxId(itemId),
     escalatedInboxId(itemId),
     stuckInboxId(itemId),
+    failureInboxId(itemId),
     stuckDecisionId(itemId),
     `inbox:factory-owner-decision:${itemId}`,
   ];
