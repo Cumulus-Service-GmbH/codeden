@@ -1,9 +1,9 @@
-import type {
-  AgentConfigDiff,
-  AgentConfigFileContent,
-  AgentConfigLocator,
-  ImageEnginesResponse,
-  McpServerEntry,
+import {
+  type AgentConfigDiff,
+  type AgentConfigFileContent,
+  type AgentConfigLocator,
+  type ImageEnginesResponse,
+  type McpServerEntry,
   SecretKey,
 } from "@codeden/contracts";
 import type { CodeDenClient } from "../client";
@@ -291,9 +291,7 @@ function mockSecrets(): SecretsApi {
     status: () =>
       delay({
         backend: "memory" as const,
-        keys: (
-          ["elevenlabs.apiKey", "openai.apiKey", "gemini.apiKey", "anthropic.apiKey"] as const
-        ).map((k) => ({ key: k, set: set.has(k) })),
+        keys: SecretKey.options.map((key) => ({ key, set: set.has(key) })),
       }),
     async set(k) {
       set.add(k);

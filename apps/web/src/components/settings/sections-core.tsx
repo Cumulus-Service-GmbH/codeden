@@ -1,4 +1,5 @@
-import type { Role } from "@codeden/contracts";
+import { type Role, SecretKey } from "@codeden/contracts";
+import { useQuery } from "@tanstack/react-query";
 import { ProviderMark } from "@/components/common/bits";
 import { NumberField } from "@/components/common/number-field";
 import { PickerFooterChoice } from "@/components/composer/model-picker/footer";
@@ -7,14 +8,17 @@ import { ModelPicker } from "@/components/composer/model-picker/model-picker";
 import { KillSwitchButton } from "@/components/factory/kill-switch";
 import { AUTONOMY } from "@/components/thread/autonomy";
 import { Switch } from "@/components/ui/switch";
+import { useClient } from "@/lib/api";
 import { useSetupStatus, useSnapshotData } from "@/lib/queries";
 import { cn } from "@/lib/utils";
 import { type ThemePreference, useThemeStore } from "@/stores/theme";
 import { AgentEnvironmentSettings } from "./agent-environment";
 import { CustomModelSettings } from "./custom-models";
 import { ModelVisibilitySettings } from "./model-visibility";
+import { NETWORK_KEY } from "./network-password";
 import { ProviderHistorySettings } from "./provider-history";
 import { ProviderSecuritySettings } from "./provider-security";
+import { SecretField } from "./secret-field";
 import { Segmented, SettingRow, SettingsSection, useSettings } from "./settings-ui";
 import { TokenSaverSettingsSection } from "./token-saver";
 import { UpdateModeSetting } from "./update-mode";
@@ -178,6 +182,8 @@ const roles: { role: Role; label: string; help: string }[] = [
 
 export function ProviderSettings() {
   const { settings, update } = useSettings();
+  const client = useClient();
+  const network = useQuery({ queryKey: NETWORK_KEY, queryFn: () => client.network.status() });
   const providers = useSnapshotData((s) => s.runner.providers, []);
   // The same checks as the setup checklist, so the two screens never disagree.
   const checks = useSetupStatus({ staleTime: 60_000 }).data?.checks;
@@ -215,6 +221,18 @@ export function ProviderSettings() {
             </SettingRow>
           );
         })}
+      </SettingsSection>
+      <SettingsSection title="API keys">
+        <SettingRow
+          label="TypeSafe API key (Jev)"
+          help="Stored in the OS keychain on this computer."
+        >
+          <SecretField
+            secret={SecretKey.enum["typesafe.apiKey"]}
+            label="TypeSafe API key (Jev)"
+            readOnly={network.data?.remote !== false}
+          />
+        </SettingRow>
       </SettingsSection>
       <SettingsSection
         title="Defaults per role"

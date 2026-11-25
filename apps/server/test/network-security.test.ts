@@ -3,13 +3,15 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { NetworkStatus, SetNetworkPasswordResponse, SignInError } from "@codeden/contracts";
 import { Hono } from "hono";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NetworkAccess } from "../src/network/access";
 import type { BindHost, HttpListener } from "../src/network/listener";
 import { RemoteAccessStore } from "../src/network/store";
 import { authRoutes, networkRoutes } from "../src/routes/network";
+import { secretRoutes } from "../src/routes/system";
 import { errorResponse } from "../src/routes/validate";
 import { loopbackOrigins, securityMiddleware } from "../src/security";
+import { KeyringSecretStore, MemorySecretStore } from "../src/services/secrets";
 import { removeTree } from "./support/remove-tree";
 
 /**
@@ -41,8 +43,39 @@ let dir: string;
 let listener: FakeListener;
 let network: NetworkAccess;
 let app: Hono;
+const log = vi.fn();
+const secretPath = "/api/secrets/typesafe.apiKey";
+
+function mountSecrets(api: Hono) {
+  let value: string | null = null;
+  class Entry {
+    constructor(
+      private readonly service: string,
+      private readonly account: string,
+    ) {}
+
+    async getPassword() {
+      return this.account === "typesafe.apiKey" ? value : null;
+    }
+
+    async setPassword(password: string) {
+      expect([this.service, this.account]).toEqual(["codeden", "typesafe.apiKey"]);
+      if (password === "synthetic write failure") throw new Error(password);
+      value = password;
+    }
+
+    async deletePassword() {
+      value = null;
+      return true;
+    }
+  }
+  const images = { invalidate: () => undefined };
+  api.route("/secrets", secretRoutes({ secrets: new KeyringSecretStore(Entry), images }));
+  api.route("/memory-secrets", secretRoutes({ secrets: new MemorySecretStore(), images }));
+}
 
 function build() {
+  log.mockClear();
   listener = new FakeListener();
   network = new NetworkAccess({
     store: new RemoteAccessStore(join(dir, "remote-access.json")),
@@ -98,11 +131,12 @@ function build() {
     }),
   );
   const api = new Hono()
-    .onError((e, c) => errorResponse(e, c))
+    .onError((e, c) => errorResponse(e, c, log))
     .get("/health", (c) => c.json({ ok: true }))
     .get("/snapshot", (c) => c.json({ snapshot: true }))
     .route("/network", networkRoutes(ctx))
     .route("/auth", authRoutes(ctx));
+  mountSecrets(api);
   app.route("/api", api);
   app.all("/mcp", (c) => c.json({ mcp: true }));
   app.get("/ws", (c) => c.text("socket"));
@@ -224,8 +258,60 @@ describe("Host and Origin checks", () => {
   });
 });
 
+describe("TypeSafe key settings", () => {
+  const save = (value: string, path = secretPath) =>
+    local(path, { ...json({ value }, auth), method: "PUT" });
+
+  it("sets and deletes the Keychain entry while exposing only its status", async () => {
+    const value = "synthetic TypeSafe input";
+    const status = async (set: boolean) => {
+      const response = await local("/api/secrets", { headers: auth });
+      const body = await response.text();
+      expect(response.status).toBe(200);
+      expect(body).not.toContain(value);
+      expect(JSON.parse(body).keys).toContainEqual({ key: "typesafe.apiKey", set });
+    };
+    await status(false);
+    const saved = await save(value);
+    expect(saved.status).toBe(200);
+    expect(await saved.json()).toEqual({ ok: true });
+    await status(true);
+    const removed = await local(secretPath, { method: "DELETE", headers: auth });
+    expect(removed.status).toBe(200);
+    expect(await removed.json()).toEqual({ ok: true });
+    await status(false);
+    expect(JSON.stringify(log.mock.calls)).not.toContain(value);
+  });
+
+  it("keeps submitted values out of failed write responses and logs", async () => {
+    const value = "synthetic write failure";
+    const response = await save(value);
+    expect(response.status).toBe(500);
+    expect(await response.text()).not.toContain(value);
+    expect(JSON.stringify(log.mock.calls)).not.toContain(value);
+  });
+
+  it("refuses to store the TypeSafe key in the memory fallback", async () => {
+    const response = await save("synthetic fallback input", "/api/memory-secrets/typesafe.apiKey");
+    expect(response.status).toBe(503);
+  });
+});
+
 describe("remote requests", () => {
   beforeEach(enable);
+
+  it("refuses authenticated remote TypeSafe key writes and deletions", async () => {
+    const signedIn = await signIn();
+    expect(signedIn.status).toBe(200);
+    const cookie = cookieOf(signedIn);
+    const save = await phone(secretPath, {
+      ...json({ value: "synthetic remote input" }, { cookie, "x-forwarded-for": "127.0.0.1" }),
+      method: "PUT",
+    });
+    expect(save.status).toBe(403);
+    expect(await save.text()).not.toContain("synthetic remote input");
+    expect((await phone(secretPath, { method: "DELETE", headers: { cookie } })).status).toBe(403);
+  });
 
   it("need a session: the install token and spoofed forwarding headers grant nothing", async () => {
     const attempts: Record<string, string>[] = [

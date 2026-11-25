@@ -1,4 +1,5 @@
 import type { SecretKey } from "@codeden/contracts";
+import { ServiceError } from "./errors";
 
 /**
  * Secrets in the OS keychain (§6), e.g. an optional ElevenLabs key. Values never go to files,
@@ -34,6 +35,15 @@ interface KeyringEntry {
 }
 type EntryCtor = new (service: string, account: string) => KeyringEntry;
 
+async function keychainOperation<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch {
+    // Native errors can contain input. Never forward their details to the API logger.
+    throw new ServiceError(500, "keychain_error", "The OS keychain operation failed.");
+  }
+}
+
 /** OS keychain through `@napi-rs/keyring` (Credential Manager, Keychain, Secret Service). */
 export class KeyringSecretStore implements SecretStore {
   readonly backend = "keyring" as const;
@@ -44,13 +54,13 @@ export class KeyringSecretStore implements SecretStore {
   ) {}
 
   async get(key: SecretKey): Promise<string | null> {
-    return new this.Entry(this.service, key).getPassword();
+    return keychainOperation(() => new this.Entry(this.service, key).getPassword());
   }
   async set(key: SecretKey, value: string): Promise<void> {
-    await new this.Entry(this.service, key).setPassword(value);
+    await keychainOperation(() => new this.Entry(this.service, key).setPassword(value));
   }
   async delete(key: SecretKey): Promise<void> {
-    await new this.Entry(this.service, key).deletePassword();
+    await keychainOperation(() => new this.Entry(this.service, key).deletePassword());
   }
 }
 

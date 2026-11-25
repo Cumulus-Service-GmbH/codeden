@@ -29,6 +29,7 @@ import {
   ReviewSessionResponse,
   RunnerConnectionStatus,
   SESSION_LOOKUP_MAX,
+  SecretsStatus,
   SendMessageRequest,
   SessionSnapshot,
   SessionSnapshotQuery,
@@ -52,6 +53,11 @@ function roundTrip<T>(schema: { parse: (v: unknown) => T }, value: unknown): T {
 }
 
 describe("api schemas", () => {
+  it("round-trips TypeSafe key status without a value", () => {
+    const status = { backend: "keyring", keys: [{ key: "typesafe.apiKey", set: true }] };
+    expect(roundTrip(SecretsStatus, status)).toEqual(status);
+  });
+
   it("fills start-session defaults", () => {
     const req = roundTrip(StartSessionRequest, { projectId: "p1", input: { text: "hi" } });
     expect(req.role).toBe("agent");

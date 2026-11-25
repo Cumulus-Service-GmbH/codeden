@@ -23,10 +23,12 @@ export function SecretField({
   secret,
   label,
   onChange,
+  readOnly = false,
 }: {
   secret: SecretKey;
   label: string;
   onChange?: () => void;
+  readOnly?: boolean;
 }) {
   const client = useClient();
   const queryClient = useQueryClient();
@@ -58,6 +60,9 @@ export function SecretField({
       toast.success(`${label} removed`);
     },
   });
+  if (readOnly) {
+    return <span className="text-xs text-muted-foreground">{isSet ? "Set" : "Not set"}</span>;
+  }
   return (
     <div className="flex w-80 items-center gap-2">
       <Input
