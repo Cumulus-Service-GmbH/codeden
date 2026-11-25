@@ -5,6 +5,7 @@ import { type Database, openDatabase } from "../src/db/client";
 import { EventStore } from "../src/events/store";
 import { ToolRegistry } from "../src/mcp/registry";
 import { allTools } from "../src/mcp/tools";
+import { updateChecklistItem } from "../src/mcp/tools/checklist";
 import { updateChecklist } from "../src/mcp/tools/orchestrator/checklist";
 import { ChecklistService, WAITING_FOR_OWNER } from "../src/services/checklist/checklist-service";
 import { InboxService } from "../src/services/inbox-service";
@@ -117,7 +118,7 @@ it("scopes item edits in MCP and exposes no owner decision tool", async () => {
   const agentCaller = { ...caller, sessionId: agent.id, role: agent.role };
   const pmCaller = { ...caller, sessionId: pm.id, role: pm.role };
   const edit = allTools.find((tool) => tool.name === "update_checklist_item");
-  expect(edit?.isAvailable?.({ checklist: service } as never, pmCaller)).toBe(false);
+  expect(edit?.isAvailable?.({ checklist: service } as never, agentCaller, "agent")).toBe(false);
   const draft = service.update(
     projectId,
     { items: [{ id: "a", text: "A" }] },
@@ -128,12 +129,19 @@ it("scopes item edits in MCP and exposes no owner decision tool", async () => {
     await tools.call("update_checklist_item", { itemId: "a", status: "doing" }, agentCaller),
   ).toMatchObject({ isError: true, text: expect.stringContaining("not linked") });
   expect(
-    await tools.call("update_checklist_item", { itemId: "a", text: "B", status: "done" }, pmCaller),
+    await tools.call(
+      "update_checklist_item",
+      { itemId: "a", text: "B", status: "done" },
+      agentCaller,
+    ),
   ).toMatchObject({ isError: true });
   expect(
-    await tools.call("update_checklist_item", { itemId: "a", note: "Reviewing" }, pmCaller),
+    await tools.call("update_checklist_item", { itemId: "a", status: "done" }, pmCaller),
   ).toMatchObject({ isError: false });
   service.link(projectId, "a", agent);
+  expect(
+    await tools.call("update_checklist_item", { itemId: "a", text: "B" }, agentCaller),
+  ).toMatchObject({ isError: true });
   expect(
     await tools.call("update_checklist_item", { itemId: "a", status: "doing" }, agentCaller),
   ).toMatchObject({ isError: false });
@@ -144,6 +152,85 @@ it("scopes item edits in MCP and exposes no owner decision tool", async () => {
     });
   }
   expect(service.get(projectId)?.pending?.inboxItemId).toBe(card);
+});
+
+function pmChecklistTools() {
+  const session = { ...sampleSession, projectId, role: "pm" as const };
+  const tools = new ToolRegistry([updateChecklistItem], {
+    checklist: service,
+    sessionRepo: { find: () => ({ session }) },
+  } as never);
+  const caller = {
+    caller: "mcp" as const,
+    projectId,
+    sessionId: session.id,
+    role: session.role,
+    signal: new AbortController().signal,
+  };
+  return { tools, caller };
+}
+
+it("updates stored task text and preserves the note when the PM sends progress", async () => {
+  const { tools, caller } = pmChecklistTools();
+  service.update(projectId, { items: [{ id: "a", text: "A" }] });
+  const note = "Reviewing\nresults";
+  expect(
+    await tools.call("update_checklist_item", { itemId: "a", note, status: "doing" }, caller),
+  ).toMatchObject({ isError: false, text: expect.stringContaining("Reviewing results") });
+  expect(service.get(projectId)?.items[0]).toMatchObject({
+    text: "Reviewing results",
+    note,
+    status: "doing",
+  });
+  expect(
+    await tools.call("update_checklist_item", { itemId: "a", text: "B", note: "Checked" }, caller),
+  ).toMatchObject({ isError: false });
+  expect(service.get(projectId)?.items[0]).toMatchObject({ text: "B", note: "Checked" });
+});
+
+it("creates the first checklist item and uses owner approval for additions to approved lists", async () => {
+  const { tools, caller } = pmChecklistTools();
+  expect(
+    await tools.call("update_checklist_item", { itemId: "a", text: "A" }, caller),
+  ).toMatchObject({
+    isError: false,
+  });
+  expect(service.get(projectId)?.items[0]).toMatchObject({ id: "a", text: "A", status: "todo" });
+  const approval = proposal(service.update(projectId, {}, { requestApproval: true }));
+  service.decide(approval.inboxItemId, "resolved");
+  expect(
+    await tools.call("update_checklist_item", { itemId: "b", text: "B", note: "Ready" }, caller),
+  ).toMatchObject({ isError: false, text: expect.stringContaining("owner card") });
+  const checklist = ProjectChecklist.parse(service.get(projectId));
+  expect(checklist.items).toHaveLength(1);
+  service.decide(proposal(checklist).inboxItemId, "resolved");
+  expect(service.get(projectId)?.items[1]).toMatchObject({ id: "b", text: "B", note: "Ready" });
+});
+
+it("refuses PM checklist writes outside the session project", async () => {
+  const { tools, caller } = pmChecklistTools();
+  const other = { ...sampleProject, id: "other-project", slug: "other-project", path: "/other" };
+  store.append([{ type: "project.created", sessionId: null, payload: { project: other } }]);
+  const original = service.update(other.id, { items: [{ id: "a", text: "Private" }] });
+  expect(
+    await tools.call(
+      "update_checklist_item",
+      { itemId: "a", note: "Changed" },
+      {
+        ...caller,
+        projectId: other.id,
+      },
+    ),
+  ).toMatchObject({ isError: true, text: "This tool needs a session in your project" });
+  expect(
+    await tools.call(
+      "update_checklist_item",
+      { itemId: "b", text: "New", projectId: other.id },
+      caller,
+    ),
+  ).toMatchObject({ isError: true });
+  expect(service.get(other.id)).toEqual(original);
+  expect(service.get(projectId)).toBeUndefined();
 });
 
 it("keeps a start expansion open until the orchestrator explicitly replaces it", async () => {
