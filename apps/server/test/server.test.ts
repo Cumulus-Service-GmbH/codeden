@@ -5,6 +5,7 @@ import { join } from "node:path";
 import {
   agentEventToNewEvent,
   type NewEvent,
+  ReviewPolicy,
   type ServerToClientMessage,
   SessionSnapshot,
   SessionTranscriptExport,
@@ -99,7 +100,10 @@ it("resolves the owner’s Factory Team acceptance fixture from saved settings",
   const loop = factory.data.loopOrNew(project.id);
   factory.data.saveLoop({
     ...loop,
-    tuning: { ...loop.tuning, reviewPolicy: { ...loop.tuning.reviewPolicy, arbiterRounds: 1 } },
+    tuning: {
+      ...loop.tuning,
+      reviewPolicy: ReviewPolicy.parse({ ...loop.tuning.reviewPolicy, arbiterRounds: 1 }),
+    },
   });
 
   const query = new URLSearchParams({ projectId: project.id });
