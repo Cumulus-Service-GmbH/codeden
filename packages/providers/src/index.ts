@@ -37,6 +37,7 @@ export {
   resolveExecutable,
   scriptRuntime,
 } from "./util/exec";
+export { currentGitBranch } from "./util/git-head";
 export { acquireInstallLock, type InstallLockOptions } from "./util/install-lock";
 export { type KnownLocationOptions, knownLocations } from "./util/known-locations";
 export {

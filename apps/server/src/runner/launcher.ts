@@ -140,6 +140,12 @@ export async function startRunnerProcess(opts: {
   timeouts?: RunnerStartTimeouts;
   /** Stop waiting (the client stopped); the runner keeps starting and is attached to later. */
   signal?: AbortSignal;
+  onSpawn?: (pid: number | undefined) => void;
+  onExitAfterReady?: (
+    pid: number | undefined,
+    code: number | null,
+    signal: NodeJS.Signals | null,
+  ) => void;
   onSlow?: (info: { pid: number | undefined; elapsedMs: number }) => void;
 }): Promise<RunnerLock> {
   const slowAfterMs = opts.timeouts?.slowAfterMs ?? DEFAULT_RUNNER_SLOW_AFTER_MS;
@@ -147,20 +153,26 @@ export async function startRunnerProcess(opts: {
   const offset = logSize(opts.home);
   const child = spawnRunnerChild(opts.launch, opts.home);
   const pid = child.pid;
+  let ready = false;
   let exitCode: number | string | null | undefined;
   const exitEvent = new Promise<void>((resolve) => {
     child.once("exit", (code, signal) => {
       exitCode = code ?? signal ?? null;
       resolve();
+      if (ready) opts.onExitAfterReady?.(pid, code, signal);
     });
   });
+  opts.onSpawn?.(pid);
   const started = Date.now();
   let slowReported = false;
   for (;;) {
     await new Promise((r) => setTimeout(r, 100));
     opts.signal?.throwIfAborted();
     const lock = readLiveRunnerLock(opts.lockFile);
-    if (lock && isFreshLock(lock, pid, opts.stale)) return lock;
+    if (lock && isFreshLock(lock, pid, opts.stale)) {
+      ready = true;
+      return lock;
+    }
     const exited = pid === undefined || exitCode !== undefined || !isProcessAlive(pid);
     if (exited) {
       // A busy machine can report the process gone before its `exit` event arrives: wait for

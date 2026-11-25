@@ -389,6 +389,7 @@ export class RunnerClient {
     const link = this.opts.link;
     if (link) return openExecTransport(link, handlers);
     const lock = await findOrStartRunner({
+      caller: "RunnerClient.openTransport",
       home: this.opts.home,
       lockFile: this.opts.lockFile,
       launch: this.opts.launch,

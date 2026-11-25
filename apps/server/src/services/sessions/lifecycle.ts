@@ -15,7 +15,6 @@ import { errorMessage } from "../errors";
 import { isFactorySession } from "../factory/starter";
 import type { UtilityService } from "../utility";
 import type { SessionAdmission } from "./admission";
-import { findConflicts } from "./conflicts";
 import type { SessionRepo } from "./repo";
 import type { SessionService } from "./session-service";
 
@@ -71,11 +70,12 @@ export class SessionLifecycle {
       const meta = repo.find(session.id)?.startMeta;
       // Admission-only starts already passed their own conflict policy (including force and fork).
       if (meta?.admission && meta.queuedBehind.length === 0) return;
-      const later = new Set(queued.slice(index + 1).map((s) => s.id));
+      const younger = queued.slice(index + 1);
+      const later = new Set(younger.map((s) => s.id));
       const others = this.deps.repo
         .activeWork(session.projectId)
         .filter((w) => w.id !== session.id && !later.has(w.id));
-      const blockers = findConflicts({ workKey: session.workKey, scope: session.scope }, others);
+      const blockers = repo.sessionConflicts(session, repo.workLocation(session.id), others);
       if (blockers.length > 0) {
         blocked.add(session.id);
         return;
@@ -88,7 +88,8 @@ export class SessionLifecycle {
       ) {
         sessions.startQueued(session);
       } else {
-        admission.enqueue(session.id);
+        const before = admission.waiters().find((entry) => later.has(entry.id) && !entry.runNext);
+        admission.enqueue(session.id, before?.id);
       }
     });
     if (!admission) return;

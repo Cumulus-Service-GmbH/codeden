@@ -42,13 +42,22 @@ export class SessionAdmission {
     this.onRelease?.();
   }
 
-  enqueue(id: string): void {
+  enqueue(id: string, before?: string): void {
     const meta = this.repo.find(id)?.startMeta;
     if (meta?.admission) {
       this.scheduleDrain();
       return;
     }
-    const seq = (this.waiters().at(-1)?.seq ?? 0) + 1;
+    const waiters = this.waiters();
+    const next = before ? waiters.findIndex((entry) => entry.id === before) : -1;
+    const seq = waiters[next]?.seq ?? (waiters.at(-1)?.seq ?? 0) + 1;
+    // Make room ahead of younger starts without disturbing queued turns or run-next choices.
+    for (const waiter of next < 0 ? [] : waiters.slice(next).reverse()) {
+      this.repo.setStartMeta(waiter.id, (m) => ({
+        ...(m ?? emptyStartMeta()),
+        admission: { seq: waiter.seq + 1, since: waiter.since, runNext: waiter.runNext },
+      }));
+    }
     this.repo.setStartMeta(id, () => ({
       ...(meta ?? emptyStartMeta()),
       admission: { seq, since: new Date().toISOString() },
@@ -62,12 +71,10 @@ export class SessionAdmission {
     const meta = this.repo.find(id)?.startMeta;
     const admission = meta?.admission;
     if (!head || !admission || !waiters.some((entry) => entry.id === id)) return false;
-    if (head.id !== id) {
-      this.repo.setStartMeta(id, () => ({
-        ...meta,
-        admission: { ...admission, seq: head.seq - 1 },
-      }));
-    }
+    this.repo.setStartMeta(id, () => ({
+      ...meta,
+      admission: { ...admission, seq: head.id === id ? head.seq : head.seq - 1, runNext: true },
+    }));
     this.scheduleDrain();
     return true;
   }

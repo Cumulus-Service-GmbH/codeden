@@ -50,7 +50,7 @@ import { assertProjectActive, inArchivedProject } from "./archived-project";
 import { assertAutonomy } from "./autonomy-policy";
 import { freezeChecks, roundAfter, withRound } from "./checks";
 import { compactingRefusal, compactionRunning, compactRefusal, startCompaction } from "./compact";
-import { derivePurpose, deriveWorkKey, findConflicts, firstPurposeLine } from "./conflicts";
+import { derivePurpose, deriveWorkKey, firstPurposeLine, requestedLocation } from "./conflicts";
 import { planFork } from "./fork";
 import { planHandoff } from "./handoff";
 import type { InputDecorator } from "./input-decorator";
@@ -67,7 +67,7 @@ import { deliverPriority } from "./priority-delivery";
 import { autoOrder } from "./provider-order";
 import type { QuestionBroker, ResponseActor } from "./questions";
 import { applyPendingConfig, assertConfigRevision, updateSession } from "./reconfigure";
-import { type AutonomyAudit, emptyStartMeta, type SessionRepo, type StoredStartMeta } from "./repo";
+import type { AutonomyAudit, SessionRepo, StoredStartMeta } from "./repo";
 import { planReview } from "./review";
 import { retireRoleSession } from "./role-retire";
 import { startWorkspace } from "./start-workspace";
@@ -340,7 +340,11 @@ export class SessionService {
     });
     const scope = { projectId: req.projectId, ...req.scope };
 
-    const conflicts = findConflicts({ workKey, scope }, repo.activeWork(req.projectId));
+    const conflicts = repo.sessionConflicts(
+      { workKey, scope },
+      requestedLocation(workspace, project?.path),
+      repo.activeWork(req.projectId),
+    );
     let queuedBehind: string[] = [];
     let forced: StoredStartMeta["forced"] = null;
     if (conflicts.length > 0) {
@@ -549,24 +553,24 @@ export class SessionService {
     if (projectId) await this.deps.projectChecks?.current(projectId);
   }
 
-  /** Start a queued session whose blockers finished (called by the queue). */
+  /** Claim a queued start after the scheduler admitted it. */
   startQueued(session: Session): void {
     const { admission, repo } = this.deps;
     try {
-      const meta = repo.find(session.id)?.startMeta;
+      const found = repo.find(session.id);
+      if (found?.session.status !== "queued" || this.launching.has(session.id)) return;
+      const meta = found.startMeta;
       const pending = meta?.pending ?? { workspace: { mode: "worktree" as const } };
       admission?.dequeue(session.id);
-      repo.setStartMeta(session.id, (m) => ({
-        ...(m ?? emptyStartMeta()),
-        pending: null,
-      }));
-      repo.update(session.id, (s) => (s.status === "queued" ? { ...s, status: "starting" } : s));
+      repo.update(session.id, (s) => ({ ...s, status: "starting", endedAt: null }));
       this.launchInBackground(
         session.id,
         pending.input,
         meta?.pending?.workspace ?? meta?.forkStart?.workspace ?? pending.workspace,
         pending.fork ?? meta?.forkStart?.fork,
       );
+    } catch (error) {
+      this.deps.launcher.fail(session.id, "start", error);
     } finally {
       if (!this.launching.has(session.id)) admission?.release(session.id);
     }
@@ -583,6 +587,17 @@ export class SessionService {
     assertRoleWritable(session);
     this.assertForcedProvider(session);
     if (NOT_STARTED.has(session.status)) return this.enqueue(id, req.input, from);
+    if (
+      (session.status === "stopped" ||
+        session.status === "failed" ||
+        session.status === "interrupted") &&
+      this.hasUnacceptedStart(id)
+    ) {
+      const queued = this.enqueue(id, req.input, from);
+      this.holds.release(id);
+      this.deps.repo.update(id, (s) => ({ ...s, status: "queued", endedAt: null }));
+      return queued;
+    }
     // A turn on its way to the runner counts as running, though there is nothing to steer yet.
     const delivering = this.delivering.has(id);
     if (BUSY.has(session.status) || delivering) {
@@ -846,8 +861,14 @@ export class SessionService {
       !this.delivering.has(session.id) &&
       !this.priorityWaits.has(session.id) &&
       FLUSHABLE.has(session.status) &&
+      !this.hasUnacceptedStart(session.id) &&
       !inArchivedProject(this.deps.projects, session)
     );
+  }
+
+  private hasUnacceptedStart(id: string): boolean {
+    const { repo } = this.deps;
+    return !!repo.find(id)?.startMeta?.pending && repo.turnCount(id) === 0;
   }
 
   canWaitForOutbox(session: Session): boolean {

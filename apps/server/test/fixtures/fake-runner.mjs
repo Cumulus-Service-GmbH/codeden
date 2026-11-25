@@ -1,9 +1,10 @@
 // A stand-in for the runner process, for launcher tests. Started like the runner
 // (`... --home <dir>`); behaves as FAKE_RUNNER_MODE says:
 //   slow  - wait FAKE_RUNNER_DELAY_MS, write a lock file, then stay alive until killed;
+//   exit-on-cue - write a lock, then exit 7 when the test writes the "exit" file;
 //   crash - write an error to stderr and exit 3 at once;
 //   hang  - never write a lock, stay alive until killed.
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const home = process.argv[process.argv.indexOf("--home") + 1];
@@ -17,7 +18,7 @@ if (mode === "crash") {
 }
 
 setInterval(() => undefined, 1000);
-if (mode === "slow") {
+if (mode === "slow" || mode === "exit-on-cue") {
   setTimeout(() => {
     mkdirSync(join(home, "runner"), { recursive: true });
     writeFileSync(
@@ -33,4 +34,10 @@ if (mode === "slow") {
       }),
     );
   }, delay);
+}
+
+if (mode === "exit-on-cue") {
+  setInterval(() => {
+    if (existsSync(join(home, "exit"))) process.exit(7);
+  }, 25);
 }

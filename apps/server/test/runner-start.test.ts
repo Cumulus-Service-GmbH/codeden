@@ -1,9 +1,11 @@
-import { existsSync, mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { type RunnerLaunchConfig, startRunnerProcess } from "../src/runner/launcher";
 import { isProcessAlive } from "../src/runner/lock";
+import { findOrStartRunner } from "../src/runner/transport-loopback";
+import { waitUntil } from "./support/harness";
 import { removeTree } from "./support/remove-tree";
 
 const homes: string[] = [];
@@ -65,6 +67,31 @@ describe("starting the runner process (#14)", () => {
     expect(slow).toHaveLength(1);
     expect(slow[0]).toBeGreaterThanOrEqual(200);
   }, 30_000);
+
+  it("logs the replacement PID and one exit after readiness", async () => {
+    const { home, launch, lockFile } = setup({ FAKE_RUNNER_MODE: "exit-on-cue" });
+    const logs: string[] = [];
+    const lock = await findOrStartRunner({
+      caller: "runner-start test",
+      launch,
+      home,
+      lockFile,
+      log: (message) => logs.push(message),
+      onStarting: () => {},
+      onSlow: () => {},
+    });
+    pids.push(lock.pid);
+    expect(lock.runnerId).toBe("fake-runner");
+    const spawn = `runner: started pid ${lock.pid}; no live runner lock`;
+    const timestamp = /; caller=runner-start test at=\d{4}-\d{2}-\d{2}T[\d:.]+Z$/;
+    expect(logs.find((line) => line.startsWith(spawn))).toMatch(timestamp);
+    writeFileSync(join(home, "exit"), "");
+    const exit = `runner: pid ${lock.pid} exited after readiness; code=7 signal=null`;
+    await waitUntil(() => logs.find((line) => line.startsWith(exit)));
+    const exits = logs.filter((line) => line.includes("exited after readiness"));
+    expect(exits).toHaveLength(1);
+    expect(exits[0]).toMatch(timestamp);
+  });
 
   it("fails fast with the end of runner.log when the runner exits during start-up", async () => {
     const { home, launch, lockFile } = setup({ FAKE_RUNNER_MODE: "crash" });

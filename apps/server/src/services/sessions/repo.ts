@@ -41,7 +41,16 @@ import { automationRuns, checkpoints, inboxItems, items, sessions, turns } from 
 import { turnsOldestFirst } from "../../db/turn-order";
 import type { EventStore } from "../../events/store";
 import { notFound } from "../errors";
-import { ACTIVE_RUN_STATUSES, ACTIVE_SESSION_STATUSES } from "./conflicts";
+import {
+  ACTIVE_RUN_STATUSES,
+  ACTIVE_SESSION_STATUSES,
+  checkoutLocation,
+  findConflicts,
+  requestedLocation,
+  sameWorkLocation,
+  type WorkCandidate,
+  type WorkLocation,
+} from "./conflicts";
 import type { ForkStart } from "./fork";
 import type { LaunchFork } from "./launcher";
 import type { UnansweredStart } from "./unanswered-start";
@@ -86,7 +95,7 @@ export type StoredStartMeta = SessionStartMeta & {
   /** The PM delegated session starts to this Team Architect. */
   teamArchitect?: true;
   pending?: PendingStart | null;
-  admission?: { seq: number; since: string } | null;
+  admission?: { seq: number; since: string; runNext?: true } | null;
   prFeedback?: Record<string, { rounds: number; keys: string[] }>;
   /**
    * Whether the turn this role session's last accepted delivery started carries the user's
@@ -446,9 +455,30 @@ export class SessionRepo {
       .select()
       .from(sessions)
       .where(eq(sessions.status, "queued"))
-      .orderBy(asc(sessions.createdAt))
+      .orderBy(asc(sessions.createdAt), asc(sessions.id))
       .all()
       .map(rowToSession);
+  }
+
+  workLocation(id: string): WorkLocation {
+    const found = this.find(id);
+    if (!found) return {};
+    const { session, startMeta } = found;
+    const workspace =
+      startMeta?.pending?.workspace ?? startMeta?.forkStart?.workspace ?? startMeta?.workspaceStart;
+    if (!session.worktreePath && !session.branch && workspace) {
+      return requestedLocation(workspace, session.cwd);
+    }
+    return checkoutLocation(session.worktreePath ?? session.cwd, session.branch);
+  }
+
+  sessionConflicts(candidate: WorkCandidate, location: WorkLocation, work: WorkSummary[]) {
+    return findConflicts(
+      candidate,
+      work,
+      (other) =>
+        other.sessionId !== null && sameWorkLocation(location, this.workLocation(other.sessionId)),
+    );
   }
 
   /** Running or queued work in a project: sessions and automation runs (§8.4). */

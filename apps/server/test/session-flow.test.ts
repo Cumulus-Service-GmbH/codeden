@@ -12,7 +12,7 @@ import {
   type TranscriptMessage,
   type UiServerMessage,
 } from "@codeden/contracts";
-import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { isProcessAlive, type RunningServer, readLiveRunnerLock, startServer } from "../src";
 import { RUNNER_REQUEST_TIMEOUT_FLOOR_MS, waitUntil } from "./support/harness";
 import { removeTree } from "./support/remove-tree";
@@ -241,5 +241,225 @@ describe("project -> Fake session through a real runner", () => {
     expect((await openInbox(first.sessionId)).length).toBe(0);
     const ran = await statusIs(queued.sessionId, "idle");
     expect(ran.session.status).toBe("idle");
+  });
+  const start = async (workKey: string, text: string, extra = {}) => {
+    const started = StartSessionResponse.parse(
+      (
+        await api("POST", "/sessions", {
+          projectId,
+          provider: "fake",
+          workKey,
+          input: { text },
+          ...extra,
+        })
+      ).body,
+    );
+    if (started.status !== "started" && started.status !== "queued") {
+      throw new Error(`Unexpected start result: ${started.status}`);
+    }
+    return started;
+  };
+
+  const stop = (id: string) => api("POST", `/sessions/${id}/stop`);
+  const resume = (id: string, text: string) =>
+    server.services.sessions.send(
+      id,
+      { input: { text, attachments: [] }, whenBusy: "queue" },
+      "pm",
+    );
+  const setCap = (maxActiveSessions: number) =>
+    api("PATCH", "/settings", { limits: { maxActiveSessions } });
+
+  it("admits six held starts in original order within the cap and keeps their briefs first", async () => {
+    const baseline = server.services.settings.get().limits.maxActiveSessions;
+    const requests = vi.spyOn(server.services.runner, "request");
+    const ids: string[] = [];
+    const commands = () => requests.mock.calls.map(([command]) => command);
+    const opens = (id: string) =>
+      commands().filter((command) => command.name === "session.start" && command.sessionId === id);
+    try {
+      expect((await setCap(1)).status).toBe(200);
+      const blocker = await start("request:hold", "hold [approval]");
+      ids.push(blocker.sessionId);
+      await statusIs(blocker.sessionId, "waiting");
+      const lanes: string[] = [];
+      for (let index = 0; index < 6; index++) {
+        const lane = await start(`request:lane-${index}`, `brief ${index} [approval]`, {
+          scope: { paths: [`apps/lane-${index}`] },
+          workspace: { mode: "worktree" },
+        });
+        expect(lane.status).toBe("queued");
+        lanes.push(lane.sessionId);
+        ids.push(lane.sessionId);
+      }
+      const [oldest, , , , fifth, last] = lanes;
+      if (!oldest || !fifth || !last) throw new Error("Expected six lanes");
+      for (const id of lanes) {
+        await stop(id);
+        expect((await detail(id)).session.status).toBe("stopped");
+      }
+      for (const id of [...lanes].reverse()) {
+        expect(await resume(id, "follow-up")).toEqual({ status: "queued" });
+        server.services.lifecycle.drainQueue();
+        expect((await detail(id)).session.status).toBe("queued");
+      }
+      expect(await resume(oldest, "second follow-up")).toEqual({ status: "queued" });
+      expect(lanes.flatMap(opens)).toHaveLength(0);
+
+      // The blocker itself occupies one of five slots until it settles.
+      expect((await setCap(5)).status).toBe(200);
+      await Promise.all(lanes.slice(0, 4).map((id) => statusIs(id, "waiting")));
+      expect((await detail(fifth)).session.status).toBe("queued");
+      expect((await detail(last)).session.status).toBe("queued");
+      expect(server.services.admission.status().active).toBe(5);
+      await stop(blocker.sessionId);
+      await statusIs(fifth, "waiting");
+      expect((await detail(last)).session.status).toBe("queued");
+      expect(opens(last)).toHaveLength(0);
+      const claimed = () =>
+        commands().flatMap((command) =>
+          command.name === "workspace.prepare" &&
+          command.sessionId &&
+          lanes.includes(command.sessionId)
+            ? [command.sessionId]
+            : [],
+        );
+      expect(claimed()).toEqual(lanes.slice(0, 5));
+
+      for (const [index, id] of lanes.slice(0, 5).entries()) {
+        const { session } = await detail(id);
+        expect(session.worktreePath).toBe(session.cwd);
+        expect(session.cwd).not.toBe(repo);
+        expect(opens(id)).toEqual([
+          expect.objectContaining({ options: expect.objectContaining({ cwd: session.cwd }) }),
+        ]);
+        expect(
+          commands().find((command) => command.name === "session.send" && command.sessionId === id),
+        ).toMatchObject({ input: { text: `brief ${index} [approval]` } });
+      }
+
+      const [approval] = await openInbox(oldest);
+      expect(
+        (
+          await api("POST", `/inbox/${approval?.id}/resolve`, {
+            response: { kind: "approval", decision: "allow_once" },
+          })
+        ).status,
+      ).toBe(200);
+      await waitUntil(() =>
+        commands().filter(
+          (command) => command.name === "session.send" && command.sessionId === oldest,
+        ).length === 3
+          ? true
+          : undefined,
+      );
+      await statusIs(oldest, "idle");
+      await statusIs(last, "waiting");
+      expect(claimed()).toEqual(lanes);
+      expect(opens(oldest)).toHaveLength(1);
+      expect(opens(last)).toHaveLength(1);
+      const inputs = commands().flatMap((command) =>
+        command.name === "session.send" && command.sessionId === oldest ? [command.input.text] : [],
+      );
+      expect(inputs).toEqual(["brief 0 [approval]", "follow-up", "second follow-up"]);
+    } finally {
+      requests.mockRestore();
+      for (const id of ids) await stop(id);
+      await setCap(baseline);
+    }
+  });
+
+  it("keeps the brief and follow-up queued when isolated preparation fails", async () => {
+    const baseline = server.services.settings.get().limits.maxActiveSessions;
+    const requests = vi.spyOn(server.services.runner, "request");
+    const ids: string[] = [];
+    try {
+      expect((await setCap(1)).status).toBe(200);
+      const blocker = await start("request:retry-hold", "hold [approval]");
+      ids.push(blocker.sessionId);
+      await statusIs(blocker.sessionId, "waiting");
+      const lane = await start("request:retry-worktree", "saved [approval]", {
+        workspace: { mode: "worktree", baseRef: "test-retry-base" },
+      });
+      ids.push(lane.sessionId);
+      expect(lane.status).toBe("queued");
+      await stop(lane.sessionId);
+      expect(await resume(lane.sessionId, "queued after saved")).toEqual({ status: "queued" });
+      await stop(blocker.sessionId);
+      await statusIs(lane.sessionId, "failed");
+      await server.services.sessions.flushOutbox(lane.sessionId);
+      const opens = () =>
+        requests.mock.calls
+          .map(([command]) => command)
+          .filter(
+            (command) => command.name === "session.start" && command.sessionId === lane.sessionId,
+          );
+      expect(opens()).toHaveLength(0);
+
+      git("branch", "test-retry-base");
+      expect(await resume(lane.sessionId, "retry")).toEqual({ status: "queued" });
+      const { session } = await statusIs(lane.sessionId, "waiting");
+      expect(session.cwd).toBe(session.worktreePath);
+      expect(session.cwd).not.toBe(repo);
+      expect(opens()).toHaveLength(1);
+      const first = requests.mock.calls
+        .map(([command]) => command)
+        .find((command) => command.name === "session.send" && command.sessionId === lane.sessionId);
+      expect(first).toMatchObject({ input: { text: "saved [approval]" } });
+    } finally {
+      requests.mockRestore();
+      for (const id of ids) await stop(id);
+      await setCap(baseline);
+    }
+  });
+
+  it("admits a queued overlapping lane while a broad scope is active on another branch", async () => {
+    const baseline = server.services.settings.get().limits.maxActiveSessions;
+    const ids: string[] = [];
+    try {
+      expect((await setCap(1)).status).toBe(200);
+      const broad = await start("request:broad", "broad [approval]", {
+        scope: { paths: ["apps/", "packages/"] },
+      });
+      ids.push(broad.sessionId);
+      await statusIs(broad.sessionId, "waiting");
+
+      const lane = await start("request:separate", "separate [approval]", {
+        scope: { paths: ["apps/server"] },
+      });
+      ids.push(lane.sessionId);
+      expect(lane.status).toBe("queued");
+      expect((await setCap(2)).status).toBe(200);
+      const opened = await statusIs(lane.sessionId, "waiting");
+      const active = await detail(broad.sessionId);
+      expect(active.session.status).toBe("waiting");
+      expect(opened.session.branch).not.toBe(active.session.branch);
+      expect(opened.session.cwd).not.toBe(active.session.cwd);
+
+      const same = await api("POST", "/sessions", {
+        projectId,
+        provider: "fake",
+        workKey: "request:same-worktree",
+        scope: { paths: ["apps/server"] },
+        workspace: { mode: "existing", path: active.session.cwd },
+      });
+      expect(same.status).toBe(409);
+
+      const branch = active.session.branch;
+      if (!branch) throw new Error("Expected the broad session's worktree branch");
+      const checkout = join(home, "same-branch-checkout");
+      git("clone", "--quiet", "--single-branch", "--branch", branch, repo, checkout);
+      const sameBranch = await api("POST", "/sessions", {
+        projectId,
+        provider: "fake",
+        workKey: "request:same-branch",
+        scope: { paths: ["packages/contracts"] },
+        workspace: { mode: "existing", path: checkout },
+      });
+      expect(sameBranch.status).toBe(409);
+    } finally {
+      for (const id of ids) await stop(id);
+      await setCap(baseline);
+    }
   });
 });

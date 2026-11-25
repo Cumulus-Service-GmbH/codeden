@@ -32,7 +32,7 @@ import {
 } from "../runner-port";
 import { childRunsFile } from "./child-runs";
 import { type PreparedWorkspace, prepareCloneWorkspace } from "./clone-workspace";
-import { slugWords } from "./conflicts";
+import { sameWorkLocation, slugWords } from "./conflicts";
 import type { ForkStart } from "./fork";
 import { withHandoffBrief } from "./handoff";
 import { ownBranch } from "./own-branch";
@@ -181,7 +181,22 @@ export class SessionLauncher {
     const sessionId = session.id;
     const runner = runnerForSession(this.deps, sessionId);
     await this.requireRunner(runner);
+    const pending = repo.find(sessionId)?.startMeta?.pending;
     const ws = await this.prepareWorkspace(runner, session, project, opts.workspace, opts.fork);
+    if (
+      pending &&
+      project &&
+      opts.workspace.mode === "worktree" &&
+      !clonesWorkspaces(runner) &&
+      (!ws.worktreePath || sameWorkLocation({ cwd: ws.cwd }, { cwd: project.path }))
+    ) {
+      throw new ServiceError(
+        409,
+        "workspace_unavailable",
+        "The queued start requires an isolated worktree",
+      );
+    }
+
     repo.update(sessionId, (s) => ({
       ...s,
       cwd: ws.cwd,
@@ -196,6 +211,7 @@ export class SessionLauncher {
       workspaceStart: null,
       ...(ws.fallback ? { workspaceFallback: ws.fallback } : {}),
     }));
+    if (pending && repo.get(sessionId).status !== "starting") return;
     const brief = this.pendingBrief(sessionId);
     const input = brief ? withHandoffBrief(brief, opts.input) : opts.input;
     const result = await this.open(
@@ -210,12 +226,17 @@ export class SessionLauncher {
       withSetupNote(input, ws.setupNote),
     );
     if (brief) this.briefDelivered(sessionId);
-    repo.update(sessionId, (s) => ({
-      ...s,
-      resumeToken: s.resumeToken ?? result.resumeToken,
-      runnerId: runner.runnerId() ?? s.runnerId,
-      status: s.status === "starting" ? (input ? "running" : "idle") : s.status,
-    }));
+    repo.update(
+      sessionId,
+      (s) => ({
+        ...s,
+        resumeToken: s.resumeToken ?? result.resumeToken,
+        runnerId: runner.runnerId() ?? s.runnerId,
+        status: s.status === "starting" ? (input ? "running" : "idle") : s.status,
+      }),
+      undefined,
+      pending ? (m) => ({ ...(m ?? defaultMeta(opts.workspace)), pending: null }) : undefined,
+    );
   }
 
   /**

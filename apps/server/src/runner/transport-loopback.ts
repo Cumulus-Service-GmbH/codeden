@@ -13,6 +13,7 @@ export interface FindRunnerOptions {
   /** Cancels the probe and the start (the client's `stop()`). */
   signal?: AbortSignal;
   log?: (message: string) => void;
+  caller: string;
   /** About to start a runner process. */
   onStarting: () => void;
   /** A started runner is taking longer than usual. */
@@ -31,7 +32,10 @@ export async function findOrStartRunner(opts: FindRunnerOptions): Promise<Runner
     opts.log?.(`runner: pid ${existing.pid} does not answer; starting a new runner`);
   }
   if (!opts.launch) throw new Error("No live runner and launching is disabled");
+  const reason = existing ? `pid ${existing.pid} failed health check` : "no live runner lock";
   opts.log?.("runner: starting a new runner process");
+  const logDecision = (message: string) =>
+    opts.log?.(`${message}; caller=${opts.caller} at=${new Date().toISOString()}`);
   opts.onStarting();
   return startRunnerProcess({
     launch: opts.launch,
@@ -40,6 +44,9 @@ export async function findOrStartRunner(opts: FindRunnerOptions): Promise<Runner
     stale: existing,
     timeouts: opts.startTimeouts,
     signal: opts.signal,
+    onSpawn: (pid) => logDecision(`runner: started pid ${pid ?? "unavailable"}; ${reason}`),
+    onExitAfterReady: (pid, code, signal) =>
+      logDecision(`runner: pid ${pid} exited after readiness; code=${code} signal=${signal}`),
     onSlow: ({ pid, elapsedMs }) => {
       const s = Math.round(elapsedMs / 1000);
       opts.log?.(`runner: pid ${pid} is still starting after ${s} s; waiting for it`);
