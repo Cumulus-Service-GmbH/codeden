@@ -68,6 +68,14 @@ export type MergePath = z.infer<typeof MergePath>;
  * agent judgement).
  */
 export const FactoryLimits = z.object({
+  /** Owner-recorded exception for an unconfigured completion verifier in this project. */
+  jevSuspension: z
+    .object({
+      scope: z.union([z.literal("project"), z.object({ itemId: z.string().min(1) })]),
+      expiresAt: z.iso.datetime({ offset: true }),
+      reason: z.string().trim().min(1),
+    })
+    .optional(),
   /** Whether LOW findings are sent back for a fix or deferred to follow-up work. */
   lowFindings: LowFindingPolicy.default("defer"),
   /** Agents working at once (the swarm): builders, reviewers, the scout and area reviewers. */

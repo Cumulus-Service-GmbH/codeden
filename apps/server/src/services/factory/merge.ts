@@ -1,9 +1,9 @@
 import type { FactoryItem, FactoryLoop, GitHubPrRef, MergePath, Project } from "@codeden/contracts";
 import { errorMessage, ServiceError } from "../errors";
-import { jevPasses } from "../review-jev";
 import { type FactoryContext, factoryNotice, raiseInbox } from "./context";
 import { followUpsAtMerge } from "./follow-ups";
 import type { FactoryPr } from "./github-port";
+import { completionAllowsMerge } from "./jev";
 import { trackedHead } from "./rebase";
 import { spotCheckAtMerge } from "./spot-checks";
 import { failureInboxId, stuckDecisionId, stuckInboxId } from "./stuck";
@@ -104,7 +104,7 @@ export async function readyForYou(
   project: Project,
   item: FactoryItem,
 ): Promise<void> {
-  if (ctx.jevScript !== null && !jevPasses(item.jev, trackedHead(item))) return;
+  if (!completionAllowsMerge(ctx, item, trackedHead(item))) return;
   const why =
     item.trust === "admitted"
       ? "it came from an untrusted author, so a person merges it"
@@ -213,7 +213,7 @@ export async function autoMerge(
   checks: FactoryItem["checks"],
   how: { path: MergePath; note?: string },
 ): Promise<FactoryLoop | MergeFailed> {
-  if (ctx.jevScript !== null && !jevPasses(current.jev, pr.headSha)) {
+  if (!completionAllowsMerge(ctx, current, pr.headSha)) {
     return {
       failed: "Jev must pass for the current head before merging",
       refusal: false,

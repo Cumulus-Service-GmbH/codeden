@@ -56,7 +56,7 @@ export const ReviewArbitration = z.object({
 });
 export type ReviewArbitration = z.infer<typeof ReviewArbitration>;
 
-export const JEV_COMPLETION_SKIPPED = "Jev not configured, completion check skipped";
+export const JEV_COMPLETION_BLOCKED = "Jev not configured, completion check blocked";
 
 /** Completion check status for the reviewed head, with history digests when available. */
 export const JevReceipt = z
@@ -72,6 +72,7 @@ export const JevReceipt = z
       "unavailable",
       "owner decision",
       "not configured",
+      "suspended",
     ]),
     historyPath: z.string().optional(),
     historySha256: z

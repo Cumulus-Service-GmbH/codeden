@@ -5,13 +5,13 @@ import {
   type Project,
 } from "@codeden/contracts";
 import { errorMessage } from "../errors";
-import { jevPasses } from "../review-jev";
 import { approvalCovers } from "./approval";
 import { CONFLICTS_DETAIL } from "./checks";
 import type { FactoryContext } from "./context";
 import { fastMergeVerdict, noteProtectionForcesStrict, withMainCi } from "./fast-merge";
 import type { FactoryPr, MainSince } from "./github-port";
 import { waitsForMain } from "./inherited-ci";
+import { completionAllowsMerge } from "./jev";
 import { autoMerge, githubRefused, type MergeFailed, prDecidedOutside } from "./merge";
 import { markStuck } from "./outcomes";
 import {
@@ -183,7 +183,7 @@ export async function act(
   }
   const sha = pr.headSha;
   if (!sha || sha !== trackedHead(item)) return nothing;
-  if (ctx.jevScript !== null && !jevPasses(item.jev, sha)) return nothing;
+  if (!completionAllowsMerge(ctx, item, sha)) return nothing;
   if (pr.mergeable === "unknown") {
     note(ctx, item, SETTLING_NOTE);
     return { did: "unsettled", loop };

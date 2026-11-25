@@ -64,3 +64,25 @@ it("round-trips a done receipt with its pinned head and history digest", () => {
   const skipped = { head: receipt.head, status: "not configured", reasons: [] };
   expect(JevReceipt.parse(JSON.parse(JSON.stringify(skipped)))).toEqual(skipped);
 });
+
+it("round-trips an owner completion-check suspension with scope and expiry", () => {
+  const jevSuspension = {
+    scope: { itemId: "item-1" },
+    expiresAt: "2026-11-25T13:00:00.000Z",
+    reason: "Verifier maintenance",
+  };
+  const saved = FactoryLimits.parse({ jevSuspension });
+  expect(FactoryLimits.parse(JSON.parse(JSON.stringify(saved))).jevSuspension).toEqual(
+    jevSuspension,
+  );
+  expect(
+    FactoryLimits.safeParse({ jevSuspension: { ...jevSuspension, expiresAt: "never" } }).success,
+  ).toBe(false);
+  expect(
+    JevReceipt.parse({
+      head: "a".repeat(40),
+      status: "suspended",
+      reasons: ["Verifier maintenance"],
+    }).status,
+  ).toBe("suspended");
+});

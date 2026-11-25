@@ -79,16 +79,80 @@ it("a configured completion check that returns non-JSON blocks the merge", async
   await expectBlocked((result) => ({ ...result, stdout: "invalid receipt" }));
 });
 
-it("an unconfigured completion check is skipped and says so", async () => {
+it.each([true, false])(
+  "missing Jev blocks an automatic or manual merge (%s)",
+  async (autoMerge) => {
+    env = activeEnv = createFactoryEnv({ jevScript: null });
+    const { id } = await finishReview(autoMerge);
+    expect(env.gh.merges).toEqual([]);
+    expect(env.inbox.find(readyInboxId(id))).toBeUndefined();
+    expect(item(id).jev?.status).toBe("not configured");
+    expect(env.execs.some(({ args }) => args[1] === "done")).toBe(false);
+  },
+);
+
+it("pausing prevents merges independently of an active suspension", async () => {
   env = activeEnv = createFactoryEnv({ jevScript: null });
-  const { id, pr } = await finishReview(true);
+  await enable();
+  const { id, pr } = await verifying("success");
+  const loop = env.factory.data.loopOrNew(env.project.id);
+  env.factory.data.saveLoop({ ...loop, state: "paused", pausedReason: "Owner paused" });
+  // Record the suspension after pausing, without changing the loop state.
+  const project = env.factory.ctx.projects.get(env.project.id);
+  env.store.append([
+    {
+      type: "project.updated",
+      sessionId: null,
+      payload: {
+        project: {
+          ...project,
+          factoryLimits: {
+            ...project.factoryLimits,
+            jevSuspension: {
+              scope: { itemId: id },
+              expiresAt: new Date(env.now().getTime() + 60_000).toISOString(),
+              reason: "Maintenance",
+            },
+          },
+        },
+      },
+    },
+  ]);
+  await review(id, APPROVE);
+  await tick();
+  expect(item(id).jev?.status).toBe("suspended");
+  expect(env.gh.merges).toEqual([]);
+  await env.factory.resume(env.project.id);
+  await tick();
   expect(env.gh.merges.map((m) => m.number)).toEqual([pr.ref.number]);
-  expect(item(id).jev).toMatchObject({
-    status: "not configured",
-    reasons: ["Jev not configured, completion check skipped"],
-  });
-  expect(env.execs.some(({ args }) => args[1] === "done")).toBe(false);
 });
+
+it.each(["active", "expired", "different item"])(
+  "honors only a live suspension for this item (%s)",
+  async (state) => {
+    env = activeEnv = createFactoryEnv({ jevScript: null });
+    await enable();
+    const { id, pr } = await verifying("success");
+    const project = env.factory.ctx.projects.get(env.project.id);
+    await env.factory.setMode(project.id, {
+      mode: "software_factory",
+      limits: {
+        ...project.factoryLimits,
+        jevSuspension: {
+          scope: { itemId: state === "different item" ? "other" : id },
+          expiresAt: new Date(
+            env.now().getTime() + (state === "expired" ? 0 : 60_000),
+          ).toISOString(),
+          reason: "Maintenance",
+        },
+      },
+    });
+    await review(id, APPROVE);
+    await tick();
+    expect(item(id).jev?.status).toBe(state === "active" ? "suspended" : "not configured");
+    expect(env.gh.merges.map((m) => m.number)).toEqual(state === "active" ? [pr.ref.number] : []);
+  },
+);
 
 it("an unset Jev completion-check reviewer fails closed and says Set the Jev completion-check reviewer in Settings → Team", async () => {
   env = activeEnv = createFactoryEnv({ jevScript: fixtureJevScript });

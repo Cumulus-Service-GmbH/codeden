@@ -176,7 +176,15 @@ export function createFactoryEnv(
     autonomy: null,
     autonomyMode: "assisted",
     visionPath: ".codeden/VISION.md",
-    factoryLimits: FactoryLimits.parse({ dailyBudget: { usd: 10 }, ...opts.limits }),
+    factoryLimits: FactoryLimits.parse({
+      dailyBudget: { usd: 10 },
+      // Suites unrelated to completion verification use a fixture owner decision.
+      jevSuspension:
+        opts.jevScript === undefined
+          ? { scope: "project", expiresAt: "2100-01-01T00:00:00Z", reason: "Factory test fixture" }
+          : undefined,
+      ...opts.limits,
+    }),
     killSwitch: false,
     timezone: null,
     createdAt: now.toISOString(),

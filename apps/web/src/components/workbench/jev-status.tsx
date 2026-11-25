@@ -1,8 +1,8 @@
-import { JEV_COMPLETION_SKIPPED, type JevReceipt } from "@codeden/contracts";
+import { JEV_COMPLETION_BLOCKED, type JevReceipt } from "@codeden/contracts";
 
 export function JevStatus({ receipt }: { receipt: JevReceipt }) {
   if (receipt.status === "not configured") {
-    return <p className="text-2xs">{JEV_COMPLETION_SKIPPED}</p>;
+    return <p className="text-2xs">{JEV_COMPLETION_BLOCKED}</p>;
   }
   return (
     <details className="text-2xs">

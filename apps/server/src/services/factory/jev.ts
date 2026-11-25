@@ -16,6 +16,27 @@ import { isBusy } from "./sessions";
 import { claimSlot, reviewTier } from "./slots";
 import { teamTuning } from "./team-role";
 
+export function activeJevSuspension(
+  ctx: FactoryContext,
+  item: Pick<FactoryItem, "id" | "projectId">,
+) {
+  if (ctx.jevScript) return undefined;
+  const suspension = ctx.projects.get(item.projectId).factoryLimits.jevSuspension;
+  if (
+    suspension &&
+    (suspension.scope === "project" || suspension.scope.itemId === item.id) &&
+    Date.parse(suspension.expiresAt) > ctx.now().getTime()
+  ) {
+    return suspension;
+  }
+}
+
+/** A live owner decision or a verifier receipt covering the head being considered. */
+export function completionAllowsMerge(ctx: FactoryContext, item: FactoryItem, head: string | null) {
+  if (!head) return false;
+  return ctx.jevScript ? jevPasses(item.jev, head) : Boolean(activeJevSuspension(ctx, item));
+}
+
 const SHA = /^[a-f0-9]{40}$/;
 const receiptHistory = (item: FactoryItem) => item.jevHistory ?? [];
 const roundsOf = (item: FactoryItem) => item.reviewRounds ?? [];
