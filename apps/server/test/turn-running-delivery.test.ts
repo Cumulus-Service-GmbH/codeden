@@ -307,6 +307,17 @@ it("queues an unsent tracked submission and delivers it when the runner reconnec
   expect(sent).toEqual(["priority"]);
 });
 
+it("keeps a tracked message retryable if worktree recovery fails before sending", async () => {
+  const { sessions, launcher, request } = providerLike();
+  repo.update("s1", (s) => ({ ...s, worktreeRemovedAt: new Date().toISOString() }));
+  launcher.resume.mockRejectedValueOnce(
+    new RunnerCommandError("runner_unavailable", "Disconnected during setup"),
+  );
+  await expect(sessions.send("s1", submission)).resolves.toEqual({ status: "queued" });
+  expect(request).not.toHaveBeenCalled();
+  expect(outbox.list("s1")[0]?.delivery).toBeUndefined();
+});
+
 it("retains a queued tracked submission if its first flush finds a disconnected runner", async () => {
   const { sessions, request, sent, state, endTurn } = providerLike();
   repo.update("s1", (s) => ({ ...s, status: "running" }));

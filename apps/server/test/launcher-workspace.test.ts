@@ -134,14 +134,22 @@ describe("new worktrees of a GitHub project", () => {
     expect(env.repo.get(session.id).status).toBe("failed");
 
     // Still can't be made: the next message is refused, not opened in the project folder.
-    await expect(launcher.resume(env.repo.get(session.id), text("second"))).rejects.toThrow(
-      "invalid reference",
-    );
+    let markers = 0;
+    const beforeSend = () => {
+      expect(opened()).toHaveLength(1);
+      expect(calls.some((call) => call.name === "session.send")).toBe(false);
+      markers++;
+    };
+    await expect(
+      launcher.resume(env.repo.get(session.id), text("second"), beforeSend),
+    ).rejects.toThrow("invalid reference");
     expect(opened()).toHaveLength(0);
+    expect(markers).toBe(0);
 
     // Now it can: the same worktree is made, then the session opens in it.
     prepareError = null;
-    await launcher.resume(env.repo.get(session.id), text("third"));
+    await launcher.resume(env.repo.get(session.id), text("third"), beforeSend);
+    expect(markers).toBe(1);
     expect(calls.filter((c) => c.name === "workspace.prepare")).toHaveLength(3);
     expect(prepared()).toMatchObject({ strategy: "worktree", baseRef: "release" });
     const worktree = env.repo.get(session.id).worktreePath;

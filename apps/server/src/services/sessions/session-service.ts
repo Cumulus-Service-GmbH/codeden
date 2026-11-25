@@ -710,7 +710,6 @@ export class SessionService {
       }
       if (submitted) {
         if (outbox.get(id, submitted.id)?.delivery === "uncertain") {
-          if (req.whenBusy === "reject") throw error;
           return { status: "queued" };
         }
         if (req.whenBusy !== "reject" && isTransientRunnerError(error)) {
@@ -1196,11 +1195,12 @@ export class SessionService {
     const runner = this.runnerOf(session.id);
     const previous = session.status;
     const { outbox } = this.deps;
-    const markAttempt = (needsSandbox = false) => {
-      if (!tracked) return;
-      if (!needsSandbox && !runner.isConnected()) throw runnerUnavailable(runner);
-      outbox.markDelivery(tracked, true);
-    };
+    const markAttempt = tracked
+      ? (wireRunner: RunnerPort) => {
+          if (!wireRunner.isConnected()) throw runnerUnavailable(wireRunner);
+          outbox.markDelivery(tracked, true);
+        }
+      : undefined;
     // Messaging an archived session brings it back.
     this.deps.repo.update(session.id, (s) => ({
       ...s,
@@ -1213,14 +1213,13 @@ export class SessionService {
       // container with it: make it again, then resume through the provider.
       const needsSandbox = this.needsSandbox(session);
       if (session.worktreeRemovedAt || needsSandbox) {
-        markAttempt(needsSandbox);
-        await this.deps.launcher.resume(this.deps.repo.get(session.id), input);
+        await this.deps.launcher.resume(this.deps.repo.get(session.id), input, markAttempt);
         return;
       }
       try {
         const revision = await applyPendingConfig(this.deps.repo, runner, session);
         assertConfigRevision(this.deps.repo, session.id, revision);
-        markAttempt();
+        markAttempt?.(runner);
         await runner.request({ name: "session.send", sessionId: session.id, input, revision });
       } catch (error) {
         const code = runnerErrorCode(error);
@@ -1229,10 +1228,13 @@ export class SessionService {
         }
         // The runner no longer hosts it (restart, stopped): resume through the provider.
         if (code !== "unknown_session") throw error;
-        markAttempt();
-        await this.deps.launcher.resume(this.deps.repo.get(session.id), input);
+        await this.deps.launcher.resume(this.deps.repo.get(session.id), input, markAttempt);
       }
     } catch (error) {
+      const code = runnerErrorCode(error);
+      if (tracked && (code === "config_unconfirmed" || code === "unknown_session")) {
+        outbox.markDelivery(tracked, false);
+      }
       // Refused because the provider is running a turn: the session is running, so it stays so
       // and that turn's end delivers what waits. Anything else: back to how it was.
       if (!isTurnRunningError(error)) {

@@ -169,9 +169,16 @@ export async function advanceJev(
   const shouldEvaluate =
     receipt?.status !== "revise" && (receipt?.status !== "unavailable" || receipt.retryable);
   if (shouldEvaluate && attempts < policy.jevAttempts) {
-    save({ head, status: "pending", reasons: [] }, { jevReviewHead: undefined });
+    const waitingForChecks = receipt?.status === "pending" && receipt.reasons.length > 0;
+    if (!waitingForChecks) {
+      save({ head, status: "pending", reasons: [] }, { jevReviewHead: undefined });
+    }
     activeReviewHead = undefined;
     receipt = await evaluate(ctx, project, item, head);
+    if (receipt.status === "pending") {
+      if (!waitingForChecks) save(receipt);
+      return false;
+    }
     save(receipt, { jevHistory: [...receiptHistory(item), receipt] });
     attempts++;
   }
@@ -208,7 +215,12 @@ export async function advanceJev(
   return false;
 }
 
-async function evaluate(ctx: FactoryContext, project: Project, item: FactoryItem, head: string) {
+async function evaluate(
+  ctx: FactoryContext,
+  project: Project,
+  item: FactoryItem,
+  head: string,
+): Promise<JevReceipt> {
   const builder = item.builderSessionId ? ctx.repo.find(item.builderSessionId)?.session : undefined;
   const reviewer = item.reviewerSessionId
     ? ctx.repo.find(item.reviewerSessionId)?.session
@@ -216,11 +228,10 @@ async function evaluate(ctx: FactoryContext, project: Project, item: FactoryItem
   const cwd = reviewer?.worktreePath ?? builder?.worktreePath;
   const rounds = roundsOf(item);
   const heads = [...new Set([...rounds.map((round) => round.head), head])];
-  const unavailable = (reason: string, retryable?: true): JevReceipt => ({
+  const unavailable = (reason: string): JevReceipt => ({
     head,
     status: "unavailable",
     reasons: [reason],
-    retryable,
   });
   const alternative = usesVerificationEvidence(item);
   const exactRevert = item.source === "revert" && !item.reviewerSessionId;
@@ -292,11 +303,11 @@ async function evaluate(ctx: FactoryContext, project: Project, item: FactoryItem
         );
       }
       const verified = await ctx.github.commitChecks(project.id, head).catch(() => null);
+      if (verified === null || verified === "pending") {
+        return { head, status: "pending", reasons: ["Waiting for GitHub commit checks."] };
+      }
       if (verified !== "success") {
-        return unavailable(
-          "Passing GitHub commit checks are unavailable at the current head.",
-          verified === null || verified === "pending" ? true : undefined,
-        );
+        return unavailable("Passing GitHub commit checks are unavailable at the current head.");
       }
       evidence = [
         `${criteria.map((_, i) => `criteria[${i}]`).join(" and ")}\n${JSON.stringify({

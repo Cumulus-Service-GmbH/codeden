@@ -223,9 +223,14 @@ it("limits ready Team history in snapshots while keeping all runs for recovery",
     expect(snapshot.map(({ id }) => id)).toContain(sample.id);
     expect(snapshot.map(({ id }) => id)).toContain("ready-23");
     expect(snapshot.map(({ id }) => id)).not.toContain("ready-0");
-    vi.setSystemTime(Date.now() + 1_000);
-    saveTeamRun(env.store, { ...sample, id: "ready-0", status: "ready" });
-    expect(listTeamRunsForSnapshot(env.db.db).slice(1)[0]?.id).toBe("ready-0");
+    const now = Date.now();
+    try {
+      vi.setSystemTime(now + 1_000);
+      saveTeamRun(env.store, { ...sample, id: "ready-0", status: "ready" });
+      expect(listTeamRunsForSnapshot(env.db.db).slice(1)[0]?.id).toBe("ready-0");
+    } finally {
+      vi.setSystemTime(now);
+    }
     expect(listTeamRuns(env.db.db)).toHaveLength(25);
   } finally {
     await env.close();

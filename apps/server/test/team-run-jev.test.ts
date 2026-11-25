@@ -13,9 +13,13 @@ it.each(["sibling.mjs", "nested/sibling.mjs"])(
     const sibling = join(dir, name);
     try {
       await mkdir(join(dir, "nested"), { mode: 0o700 });
+      await mkdir(join(dir, ".git"), { mode: 0o777 });
+      await writeFile(join(dir, ".git", "ignored.json"), "{}", { mode: 0o666 });
       await writeFile(script, `import "./${name}";\n`, { mode: 0o600 });
       await writeFile(sibling, "export const version = 1;\n", { mode: 0o600 });
       const resolve = pinTeamJevHelper(script);
+      expect(resolve()).toEqual(expect.stringContaining("jev.mjs"));
+      await writeFile(join(dir, ".git", "ignored.json"), '{"changed":true}');
       expect(resolve()).toEqual(expect.stringContaining("jev.mjs"));
       await writeFile(sibling, "export const version = 2;\n");
       expect(resolve()).toBeNull();

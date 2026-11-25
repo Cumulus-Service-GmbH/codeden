@@ -32,12 +32,14 @@ export function pinTeamJevHelper(configuredPath: string): () => string | null {
     if (!secureSource(directory).isDirectory()) throw new Error("Missing helper directory");
     const hash = createHash("sha256");
     let entries = 0;
+    let sources = 0;
     let total = 0;
     const visit = (dir: string, prefix: string) => {
       for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
         a.name.localeCompare(b.name),
       )) {
-        if (++entries > 256) throw new Error("Helper installation is too large");
+        if (entry.name === ".git" || entry.name === "node_modules") continue;
+        if (++entries > 4096) throw new Error("Helper installation is too large");
         if (entry.isSymbolicLink()) throw new Error("Unexpected helper symlink");
         const file = join(dir, entry.name);
         const name = `${prefix}${entry.name}`;
@@ -45,6 +47,7 @@ export function pinTeamJevHelper(configuredPath: string): () => string | null {
           if (!secureSource(file).isDirectory()) throw new Error("Unexpected helper directory");
           visit(file, `${name}/`);
         } else if (/\.(?:[cm]?js|json)$/.test(entry.name)) {
+          if (++sources > 256) throw new Error("Too many helper sources");
           const stat = secureSource(file);
           total += stat.size;
           if (!stat.isFile() || total > 8 * 1024 * 1024)

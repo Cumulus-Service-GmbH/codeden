@@ -154,19 +154,23 @@ export class SessionLauncher {
    * (`docs/remote-runners.md` §8). A start that fails after that removes the container again
    * and forgets it, so the next message starts over in a new one rather than anywhere else.
    */
-  private async start(sessionId: string, opts: LaunchOptions): Promise<void> {
+  private async start(
+    sessionId: string,
+    opts: LaunchOptions,
+    beforeSend?: (runner: RunnerPort) => void,
+  ): Promise<void> {
     this.keepWorkspaceStart(sessionId, opts);
     const session = this.deps.repo.get(sessionId);
     const project = session.projectId ? this.deps.projects.get(session.projectId) : null;
     const sandboxes = this.deps.sandboxes;
     if (!project || !sandboxes?.wants(session, project, { fork: opts.fork !== undefined })) {
-      return this.startOn(session, project, opts);
+      return this.startOn(session, project, opts, beforeSend);
     }
     const home = this.deps.runner.providers().find((p) => p.id === session.provider);
     const runnerId = await sandboxes.place(session, project, home);
     const placed = this.deps.repo.update(sessionId, (s) => ({ ...s, runnerId }));
     try {
-      await this.startOn(placed, project, opts);
+      await this.startOn(placed, project, opts, beforeSend);
     } catch (error) {
       await sandboxes.release(this.deps.repo.get(sessionId), { force: true }).catch(() => null);
       this.deps.repo.update(sessionId, (s) => ({ ...s, runnerId: null }));
@@ -179,7 +183,12 @@ export class SessionLauncher {
    * provider session. Throws on failure; nothing reaches the provider when the workspace could
    * not be prepared.
    */
-  private async startOn(session: Session, project: Project | null, opts: LaunchOptions) {
+  private async startOn(
+    session: Session,
+    project: Project | null,
+    opts: LaunchOptions,
+    beforeSend?: (runner: RunnerPort) => void,
+  ) {
     const { repo } = this.deps;
     const sessionId = session.id;
     const runner = runnerForSession(this.deps, sessionId);
@@ -216,6 +225,7 @@ export class SessionLauncher {
       },
       withSetupNote(input, ws.setupNote),
       pushPreflight,
+      beforeSend,
     );
     if (brief) this.briefDelivered(sessionId);
     repo.update(sessionId, (s) => ({
@@ -254,19 +264,24 @@ export class SessionLauncher {
    * the project folder in its place. A handoff whose brief no start delivered yet (§9) sends it
    * now, ahead of `input`.
    */
-  async resume(session: Session, input?: UserInput): Promise<void> {
+  async resume(
+    session: Session,
+    input?: UserInput,
+    beforeSend?: (runner: RunnerPort) => void,
+  ): Promise<void> {
     const unprepared = this.pendingForkStart(session) ?? this.pendingWorkspaceStart(session);
     if (unprepared) {
-      await this.start(session.id, { ...unprepared, ...(input ? { input } : {}) });
+      await this.start(session.id, { ...unprepared, ...(input ? { input } : {}) }, beforeSend);
       return;
     }
     // A container session whose start failed has none: it gets one now, never runs elsewhere.
     const project = session.projectId ? this.deps.projects.get(session.projectId) : null;
     if (project && this.deps.sandboxes?.wants(session, project)) {
-      await this.start(session.id, {
-        workspace: { mode: "worktree" },
-        ...(input ? { input } : {}),
-      });
+      await this.start(
+        session.id,
+        { workspace: { mode: "worktree" }, ...(input ? { input } : {}) },
+        beforeSend,
+      );
       return;
     }
     const runner = runnerForSession(this.deps, session.id);
@@ -274,7 +289,13 @@ export class SessionLauncher {
     const { session: current, setupNote } = await this.restoreWorktree(session);
     const brief = this.pendingBrief(session.id);
     const first = brief ? withHandoffBrief(brief, input) : input;
-    const result = await this.open(runner, current, withSetupNote(first, setupNote));
+    const result = await this.open(
+      runner,
+      current,
+      withSetupNote(first, setupNote),
+      undefined,
+      beforeSend,
+    );
     if (brief) this.briefDelivered(session.id);
     this.deps.repo.update(session.id, (s) => ({
       ...s,
@@ -362,6 +383,7 @@ export class SessionLauncher {
     session: Session,
     input: UserInput | undefined,
     startupNote?: string,
+    beforeSend?: (runner: RunnerPort) => void,
   ) {
     if (this.deps.forceFakeProvider && session.provider !== "fake") {
       throw new ServiceError(
@@ -415,6 +437,7 @@ export class SessionLauncher {
         throw error;
       }
       if (input) {
+        beforeSend?.(runner);
         await runner.request(
           { name: "session.send", sessionId: session.id, input, revision: confirmed },
           START_TIMEOUT_MS,
