@@ -54,7 +54,7 @@ it("never interrupts an edit, git or install command", () => {
   }
 });
 
-it("drops unfinished child tools when their root turn ends", async () => {
+it.each([false, true])("drops child tools from the ended root turn (late: %s)", async (late) => {
   vi.useFakeTimers({ toFake: ["setImmediate"] });
   const fake = new FakeProvider();
   const stream = new AsyncQueue<AgentEvent>();
@@ -84,7 +84,7 @@ it("drops unfinished child tools when their root turn ends", async () => {
 
   stream.push({ type: "thread.started", thread: { id: "root" } });
   stream.push({ type: "turn.started", threadId: "root", turnId: "first" });
-  stream.push({
+  const childTool = {
     type: "item.started",
     threadId: "child",
     turnId: "child-turn",
@@ -96,7 +96,8 @@ it("drops unfinished child tools when their root turn ends", async () => {
       command: "sleep 600",
       status: "in_progress",
     },
-  });
+  } satisfies AgentEvent;
+  stream.push(childTool);
   const cmd = {
     name: "session.steer" as const,
     sessionId: "s",
@@ -108,6 +109,7 @@ it("drops unfinished child tools when their root turn ends", async () => {
   await expect(before).resolves.toMatchObject({ waitingFor: { itemId: "tool" } });
 
   stream.push({ type: "turn.interrupted", threadId: "root", turnId: "first", reason: "provider" });
+  if (late) stream.push(childTool);
   stream.push({ type: "turn.started", threadId: "root", turnId: "second" });
   await vi.runAllTimersAsync();
   const after = host.steer(cmd);

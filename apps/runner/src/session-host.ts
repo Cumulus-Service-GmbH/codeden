@@ -486,6 +486,7 @@ export class SessionHost {
     const onRoot = "threadId" in event && event.threadId === hosted.rootThreadId;
     if (!onRoot) return;
     if (event.type === "turn.started" && hosted.state !== "closing") {
+      if (hosted.rootTurnId !== event.turnId) hosted.activeTools.clear();
       hosted.state = "running";
       hosted.rootTurnId = event.turnId;
     }
