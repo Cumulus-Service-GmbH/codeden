@@ -3,6 +3,7 @@
 #include <crt_externs.h>
 #include <curl/curl.h>
 #include <limits.h>
+#include <mach-o/dyld.h>
 #include <pwd.h>
 #include <signal.h>
 #include <stdio.h>
@@ -119,6 +120,15 @@ static NSData *request_body(void) {
     return body;
 }
 
+static BOOL installed_reader(const char *home, const char *invocation) {
+    char actual[PATH_MAX], expected[PATH_MAX];
+    uint32_t length = sizeof(actual);
+    int size = snprintf(expected, sizeof(expected),
+        "%s/.config/trioharness/jev-keyring-runtime/bin/jev-keychain-reader", home);
+    return size > 0 && (size_t)size < sizeof(expected) && strcmp(invocation, expected) == 0 &&
+        _NSGetExecutablePath(actual, &length) == 0 && strcmp(actual, expected) == 0;
+}
+
 static int run_reader(int argc, char **argv) {
     if (argc != 2) return 3;
     BOOL present = strcmp(argv[1], "present") == 0;
@@ -132,7 +142,7 @@ static int run_reader(int argc, char **argv) {
     if (request && !body) return 65;
     const struct passwd *owner = getpwuid(getuid());
     char path[PATH_MAX];
-    if (!owner) return 3;
+    if (!owner || !installed_reader(owner->pw_dir, argv[0])) return 3;
     int size = snprintf(path, sizeof(path), "%s/Library/Keychains/login.keychain-db", owner->pw_dir);
     if (size < 0 || (size_t)size >= sizeof(path)) return 3;
 

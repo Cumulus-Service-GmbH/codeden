@@ -46,7 +46,7 @@ test('Jev credential reads return hard-deny through the Claude and Codex hooks',
   }
 });
 
-test('9.R1 and 10.R2: aliases, directory operands and globs are denied; present is allowed',
+test('Jev path protection covers aliases, ancestor operands and globs with exact presence allowed',
   { skip: process.platform === 'win32' && 'requires POSIX symlinks' }, t => {
     const cwd = mkdtempSync(join(process.cwd(), '.guard-jev-reader-'));
     t.after(() => rmSync(cwd, { recursive: true, force: true }));
@@ -55,13 +55,20 @@ test('9.R1 and 10.R2: aliases, directory operands and globs are denied; present 
     mkdirSync(dirname(reader), { recursive: true });
     writeFileSync(reader, '#!/bin/sh\nexit 3\n', { mode: 0o500 });
     symlinkSync(reader, join(cwd, 'fixture-alias'));
+    const fallback = join(home, '.config/trioharness/jev.env');
+    writeFileSync(fallback, '# synthetic fixture only\n', { mode: 0o600 });
+    symlinkSync(fallback, join(cwd, 'fixture-legacy-alias'));
+    const childDir = join(home, '.config/trioharness/fixture-child');
+    mkdirSync(childDir);
 
     const guard = new URL('./codeden-guard.mjs', import.meta.url).href;
+    const secrets = new URL('./codeden-guard-secrets.mjs', import.meta.url).href;
     const azure = new URL('./fixtures/azure-targets.json', import.meta.url).href;
     const script = `
       import { checkCommand, loadAzureTargets } from ${JSON.stringify(guard)};
+      import { checkExecution } from ${JSON.stringify(secrets)};
       const targets = loadAzureTargets(new URL(${JSON.stringify(azure)}));
-      const check = command => checkCommand(command, targets, 0, { cwd: process.cwd() });
+      const check = (command, cwd = process.cwd()) => checkCommand(command, targets, 0, { cwd });
       for (const command of [
         './fixture-alias read',
         'cp ./fixture-alias ./fixture-copy',
@@ -71,13 +78,32 @@ test('9.R1 and 10.R2: aliases, directory operands and globs are denied; present 
         'dd if=./fixture-alias of=./fixture-copy',
         'env -C "$HOME" cp .config/trioharness/jev-keyring-runtime/bin/* ./fixture-copy',
         'cp -R ~/.config/trioharness ./fixture-copy',
-        'fixture-alias read'
+        'fixture-alias read',
+        'cp ~/.config/trioharness/jev-keyring-runtim?/bin/* ./fixture-copy',
+        'cp ~/.config/trioharnes[s]/jev-keyring-runtim?/bin/jev-keychain-reade? ./fixture-copy',
+        'zip -r ./fixture-copy ./home/.config/trioharness',
+        'bsdtar -cf ./fixture-copy -C./home/.config/trioharness config.json',
+        'zip -r ./fixture-copy "$HOME"',
+        'tar -cf ./fixture-copy ~',
+        'dd if=./fixture-legacy-alias of=./fixture-copy'
       ]) {
         const denial = check(command);
         if (!denial) { console.error(command); process.exit(1); }
       }
       if (!/Jev credential/i.test(check('./fixture-alias present') || '')) process.exit(2);
       if (check(${JSON.stringify(JSON.stringify(reader) + ' present')})) process.exit(3);
+      if (!check('zip -r ./fixture-copy ..', ${JSON.stringify(childDir)})) process.exit(4);
+      if (!check('zip -r ./fixture-copy trioharness', ${JSON.stringify(dirname(dirname(childDir)))})) process.exit(5);
+      if (check('ls "$HOME"') || check('printf "%s" "example?[text]"')) process.exit(6);
+      for (const command of [
+        'bsdtar -cf ./fixture-copy -C./home/.config/trioharness config.json',
+        'cp ~/.config/trioharnes[s]/jev-keyring-runtim?/bin/jev-keychain-reade? ./fixture-copy',
+        'dd if=./fixture-legacy-alias of=./fixture-copy'
+      ]) {
+        const [program, ...args] = command.split(' ').map(value => ({ value, syntax: value }));
+        const denial = checkExecution(program, args, () => true, () => null, { cwd: process.cwd() });
+        if (!/Jev credential/i.test(denial || '')) { console.error(command, denial); process.exit(7); }
+      }
     `;
     const result = spawnSync(process.execPath, ['--input-type=module', '-e', script],
       { env: { HOME: home, PATH: cwd + (process.env.PATH ? ':' + process.env.PATH : '') }, cwd, encoding: 'utf8' });

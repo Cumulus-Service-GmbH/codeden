@@ -295,20 +295,34 @@ export function checkExecution(program, args, isPlainWord, inspect, options = {}
   // With a dynamic cd, inspect only relative paths visible from the hook cwd.
   const scriptCwd = options.cwd === null && !options.scriptContent ? options.hookCwd ?? null : options.cwd;
   const values = args.map(({ value }) => value);
-  const targets = [...values, ...(options.redirects ?? []).map(redirect => redirect.target?.value ?? "")];
+  const targets = [...args, ...(options.redirects ?? []).map(redirect => redirect.target).filter(Boolean)];
   const readerPath = realPath(JEV_READER_PATH);
   const runtimePath = realPath(JEV_RUNTIME_PATH);
-  const targetPath = value => resolveScriptPath(scriptCwd ?? "/", value.replace(/^\$\{?HOME\}?\//, "~/"));
-  const inside = (path, root) => root && path && (path === root || path.startsWith(root + sep));
-  const touchesRuntime = value => {
+  const targetPath = value => resolveScriptPath(scriptCwd ?? "/",
+    value.replace(/^(?:~|\$(?:HOME|\{HOME\}))(?=$|\/)/, homedir()));
+  const inside = (path, root) => root && path &&
+    (path === root || path.startsWith(root.endsWith(sep) ? root : root + sep));
+  const homePath = homedir();
+  const actualHome = realPath(homePath);
+  const guardedRoots = [JEV_RUNTIME_PATH, runtimePath, JEV_FILE, realPath(JEV_FILE)].filter(Boolean);
+  const metadataCommand = /^(?:cd|ls|pwd|realpath|readlink|stat)$/.test(name);
+  const shellPatternTest = name === "[[" || name === "[";
+  const shellGlob = /[?*]|\[[^\]]+\]|\{[^}]*,[^}]*\}/;
+  const touchesRuntime = ({ value, syntax }) => {
     if (!value) return false;
     if (JEV_RUNTIME_TEXT.test(value)) return true;
-    const operand = value.replace(/^[\w-]+=/, "");
+    const assigned = value.replace(/^[\w-]+=/, "");
+    const operand = /^(?:tar|bsdtar|gtar)$/.test(name) ? assigned.replace(/^-C(?=.)/, "") : assigned;
+    if (!operand) return false;
     const path = targetPath(operand);
-    const actual = runtimePath ? realPath(path) : null;
-    return inside(path, JEV_RUNTIME_PATH) || inside(actual, runtimePath) ||
-      (/^(?:cp|dd|ditto|ln|mv|rsync|tar)$/.test(name) && operand.includes("/") &&
-        (inside(JEV_RUNTIME_PATH, path) || inside(runtimePath, actual)));
+    const actual = realPath(path);
+    const firstGlob = !shellPatternTest && shellGlob.test(syntax) && (operand.includes("/") || inside(scriptCwd, homePath))
+      ? path.search(shellGlob) : -1;
+    return guardedRoots.some(root =>
+      inside(path, root) || inside(actual, root) ||
+      (firstGlob >= 0 && root.startsWith(path.slice(0, firstGlob))) ||
+      (!metadataCommand && ((inside(path, homePath) && inside(root, path)) ||
+        (inside(actual, actualHome) && inside(root, actual)))));
   };
   const programPath = targetPath(program.value);
   const canonicalProgram = readerPath && realPath(programPath) === readerPath;
@@ -317,9 +331,8 @@ export function checkExecution(program, args, isPlainWord, inspect, options = {}
   const metadataOnly = programPath === JEV_READER_PATH && canonicalProgram && isPlainWord(program.syntax) &&
     values.length === 1 && values[0] === "present" && isPlainWord(args[0].syntax);
   if (targets.some(touchesRuntime) ||
-      (!metadataOnly && (canonicalProgram || pathAlias || touchesRuntime(program.value)))) return JEV_CREDENTIAL_DENIAL;
-  if (targets.some(value => JEV_FILE_TEXT.test(value) ||
-      resolveScriptPath(scriptCwd ?? "/", value) === JEV_FILE)) return JEV_CREDENTIAL_DENIAL;
+      (!metadataOnly && (canonicalProgram || pathAlias || touchesRuntime(program)))) return JEV_CREDENTIAL_DENIAL;
+  if (targets.some(({ value }) => JEV_FILE_TEXT.test(value))) return JEV_CREDENTIAL_DENIAL;
   const evaluator = launcherTarget(name, values);
   const prefix = evaluator < 0 ? values : values.slice(0, evaluator);
   const flags = prefix.slice(0, prefix.indexOf("--") < 0 ? prefix.length : prefix.indexOf("--"));

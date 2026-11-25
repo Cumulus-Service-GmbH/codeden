@@ -96,6 +96,8 @@ int main(void) {
         if (!hardened_reader()) return 1;
         char *removed_mode[] = { "aliased-fixture", "read", NULL };
         if (run_reader(2, removed_mode) != 3) return 2;
+        char *copied_mode[] = { "copied-fixture", "ready", NULL };
+        if (run_reader(2, copied_mode) != 3) return 9;
         const char token[] = "fixture/opaque";
         NSData *fixture = [NSData dataWithBytes:token length:sizeof(token) - 1];
         if (safe_response([@"{\"answers\":{\"x\":\"fixture\\/opaque\"}}" dataUsingEncoding:NSUTF8StringEncoding], fixture)) return 3;
