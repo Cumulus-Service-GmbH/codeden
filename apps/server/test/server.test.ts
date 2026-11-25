@@ -10,6 +10,7 @@ import {
   SessionTranscriptExport,
   Settings,
   Snapshot,
+  Team,
   TeamDiagnostics,
 } from "@codeden/contracts";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -72,6 +73,48 @@ it("reports saved Team overrides and merged sources through the authenticated AP
     team: [override, operator],
     sources: { writer: "project", operator: "default" },
     overrides: {},
+  });
+});
+
+it("resolves the owner’s Factory Team acceptance fixture from saved settings", async () => {
+  const team = Team.parse([
+    { role: "architect", provider: "codex", model: "gpt-6.2-sol", effort: "high" },
+    { role: "writer", provider: "codex", model: "gpt-6.2-sol", effort: "medium" },
+    { role: "uiWriter", provider: "codex", model: "gpt-6.2-sol", effort: "high" },
+    { role: "agentsMdWriter", provider: "codex", model: "gpt-6.1-terra", effort: "medium" },
+    { role: "planReviewer", provider: "codex", model: "gpt-6.2-astra", effort: "high" },
+    { role: "reviewer", provider: "antigravity", model: "gemini-4-neon", effort: "high" },
+    { role: "reviewerFallback", provider: "claude", model: "claude-opus-5-5", effort: "high" },
+    { role: "arbiter", provider: "claude", model: "claude-opus-5-5", effort: "xhigh" },
+  ]);
+  const { settings, projects, factory } = server.services;
+  settings.update({ teamSetup: { remembered: true, team } });
+  const savedLimits = await fetch(`${server.url}/api/settings`, {
+    method: "PATCH",
+    headers: { ...auth, "content-type": "application/json" },
+    body: JSON.stringify({ teamReviewLimits: { defaults: { reviewerRounds: 2, totalRounds: 8 } } }),
+  });
+  expect(savedLimits.status).toBe(200);
+  const { project } = await projects.create({ source: { type: "local", path: home } });
+  const loop = factory.data.loopOrNew(project.id);
+  factory.data.saveLoop({
+    ...loop,
+    tuning: { ...loop.tuning, reviewPolicy: { ...loop.tuning.reviewPolicy, arbiterRounds: 1 } },
+  });
+
+  const query = new URLSearchParams({ projectId: project.id });
+  const diagnostics = await fetch(`${server.url}/api/settings/team?${query}`, { headers: auth });
+  expect(diagnostics.status).toBe(200);
+  expect(TeamDiagnostics.parse(await diagnostics.json())).toEqual({
+    team,
+    sources: Object.fromEntries(team.map(({ role }) => [role, "default"])),
+    overrides: {},
+  });
+
+  const status = await fetch(`${server.url}/api/projects/${project.id}/factory`, { headers: auth });
+  expect(status.status).toBe(200);
+  expect(await status.json()).toMatchObject({
+    tuning: { reviewPolicy: { arbiterRounds: 1, reviewerRounds: 2, totalRounds: 8 } },
   });
 });
 
