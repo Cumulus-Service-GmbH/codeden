@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { userInfo } from 'node:os';
 import { checkCommand, loadAzureTargets } from './codeden-guard.mjs';
 
 const targets = loadAzureTargets(new URL('./fixtures/azure-targets.json', import.meta.url));
@@ -58,6 +59,9 @@ test('Jev path protection covers aliases, ancestor operands and globs with exact
     const fallback = join(home, '.config/trioharness/jev.env');
     writeFileSync(fallback, '# synthetic fixture only\n', { mode: 0o600 });
     symlinkSync(fallback, join(cwd, 'fixture-legacy-alias'));
+    symlinkSync(dirname(fallback), join(cwd, 'fixture-dir-alias'));
+    symlinkSync(home, join(cwd, 'fixture-home-alias'));
+    writeFileSync(join(cwd, 'ordinary.txt'), 'fixture\n');
     const childDir = join(home, '.config/trioharness/fixture-child');
     mkdirSync(childDir);
 
@@ -97,12 +101,27 @@ test('Jev path protection covers aliases, ancestor operands and globs with exact
       if (check('ls "$HOME"') || check('printf "%s" "example?[text]"')) process.exit(6);
       for (const command of [
         'bsdtar -cf ./fixture-copy -C./home/.config/trioharness config.json',
+        'bsdtar -cC./home/.config/trioharness config.json',
         'cp ~/.config/trioharnes[s]/jev-keyring-runtim?/bin/jev-keychain-reade? ./fixture-copy',
-        'dd if=./fixture-legacy-alias of=./fixture-copy'
+        'dd if=./fixture-legacy-alias of=./fixture-copy',
+        'dd if=./fixture-legacy-alia? of=./fixture-copy',
+        'dd if=./fixture-dir-alia?/jev.en? of=./fixture-copy',
+        'cat ~/.config/trioharness/jev.{e..e}nv',
+        'cat ~/.config/trioharness/jev.[]e]nv',
+        'cat ~/.config/trioharness/{{a},jev}.env',
+        'zip -r ./fixture-copy hom?',
+        'zip -r ./fixture-copy .',
+        ${JSON.stringify('zip -r ./fixture-copy ~' + userInfo().username + '/.config/trioharness')}
       ]) {
         const [program, ...args] = command.split(' ').map(value => ({ value, syntax: value }));
         const denial = checkExecution(program, args, () => true, () => null, { cwd: process.cwd() });
         if (!/Jev credential/i.test(denial || '')) { console.error(command, denial); process.exit(7); }
+      }
+      if (!check('zip -r ./fixture-copy .confi?', ${JSON.stringify(join(cwd, 'fixture-home-alias'))})) process.exit(9);
+      if (check('cat ./ordinar?.txt')) process.exit(10);
+      for (const command of ['[ -d "$HOME" ]', '[[ -d "$HOME" ]]', 'test -d ~/.config',
+        'echo "$HOME"', 'mkdir -p ~/.config']) {
+        if (check(command)) { console.error(command); process.exit(8); }
       }
     `;
     const result = spawnSync(process.execPath, ['--input-type=module', '-e', script],

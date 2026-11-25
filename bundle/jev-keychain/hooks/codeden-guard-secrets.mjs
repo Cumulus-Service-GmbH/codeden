@@ -1,6 +1,6 @@
-import { closeSync, constants, fstatSync, openSync, readSync, realpathSync, statSync } from "node:fs";
-import { homedir } from "node:os";
-import { delimiter, isAbsolute, resolve, sep } from "node:path";
+import { closeSync, constants, fstatSync, opendirSync, openSync, readSync, realpathSync, statSync } from "node:fs";
+import { homedir, userInfo } from "node:os";
+import { delimiter, isAbsolute, matchesGlob, resolve, sep } from "node:path";
 
 export const SCRIPT_SECRET_FAMILY = /keyvault|secret|appsettings|connection.string|security|sqlcmd|ERPURE.SQL/i;
 export const resolveScriptPath = (cwd, path) => path.startsWith("~/") ? resolve(homedir(), path.slice(2)) : resolve(cwd, path);
@@ -12,9 +12,35 @@ const JEV_NATIVE_ACCESS = /\b(?:keyring|getPassword|SecItemCopyMatching|SecKeych
 const JEV_ENTRY = /typesafe\.apiKey/i;
 const JEV_RUNTIME_PATH = resolve(homedir(), ".config", "trioharness", "jev-keyring-runtime");
 const JEV_READER_PATH = resolve(JEV_RUNTIME_PATH, "bin", "jev-keychain-reader");
+const SHELL_PATH_PATTERN = /[?*]|\[[^/]+\]|\{[^/]*(?:,|\.\.)[^/]*\}/;
+const currentUser = userInfo().username;
 const realPath = path => {
   try { return realpathSync(path); } catch { return null; }
 };
+
+function globTouchesPath(path, protectedPath) {
+  let remaining = 4096;
+  function visit(dir, parts) {
+    const [part, ...rest] = parts;
+    if (part === undefined) return protectedPath(realPath(dir));
+    if (!SHELL_PATH_PATTERN.test(part)) return visit(resolve(dir, part), rest);
+    if (part === "**" && visit(dir, rest)) return true;
+    let entries;
+    try { entries = opendirSync(dir); } catch { return false; }
+    try {
+      for (let entry; (entry = entries.readSync());) {
+        if (--remaining < 0) return true;
+        if (!matchesGlob(entry.name, part === "**" ? "*" : part)) continue;
+        const path = resolve(dir, entry.name);
+        if (visit(path, rest) || (part === "**" && entry.isDirectory() && visit(path, parts))) return true;
+      }
+      return false;
+    } finally {
+      entries.closeSync();
+    }
+  }
+  return visit(sep, path.split(sep).filter(Boolean));
+}
 const JEV_RUNTIME_TEXT = /(?:^|[^\w.-])(?:jev-keyring-runtime|jev-keychain-reader)(?![\w.-])/i;
 const JEV_SCRIPTS = new Set([
   ".claude/skills/trioharness-codeden/scripts/jev.mjs",
@@ -298,31 +324,32 @@ export function checkExecution(program, args, isPlainWord, inspect, options = {}
   const targets = [...args, ...(options.redirects ?? []).map(redirect => redirect.target).filter(Boolean)];
   const readerPath = realPath(JEV_READER_PATH);
   const runtimePath = realPath(JEV_RUNTIME_PATH);
+  const homePath = homedir();
   const targetPath = value => resolveScriptPath(scriptCwd ?? "/",
-    value.replace(/^(?:~|\$(?:HOME|\{HOME\}))(?=$|\/)/, homedir()));
+    value.replace(/^(?:~([^/]*)|\$(?:HOME|\{HOME\}))(?=$|\/)/,
+      (prefix, user) => !user || user === currentUser ? homePath : prefix));
   const inside = (path, root) => root && path &&
     (path === root || path.startsWith(root.endsWith(sep) ? root : root + sep));
-  const homePath = homedir();
-  const actualHome = realPath(homePath);
   const guardedRoots = [JEV_RUNTIME_PATH, runtimePath, JEV_FILE, realPath(JEV_FILE)].filter(Boolean);
-  const metadataCommand = /^(?:cd|ls|pwd|realpath|readlink|stat)$/.test(name);
+  const metadataCommand = /^(?:cd|ls|pwd|realpath|readlink|stat|test|echo|printf|mkdir|\[\[?)$/.test(name);
   const shellPatternTest = name === "[[" || name === "[";
-  const shellGlob = /[?*]|\[[^\]]+\]|\{[^}]*,[^}]*\}/;
+  const protectedPath = path => guardedRoots.some(root => inside(path, root) ||
+    (!metadataCommand && path !== sep && inside(root, path)));
   const touchesRuntime = ({ value, syntax }) => {
     if (!value) return false;
     if (JEV_RUNTIME_TEXT.test(value)) return true;
     const assigned = value.replace(/^[\w-]+=/, "");
-    const operand = /^(?:tar|bsdtar|gtar)$/.test(name) ? assigned.replace(/^-C(?=.)/, "") : assigned;
+    const operand = /^(?:tar|bsdtar|gtar)$/.test(name)
+      ? assigned.replace(/^-[crtxuzjJvpkhm]*C(?=.)/, "") : assigned;
     if (!operand) return false;
     const path = targetPath(operand);
     const actual = realPath(path);
-    const firstGlob = !shellPatternTest && shellGlob.test(syntax) && (operand.includes("/") || inside(scriptCwd, homePath))
-      ? path.search(shellGlob) : -1;
-    return guardedRoots.some(root =>
-      inside(path, root) || inside(actual, root) ||
-      (firstGlob >= 0 && root.startsWith(path.slice(0, firstGlob))) ||
-      (!metadataCommand && ((inside(path, homePath) && inside(root, path)) ||
-        (inside(actual, actualHome) && inside(root, actual)))));
+    if (protectedPath(path) || protectedPath(actual)) return true;
+    const firstGlob = !shellPatternTest && SHELL_PATH_PATTERN.test(syntax) && (operand.includes("/") || scriptCwd)
+      ? path.search(SHELL_PATH_PATTERN) : -1;
+    if (firstGlob < 0) return false;
+    const prefix = path.slice(0, firstGlob);
+    return guardedRoots.some(root => root.startsWith(prefix)) || globTouchesPath(path, protectedPath);
   };
   const programPath = targetPath(program.value);
   const canonicalProgram = readerPath && realPath(programPath) === readerPath;
