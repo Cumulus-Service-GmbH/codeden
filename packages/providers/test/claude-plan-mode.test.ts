@@ -294,7 +294,7 @@ describe("Claude plan mode", () => {
   it.each([
     ["the tool result", toolResult("exit")],
     ["turn end", { type: "result", subtype: "success" }],
-  ])("recognizes the approved Full plan's intermediate mode until %s", async (_end, completion) => {
+  ])("recognizes the Full plan transition after %s", async (_end, completion) => {
     const sdk = stubSdk();
     const { session, items, permission } = open(sdk, { autonomy: "full" });
     await session.send({ text: "Plan this change", attachments: [] });
@@ -306,22 +306,33 @@ describe("Claude plan mode", () => {
     await settle();
     expect(sdk.modes).toEqual([]);
     expect(items("notice")).toEqual([]);
+    const update = Promise.withResolvers<void>();
+    sdk.beforeMode.mockImplementationOnce(() => update.promise);
     sdk.deliver(completion);
-    await vi.waitFor(() => expect(sdk.modes).toEqual(["bypassPermissions"]));
+    await vi.waitFor(() => expect(sdk.beforeMode).toHaveBeenCalledWith("bypassPermissions"));
+    sdk.deliver({ type: "system", subtype: "status", permissionMode: "acceptEdits" });
+    await settle();
+    update.resolve();
+    await settle();
+    expect(sdk.beforeMode.mock.calls).toEqual([["bypassPermissions"]]);
+    expect(sdk.modes).toEqual(["bypassPermissions"]);
+    expect(items("notice")).toEqual([]);
   });
 
   it("recognizes the previous mode while a configuration change is pending", async () => {
     const sdk = stubSdk();
-    const { session, items } = open(sdk, { planMode: false });
+    const { session, items, preToolUse } = open(sdk, { planMode: false });
     await session.send({ text: "Check mode", attachments: [] });
     const update = Promise.withResolvers<void>();
     sdk.beforeMode.mockImplementationOnce(() => update.promise);
     const switching = session.setAutonomy("supervised");
+    await preToolUse("Read", inWorktree, "acceptEdits");
     await vi.waitFor(() => expect(sdk.beforeMode).toHaveBeenCalledWith("default"));
     sdk.deliver({ type: "system", subtype: "status", permissionMode: "acceptEdits" });
     await settle();
     update.resolve();
     await switching;
+    await settle();
     expect(sdk.modes).toEqual(["default"]);
     expect(items("notice")).toEqual([]);
   });

@@ -118,6 +118,7 @@ export class ClaudeSession implements ProviderSession {
   private readonly policy: ClaudePolicy;
   private q: Query | undefined;
   private modeUpdate = Promise.resolve();
+  private pendingModeUpdates = 0;
   private modeRevision = 0;
   private correctingMode = false;
   private appliedMode: PermissionMode | undefined;
@@ -348,6 +349,7 @@ export class ClaudeSession implements ProviderSession {
     if (!q) return;
     // Serialize writes to this query, and read current state when each write is dispatched.
     const active = () => this.q === q && !this.closed;
+    this.pendingModeUpdates++;
     const update = this.modeUpdate.then(async () => {
       if (!active()) return;
       const revision = this.modeRevision;
@@ -371,7 +373,11 @@ export class ClaudeSession implements ProviderSession {
       }
     });
     this.modeUpdate = update.catch(() => {});
-    await update;
+    try {
+      await update;
+    } finally {
+      if (active()) this.pendingModeUpdates--;
+    }
   }
 
   private warnPermissionMode(code: string, message: string): void {
@@ -395,7 +401,10 @@ export class ClaudeSession implements ProviderSession {
     const expected = permissionModeFor(this.autonomy, this.planMode);
     if (reported === expected) return;
     // The CLI can report the old or new mode before it acknowledges a write.
-    if (this.settingMode && (reported === this.appliedMode || reported === this.settingMode))
+    if (
+      reported === this.settingMode ||
+      (this.pendingModeUpdates > 0 && reported === this.appliedMode)
+    )
       return;
     if (
       this.planExit?.revision === this.modeRevision &&
@@ -450,9 +459,12 @@ export class ClaudeSession implements ProviderSession {
     if (!this.planExit) return;
     if (str(message, "type") !== "result" && !carriesToolResult(message, this.planExit.toolUseId))
       return;
+    const { mode } = this.planExit;
     this.planExit = undefined;
-    // Only a guard: the CLI already took the level's mode with the approval.
-    if (!this.planMode) void this.applyPermissionModeInBackground();
+    if (this.planMode) return;
+    // The CLI took the approval's mode before yielding the result.
+    this.appliedMode = mode;
+    void this.applyPermissionModeInBackground();
   }
 
   /** Say in the transcript when a Stop dropped steered messages the agent never read. */
@@ -526,6 +538,7 @@ export class ClaudeSession implements ProviderSession {
     }
     this.q = q;
     this.modeUpdate = Promise.resolve();
+    this.pendingModeUpdates = 0;
     this.correctingMode = false;
     this.appliedMode = permissionModeFor(this.autonomy, this.planMode);
     this.settingMode = undefined;
