@@ -6,6 +6,7 @@ import {
   EventEnvelope,
   ProjectChecklist,
   Snapshot,
+  UpdateChecklistItemInput,
 } from "../src";
 import { sampleProject, ts } from "./fixtures";
 
@@ -17,6 +18,15 @@ const checklist = {
 };
 
 describe("project checklists", () => {
+  it("round-trips PM checklist text and progress without accepting a project override", () => {
+    const input = { itemId: "tests", text: "Run tests", note: "Ready", eta: null };
+    expect(UpdateChecklistItemInput.parse(JSON.parse(JSON.stringify(input)))).toEqual(input);
+    expect(
+      UpdateChecklistItemInput.safeParse({ ...input, projectId: sampleProject.id }).success,
+    ).toBe(false);
+    expect(UpdateChecklistItemInput.safeParse({ itemId: "tests" }).success).toBe(false);
+  });
+
   it("round-trips the checklist and its event", () => {
     expect(ProjectChecklist.parse(JSON.parse(JSON.stringify(checklist)))).toEqual(checklist);
     const event = {

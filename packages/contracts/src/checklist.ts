@@ -32,6 +32,28 @@ export const ChecklistItem = z.object({
 });
 export type ChecklistItem = z.infer<typeof ChecklistItem>;
 
+/** Session-scoped MCP input for checklist progress and PM structural edits. */
+export const UpdateChecklistItemInput = z
+  .strictObject({
+    itemId: ChecklistItem.shape.id,
+    /** PM-only task text. Required when adding a new item. */
+    text: ChecklistItem.shape.text.optional(),
+    status: ChecklistStatus.optional(),
+    /** A progress note stored separately from the task text. */
+    note: ChecklistItem.shape.note,
+    eta: ChecklistItem.shape.eta.unwrap().nullable().optional(),
+    needsOwner: ChecklistItem.shape.needsOwner
+      .unwrap()
+      .omit({ source: true })
+      .nullable()
+      .optional(),
+  })
+  .refine(
+    ({ text, status, note, eta, needsOwner }) =>
+      [text, status, note, eta, needsOwner].some((value) => value !== undefined),
+    "Provide text, status, a note, an ETA, or an owner action",
+  );
+
 /** A status change, addition (null from), or removal (null to). */
 export const ChecklistChange = z.object({
   itemId: ChecklistItem.shape.id,
@@ -82,7 +104,7 @@ export const ChecklistProposal = z.object({
   /** Metadata to apply only if the proposed additions are approved. */
   additionMetadata: z
     .array(
-      ChecklistItem.pick({ id: true, eta: true }).extend({
+      ChecklistItem.pick({ id: true, eta: true, note: true }).extend({
         needsOwner: ChecklistItem.shape.needsOwner.unwrap().omit({ source: true }).optional(),
       }),
     )
