@@ -38,7 +38,7 @@ export function pinTeamJevHelper(configuredPath: string): () => string | null {
       for (const entry of readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
         a.name.localeCompare(b.name),
       )) {
-        if (entry.name === ".git" || entry.name === "node_modules") continue;
+        if (entry.name === ".git") continue;
         if (++entries > 4096) throw new Error("Helper installation is too large");
         if (entry.isSymbolicLink()) throw new Error("Unexpected helper symlink");
         const file = join(dir, entry.name);

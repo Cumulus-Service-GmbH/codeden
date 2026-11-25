@@ -169,14 +169,14 @@ export async function advanceJev(
   const shouldEvaluate =
     receipt?.status !== "revise" && (receipt?.status !== "unavailable" || receipt.retryable);
   if (shouldEvaluate && attempts < policy.jevAttempts) {
-    const waitingForChecks = receipt?.status === "pending" && receipt.reasons.length > 0;
-    if (!waitingForChecks) {
+    const waitingReason = receipt?.status === "pending" ? receipt.reasons[0] : undefined;
+    if (!waitingReason) {
       save({ head, status: "pending", reasons: [] }, { jevReviewHead: undefined });
     }
     activeReviewHead = undefined;
     receipt = await evaluate(ctx, project, item, head);
     if (receipt.status === "pending") {
-      if (!waitingForChecks) save(receipt);
+      if (waitingReason !== receipt.reasons[0]) save(receipt);
       return false;
     }
     save(receipt, { jevHistory: [...receiptHistory(item), receipt] });
@@ -303,7 +303,18 @@ async function evaluate(
         );
       }
       const verified = await ctx.github.commitChecks(project.id, head).catch(() => null);
-      if (verified === null || verified === "pending") {
+      if (verified === null) {
+        const reason = "Retrying an unavailable GitHub commit-check lookup.";
+        if (
+          item.jev?.head === head &&
+          item.jev.status === "pending" &&
+          item.jev.reasons.includes(reason)
+        ) {
+          return unavailable("GitHub commit-check lookup failed twice at the current head.");
+        }
+        return { head, status: "pending", reasons: [reason] };
+      }
+      if (verified === "pending") {
         return { head, status: "pending", reasons: ["Waiting for GitHub commit checks."] };
       }
       if (verified !== "success") {

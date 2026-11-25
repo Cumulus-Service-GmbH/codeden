@@ -1,20 +1,22 @@
 import { createHash } from "node:crypto";
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { appendFile, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { expect, it, vi } from "vitest";
 import { pinTeamJevHelper, runJevDone } from "../src/services/sessions/team-run-jev";
 
-it.each(["sibling.mjs", "nested/sibling.mjs"])(
+it.each(["sibling.mjs", "nested/sibling.mjs", "node_modules/pkg/index.mjs"])(
   "rejects changes to pinned module %s",
   async (name) => {
     const dir = await mkdtemp(join(tmpdir(), "team-jev-pin-"));
     const script = join(dir, "jev.mjs");
     const sibling = join(dir, name);
     try {
-      await mkdir(join(dir, "nested"), { mode: 0o700 });
-      await mkdir(join(dir, ".git"), { mode: 0o777 });
-      await writeFile(join(dir, ".git", "ignored.json"), "{}", { mode: 0o666 });
+      await mkdir(dirname(sibling), { recursive: true, mode: 0o700 });
+      await mkdir(join(dir, ".git"));
+      await chmod(join(dir, ".git"), 0o777);
+      await writeFile(join(dir, ".git", "ignored.json"), "{}");
+      await chmod(join(dir, ".git", "ignored.json"), 0o666);
       await writeFile(script, `import "./${name}";\n`, { mode: 0o600 });
       await writeFile(sibling, "export const version = 1;\n", { mode: 0o600 });
       const resolve = pinTeamJevHelper(script);

@@ -105,6 +105,18 @@ it("waits for GitHub CI without consuming a Jev attempt", async () => {
   expect(item(id).jev?.status).toBe("pass");
 });
 
+it("escalates persistent GitHub lookup failures to the owner", async () => {
+  env = activeEnv = createFactoryEnv({ jevScript: fixtureJevScript });
+  installDoneFixture(env);
+  vi.spyOn(env.gh, "commitChecks").mockRejectedValue(new Error("GitHub unavailable"));
+  const { id } = await finishReview(true, ReviewPolicy.parse({ jevAttempts: 1 }));
+  expect(item(id).jev?.status).toBe("pending");
+  await tick();
+  expect(item(id).jev?.status).toBe("owner decision");
+  expect(env.inbox.find(`inbox:factory-owner-decision:${id}`)?.kind).toBe("owner_decision");
+  expect(env.execs.some(({ args }) => args[1] === "done")).toBe(false);
+});
+
 async function expectBlocked(done: (result: ExecResult) => ExecResult) {
   for (const autoMerge of [true, false]) {
     env = activeEnv = createFactoryEnv({ jevScript: fixtureJevScript });

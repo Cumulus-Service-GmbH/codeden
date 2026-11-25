@@ -31,6 +31,7 @@ import { type TeamRunPorts, TeamRuns } from "../src/services/sessions/team-runs"
 import { SettingsStore } from "../src/settings-store";
 import { createGithubEnv } from "./support/github-env";
 import { removeTree } from "./support/remove-tree";
+import { runClockFrom } from "./support/test-clock";
 
 const teams: ProjectTeams = {
   defaultTeamId: "build",
@@ -223,13 +224,12 @@ it("limits ready Team history in snapshots while keeping all runs for recovery",
     expect(snapshot.map(({ id }) => id)).toContain(sample.id);
     expect(snapshot.map(({ id }) => id)).toContain("ready-23");
     expect(snapshot.map(({ id }) => id)).not.toContain("ready-0");
-    const now = Date.now();
+    const restoreClock = runClockFrom(Date.now() + 1_000);
     try {
-      vi.setSystemTime(now + 1_000);
       saveTeamRun(env.store, { ...sample, id: "ready-0", status: "ready" });
       expect(listTeamRunsForSnapshot(env.db.db).slice(1)[0]?.id).toBe("ready-0");
     } finally {
-      vi.setSystemTime(now);
+      restoreClock();
     }
     expect(listTeamRuns(env.db.db)).toHaveLength(25);
   } finally {

@@ -318,6 +318,16 @@ it("keeps a tracked message retryable if worktree recovery fails before sending"
   expect(outbox.list("s1")[0]?.delivery).toBeUndefined();
 });
 
+it("acknowledges an ambiguous reject submission without replaying it", async () => {
+  const { sessions, request, endTurn } = providerLike();
+  request.mockRejectedValueOnce(new RunnerCommandError("timeout", "Reply was lost"));
+  const rejecting = { ...submission, whenBusy: "reject" as const };
+  await expect(sessions.send("s1", rejecting)).resolves.toEqual({ status: "queued" });
+  await endTurn();
+  expect(outbox.list("s1")[0]?.delivery).toBe("uncertain");
+  expect(request).toHaveBeenCalledTimes(1);
+});
+
 it("retains a queued tracked submission if its first flush finds a disconnected runner", async () => {
   const { sessions, request, sent, state, endTurn } = providerLike();
   repo.update("s1", (s) => ({ ...s, status: "running" }));
