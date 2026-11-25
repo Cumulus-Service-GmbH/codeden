@@ -911,9 +911,15 @@ test('review instructions distinguish the brief from the saved built packet', { 
   for (const path of skillDocs) {
     const skill = readFileSync(new URL(path, import.meta.url), 'utf8');
     assert.match(skill, /run [^`\n]*--packet <brief>/);
-    assert.match(skill, /record --slot fallback\|second-pass[^\n]*combined packet[^\n]*<run>\/workers\/packet-<round>\.md/);
     assert.match(skill, /short brief[^\n]*objective, non-goals and proof/);
     assert.match(skill, /--context <path>\[:<from>-<to>\]/);
+    if (/^name: trioharness-codeden$/m.test(skill)) {
+      assert.match(skill, /the CLI saves the built packet at `<run>\/workers\/packet-<round>\.md`/);
+      assert.match(skill, /host-side review runner \(G-B\)/);
+      assert.doesNotMatch(skill, /team-review\.mjs["`]? record\b/);
+    } else {
+      assert.match(skill, /record --slot fallback\|second-pass[^\n]*combined packet[^\n]*<run>\/workers\/packet-<round>\.md/);
+    }
   }
 });
 
